@@ -13,8 +13,8 @@
     },
     "kind": {
       "type": "string",
-      "description": "Component purity: Pure (no side effects) or Effectful",
-      "enum": ["Pure", "Effectful"]
+      "description": "Component kind: Function (callable entry point), Build (compile-and-inspect), or Run (execute a binary)",
+      "enum": ["Function", "Build", "Run"]
     },
     "inputs": {
       "type": "object",
@@ -43,7 +43,17 @@
         "type": "object",
         "description": "Named outputs for this outcome branch.",
         "additionalProperties": {
-          "type": "string"
+          "oneOf": [
+            { "type": "string" },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string" },
+                "source": { "type": "string", "description": "Where to observe this output. E.g. 'build-artifact', 'compiler-output'." }
+              },
+              "required": ["type"]
+            }
+          ]
         }
       }
     },
@@ -59,11 +69,19 @@
   "definitions": {
     "inputDeclaration": {
       "type": "object",
-      "description": "An input declaration. Use 'type' for a type reference string, or inline fields for a structural type.",
+      "description": "An input declaration with type, optional source annotation, and optional description.",
       "properties": {
         "type": {
           "type": "string",
-          "description": "Type expression, e.g. 'List[Annotation]' or 'string'. May reference named types or use inline shapes like '{ name: string, count: int }'."
+          "description": "Type expression, e.g. 'List<Annotation>' or 'string'."
+        },
+        "source": {
+          "type": "string",
+          "description": "Where this input comes from if not a function argument. E.g. 'fixture-file', 'env-var'."
+        },
+        "desc": {
+          "type": "string",
+          "description": "Human-readable description of this input."
         }
       },
       "required": ["type"]

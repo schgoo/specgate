@@ -6,7 +6,7 @@
 # role-kind matrix and completeness rules.
 
 name: core.validate
-kind: Pure
+kind: Function
 
 inputs:
   annotations:
