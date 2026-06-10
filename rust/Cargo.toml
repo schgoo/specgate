@@ -1,0 +1,3 @@
+[workspace]
+members = ["specgate-core", "specgate-extract"]
+resolver = "2"

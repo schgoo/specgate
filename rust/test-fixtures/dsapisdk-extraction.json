@@ -1,0 +1,137 @@
+{
+  "source_language": "csharp",
+  "project": "DSAPISdk",
+  "symbols": [
+    {
+      "name": "FindByTypeName",
+      "symbol_kind": "method",
+      "declaring_type": "Microsoft.M365.Substrate.SDK.DSAPI.TenantConfigsRestRequest",
+      "return_type": "Task<TenantConfigResponse>",
+      "parameters": [
+        { "name": "options", "type": "QueryOptions<TenantConfig>" }
+      ],
+      "accessibility": "public",
+      "is_static": false,
+      "is_async": true,
+      "location": { "file": "TenantConfigsRestRequest.cs", "line": 38 },
+      "annotations": [
+        {
+          "attribute": "SpecOperation",
+          "args": { "name": "findByTypeName", "kind": "Sequence" }
+        }
+      ]
+    },
+    {
+      "name": ".ctor",
+      "symbol_kind": "constructor",
+      "declaring_type": "Microsoft.M365.Substrate.SDK.DSAPI.TenantConfigsRestRequest",
+      "parameters": [
+        { "name": "callContext", "type": "DsApiCallContext" }
+      ],
+      "accessibility": "public",
+      "location": { "file": "TenantConfigsRestRequest.cs", "line": 20 },
+      "annotations": [
+        {
+          "attribute": "SpecInput",
+          "args": { "name": "findByTypeName" }
+        }
+      ]
+    },
+    {
+      "name": "RoutingHint",
+      "symbol_kind": "method",
+      "declaring_type": "Microsoft.M365.Substrate.SDK.DSAPI.TenantConfigsRestRequest",
+      "return_type": "string",
+      "accessibility": "internal",
+      "is_static": false,
+      "location": { "file": "TenantConfigsRestRequest.cs", "line": 56 },
+      "annotations": [
+        {
+          "attribute": "SpecCheckpoint",
+          "args": { "name": "findByTypeName" }
+        }
+      ]
+    },
+    {
+      "name": "TenantIdentity",
+      "symbol_kind": "property",
+      "declaring_type": "Microsoft.M365.Substrate.SDK.DSAPI.BaseRequest",
+      "type": "TenantIdentity",
+      "accessibility": "public",
+      "location": { "file": "BaseRequest.cs", "line": 124 },
+      "annotations": [
+        {
+          "attribute": "SpecEnvironment",
+          "args": { "name": "findByTypeName" }
+        }
+      ]
+    },
+    {
+      "name": "DsApiCallContext",
+      "symbol_kind": "property",
+      "declaring_type": "Microsoft.M365.Substrate.SDK.DSAPI.BaseRequest",
+      "type": "DsApiCallContext",
+      "accessibility": "public",
+      "location": { "file": "BaseRequest.cs", "line": 161 },
+      "annotations": [
+        {
+          "attribute": "SpecEnvironment",
+          "args": { "name": "findByTypeName" }
+        }
+      ]
+    },
+    {
+      "name": "InvokeDsApiBatchRequest",
+      "symbol_kind": "method",
+      "declaring_type": "Microsoft.M365.Substrate.SDK.DSAPI.BaseRestRequest",
+      "return_type": "Task<HttpResponseMessage>",
+      "parameters": [],
+      "accessibility": "protected",
+      "is_async": true,
+      "location": { "file": "BaseRestRequest.cs", "line": 193 },
+      "annotations": [
+        {
+          "attribute": "SpecDependency",
+          "args": { "name": "findByTypeName", "dep": "dsapiHttp" }
+        }
+      ]
+    }
+  ],
+  "types": [
+    {
+      "name": "DsApiCallContext",
+      "is_abstract": false,
+      "accessibility": "public",
+      "constructors": [
+        {
+          "accessibility": "internal",
+          "parameters": [
+            { "name": "tenantId", "type": "string" },
+            { "name": "token", "type": "string" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "QueryOptions<TenantConfig>",
+      "is_abstract": false,
+      "is_generic": true,
+      "generic_parameters": ["T"],
+      "accessibility": "public",
+      "constructors": []
+    },
+    {
+      "name": "TenantIdentity",
+      "is_abstract": false,
+      "accessibility": "public",
+      "constructors": [
+        {
+          "accessibility": "public",
+          "parameters": [
+            { "name": "tenantId", "type": "Guid" }
+          ]
+        }
+      ]
+    }
+  ]
+}

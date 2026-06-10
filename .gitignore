@@ -1,0 +1,13 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# Rust
+target/
+
+# IDE
+.idea/
+*.swp
