@@ -1,0 +1,122 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SpecGate Component Spec",
+  "description": "Schema for SpecGate .spec.yaml files — declares inputs, types, outputs, and test cases for a single component.",
+  "type": "object",
+  "required": ["name", "kind", "inputs", "outcome", "outputs", "cases"],
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Dotted component name, e.g. core.validate",
+      "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9_]*)+$"
+    },
+    "kind": {
+      "type": "string",
+      "description": "Component purity: Pure (no side effects) or Effectful",
+      "enum": ["Pure", "Effectful"]
+    },
+    "inputs": {
+      "type": "object",
+      "description": "Named inputs to the component. Each key is an input name, value describes its type.",
+      "additionalProperties": {
+        "$ref": "#/definitions/inputDeclaration"
+      },
+      "minProperties": 1
+    },
+    "types": {
+      "type": "object",
+      "description": "Named type definitions. Each key is a type name referenced by inputs or outputs.",
+      "additionalProperties": {
+        "$ref": "#/definitions/typeDefinition"
+      }
+    },
+    "outcome": {
+      "type": "string",
+      "description": "Outcome declaration, e.g. 'oneof [Valid, Invalid]'",
+      "pattern": "^oneof \\[.+\\]$"
+    },
+    "outputs": {
+      "type": "object",
+      "description": "Output declarations keyed by outcome branch, e.g. 'when Valid'.",
+      "additionalProperties": {
+        "type": "object",
+        "description": "Named outputs for this outcome branch.",
+        "additionalProperties": {
+          "type": "string"
+        }
+      }
+    },
+    "cases": {
+      "type": "array",
+      "description": "Test cases exercising the component.",
+      "items": {
+        "$ref": "#/definitions/testCase"
+      },
+      "minItems": 1
+    }
+  },
+  "definitions": {
+    "inputDeclaration": {
+      "type": "object",
+      "description": "An input declaration. Use 'type' for a type reference string, or inline fields for a structural type.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Type expression, e.g. 'List[Annotation]' or 'string'. May reference named types or use inline shapes like '{ name: string, count: int }'."
+        }
+      },
+      "required": ["type"]
+    },
+    "typeDefinition": {
+      "type": "object",
+      "description": "A named type. Use 'oneof' for variant/sum types, or 'fields' for record/struct types.",
+      "properties": {
+        "oneof": {
+          "type": "object",
+          "description": "Variant type — each key is a variant name, value is an object describing its fields.",
+          "additionalProperties": true
+        },
+        "fields": {
+          "type": "object",
+          "description": "Record type — each key is a field name, value is a type expression string.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "testCase": {
+      "type": "object",
+      "required": ["name", "desc", "inputs", "expected"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique snake_case test name.",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "desc": {
+          "type": "string",
+          "description": "Human-readable description of what this case tests and why."
+        },
+        "inputs": {
+          "type": "object",
+          "description": "Input values for this case. Keys must match the spec's inputs."
+        },
+        "expected": {
+          "type": "object",
+          "required": ["outcome"],
+          "description": "Expected outputs. Must include 'outcome' and any output fields declared for that outcome branch.",
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "description": "Expected outcome variant, e.g. 'Valid' or 'Invalid'."
+            }
+          },
+          "additionalProperties": true
+        }
+      }
+    }
+  }
+}

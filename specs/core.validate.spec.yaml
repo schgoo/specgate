@@ -1,0 +1,366 @@
+# yaml-language-server: $schema=../spec-schema.json
+# SpecGate component: core.validate
+#
+# Given annotations extracted from source code and type metadata,
+# validate they form structurally correct operations per the
+# role-kind matrix and completeness rules.
+
+name: core.validate
+kind: Pure
+
+inputs:
+  annotations:
+    type: List<Annotation>
+  types:
+    type: List<TypeInfo>
+
+types:
+  TypeInfo:
+    fields:
+      name: string
+      is_abstract: bool
+      has_generator: bool
+
+  Annotation:
+    oneof:
+      SpecOperation: { operation: string, kind: string, symbol: string, parameter_types: List<string> }
+      SpecInput: { operation: string, symbol: string, params: List<string> }
+      SpecCheckpoint: { operation: string, symbol: string, accessibility: string }
+      SpecState: { operation: string, symbol: string }
+      SpecEnvironment: { operation: string, symbol: string }
+      SpecDependency: { operation: string, symbol: string, dependency_name: string }
+
+  ValidationError:
+    oneof:
+      MissingEntryPoint: { operation: string }
+      DuplicateEntryPoint: { operation: string }
+      IncompleteOperation: { operation: string }
+      InvalidRoleForKind: { operation: string, symbol: string }
+      ConflictingParamNames: { operation: string }
+      OrphanAnnotation: { operation: string, symbol: string }
+      DuplicateDependencyName: { operation: string }
+
+  ValidationWarning:
+    oneof:
+      AbstractTypeNoGenerator: { operation: string }
+      PrivateCheckpoint: { symbol: string }
+
+outcome: "oneof [Valid, Invalid]"
+
+outputs:
+  when Valid:
+    warnings: "List[ValidationWarning]"
+  when Invalid:
+    errors: "List[ValidationError]"
+    warnings: "List[ValidationWarning]"
+
+# Role-kind validity matrix (csharp-harness.md:252)
+#          Pure  SM   Seq  ErrMap  Structural
+# Input     ✓    ✓    ✓     ✓       ✗
+# State     ✗    ✓    ✗     ✗       ✗
+# Chkpt     ✗    ✗    ✓     ✗       ✗
+# Env       ✓    ✓    ✓     ✓       ✗
+# Dep       ✓    ✓    ✓     ✓       ✗
+
+# -------------------------------------------------------------------
+# Cases
+# -------------------------------------------------------------------
+cases:
+
+  # ===== VALID =====
+
+  - name: validate_pure_minimal
+    desc: A single SpecOperation with no roles is the simplest valid input
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Pure }
+    expected:
+      outcome: Valid
+      warnings: []
+
+  - name: validate_sequence_all_roles
+    desc: Sequence with every allowed role — Input, Environment, Dependency, Checkpoint
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Sequence, symbol: entry }
+        - SpecInput:       { operation: op_a, symbol: ctor, params: [x, y] }
+        - SpecInput:       { operation: op_a, symbol: prop_a }
+        - SpecEnvironment: { operation: op_a, symbol: env_a }
+        - SpecDependency:  { operation: op_a, symbol: dep_a, dependency_name: svc }
+        - SpecCheckpoint:  { operation: op_a, symbol: chk_a }
+    expected:
+      outcome: Valid
+      warnings: []
+
+  - name: validate_statemachine_with_state
+    desc: StateMachine satisfies completeness when it has at least one State
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: StateMachine }
+        - SpecState:     { operation: op_a, symbol: state_a }
+    expected:
+      outcome: Valid
+      warnings: []
+
+  - name: validate_two_independent_operations
+    desc: Two operations in the same input both valid — no cross-operation interference
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Pure }
+        - SpecOperation: { operation: op_b, kind: Pure }
+    expected:
+      outcome: Valid
+      warnings: []
+
+  - name: validate_one_symbol_two_operations
+    desc: Same symbol annotated for two different operations is allowed
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Pure }
+        - SpecOperation: { operation: op_b, kind: Pure }
+        - SpecInput: { operation: op_a, symbol: shared_ctor, params: [x] }
+        - SpecInput: { operation: op_b, symbol: shared_ctor, params: [x] }
+    expected:
+      outcome: Valid
+      warnings: []
+
+  - name: validate_structural
+    desc: Structural kind needs only the entry point — no roles allowed
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Structural }
+    expected:
+      outcome: Valid
+      warnings: []
+
+  - name: validate_method_as_dependency
+    desc: A method can serve as a dependency (not just injected services)
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Pure }
+        - SpecDependency: { operation: op_a, symbol: rng, dependency_name: rng }
+    expected:
+      outcome: Valid
+      warnings: []
+
+  - name: validate_errormap
+    desc: ErrorMap is a valid kind with no required roles
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: ErrorMap }
+    expected:
+      outcome: Valid
+      warnings: []
+
+  - name: validate_empty_input
+    desc: Empty annotation list is vacuously valid — nothing to validate
+    inputs:
+      annotations: []
+    expected:
+      outcome: Valid
+      warnings: []
+
+  # ===== ERRORS =====
+
+  - name: missing_entry_point
+    desc: Annotations reference an operation that has no SpecOperation — missing entry point
+    inputs:
+      annotations:
+        - SpecInput: { operation: op_a, symbol: ctor }
+    expected:
+      outcome: Invalid
+      errors:
+        - MissingEntryPoint: { operation: op_a }
+
+  - name: duplicate_entry_point
+    desc: Two SpecOperations for the same operation name — only one allowed
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Pure, symbol: entry_1 }
+        - SpecOperation: { operation: op_a, kind: Sequence, symbol: entry_2 }
+    expected:
+      outcome: Invalid
+      errors:
+        - DuplicateEntryPoint: { operation: op_a }
+
+  - name: sequence_missing_checkpoint
+    desc: Sequence requires at least one Checkpoint to be complete
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Sequence }
+    expected:
+      outcome: Invalid
+      errors:
+        - IncompleteOperation: { operation: op_a }
+
+  - name: statemachine_missing_state
+    desc: StateMachine requires at least one State to be complete
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: StateMachine }
+    expected:
+      outcome: Invalid
+      errors:
+        - IncompleteOperation: { operation: op_a }
+
+  - name: state_on_pure
+    desc: State is only valid on StateMachine — invalid on Pure
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Pure }
+        - SpecState: { operation: op_a, symbol: x }
+    expected:
+      outcome: Invalid
+      errors:
+        - InvalidRoleForKind: { operation: op_a, symbol: x }
+
+  - name: checkpoint_on_statemachine
+    desc: Checkpoint is only valid on Sequence — invalid on StateMachine
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: StateMachine }
+        - SpecState: { operation: op_a, symbol: s }
+        - SpecCheckpoint: { operation: op_a, symbol: c }
+    expected:
+      outcome: Invalid
+      errors:
+        - InvalidRoleForKind: { operation: op_a, symbol: c }
+
+  - name: input_on_structural
+    desc: Structural forbids all runtime roles — Input not allowed
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Structural }
+        - SpecInput: { operation: op_a, symbol: x }
+    expected:
+      outcome: Invalid
+      errors:
+        - InvalidRoleForKind: { operation: op_a, symbol: x }
+
+  - name: environment_on_structural
+    desc: Structural forbids all runtime roles — Environment not allowed
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Structural }
+        - SpecEnvironment: { operation: op_a, symbol: x }
+    expected:
+      outcome: Invalid
+      errors:
+        - InvalidRoleForKind: { operation: op_a, symbol: x }
+
+  - name: dependency_on_structural
+    desc: Structural forbids all runtime roles — Dependency not allowed
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Structural }
+        - SpecDependency: { operation: op_a, symbol: x, dependency_name: svc }
+    expected:
+      outcome: Invalid
+      errors:
+        - InvalidRoleForKind: { operation: op_a, symbol: x }
+
+  - name: conflicting_param_names
+    desc: Two inputs contributing the same param name creates ambiguity
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Pure }
+        - SpecInput: { operation: op_a, symbol: ctor_1, params: [tenant] }
+        - SpecInput: { operation: op_a, symbol: ctor_2, params: [tenant] }
+    expected:
+      outcome: Invalid
+      errors:
+        - ConflictingParamNames: { operation: op_a }
+
+  - name: orphan_typo
+    desc: Annotation references op_A but entry point is op_a — likely typo, orphan
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Pure }
+        - SpecCheckpoint: { operation: op_A, symbol: c }
+    expected:
+      outcome: Invalid
+      errors:
+        - OrphanAnnotation: { operation: op_A, symbol: c }
+
+  - name: duplicate_dep_name
+    desc: Two dependencies on the same operation with the same dependency_name
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Pure }
+        - SpecDependency: { operation: op_a, symbol: dep_1, dependency_name: svc }
+        - SpecDependency: { operation: op_a, symbol: dep_2, dependency_name: svc }
+    expected:
+      outcome: Invalid
+      errors:
+        - DuplicateDependencyName: { operation: op_a }
+
+  - name: multiple_errors_same_operation
+    desc: StateMachine missing State and Checkpoint invalid for kind — both reported
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: StateMachine }
+        - SpecCheckpoint: { operation: op_a, symbol: c }
+    expected:
+      outcome: Invalid
+      errors:
+        - IncompleteOperation: { operation: op_a }
+        - InvalidRoleForKind: { operation: op_a, symbol: c }
+
+  - name: one_valid_one_invalid_overall_invalid
+    desc: op_a is fine but op_b (Sequence, no Checkpoint) fails — overall result is Invalid
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Pure }
+        - SpecOperation: { operation: op_b, kind: Sequence }
+    expected:
+      outcome: Invalid
+      errors:
+        - IncompleteOperation: { operation: op_b }
+
+  - name: multiple_orphans_zero_entry_points
+    desc: No entry points at all — every annotation is an orphan
+    inputs:
+      annotations:
+        - SpecInput: { operation: op_a, symbol: ctor }
+        - SpecEnvironment: { operation: op_b, symbol: env }
+    expected:
+      outcome: Invalid
+      errors:
+        - MissingEntryPoint: { operation: op_a }
+        - MissingEntryPoint: { operation: op_b }
+
+  # ===== WARNINGS =====
+
+  - name: abstract_type_no_generator
+    desc: Abstract type in parameter_types without a generator — warn about unconstructable input
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Pure, parameter_types: [T1] }
+      types:
+        - { name: T1, is_abstract: true, has_generator: false }
+    expected:
+      outcome: Valid
+      warnings:
+        - AbstractTypeNoGenerator: { operation: op_a }
+
+  - name: abstract_type_with_generator_no_warning
+    desc: Abstract type has a generator — no warning needed
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Pure, parameter_types: [T1] }
+      types:
+        - { name: T1, is_abstract: true, has_generator: true }
+    expected:
+      outcome: Valid
+      warnings: []
+
+  - name: private_checkpoint
+    desc: Checkpoint with Private accessibility — warn that harness may not reach it
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Sequence }
+        - SpecCheckpoint: { operation: op_a, symbol: c, accessibility: Private }
+    expected:
+      outcome: Valid
+      warnings:
+        - PrivateCheckpoint: { symbol: c }
