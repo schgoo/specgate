@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../schema/spec-schema.json
+name: findByTypeName
+kind: Sequence
+inputs:
+- name: context
+  type: DsApiCallContext
+environments:
+- name: TenantIdentity
+  type: str
+- name: DsApiCallContext
+  type: DsApiCallContext
+dependencies:
+- name: InvokeDsApiBatchRequest
+  type: IEnumerable<TClient>>>
+  dep: dsapiHttp
+checkpoints:
+- name: RoutingHint
+  type: unknown
