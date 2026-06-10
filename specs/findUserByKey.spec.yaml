@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../schema/spec-schema.json
+name: findUserByKey
+kind: Pure
+inputs:
+- name: db
+  type: IDatabase
+environments:
+- name: TenantId
+  type: str
+dependencies:
+- name: Database
+  type: IDatabase
+  dep: database
