@@ -12,7 +12,7 @@ This system closes that gap.
 |------|-----------|
 | **Operation** | A named behavioral unit the spec makes claims about (e.g., `findUserByKey`). |
 | **Claim** | A single assertion the spec makes about an operation. Each claim is one scorecard entry. |
-| **Kind** | The operation's type: `Pure`, `StateMachine`, `Sequence`, `ErrorMap`, `Structural`. Determines extraction and validation strategy. |
+| **Kind** | The operation's type: `Stateless`, `StateMachine`, `Sequence`, `ErrorMap`, `Structural`. Determines extraction and validation strategy. |
 | **Role** | What an annotation contributes to the operation: `Input`, `Checkpoint`, `State`, `Environment`, `Dependency`. |
 | **Context** | Ambient state an operation depends on (config, identity, feature flags) — not a direct parameter. |
 | **Dependency** | An external service or non-deterministic source the operation interacts with. Bidirectional: outbound calls are outputs, responses are inputs. |
@@ -125,16 +125,27 @@ arise. The binding does NOT contain discovery logic — the macros produce known
 output in a known format at a known path. Operation names in the output match
 operation names in the spec.
 
-### Component kinds
+### Execution targets
 
-| Kind | Entry point | Inputs from | Outputs from |
-|------|------------|-------------|--------------|
-| `Function` | Call a function | Arguments | Return value |
-| `Build` | Run a build command | Fixture files | Build artifacts |
-| `Run` | Execute a binary | Args, stdin, files | Stdout, exit code, files |
+Specs reference a named **target** from the binding file instead of encoding
+execution strategy directly. The binding defines how each target works:
 
-Inputs/outputs that don't come from the call signature use `source` annotations
-to tell the harness where to set up or observe them.
+```yaml
+# bindings/rust.yaml
+language: rust
+targets:
+  build:
+    command: cargo build -p my-crate
+    output: target/specgate-annotations.json
+  test:
+    command: cargo test -p my-crate
+    output: target/specgate-captures.json
+  validate:
+    call: specgate_core::validate
+```
+
+The spec just says `target: build` or `target: validate`. The binding owns the
+how — command, output path, calling convention.
 
 ### Spec file format
 
@@ -148,7 +159,7 @@ logical group of related operations).
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `name` | str | yes | Operation name (grouping key across annotations) |
-| `kind` | oneof | yes | `Pure`, `StateMachine`, `Sequence`, `ErrorMap`, `Structural` |
+| `kind` | oneof | yes | `Stateless`, `StateMachine`, `Sequence`, `ErrorMap`, `Structural` |
 | `inputs` | list | yes | Named, typed parameters |
 | `environments` | list | no | Ambient state the operation reads |
 | `dependencies` | list | no | External services or non-deterministic calls |
@@ -261,13 +272,36 @@ cover all patterns.
 | Role | Placed on | Contributes |
 |------|-----------|-------------|
 | `kind = Pure\|StateMachine\|Sequence\|ErrorMap\|Structural` | Entry point method | Operation type + return value |
-| `role = Input` | Constructors, properties, setters | Values harness provides before calling entry point |
+| `role = Setup` | Test fixture function | Construction + input values for the entry point's type |
 | `role = Checkpoint` | Internal methods/call sites | Observable intermediate state |
 | `role = State` | Fields/properties | State to snapshot before/after (StateMachine) |
 | `role = Environment` | Config/ambient-state readers | Values harness sets up in the environment |
-| `role = Dependency` | External services or non-deterministic methods | Boundary the harness replaces |
+| `role = Mock` | Methods calling external services | Makes function mockable; harness injects controlled responses |
 
 Only one annotation per operation has a `kind` (the entry point). All others have a `role`.
+
+Setup functions live in the test project. They construct the type under test and
+provide input values. If the entry point is a free function, no setup is needed.
+If it's a method and no setup is provided, `core.validate` warns about ambiguous
+construction. Multiple setups per operation are allowed — test cases reference
+which setup to use.
+
+### Construction resolution
+
+The harness works backwards from the entry point to build a construction graph:
+
+1. **Entry point** — what types does it need? (self type, parameter types)
+2. **For each type, try in order:**
+   - Auto-discover a single public constructor → use it, recurse on its params
+   - Find a `spec_setup` that returns this type → use it
+   - Primitive/leaf type → provided by test case inputs
+3. **If unresolvable** — validation error with actionable suggestion:
+   > "Cannot construct `DirectoryKey` for operation `find_user`.
+   > Add a `#[spec_setup("find_user")]` function that returns `DirectoryKey`."
+
+All resolved constructor/setup parameters bubble up as flat test case inputs.
+This is conceptually dependency injection resolution at code-generation time.
+See also: `fundle` crate for potential runtime DI integration (future work).
 
 Annotated code must be callable from the test project but need not be public API.
 Each language has its own mechanism: C# uses `InternalsVisibleTo`, Rust uses
@@ -344,7 +378,7 @@ roles. The harness maps by name, not by code shape.
 
 | Kind | Extraction | Spec output |
 |------|-----------|-------------|
-| Pure | Capture (args, return_value) | Test table |
+| Stateless | Capture (args, return_value) | Test table |
 | StateMachine | Snapshot state before/after | State transitions |
 | Sequence | Record ordered emissions | Checkpoint sequence |
 | ErrorMap | Capture (args, error_variant) | Error classification |
@@ -357,7 +391,7 @@ roles. The harness maps by name, not by code shape.
 | StateMachine | ≥1 State annotation | No state registered |
 | Sequence | ≥1 Checkpoint | No checkpoints |
 | ErrorMap | ≥1 error-returning path | Method never errors |
-| Pure / Structural | Nothing beyond signature | Always complete |
+| Stateless / Structural | Nothing beyond signature | Always complete |
 
 CI fails fast on structural annotation errors without compiling.
 

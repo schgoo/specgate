@@ -3,7 +3,7 @@
   "title": "SpecGate Component Spec",
   "description": "Schema for SpecGate .spec.yaml files — declares inputs, types, outputs, and test cases for a single component.",
   "type": "object",
-  "required": ["name", "kind", "inputs", "outcome", "outputs", "cases"],
+  "required": ["name", "target", "outcome", "outputs", "cases"],
   "additionalProperties": false,
   "properties": {
     "name": {
@@ -11,10 +11,9 @@
       "description": "Dotted component name, e.g. core.validate",
       "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9_]*)+$"
     },
-    "kind": {
+    "target": {
       "type": "string",
-      "description": "Component kind: Function (callable entry point), Build (compile-and-inspect), or Run (execute a binary)",
-      "enum": ["Function", "Build", "Run"]
+      "description": "Name of the execution target defined in the binding file (e.g. 'build', 'test', 'validate')"
     },
     "inputs": {
       "type": "object",
@@ -32,9 +31,26 @@
       }
     },
     "outcome": {
-      "type": "string",
-      "description": "Outcome declaration, e.g. 'oneof [Valid, Invalid]'",
-      "pattern": "^oneof \\[.+\\]$"
+      "description": "Outcome declaration. Use oneof for variant outcomes, or a string for a single outcome type.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["oneof"],
+          "properties": {
+            "oneof": {
+              "type": "array",
+              "items": { "type": "string" },
+              "minItems": 2,
+              "description": "Outcome variant names, e.g. [Valid, Invalid]"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "string",
+          "description": "Single outcome type, e.g. 'Ok'"
+        }
+      ]
     },
     "outputs": {
       "type": "object",
@@ -88,7 +104,7 @@
     },
     "typeDefinition": {
       "type": "object",
-      "description": "A named type. Use 'oneof' for variant/sum types, or 'fields' for record/struct types.",
+      "description": "A named type. Use 'oneof' for variant types. Otherwise keys are record fields with type expression values.",
       "properties": {
         "oneof": {
           "type": "object",
@@ -102,11 +118,14 @@
             "type": "string"
           }
         }
+      },
+      "additionalProperties": {
+        "type": "string"
       }
     },
     "testCase": {
       "type": "object",
-      "required": ["name", "desc", "inputs", "expected"],
+      "required": ["name", "desc", "expected"],
       "additionalProperties": false,
       "properties": {
         "name": {

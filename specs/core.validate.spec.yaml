@@ -6,7 +6,7 @@
 # role-kind matrix and completeness rules.
 
 name: core.validate
-kind: Function
+target: validate
 
 inputs:
   annotations:
@@ -24,11 +24,10 @@ types:
   Annotation:
     oneof:
       SpecOperation: { operation: string, kind: string, symbol: string, parameter_types: List<string> }
-      SpecInput: { operation: string, symbol: string, params: List<string> }
+      SpecSetup: { operation: string, name: string, symbol: string, params: List<string>, returns: string }
       SpecCheckpoint: { operation: string, symbol: string, accessibility: string }
       SpecState: { operation: string, symbol: string }
-      SpecEnvironment: { operation: string, symbol: string }
-      SpecDependency: { operation: string, symbol: string, dependency_name: string }
+      SpecMock: { operation: string, symbol: string, mock_name: string }
 
   ValidationError:
     oneof:
@@ -38,29 +37,31 @@ types:
       InvalidRoleForKind: { operation: string, symbol: string }
       ConflictingParamNames: { operation: string }
       OrphanAnnotation: { operation: string, symbol: string }
-      DuplicateDependencyName: { operation: string }
+      DuplicateMockName: { operation: string }
+      DuplicateSetupName: { operation: string, name: string }
 
   ValidationWarning:
     oneof:
       AbstractTypeNoGenerator: { operation: string }
       PrivateCheckpoint: { symbol: string }
+      AmbiguousConstruction: { operation: string, type: string }
 
-outcome: "oneof [Valid, Invalid]"
+outcome:
+  oneof: [Valid, Invalid]
 
 outputs:
   when Valid:
-    warnings: "List[ValidationWarning]"
+    warnings: List<ValidationWarning>
   when Invalid:
-    errors: "List[ValidationError]"
-    warnings: "List[ValidationWarning]"
+    errors: List<ValidationError>
+    warnings: List<ValidationWarning>
 
-# Role-kind validity matrix (csharp-harness.md:252)
-#          Pure  SM   Seq  ErrMap  Structural
-# Input     ✓    ✓    ✓     ✓       ✗
-# State     ✗    ✓    ✗     ✗       ✗
-# Chkpt     ✗    ✗    ✓     ✗       ✗
-# Env       ✓    ✓    ✓     ✓       ✗
-# Dep       ✓    ✓    ✓     ✓       ✗
+# Role-kind validity matrix
+#            Stateless  SM   Seq  ErrMap  Structural
+# Setup        ✓        ✓    ✓     ✓       ✗
+# State        ✗        ✓    ✗     ✗       ✗
+# Chkpt        ✗        ✗    ✓     ✗       ✗
+# Mock         ✓        ✓    ✓     ✓       ✗
 
 # -------------------------------------------------------------------
 # Cases
@@ -73,20 +74,20 @@ cases:
     desc: A single SpecOperation with no roles is the simplest valid input
     inputs:
       annotations:
-        - SpecOperation: { operation: op_a, kind: Pure }
+        - SpecOperation: { operation: op_a, kind: Stateless }
     expected:
       outcome: Valid
       warnings: []
 
   - name: validate_sequence_all_roles
-    desc: Sequence with every allowed role — Input, Environment, Dependency, Checkpoint
+    desc: Sequence with every allowed role — Setup, Mock, Checkpoint
     inputs:
       annotations:
         - SpecOperation: { operation: op_a, kind: Sequence, symbol: entry }
-        - SpecInput:       { operation: op_a, symbol: ctor, params: [x, y] }
-        - SpecInput:       { operation: op_a, symbol: prop_a }
-        - SpecEnvironment: { operation: op_a, symbol: env_a }
-        - SpecDependency:  { operation: op_a, symbol: dep_a, dependency_name: svc }
+        - SpecSetup: { operation: op_a, name: ctor, symbol: ctor, params: [x, y] }
+        - SpecSetup: { operation: op_a, name: prop_a, symbol: prop_a }
+        - SpecSetup: { operation: op_a, name: env_a, symbol: env_a }
+        - SpecMock:  { operation: op_a, symbol: dep_a, mock_name: svc }
         - SpecCheckpoint:  { operation: op_a, symbol: chk_a }
     expected:
       outcome: Valid
@@ -106,8 +107,8 @@ cases:
     desc: Two operations in the same input both valid — no cross-operation interference
     inputs:
       annotations:
-        - SpecOperation: { operation: op_a, kind: Pure }
-        - SpecOperation: { operation: op_b, kind: Pure }
+        - SpecOperation: { operation: op_a, kind: Stateless }
+        - SpecOperation: { operation: op_b, kind: Stateless }
     expected:
       outcome: Valid
       warnings: []
@@ -116,10 +117,10 @@ cases:
     desc: Same symbol annotated for two different operations is allowed
     inputs:
       annotations:
-        - SpecOperation: { operation: op_a, kind: Pure }
-        - SpecOperation: { operation: op_b, kind: Pure }
-        - SpecInput: { operation: op_a, symbol: shared_ctor, params: [x] }
-        - SpecInput: { operation: op_b, symbol: shared_ctor, params: [x] }
+        - SpecOperation: { operation: op_a, kind: Stateless }
+        - SpecOperation: { operation: op_b, kind: Stateless }
+        - SpecSetup: { operation: op_a, name: shared, symbol: shared_ctor, params: [x] }
+        - SpecSetup: { operation: op_b, name: shared, symbol: shared_ctor, params: [x] }
     expected:
       outcome: Valid
       warnings: []
@@ -137,8 +138,8 @@ cases:
     desc: A method can serve as a dependency (not just injected services)
     inputs:
       annotations:
-        - SpecOperation: { operation: op_a, kind: Pure }
-        - SpecDependency: { operation: op_a, symbol: rng, dependency_name: rng }
+        - SpecOperation: { operation: op_a, kind: Stateless }
+        - SpecMock: { operation: op_a, symbol: rng, mock_name: rng }
     expected:
       outcome: Valid
       warnings: []
@@ -166,7 +167,7 @@ cases:
     desc: Annotations reference an operation that has no SpecOperation — missing entry point
     inputs:
       annotations:
-        - SpecInput: { operation: op_a, symbol: ctor }
+        - SpecSetup: { operation: op_a, name: ctor, symbol: ctor }
     expected:
       outcome: Invalid
       errors:
@@ -176,7 +177,7 @@ cases:
     desc: Two SpecOperations for the same operation name — only one allowed
     inputs:
       annotations:
-        - SpecOperation: { operation: op_a, kind: Pure, symbol: entry_1 }
+        - SpecOperation: { operation: op_a, kind: Stateless, symbol: entry_1 }
         - SpecOperation: { operation: op_a, kind: Sequence, symbol: entry_2 }
     expected:
       outcome: Invalid
@@ -207,7 +208,7 @@ cases:
     desc: State is only valid on StateMachine — invalid on Pure
     inputs:
       annotations:
-        - SpecOperation: { operation: op_a, kind: Pure }
+        - SpecOperation: { operation: op_a, kind: Stateless }
         - SpecState: { operation: op_a, symbol: x }
     expected:
       outcome: Invalid
@@ -226,46 +227,58 @@ cases:
       errors:
         - InvalidRoleForKind: { operation: op_a, symbol: c }
 
-  - name: input_on_structural
-    desc: Structural forbids all runtime roles — Input not allowed
+  - name: state_on_sequence
+    desc: State is only valid on StateMachine — invalid on Sequence
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Sequence }
+        - SpecCheckpoint: { operation: op_a, symbol: c }
+        - SpecState: { operation: op_a, symbol: s }
+    expected:
+      outcome: Invalid
+      errors:
+        - InvalidRoleForKind: { operation: op_a, symbol: s }
+
+  - name: checkpoint_on_stateless
+    desc: Checkpoint is only valid on Sequence — invalid on Stateless
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Stateless }
+        - SpecCheckpoint: { operation: op_a, symbol: c }
+    expected:
+      outcome: Invalid
+      errors:
+        - InvalidRoleForKind: { operation: op_a, symbol: c }
+
+  - name: setup_on_structural
+    desc: Structural forbids all runtime roles — Setup not allowed
     inputs:
       annotations:
         - SpecOperation: { operation: op_a, kind: Structural }
-        - SpecInput: { operation: op_a, symbol: x }
+        - SpecSetup: { operation: op_a, name: x, symbol: x }
     expected:
       outcome: Invalid
       errors:
         - InvalidRoleForKind: { operation: op_a, symbol: x }
 
-  - name: environment_on_structural
-    desc: Structural forbids all runtime roles — Environment not allowed
+  - name: mock_on_structural
+    desc: Structural forbids all runtime roles — Mock not allowed
     inputs:
       annotations:
         - SpecOperation: { operation: op_a, kind: Structural }
-        - SpecEnvironment: { operation: op_a, symbol: x }
-    expected:
-      outcome: Invalid
-      errors:
-        - InvalidRoleForKind: { operation: op_a, symbol: x }
-
-  - name: dependency_on_structural
-    desc: Structural forbids all runtime roles — Dependency not allowed
-    inputs:
-      annotations:
-        - SpecOperation: { operation: op_a, kind: Structural }
-        - SpecDependency: { operation: op_a, symbol: x, dependency_name: svc }
+        - SpecMock: { operation: op_a, symbol: x, mock_name: svc }
     expected:
       outcome: Invalid
       errors:
         - InvalidRoleForKind: { operation: op_a, symbol: x }
 
   - name: conflicting_param_names
-    desc: Two inputs contributing the same param name creates ambiguity
+    desc: Two setups contributing the same param name creates ambiguity
     inputs:
       annotations:
-        - SpecOperation: { operation: op_a, kind: Pure }
-        - SpecInput: { operation: op_a, symbol: ctor_1, params: [tenant] }
-        - SpecInput: { operation: op_a, symbol: ctor_2, params: [tenant] }
+        - SpecOperation: { operation: op_a, kind: Stateless }
+        - SpecSetup: { operation: op_a, name: ctor_1, symbol: ctor_1, params: [tenant] }
+        - SpecSetup: { operation: op_a, name: ctor_2, symbol: ctor_2, params: [tenant] }
     expected:
       outcome: Invalid
       errors:
@@ -275,24 +288,36 @@ cases:
     desc: Annotation references op_A but entry point is op_a — likely typo, orphan
     inputs:
       annotations:
-        - SpecOperation: { operation: op_a, kind: Pure }
+        - SpecOperation: { operation: op_a, kind: Stateless }
         - SpecCheckpoint: { operation: op_A, symbol: c }
     expected:
       outcome: Invalid
       errors:
         - OrphanAnnotation: { operation: op_A, symbol: c }
 
-  - name: duplicate_dep_name
-    desc: Two dependencies on the same operation with the same dependency_name
+  - name: duplicate_mock_name
+    desc: Two mocks on the same operation with the same mock_name
     inputs:
       annotations:
-        - SpecOperation: { operation: op_a, kind: Pure }
-        - SpecDependency: { operation: op_a, symbol: dep_1, dependency_name: svc }
-        - SpecDependency: { operation: op_a, symbol: dep_2, dependency_name: svc }
+        - SpecOperation: { operation: op_a, kind: Stateless }
+        - SpecMock: { operation: op_a, symbol: dep_1, mock_name: svc }
+        - SpecMock: { operation: op_a, symbol: dep_2, mock_name: svc }
     expected:
       outcome: Invalid
       errors:
-        - DuplicateDependencyName: { operation: op_a }
+        - DuplicateMockName: { operation: op_a }
+
+  - name: duplicate_setup_name
+    desc: Two setups on the same operation with the same name
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Stateless }
+        - SpecSetup: { operation: op_a, name: default, symbol: setup_1, params: [x] }
+        - SpecSetup: { operation: op_a, name: default, symbol: setup_2, params: [y] }
+    expected:
+      outcome: Invalid
+      errors:
+        - DuplicateSetupName: { operation: op_a, name: default }
 
   - name: multiple_errors_same_operation
     desc: StateMachine missing State and Checkpoint invalid for kind — both reported
@@ -310,7 +335,7 @@ cases:
     desc: op_a is fine but op_b (Sequence, no Checkpoint) fails — overall result is Invalid
     inputs:
       annotations:
-        - SpecOperation: { operation: op_a, kind: Pure }
+        - SpecOperation: { operation: op_a, kind: Stateless }
         - SpecOperation: { operation: op_b, kind: Sequence }
     expected:
       outcome: Invalid
@@ -321,8 +346,8 @@ cases:
     desc: No entry points at all — every annotation is an orphan
     inputs:
       annotations:
-        - SpecInput: { operation: op_a, symbol: ctor }
-        - SpecEnvironment: { operation: op_b, symbol: env }
+        - SpecSetup: { operation: op_a, name: ctor, symbol: ctor }
+        - SpecSetup: { operation: op_b, name: env, symbol: env }
     expected:
       outcome: Invalid
       errors:
@@ -335,7 +360,7 @@ cases:
     desc: Abstract type in parameter_types without a generator — warn about unconstructable input
     inputs:
       annotations:
-        - SpecOperation: { operation: op_a, kind: Pure, parameter_types: [T1] }
+        - SpecOperation: { operation: op_a, kind: Stateless, parameter_types: [T1] }
       types:
         - { name: T1, is_abstract: true, has_generator: false }
     expected:
@@ -347,7 +372,7 @@ cases:
     desc: Abstract type has a generator — no warning needed
     inputs:
       annotations:
-        - SpecOperation: { operation: op_a, kind: Pure, parameter_types: [T1] }
+        - SpecOperation: { operation: op_a, kind: Stateless, parameter_types: [T1] }
       types:
         - { name: T1, is_abstract: true, has_generator: true }
     expected:
@@ -364,3 +389,107 @@ cases:
       outcome: Valid
       warnings:
         - PrivateCheckpoint: { symbol: c }
+
+  - name: ambiguous_construction
+    desc: Entry point is a method but no spec_setup — warn about ambiguous construction
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Sequence, symbol: "Request::execute" }
+        - SpecCheckpoint: { operation: op_a, symbol: c }
+    expected:
+      outcome: Valid
+      warnings:
+        - AmbiguousConstruction: { operation: op_a, type: Request }
+
+  - name: free_function_no_setup_needed
+    desc: Entry point is a free function — no construction warning
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Stateless, symbol: validate }
+    expected:
+      outcome: Valid
+      warnings: []
+
+  - name: setup_present_no_warning
+    desc: Entry point is a method with a spec_setup — no construction warning
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Sequence, symbol: "Request::execute" }
+        - SpecSetup: { operation: op_a, name: default, symbol: "test::setup_request", params: [tenant, token] }
+        - SpecCheckpoint: { operation: op_a, symbol: c }
+    expected:
+      outcome: Valid
+      warnings: []
+
+  - name: invalid_still_reports_warnings
+    desc: Warnings are reported even when outcome is Invalid
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Stateless, parameter_types: [T1] }
+        - SpecSetup: { operation: op_a, name: x, symbol: x }
+        - SpecSetup: { operation: op_a, name: x, symbol: y }
+      types:
+        - { name: T1, is_abstract: true, has_generator: false }
+    expected:
+      outcome: Invalid
+      errors:
+        - DuplicateSetupName: { operation: op_a, name: x }
+      warnings:
+        - AbstractTypeNoGenerator: { operation: op_a }
+
+  - name: duplicate_mock_name_across_operations
+    desc: Same mock_name in different operations is valid
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Stateless }
+        - SpecOperation: { operation: op_b, kind: Stateless }
+        - SpecMock: { operation: op_a, symbol: m1, mock_name: svc }
+        - SpecMock: { operation: op_b, symbol: m2, mock_name: svc }
+    expected:
+      outcome: Valid
+      warnings: []
+
+  - name: conflicting_params_across_operations
+    desc: Same setup param names in different operations is valid
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Stateless }
+        - SpecOperation: { operation: op_b, kind: Stateless }
+        - SpecSetup: { operation: op_a, name: s1, symbol: s1, params: [tenant] }
+        - SpecSetup: { operation: op_b, name: s2, symbol: s2, params: [tenant] }
+    expected:
+      outcome: Valid
+      warnings: []
+
+  - name: errormap_with_setup_and_mock
+    desc: ErrorMap kind allows setup and mock roles
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: ErrorMap }
+        - SpecSetup: { operation: op_a, name: default, symbol: setup }
+        - SpecMock: { operation: op_a, symbol: m, mock_name: svc }
+    expected:
+      outcome: Valid
+      warnings: []
+
+  - name: ambiguous_construction_statemachine
+    desc: StateMachine method entry point without setup warns too
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: StateMachine, symbol: "Machine::step" }
+        - SpecState: { operation: op_a, symbol: s }
+    expected:
+      outcome: Valid
+      warnings:
+        - AmbiguousConstruction: { operation: op_a, type: Machine }
+
+  - name: setup_has_self
+    desc: Setup with self receiver is a validation error
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Stateless }
+        - SpecSetup: { operation: op_a, name: bad, symbol: "Foo::do_thing", params: [self] }
+    expected:
+      outcome: Invalid
+      errors:
+        - InvalidRoleForKind: { operation: op_a, symbol: "Foo::do_thing" }

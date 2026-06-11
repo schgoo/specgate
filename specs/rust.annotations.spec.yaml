@@ -1,0 +1,557 @@
+# yaml-language-server: $schema=../spec-schema.json
+# SpecGate component: rust.annotations
+#
+# Tests the specgate proc macro crate. Each case provides a Rust
+# source snippet compiled as a fixture crate with specgate-macros
+# as a dependency. The macros fire at compile time and write
+# annotation metadata to an output file. Cases assert the output
+# matches expected annotations.
+#
+# Symbols are fully qualified via module_path!() — the fixture
+# crate is named "fixture", so symbols resolve to e.g.
+# "fixture::Request::new".
+
+name: rust.annotations
+target: build
+
+inputs:
+  source:
+    type: string
+    desc: Rust source code placed in the fixture crate's src/lib.rs
+
+types:
+  Annotation:
+    oneof:
+      SpecOperation:
+        operation: string
+        kind: string
+        symbol: string
+      SpecSetup:
+        operation: string
+        name: string
+        symbol: string
+        params: List<string>
+        returns: string
+      SpecCheckpoint:
+        operation: string
+        symbol: string
+      SpecState:
+        operation: string
+        symbol: string
+      SpecMock:
+        operation: string
+        symbol: string
+        mock_name: string
+
+  CompileError:
+    message: string
+
+outcome:
+  oneof: [Ok, Error]
+
+outputs:
+  when Ok:
+    annotations:
+      type: List<Annotation>
+      source: annotations
+  when Error:
+    errors:
+      type: List<CompileError>
+      source: errors
+
+# -------------------------------------------------------------------
+# Cases
+# -------------------------------------------------------------------
+cases:
+
+  # ===== OK: single annotation per role =====
+
+  - name: stateless_operation
+    desc: spec_operation with kind produces a SpecOperation annotation
+    inputs:
+      source: |
+        #[spec_operation("op_a", kind = Stateless)]
+        fn handler() {}
+    expected:
+      outcome: Ok
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Stateless, symbol: "fixture::handler" }
+
+  - name: sequence_operation
+    desc: spec_operation extracts the Sequence kind
+    inputs:
+      source: |
+        #[spec_operation("op_a", kind = Sequence)]
+        async fn process() {}
+    expected:
+      outcome: Ok
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Sequence, symbol: "fixture::process" }
+
+  - name: setup_constructor
+    desc: spec_setup on a constructor extracts param names and return type
+    inputs:
+      source: |
+        struct Request;
+        impl Request {
+            #[spec_setup("op_a", name = "ctor")]
+            fn new(tenant: String, token: String) -> Self { Request }
+        }
+    expected:
+      outcome: Ok
+      annotations:
+        - SpecSetup: { operation: op_a, name: ctor, symbol: "fixture::Request::new", params: [tenant, token], returns: Request }
+
+  - name: setup_free_function
+    desc: spec_setup as a free function in test code
+    inputs:
+      source: |
+        struct Request;
+        impl Request {
+            fn new(_t: String, _k: String) -> Self { Request }
+            fn set_endpoint(&mut self, _ep: String) {}
+        }
+        #[spec_setup("op_a", name = "full")]
+        fn make_request(tenant: String, token: String, ep: String) -> Request {
+            let mut r = Request::new(tenant, token);
+            r.set_endpoint(ep);
+            r
+        }
+    expected:
+      outcome: Ok
+      annotations:
+        - SpecSetup: { operation: op_a, name: full, symbol: "fixture::make_request", params: [tenant, token, ep], returns: Request }
+
+  - name: checkpoint
+    desc: spec_checkpoint extracts a Checkpoint annotation
+    inputs:
+      source: |
+        struct Handler;
+        impl Handler {
+            #[spec_checkpoint("op_a")]
+            fn get_routing_hint(&self) -> String { String::new() }
+        }
+    expected:
+      outcome: Ok
+      annotations:
+        - SpecCheckpoint: { operation: op_a, symbol: "fixture::Handler::get_routing_hint" }
+
+  - name: state_on_field
+    desc: spec_state on a struct field extracts a State annotation
+    inputs:
+      source: |
+        struct Machine {
+            #[spec_state("op_a")]
+            current: u32,
+        }
+    expected:
+      outcome: Ok
+      annotations:
+        - SpecState: { operation: op_a, symbol: "fixture::Machine::current" }
+
+  - name: setup_environment
+    desc: spec_setup for environment prep — no return type, no self
+    inputs:
+      source: |
+        #[spec_setup("op_a", name = "runtime")]
+        fn init_runtime(mode: String) {}
+    expected:
+      outcome: Ok
+      annotations:
+        - SpecSetup: { operation: op_a, name: runtime, symbol: "fixture::init_runtime", params: [mode], returns: "()" }
+
+  - name: setup_no_params
+    desc: spec_setup with no params — default construction
+    inputs:
+      source: |
+        struct Request;
+        impl Request {
+            fn new() -> Self { Request }
+        }
+        #[spec_setup("op_a", name = "default")]
+        fn default_request() -> Request { Request::new() }
+    expected:
+      outcome: Ok
+      annotations:
+        - SpecSetup: { operation: op_a, name: default, symbol: "fixture::default_request", params: [], returns: Request }
+
+  - name: multiple_setups_same_operation
+    desc: Two setups returning different types for the same operation
+    inputs:
+      source: |
+        struct Request;
+        struct Client;
+        #[spec_setup("op_a", name = "request")]
+        fn make_request(tenant: String) -> Request { Request }
+        #[spec_setup("op_a", name = "client")]
+        fn make_client(base_url: String) -> Client { Client }
+    expected:
+      outcome: Ok
+      annotations:
+        - SpecSetup: { operation: op_a, name: request, symbol: "fixture::make_request", params: [tenant], returns: Request }
+        - SpecSetup: { operation: op_a, name: client, symbol: "fixture::make_client", params: [base_url], returns: Client }
+
+  - name: mock
+    desc: spec_mock extracts dependency name
+    inputs:
+      source: |
+        struct Handler;
+        impl Handler {
+            #[spec_mock("op_a", name = "rest_client")]
+            fn call_api(&self) -> u32 { 0 }
+        }
+    expected:
+      outcome: Ok
+      annotations:
+        - SpecMock: { operation: op_a, symbol: "fixture::Handler::call_api", mock_name: rest_client }
+
+  # ===== OK: composition =====
+
+  - name: full_operation
+    desc: All annotation roles for a complete Sequence operation
+    inputs:
+      source: |
+        struct Request {
+            #[spec_state("find_user")]
+            retries: u32,
+        }
+        impl Request {
+            fn new(tenant: String, token: String) -> Self { Request { retries: 0 } }
+
+            #[spec_operation("find_user", kind = Sequence)]
+            fn execute(&self) -> u32 { 0 }
+
+            #[spec_checkpoint("find_user")]
+            fn get_routing_hint(&self) -> String { String::new() }
+
+            #[spec_mock("find_user", name = "http")]
+            fn call_api(&self) -> u32 { 0 }
+        }
+
+        #[spec_setup("find_user", name = "default")]
+        fn setup_request(tenant: String, token: String, ep: String) -> Request {
+            Request::new(tenant, token)
+        }
+    expected:
+      outcome: Ok
+      annotations:
+        - SpecState: { operation: find_user, symbol: "fixture::Request::retries" }
+        - SpecOperation: { operation: find_user, kind: Sequence, symbol: "fixture::Request::execute" }
+        - SpecCheckpoint: { operation: find_user, symbol: "fixture::Request::get_routing_hint" }
+        - SpecMock: { operation: find_user, symbol: "fixture::Request::call_api", mock_name: http }
+        - SpecSetup: { operation: find_user, name: default, symbol: "fixture::setup_request", params: [tenant, token, ep], returns: Request }
+
+  - name: full_statemachine
+    desc: All annotation roles for a complete StateMachine operation
+    inputs:
+      source: |
+        struct CircuitBreaker {
+            #[spec_state("breaker")]
+            state: String,
+            #[spec_state("breaker")]
+            failure_count: u32,
+        }
+        impl CircuitBreaker {
+            fn new(threshold: u32) -> Self {
+                CircuitBreaker { state: "closed".into(), failure_count: 0 }
+            }
+
+            #[spec_operation("breaker", kind = StateMachine)]
+            fn on_result(&mut self, success: bool) {}
+
+            #[spec_mock("breaker", name = "backend")]
+            fn call_backend(&self) -> bool { true }
+        }
+
+        #[spec_setup("breaker", name = "default")]
+        fn setup_breaker(threshold: u32) -> CircuitBreaker {
+            CircuitBreaker::new(threshold)
+        }
+    expected:
+      outcome: Ok
+      annotations:
+        - SpecState: { operation: breaker, symbol: "fixture::CircuitBreaker::state" }
+        - SpecState: { operation: breaker, symbol: "fixture::CircuitBreaker::failure_count" }
+        - SpecOperation: { operation: breaker, kind: StateMachine, symbol: "fixture::CircuitBreaker::on_result" }
+        - SpecMock: { operation: breaker, symbol: "fixture::CircuitBreaker::call_backend", mock_name: backend }
+        - SpecSetup: { operation: breaker, name: default, symbol: "fixture::setup_breaker", params: [threshold], returns: CircuitBreaker }
+
+  - name: full_stateless
+    desc: Stateless operation with setup and mock — all allowed roles
+    inputs:
+      source: |
+        struct Config;
+
+        #[spec_setup("validate_input", name = "default")]
+        fn make_config(mode: String) -> Config { Config }
+
+        #[spec_operation("validate_input", kind = Stateless)]
+        fn validate(input: String, config: Config) -> bool { true }
+
+        struct Handler;
+        impl Handler {
+            #[spec_mock("validate_input", name = "schema_svc")]
+            fn fetch_schema(&self) -> String { String::new() }
+        }
+    expected:
+      outcome: Ok
+      annotations:
+        - SpecSetup: { operation: validate_input, name: default, symbol: "fixture::make_config", params: [mode], returns: Config }
+        - SpecOperation: { operation: validate_input, kind: Stateless, symbol: "fixture::validate" }
+        - SpecMock: { operation: validate_input, symbol: "fixture::Handler::fetch_schema", mock_name: schema_svc }
+
+  - name: full_errormap
+    desc: ErrorMap operation with setup and mock — maps inputs to error variants
+    inputs:
+      source: |
+        struct Client;
+
+        #[spec_setup("classify_error", name = "default")]
+        fn make_client(base_url: String) -> Client { Client }
+
+        impl Client {
+            #[spec_operation("classify_error", kind = ErrorMap)]
+            fn send(&self, payload: String) -> Result<(), String> { Ok(()) }
+
+            #[spec_mock("classify_error", name = "network")]
+            fn raw_send(&self, data: &[u8]) -> Result<Vec<u8>, std::io::Error> {
+                Ok(vec![])
+            }
+        }
+    expected:
+      outcome: Ok
+      annotations:
+        - SpecSetup: { operation: classify_error, name: default, symbol: "fixture::make_client", params: [base_url], returns: Client }
+        - SpecOperation: { operation: classify_error, kind: ErrorMap, symbol: "fixture::Client::send" }
+        - SpecMock: { operation: classify_error, symbol: "fixture::Client::raw_send", mock_name: network }
+
+  - name: two_operations
+    desc: Two independent operations in the same source
+    inputs:
+      source: |
+        #[spec_operation("op_a", kind = Stateless)]
+        fn handle_a() {}
+
+        #[spec_operation("op_b", kind = Stateless)]
+        fn handle_b() {}
+    expected:
+      outcome: Ok
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Stateless, symbol: "fixture::handle_a" }
+        - SpecOperation: { operation: op_b, kind: Stateless, symbol: "fixture::handle_b" }
+
+  - name: no_annotations
+    desc: Source with no spec_* attributes produces empty list
+    inputs:
+      source: |
+        fn plain() {}
+        struct Plain { x: i32 }
+    expected:
+      outcome: Ok
+      annotations: []
+
+  # ===== OK: edge cases =====
+
+  - name: all_operation_kinds
+    desc: All five operation kinds extract correctly
+    inputs:
+      source: |
+        #[spec_operation("op_a", kind = Stateless)]
+        fn stateless_op() {}
+
+        struct Machine {
+            #[spec_state("op_b")]
+            counter: u32,
+        }
+        impl Machine {
+            #[spec_operation("op_b", kind = StateMachine)]
+            fn step(&mut self) {}
+        }
+
+        struct Pipeline;
+        impl Pipeline {
+            #[spec_operation("op_c", kind = Sequence)]
+            fn run(&self) {}
+            #[spec_checkpoint("op_c")]
+            fn stage_1(&self) -> u32 { 0 }
+        }
+
+        #[spec_operation("op_d", kind = ErrorMap)]
+        fn classify(code: u32) -> Result<(), String> { Ok(()) }
+
+        #[spec_operation("op_e", kind = Structural)]
+        fn check_deps() {}
+    expected:
+      outcome: Ok
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Stateless, symbol: "fixture::stateless_op" }
+        - SpecState: { operation: op_b, symbol: "fixture::Machine::counter" }
+        - SpecOperation: { operation: op_b, kind: StateMachine, symbol: "fixture::Machine::step" }
+        - SpecOperation: { operation: op_c, kind: Sequence, symbol: "fixture::Pipeline::run" }
+        - SpecCheckpoint: { operation: op_c, symbol: "fixture::Pipeline::stage_1" }
+        - SpecOperation: { operation: op_d, kind: ErrorMap, symbol: "fixture::classify" }
+        - SpecOperation: { operation: op_e, kind: Structural, symbol: "fixture::check_deps" }
+
+  - name: nested_module_symbols
+    desc: Annotations in nested modules produce fully-qualified symbols
+    inputs:
+      source: |
+        mod inner {
+            pub mod deep {
+                #[spec_operation("op_a", kind = Stateless)]
+                pub fn handler() {}
+            }
+        }
+    expected:
+      outcome: Ok
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Stateless, symbol: "fixture::inner::deep::handler" }
+
+  - name: async_function
+    desc: spec_operation on an async fn extracts correctly
+    inputs:
+      source: |
+        #[spec_operation("op_a", kind = Stateless)]
+        async fn handle(input: String) -> u32 { 0 }
+    expected:
+      outcome: Ok
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Stateless, symbol: "fixture::handle" }
+
+  - name: generic_function
+    desc: spec_operation on a generic function extracts correctly
+    inputs:
+      source: |
+        #[spec_operation("op_a", kind = Stateless)]
+        fn process<T: std::fmt::Display>(item: T) -> String { item.to_string() }
+    expected:
+      outcome: Ok
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Stateless, symbol: "fixture::process" }
+
+  - name: duplicate_operation_name
+    desc: Two spec_operations with the same name in one source — extractor emits both
+    inputs:
+      source: |
+        #[spec_operation("op_a", kind = Stateless)]
+        fn handler_one() {}
+
+        #[spec_operation("op_a", kind = Stateless)]
+        fn handler_two() {}
+    expected:
+      outcome: Ok
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Stateless, symbol: "fixture::handler_one" }
+        - SpecOperation: { operation: op_a, kind: Stateless, symbol: "fixture::handler_two" }
+
+  - name: other_attributes_ignored
+    desc: Non-spec attributes do not interfere with extraction
+    inputs:
+      source: |
+        #[derive(Debug, Clone)]
+        struct Request {
+            #[spec_state("op_a")]
+            status: u32,
+        }
+    expected:
+      outcome: Ok
+      annotations:
+        - SpecState: { operation: op_a, symbol: "fixture::Request::status" }
+
+  # ===== ERROR =====
+
+  - name: invalid_kind
+    desc: Unrecognized kind value produces a compile error
+    inputs:
+      source: |
+        #[spec_operation("op_a", kind = Stream)]
+        fn handler() {}
+    expected:
+      outcome: Error
+      errors:
+        - CompileError: { message: "invalid kind: Stream" }
+
+  - name: missing_operation_name
+    desc: spec_* attribute without operation name fails
+    inputs:
+      source: |
+        #[spec_operation(kind = Stateless)]
+        fn handler() {}
+    expected:
+      outcome: Error
+      errors:
+        - CompileError: { message: "missing operation name" }
+
+  - name: setup_missing_name
+    desc: spec_setup without a name produces a compile error
+    inputs:
+      source: |
+        #[spec_setup("op_a")]
+        fn make_request() -> u32 { 0 }
+    expected:
+      outcome: Error
+      errors:
+        - CompileError: { message: "missing required parameter: name" }
+
+  - name: setup_with_self
+    desc: spec_setup on a method with self is rejected
+    inputs:
+      source: |
+        struct Foo;
+        impl Foo {
+            #[spec_setup("op_a", name = "bad")]
+            fn do_thing(&self) {}
+        }
+    expected:
+      outcome: Error
+      errors:
+        - CompileError: { message: "spec_setup must not take self" }
+
+  - name: mock_missing_name
+    desc: spec_mock without a name produces a compile error
+    inputs:
+      source: |
+        struct Foo;
+        impl Foo {
+            #[spec_mock("op_a")]
+            fn call_api(&self) -> u32 { 0 }
+        }
+    expected:
+      outcome: Error
+      errors:
+        - CompileError: { message: "missing required parameter: name" }
+
+  - name: missing_kind
+    desc: spec_operation without kind produces a compile error
+    inputs:
+      source: |
+        #[spec_operation("op_a")]
+        fn handler() {}
+    expected:
+      outcome: Error
+      errors:
+        - CompileError: { message: "missing required parameter: kind" }
+
+  - name: state_on_function
+    desc: spec_state on a function is rejected — must be on a field
+    inputs:
+      source: |
+        #[spec_state("op_a")]
+        fn handler() {}
+    expected:
+      outcome: Error
+      errors:
+        - CompileError: { message: "spec_state must be placed on a struct field" }
+
+  - name: checkpoint_on_field
+    desc: spec_checkpoint on a struct field is rejected — must be on a method
+    inputs:
+      source: |
+        struct Foo {
+            #[spec_checkpoint("op_a")]
+            value: u32,
+        }
+    expected:
+      outcome: Error
+      errors:
+        - CompileError: { message: "spec_checkpoint must be placed on a method" }
