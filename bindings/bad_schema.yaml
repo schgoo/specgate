@@ -1,0 +1,4 @@
+# Valid YAML but not a valid binding — missing required fields.
+some_random_key: hello
+nested:
+  thing: 123

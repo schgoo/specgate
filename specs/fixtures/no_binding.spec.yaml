@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../spec-schema.json
+# Fixture: no binding field — should default to mock.
+name: no_binding
+target: test
+outcome: Complete
+outputs:
+  when Complete:
+    report: RunReport
+cases:
+  - name: basic_case
+    desc: A basic passing case with default binding.
+    expected:
+      outcome: Complete

@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../spec-schema.json
+name: generate_error
+binding: mock
+target: test
+outcome: Complete
+outputs:
+  when Complete:
+    report: RunReport
+cases:
+  - name: generation_case
+    desc: The mock backend fails during generation.
+    expected:
+      outcome: Complete

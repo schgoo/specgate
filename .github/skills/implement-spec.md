@@ -17,13 +17,18 @@ produce working source code with tests that verify the spec's cases.
 1. **Read the spec file** the user provides or references
 2. **Read `docs/knowledge/index.md`** to see what knowledge topics are available
 3. **Read only the knowledge files relevant to this spec** — don't load everything
-4. **Determine implementation mode** (see below)
-5. **Plan your implementation** based on the spec's types, inputs, outputs, and cases
-6. **Scaffold the project** if it doesn't exist (Cargo.toml, project structure)
-7. **Write tests first (TDD)** — generate test functions from spec cases before implementing
-8. **Implement** the component logic until all tests pass
-9. **Add internal tests** for helper functions and edge cases not in the spec
-10. **Build and run all tests** to verify
+4. **Check if implementation already exists** — look for the crate/project, existing
+   test files, and source modules that correspond to this spec's component name
+   - **If YES** → read `docs/knowledge/incremental.md` and follow the incremental
+     workflow. Do NOT continue with the greenfield steps below.
+   - **If NO** → continue with the greenfield workflow below
+5. **Determine implementation mode** (see below)
+6. **Plan your implementation** based on the spec's types, inputs, outputs, and cases
+7. **Scaffold the project** if it doesn't exist (Cargo.toml, project structure)
+8. **Write tests first (TDD)** — generate test functions from spec cases before implementing
+9. **Implement** the component logic until all tests pass
+10. **Add internal tests** for helper functions and edge cases not in the spec
+11. **Build and run all tests** to verify
 
 ## Implementation modes
 
@@ -80,8 +85,11 @@ Follow a test-driven workflow: write tests from spec cases **before** implementi
    until they pass.
 2. **Internal tests come after** — once spec cases pass, add unit tests for
    helper functions, internal invariants, and edge cases the spec doesn't cover.
-3. **100% coverage** — the goal is 100% `cargo test` / `dotnet test`
-   coverage, not just spec conformance.
+3. **100% line coverage** — measure with a coverage tool, not by inspection.
+   - Rust: `cargo llvm-cov --summary-only` (install with `cargo install cargo-llvm-cov` if needed)
+   - C#: `dotnet test --collect:"XPlat Code Coverage"` + `reportgenerator`
+   - If line coverage is below 100%, identify uncovered branches and add tests.
+   - Report the final coverage percentage before declaring done.
 
 The harness generates and runs these tests via the binding, but having them
 inline in the project gives fast feedback during development.
@@ -123,5 +131,7 @@ Then read only what you need:
 - [ ] Core logic implemented — all spec-case tests pass
 - [ ] Internal helper functions have their own unit tests
 - [ ] Tests build and pass (`cargo test` / `dotnet test`)
+- [ ] Coverage measured and reported (target: 100% line coverage)
+- [ ] Uncovered branches identified and tested, or justified if untestable
 - [ ] If annotated mode: annotations present, binding file created
 - [ ] If bootstrap mode: conventional tests cover all cases

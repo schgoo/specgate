@@ -1,0 +1,9 @@
+# yaml-language-server: $schema=../../spec-schema.json
+name: no_cases
+binding: mock
+target: test
+outcome: Complete
+outputs:
+  when Complete:
+    report: RunReport
+cases: []

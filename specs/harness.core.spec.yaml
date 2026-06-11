@@ -188,3 +188,46 @@ cases:
         failed: 0
         total: 0
         results: []
+
+  - name: default_binding
+    desc: Spec with no binding field defaults to mock backend
+    inputs:
+      spec_path: fixtures/no_binding.spec.yaml
+    expected:
+      outcome: Complete
+      report:
+        binding: mock
+        passed: 1
+        total: 1
+
+  - name: all_cases_fail
+    desc: All cases fail — report reflects full failure
+    inputs:
+      spec_path: fixtures/all_fail.spec.yaml
+    expected:
+      outcome: Complete
+      report:
+        passed: 0
+        failed: 2
+        total: 2
+
+  - name: binding_invalid_schema
+    desc: Binding file is valid YAML but does not match binding schema
+    inputs:
+      spec_path: fixtures/bad_binding_schema.spec.yaml
+    expected:
+      outcome: Error
+      error:
+        SpecInvalid: {}
+
+  - name: mixed_results_ordering
+    desc: Results appear in the same order as spec cases
+    inputs:
+      spec_path: fixtures/multi_mixed.spec.yaml
+    expected:
+      outcome: Complete
+      report:
+        results:
+          - { name: alpha_case, status: pass }
+          - { name: beta_case, status: fail }
+          - { name: gamma_case, status: pass }

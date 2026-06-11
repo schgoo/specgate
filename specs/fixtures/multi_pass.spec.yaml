@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../../spec-schema.json
+name: multi_pass
+binding: mock
+target: test
+outcome: Complete
+outputs:
+  when Complete:
+    report: RunReport
+cases:
+  - name: alpha_case
+    desc: The first case passes.
+    expected:
+      outcome: Complete
+  - name: beta_case
+    desc: The second case passes.
+    expected:
+      outcome: Complete
+  - name: gamma_case
+    desc: The third case passes.
+    expected:
+      outcome: Complete

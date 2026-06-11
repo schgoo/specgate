@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../spec-schema.json
+name: simple_fail
+binding: mock
+target: test
+outcome: Complete
+outputs:
+  when Complete:
+    report: RunReport
+cases:
+  - name: basic_case
+    desc: The basic case fails.
+    inputs:
+      mock_result: fail
+    expected:
+      outcome: Complete

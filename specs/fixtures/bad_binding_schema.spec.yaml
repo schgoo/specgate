@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../spec-schema.json
+# Fixture: references a binding with valid YAML but wrong schema.
+name: bad_binding_schema
+binding: bad_schema
+target: test
+outcome: Complete
+outputs:
+  when Complete:
+    report: RunReport
+cases:
+  - name: basic
+    desc: Should fail with invalid binding.
+    expected:
+      outcome: Complete

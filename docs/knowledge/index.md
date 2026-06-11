@@ -12,3 +12,4 @@ Read this file first. Then read only the topics relevant to your current task.
 | Validation rules | `validation.md` | When you need to understand what makes annotations valid or invalid |
 | Rust conventions | `rust.md` | When implementing in Rust |
 | C# conventions | `csharp.md` | When implementing in C# |
+| Incremental updates | `incremental.md` | When an implementation already exists and the spec has changed |

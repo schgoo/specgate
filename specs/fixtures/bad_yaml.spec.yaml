@@ -1,0 +1,9 @@
+name: bad_yaml
+binding: mock
+target: test
+cases:
+  - name: broken
+    desc: This file is intentionally malformed.
+    expected:
+      outcome: Complete
+    extra: [unterminated
