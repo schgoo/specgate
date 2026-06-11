@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=../binding-schema.json
+# Binding: Rust language targets
+
+language: rust
+
+targets:
+  build:
+    command: cargo build -p fixture --message-format=json
+    inputs:
+      source:
+        file: "{workdir}/fixture/src/lib.rs"
+    outputs:
+      file: "{workdir}/target/specgate-annotations.json"
+      stderr: true
+
+  test:
+    command: cargo test -p specgate-core
+    outputs:
+      file: "{workdir}/target/specgate-captures.json"
+
+  validate:
+    call: specgate_core::validate

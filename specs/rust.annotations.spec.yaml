@@ -12,6 +12,7 @@
 # "fixture::Request::new".
 
 name: rust.annotations
+binding: rust
 target: build
 
 inputs:

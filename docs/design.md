@@ -13,7 +13,7 @@ This system closes that gap.
 | **Operation** | A named behavioral unit the spec makes claims about (e.g., `findUserByKey`). |
 | **Claim** | A single assertion the spec makes about an operation. Each claim is one scorecard entry. |
 | **Kind** | The operation's type: `Stateless`, `StateMachine`, `Sequence`, `ErrorMap`, `Structural`. Determines extraction and validation strategy. |
-| **Role** | What an annotation contributes to the operation: `Input`, `Checkpoint`, `State`, `Environment`, `Dependency`. |
+| **Role** | What an annotation contributes to the operation: `Setup`, `Checkpoint`, `State`, `Mock`. |
 | **Context** | Ambient state an operation depends on (config, identity, feature flags) — not a direct parameter. |
 | **Dependency** | An external service or non-deterministic source the operation interacts with. Bidirectional: outbound calls are outputs, responses are inputs. |
 | **Measurable claim** | Has instrumentation. Validated by running N trials against a threshold. |
@@ -98,54 +98,56 @@ all expressed in the same YAML format.
 
 The spec declares behavior. The binding declares how to build and where artifacts
 land. Source annotations mark which code implements which operations. The harness
-joins them: read binding → build → read output → match operation names to spec → assert.
+joins them: spec's `binding` field → binding file → target definition → execute → assert.
 
 ### Binding files
 
 **File convention**: `bindings/<language>.yaml`
+**Schema**: `binding-schema.json`
+**Linked from specs**: `binding: rust` → `bindings/rust.yaml`
 
-Minimal — just enough for the harness to build and find output:
-
-```yaml
-# bindings/rust.yaml
-language: rust
-build: cargo build -p specgate-core
-output: target/specgate.json
-```
-
-```yaml
-# bindings/csharp.yaml
-language: csharp
-build: dotnet build src/SpecGate.Core
-output: bin/specgate.json
-```
-
-Start small. Extend later with `features`, `toolchain`, `profile`, etc. as needs
-arise. The binding does NOT contain discovery logic — the macros produce known
-output in a known format at a known path. Operation names in the output match
-operation names in the spec.
-
-### Execution targets
-
-Specs reference a named **target** from the binding file instead of encoding
-execution strategy directly. The binding defines how each target works:
+Targets are either **command** (run a shell command) or **call** (invoke a function):
 
 ```yaml
 # bindings/rust.yaml
 language: rust
 targets:
   build:
-    command: cargo build -p my-crate
-    output: target/specgate-annotations.json
+    command: cargo build -p fixture --message-format=json
+    inputs:
+      source:
+        file: "{workdir}/fixture/src/lib.rs"
+    outputs:
+      file: "{workdir}/target/specgate-annotations.json"
+      stderr: true
   test:
-    command: cargo test -p my-crate
-    output: target/specgate-captures.json
+    command: cargo test -p specgate-core
+    outputs:
+      file: "{workdir}/target/specgate-captures.json"
   validate:
     call: specgate_core::validate
 ```
 
-The spec just says `target: build` or `target: validate`. The binding owns the
-how — command, output path, calling convention.
+For command targets, inputs are delivered via `file`, `env`, or `arg`. For call
+targets, inputs map directly to function parameters by name.
+
+The binding does NOT contain discovery logic — the macros produce known
+output in a known format at a known path. Operation names in the output match
+operation names in the spec.
+
+### Execution targets
+
+Specs reference a **binding** file and a named **target** within it:
+
+```yaml
+# specs/rust.annotations.spec.yaml
+name: rust.annotations
+binding: rust       # → bindings/rust.yaml
+target: build       # → targets.build in that binding
+```
+
+The spec stays language-agnostic. The binding owns the how — command, input
+delivery, output reading.
 
 ### Spec file format
 
@@ -158,19 +160,16 @@ logical group of related operations).
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | str | yes | Operation name (grouping key across annotations) |
-| `kind` | oneof | yes | `Stateless`, `StateMachine`, `Sequence`, `ErrorMap`, `Structural` |
-| `inputs` | list | yes | Named, typed parameters |
-| `environments` | list | no | Ambient state the operation reads |
-| `dependencies` | list | no | External services or non-deterministic calls |
-| `outcome` | oneof | no | Named outcome variants (e.g., `[Success, NotFound, Error]`) |
-| `outputs` | map | no | Per-outcome output fields (keyed by `when <Variant>`) |
-| `checkpoints` | list | no | Observable intermediates |
-| `states` | list | no | State snapshots (StateMachine kind only) |
-| `cases` | list | no | Concrete test cases (input → expected outcome + outputs) |
+| `name` | str | yes | Dotted component name (e.g., `core.validate`) |
+| `binding` | str | yes | Binding file identifier (resolves to `bindings/<binding>.yaml`) |
+| `target` | str | yes | Named target within the binding file |
+| `inputs` | map | no | Named, typed parameters |
+| `types` | map | no | Named type definitions (oneof or record) |
+| `outcome` | oneof/str | yes | Named outcome variants or single type |
+| `outputs` | map | yes | Per-outcome output fields (keyed by `when <Variant>`) |
+| `cases` | list | yes | Concrete test cases (≥1) |
 
-Each `inputs`, `environments`, `dependencies`, `checkpoints`, and `states` entry
-has at minimum `name: str` and `type: <spec-type>`.
+Each input entry has `type` (required), plus optional `source` and `desc`.
 
 **Input type declarations**: types can be declared inline or as named types.
 
@@ -191,7 +190,7 @@ types:
   Annotation:
     oneof:
       SpecOperation: { operation: string, kind: string }
-      SpecInput: { operation: string, symbol: string, params: List[string] }
+      SpecSetup: { operation: string, name: string, symbol: string, params: List[string] }
 ```
 
 Both forms are valid. Use named types when the shape has variants (`oneof`), is
@@ -210,13 +209,10 @@ Each `cases` entry has:
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `name` | yes | Human-readable case description |
-| `inputs` | yes | Values for all inputs |
-| `environments` | no | Values for ambient state |
-| `dependency_responses` | no | Controlled responses from dependencies |
-| `outcome` | yes | Which outcome variant is expected |
-| `outputs` | no | Expected output values for this outcome |
-| `checkpoints` | no | Expected intermediate values |
+| `name` | yes | Unique snake_case test name |
+| `desc` | yes | Human-readable description |
+| `inputs` | no | Values for inputs |
+| `expected` | yes | Expected outcome + outputs |
 
 **JSON Schema**: a `spec-schema.json` file provides editor autocompletion, inline
 validation, and catches YAML parsing pitfalls (bare booleans, missing required
@@ -271,11 +267,10 @@ cover all patterns.
 
 | Role | Placed on | Contributes |
 |------|-----------|-------------|
-| `kind = Pure\|StateMachine\|Sequence\|ErrorMap\|Structural` | Entry point method | Operation type + return value |
-| `role = Setup` | Test fixture function | Construction + input values for the entry point's type |
+| `kind = Stateless\|StateMachine\|Sequence\|ErrorMap\|Structural` | Entry point method | Operation type + return value |
+| `role = Setup` | Test fixture function (no `self`) | Construction + input values for the entry point's type |
 | `role = Checkpoint` | Internal methods/call sites | Observable intermediate state |
 | `role = State` | Fields/properties | State to snapshot before/after (StateMachine) |
-| `role = Environment` | Config/ambient-state readers | Values harness sets up in the environment |
 | `role = Mock` | Methods calling external services | Makes function mockable; harness injects controlled responses |
 
 Only one annotation per operation has a `kind` (the entry point). All others have a `role`.
@@ -311,20 +306,26 @@ Each language has its own mechanism: C# uses `InternalsVisibleTo`, Rust uses
 
 ```csharp
 public class UsersRestRequest : BaseRequest {
-    [Spec("findByKey", role = Input)]
     public UsersRestRequest(string tenant, string token) : base(tenant, token) { }
 
-    [Spec("findByKey", role = Input)]
     public string TargetEndpoint { get; set; }
 
-    [Spec("findByKey", role = Environment)]
-    public RuntimeModel RuntimeModel { get; }
-
-    [Spec("findByKey", kind = Sequence)]
+    [SpecOperation("findByKey", Kind = Sequence)]
     public async Task<User> FindByKeyAsync(DirectoryKey key) { ... }
 
-    [Spec("findByKey", role = Checkpoint)]
+    [SpecCheckpoint("findByKey")]
     internal string GetRoutingHint() { ... }
+
+    [SpecMock("findByKey", Name = "restClient")]
+    public Task<HttpResponse> CallApiAsync(HttpRequest req) { ... }
+}
+
+// In the test project:
+[SpecSetup("findByKey", Name = "default")]
+public static UsersRestRequest SetupRequest(string tenant, string token, string ep) {
+    var r = new UsersRestRequest(tenant, token);
+    r.TargetEndpoint = ep;
+    return r;
 }
 ```
 
@@ -334,18 +335,12 @@ Running the instrumented code against existing tests produces this extracted spe
 operation: findByKey
 kind: Sequence
 
-contexts:
-  caller_identity:
-    runtime_model: oneof [Production, Test]
-
 inputs:
   tenant: string
   token: string
   target_endpoint: string
   key.type: oneof [ObjectId, Sid, LegacyDN, ProxyAddress]
   key.value: string
-
-context: [caller_identity]
 
 checkpoints:
   - routing_hint: string
@@ -355,20 +350,17 @@ output: User
 cases:
   - inputs: { tenant: "contoso", token: "t1", target_endpoint: "/users",
               key.type: ObjectId, key.value: "abc123" }
-    context: { caller_identity: { runtime_model: Production } }
     checkpoints: [{ routing_hint: "OID:abc123@contoso" }]
     output: { id: "abc123", display_name: "Alice" }
 
   - inputs: { tenant: "fabrikam", token: "t2", target_endpoint: "/users",
               key.type: Sid, key.value: "S-1-5-21" }
-    context: { caller_identity: { runtime_model: Production } }
     checkpoints: [{ routing_hint: "SID:S-1-5-21@fabrikam" }]
     output: { id: "S-1-5-21", display_name: "Bob" }
 ```
 
-Every field traces back to an annotation: `tenant` and `token` from the constructor
-(`role = Input`), `target_endpoint` from the property (`role = Input`),
-`runtime_model` from the environment annotation, `routing_hint` from the checkpoint,
+Every field traces back to an annotation: `tenant`, `token`, and `target_endpoint`
+from the setup function, `routing_hint` from the checkpoint,
 `key.*` and the output from the entry point signature.
 
 The Rust equivalent uses different types/structure but the same operation name and
@@ -451,7 +443,7 @@ For multi-call dependencies (pagination, retries), the spec captures only wire-l
 events — what crosses the boundary. Comparison is semantic (same key-value pairs),
 not structural (same ordering).
 
-Non-deterministic methods like `GenerateSessionId()` are annotated as `role = Dependency`
+Non-deterministic methods like `GenerateSessionId()` are annotated with `spec_mock`
 on the method itself. The harness can replace them with controlled values.
 
 ### Testability diagnostic

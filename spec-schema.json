@@ -3,13 +3,18 @@
   "title": "SpecGate Component Spec",
   "description": "Schema for SpecGate .spec.yaml files — declares inputs, types, outputs, and test cases for a single component.",
   "type": "object",
-  "required": ["name", "target", "outcome", "outputs", "cases"],
+  "required": ["name", "binding", "target", "outcome", "outputs", "cases"],
   "additionalProperties": false,
   "properties": {
     "name": {
       "type": "string",
       "description": "Dotted component name, e.g. core.validate",
       "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9_]*)+$"
+    },
+    "binding": {
+      "type": "string",
+      "description": "Binding file identifier. Resolves to bindings/<binding>.yaml.",
+      "pattern": "^[a-z][a-z0-9_]*$"
     },
     "target": {
       "type": "string",
