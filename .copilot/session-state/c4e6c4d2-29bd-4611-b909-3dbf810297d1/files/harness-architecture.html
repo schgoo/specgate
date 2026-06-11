@@ -1,0 +1,897 @@
+<!-- SpecGate Harness Architecture Document -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Architecture — SpecGate Harness</title>
+  <style>
+    :root {
+      --ivory:    #FAF9F5;
+      --slate:    #141413;
+      --clay:     #D97757;
+      --oat:      #E3DACC;
+      --olive:    #788C5D;
+      --gray-150: #F0EEE6;
+      --gray-300: #D1CFC5;
+      --gray-500: #87867F;
+      --gray-700: #3D3D3A;
+      --white:    #FFFFFF;
+      --serif: ui-serif, Georgia, 'Times New Roman', serif;
+      --sans:  system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      --mono:  ui-monospace, 'SF Mono', Menlo, Monaco, monospace;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: var(--sans);
+      background: var(--ivory);
+      color: var(--gray-700);
+      line-height: 1.55;
+      padding: 56px 32px 120px;
+      -webkit-font-smoothing: antialiased;
+    }
+    .page { max-width: 1120px; margin: 0 auto; }
+
+    /* header */
+    header.page-head { margin-bottom: 48px; max-width: 820px; }
+    .eyebrow {
+      font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+      color: var(--gray-500); margin-bottom: 12px;
+    }
+    h1 {
+      font-family: var(--serif); font-weight: 500; font-size: 38px;
+      line-height: 1.15; color: var(--slate); margin-bottom: 18px;
+      letter-spacing: -0.01em;
+    }
+    .subtitle { font-size: 16px; color: var(--gray-500); max-width: 700px; }
+
+    /* summary strip */
+    .summary {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 64px;
+    }
+    @media (max-width: 900px) { .summary { grid-template-columns: repeat(2, 1fr); } }
+    .summary .cell {
+      background: var(--white); border: 1.5px solid var(--gray-300);
+      border-radius: 12px; padding: 18px 20px;
+    }
+    .summary .k {
+      font-family: var(--mono); font-size: 11px; text-transform: uppercase;
+      letter-spacing: 0.06em; color: var(--gray-500); margin-bottom: 6px;
+    }
+    .summary .v { font-size: 17px; color: var(--slate); font-weight: 600; }
+    .summary .v.accent { color: var(--clay); }
+
+    /* sections */
+    section { margin-bottom: 64px; }
+    .sec-head {
+      display: flex; align-items: baseline; gap: 14px; margin-bottom: 8px;
+    }
+    .sec-head .num {
+      font-family: var(--mono); font-size: 12px; background: var(--oat);
+      color: var(--slate); padding: 3px 9px; border-radius: 8px;
+    }
+    .sec-head h2 {
+      font-family: var(--serif); font-weight: 500; font-size: 26px;
+      color: var(--slate); letter-spacing: -0.01em;
+    }
+    .sec-intro {
+      font-size: 14.5px; color: var(--gray-500); max-width: 720px; margin-bottom: 28px;
+    }
+
+    /* diagram */
+    .diagram {
+      background: var(--white); border: 1.5px solid var(--gray-300);
+      border-radius: 12px; padding: 28px; overflow-x: auto;
+    }
+    .diagram svg { display: block; min-width: 760px; }
+    .diagram text { font-family: var(--mono); }
+    .caption { font-size: 13px; color: var(--gray-500); margin-top: 12px; }
+
+    /* cards grid */
+    .cards {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 20px;
+    }
+    .card {
+      background: var(--white); border: 1.5px solid var(--gray-300);
+      border-radius: 12px; padding: 22px; display: flex; flex-direction: column;
+    }
+    .card h3 {
+      font-family: var(--serif); font-weight: 500; font-size: 19px;
+      color: var(--slate); margin-bottom: 6px;
+    }
+    .card .desc { font-size: 13.5px; color: var(--gray-700); margin-bottom: 14px; flex: 1; }
+    .card .files {
+      font-family: var(--mono); font-size: 11.5px; color: var(--gray-500);
+      border-top: 1px solid var(--gray-150); padding-top: 10px;
+      display: flex; flex-direction: column; gap: 3px;
+    }
+
+    /* flow steps */
+    .flow {
+      display: flex; flex-direction: column; gap: 0;
+    }
+    .step {
+      display: grid; grid-template-columns: 40px 28px 1fr; gap: 0 18px;
+      position: relative;
+    }
+    .step .num-col {
+      text-align: right; font-family: var(--mono); font-size: 13px;
+      color: var(--clay); font-weight: 600; padding-top: 4px;
+    }
+    .step .dot-col { display: flex; flex-direction: column; align-items: center; }
+    .step .dot {
+      width: 14px; height: 14px; border-radius: 50%; background: var(--white);
+      border: 3px solid var(--clay); margin-top: 4px; flex-shrink: 0;
+    }
+    .step .line { width: 2px; flex: 1; background: var(--gray-300); margin: 4px 0; }
+    .step:last-child .line { display: none; }
+    .step .body { padding-bottom: 28px; }
+    .step .body h3 {
+      font-family: var(--serif); font-weight: 500; font-size: 18px;
+      color: var(--slate); margin-bottom: 4px;
+    }
+    .step .body p { font-size: 14px; color: var(--gray-500); max-width: 620px; margin-bottom: 8px; }
+    .step .tags { display: flex; gap: 8px; flex-wrap: wrap; }
+    .step .tag {
+      font-family: var(--mono); font-size: 11.5px; background: var(--gray-150);
+      border: 1px solid var(--gray-300); border-radius: 6px; padding: 3px 8px; color: var(--gray-700);
+    }
+
+    /* code */
+    .code-panel {
+      background: var(--slate); border-radius: 12px; padding: 18px 20px; overflow-x: auto;
+    }
+    .code-panel pre {
+      font-family: var(--mono); font-size: 12.5px; line-height: 1.65; color: #E8E6DE; white-space: pre;
+    }
+    .code-panel .kw { color: var(--clay); }
+    .code-panel .str { color: var(--olive); }
+    .code-panel .cm { color: var(--gray-500); }
+    .code-panel .fn { color: #C9B98A; }
+    .code-label {
+      font-family: var(--mono); font-size: 12px; color: var(--gray-500); margin-bottom: 10px;
+    }
+
+    /* table */
+    .tbl {
+      border: 1.5px solid var(--gray-300); border-radius: 12px;
+      overflow: hidden; background: var(--white);
+    }
+    .tbl .row {
+      display: grid; gap: 0;
+    }
+    .tbl .row + .row { border-top: 1.5px solid var(--gray-300); }
+    .tbl .cell { padding: 14px 18px; font-size: 13.5px; }
+    .tbl .cell + .cell { border-left: 1.5px solid var(--gray-300); }
+    .tbl .head {
+      background: var(--gray-150); font-weight: 600; color: var(--slate);
+      font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .tbl-3 .row { grid-template-columns: 1.2fr 1fr 2fr; }
+    .tbl-2 .row { grid-template-columns: 1fr 2fr; }
+
+    /* decision boxes */
+    .decisions { display: flex; flex-direction: column; gap: 14px; max-width: 820px; }
+    .decision {
+      background: var(--white); border: 1.5px solid var(--gray-300);
+      border-left: 4px solid var(--olive); border-radius: 10px; padding: 16px 20px;
+    }
+    .decision.open { border-left-color: var(--clay); }
+    .decision .dt { font-weight: 600; font-size: 15px; color: var(--slate); margin-bottom: 4px; }
+    .decision .dd { font-size: 13.5px; color: var(--gray-500); }
+    .decision .status {
+      font-family: var(--mono); font-size: 11px; text-transform: uppercase;
+      letter-spacing: 0.06em; margin-top: 8px;
+    }
+    .decision .status.decided { color: var(--olive); }
+    .decision .status.open-q { color: var(--clay); }
+
+    .badge {
+      display: inline-block; font-family: var(--mono); font-size: 11px;
+      padding: 2px 8px; border-radius: 6px; font-weight: 600;
+    }
+    .badge.core { background: #E4E9DC; color: #4B5C39; }
+    .badge.backend { background: var(--oat); color: var(--slate); }
+    .badge.lang { background: #F3D9CC; color: #8A3B1E; }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <header class="page-head">
+    <div class="eyebrow">Architecture document · SpecGate</div>
+    <h1>Harness: test generation and execution</h1>
+    <p class="subtitle">
+      The harness reads a <code>.spec.yaml</code> file, generates language-specific test code from
+      its cases, builds and runs the tests, and produces a structured JSON result. This document
+      describes the pipeline, module decomposition, and key decisions.
+    </p>
+  </header>
+
+  <!-- Summary strip -->
+  <div class="summary">
+    <div class="cell"><div class="k">Crate</div><div class="v">specgate-harness</div></div>
+    <div class="cell"><div class="k">Language</div><div class="v accent">Rust CLI</div></div>
+    <div class="cell"><div class="k">Backends</div><div class="v">Rust · C#</div></div>
+    <div class="cell"><div class="k">Output</div><div class="v">JSON</div></div>
+  </div>
+
+  <!-- ============================================================= -->
+  <!-- Section 1: Pipeline overview -->
+  <!-- ============================================================= -->
+  <section>
+    <div class="sec-head"><span class="num">01</span><h2>Pipeline</h2></div>
+    <p class="sec-intro">
+      The harness runs a seven-stage pipeline. Each stage has a single responsibility
+      and a well-defined input/output contract.
+    </p>
+
+    <div class="flow">
+      <div class="step">
+        <div class="num-col">1</div>
+        <div class="dot-col"><span class="dot"></span><span class="line"></span></div>
+        <div class="body">
+          <h3>Parse spec</h3>
+          <p>Read and validate the <code>.spec.yaml</code> file against <code>spec-schema.json</code>.
+             Produce a typed <code>Spec</code> struct with inputs, types, outcomes, outputs, and cases.</p>
+          <div class="tags"><span class="tag">serde_yaml</span><span class="tag">spec-schema.json</span></div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="num-col">2</div>
+        <div class="dot-col"><span class="dot"></span><span class="line"></span></div>
+        <div class="body">
+          <h3>Resolve binding</h3>
+          <p>Look up the binding file from <code>binding:</code> field (or CLI override).
+             Validate against <code>binding-schema.json</code>. Extract <code>language</code>
+             and <code>project_root</code>.</p>
+          <div class="tags"><span class="tag">binding-schema.json</span></div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="num-col">3</div>
+        <div class="dot-col"><span class="dot"></span><span class="line"></span></div>
+        <div class="body">
+          <h3>Build &amp; discover</h3>
+          <p>Build the implementation project with the <code>specgate</code> Cargo feature
+             enabled. Proc-macro annotations populate a compile-time registry of spec
+             names → code symbols. The harness reads this registry to resolve which
+             functions/methods implement each spec operation, setup, capture, etc.</p>
+          <div class="tags"><span class="tag">compile-time registry</span><span class="tag">proc macros</span></div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="num-col">4</div>
+        <div class="dot-col"><span class="dot"></span><span class="line"></span></div>
+        <div class="body">
+          <h3>Generate test code</h3>
+          <p>Select language backend from binding's <code>language:</code> field.
+             For each spec case, emit a test function that constructs inputs,
+             calls the implementation (using symbols from the registry), and asserts
+             outputs. Write generated test file to the project
+             (e.g. <code>tests/specgate_generated.rs</code>).</p>
+          <div class="tags">
+            <span class="tag badge lang">language-specific</span>
+            <span class="tag">codegen</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="num-col">5</div>
+        <div class="dot-col"><span class="dot"></span><span class="line"></span></div>
+        <div class="body">
+          <h3>Build &amp; run tests</h3>
+          <p>Build and run the generated tests (e.g. <code>cargo test --test specgate_generated</code>).
+             The backend knows the appropriate test command for each language.</p>
+          <div class="tags"><span class="tag">process</span><span class="tag">isolation</span></div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="num-col">6</div>
+        <div class="dot-col"><span class="dot"></span><span class="line"></span></div>
+        <div class="body">
+          <h3>Collect JSON</h3>
+          <p>Read each case's output JSON written by the generated tests.
+             Aggregate per-case results with pass/fail status.</p>
+          <div class="tags"><span class="tag">serde_json</span></div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="num-col">7</div>
+        <div class="dot-col"><span class="dot"></span><span class="line"></span></div>
+        <div class="body">
+          <h3>Report</h3>
+          <p>Produce structured JSON with per-case results, run metadata, and optional
+             perf metrics. Write to stdout or a file.</p>
+          <div class="tags"><span class="tag">JSON output</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <!-- Section 2: Data flow diagram -->
+  <!-- ============================================================= -->
+  <section>
+    <div class="sec-head"><span class="num">02</span><h2>Data flow</h2></div>
+    <p class="sec-intro">
+      How data moves through the pipeline, from spec file to JSON report.
+    </p>
+
+    <div class="diagram">
+      <svg viewBox="0 0 1050 320" xmlns="http://www.w3.org/2000/svg">
+        <!-- Input files -->
+        <rect x="20" y="20" width="120" height="50" rx="8" fill="#FAF9F5" stroke="#D1CFC5" stroke-width="2"/>
+        <text x="80" y="50" text-anchor="middle" font-size="12" fill="#141413">.spec.yaml</text>
+
+        <rect x="20" y="90" width="120" height="50" rx="8" fill="#FAF9F5" stroke="#D1CFC5" stroke-width="2"/>
+        <text x="80" y="120" text-anchor="middle" font-size="12" fill="#141413">binding.yaml</text>
+
+        <!-- Parse -->
+        <rect x="190" y="40" width="100" height="50" rx="8" fill="#E3DACC" stroke="#141413" stroke-width="2"/>
+        <text x="240" y="62" text-anchor="middle" font-size="11" fill="#141413">Parse &amp;</text>
+        <text x="240" y="76" text-anchor="middle" font-size="11" fill="#141413">Resolve</text>
+
+        <!-- Build & Discover -->
+        <rect x="340" y="40" width="100" height="50" rx="8" fill="#E3DACC" stroke="#141413" stroke-width="2"/>
+        <text x="390" y="62" text-anchor="middle" font-size="11" fill="#141413">Build &amp;</text>
+        <text x="390" y="76" text-anchor="middle" font-size="11" fill="#141413">Discover</text>
+
+        <!-- Registry label -->
+        <rect x="340" y="130" width="100" height="35" rx="8" fill="#FAF9F5" stroke="#D1CFC5" stroke-width="2"/>
+        <text x="390" y="152" text-anchor="middle" font-size="10" fill="#141413">registry.json</text>
+
+        <!-- Codegen -->
+        <rect x="490" y="40" width="110" height="50" rx="8" fill="#D97757" stroke="#141413" stroke-width="2"/>
+        <text x="545" y="62" text-anchor="middle" font-size="11" fill="#FAF9F5">Generate</text>
+        <text x="545" y="76" text-anchor="middle" font-size="11" fill="#FAF9F5">Tests</text>
+
+        <!-- Generated file -->
+        <rect x="490" y="130" width="110" height="40" rx="8" fill="#FAF9F5" stroke="#D1CFC5" stroke-width="2"/>
+        <text x="545" y="152" text-anchor="middle" font-size="11" fill="#141413">specgate_generated.rs</text>
+
+        <!-- Build & Run Tests -->
+        <rect x="650" y="40" width="110" height="50" rx="8" fill="#E3DACC" stroke="#141413" stroke-width="2"/>
+        <text x="705" y="62" text-anchor="middle" font-size="11" fill="#141413">Build &amp;</text>
+        <text x="705" y="76" text-anchor="middle" font-size="11" fill="#141413">Run Tests</text>
+
+        <!-- Collect -->
+        <rect x="650" y="130" width="110" height="50" rx="8" fill="#E3DACC" stroke="#141413" stroke-width="2"/>
+        <text x="705" y="152" text-anchor="middle" font-size="11" fill="#141413">Collect</text>
+        <text x="705" y="166" text-anchor="middle" font-size="11" fill="#141413">JSON</text>
+
+        <!-- Result -->
+        <rect x="820" y="130" width="130" height="50" rx="8" fill="#788C5D" stroke="#141413" stroke-width="2"/>
+        <text x="885" y="160" text-anchor="middle" font-size="12" fill="#FAF9F5">results.json</text>
+
+        <!-- Arrows -->
+        <line x1="140" y1="45" x2="190" y2="60" stroke="#87867F" stroke-width="2" marker-end="url(#arrow)"/>
+        <line x1="140" y1="115" x2="190" y2="70" stroke="#87867F" stroke-width="2" marker-end="url(#arrow)"/>
+        <line x1="290" y1="65" x2="340" y2="65" stroke="#87867F" stroke-width="2" marker-end="url(#arrow)"/>
+        <line x1="390" y1="90" x2="390" y2="130" stroke="#87867F" stroke-width="2" marker-end="url(#arrow)"/>
+        <line x1="440" y1="65" x2="490" y2="65" stroke="#87867F" stroke-width="2" marker-end="url(#arrow)"/>
+        <line x1="440" y1="148" x2="490" y2="148" stroke="#87867F" stroke-width="2" marker-end="url(#arrow)"/>
+        <line x1="545" y1="90" x2="545" y2="130" stroke="#87867F" stroke-width="2" marker-end="url(#arrow)"/>
+        <line x1="600" y1="65" x2="650" y2="65" stroke="#87867F" stroke-width="2" marker-end="url(#arrow)"/>
+        <line x1="705" y1="90" x2="705" y2="130" stroke="#87867F" stroke-width="2" marker-end="url(#arrow)"/>
+        <line x1="760" y1="155" x2="820" y2="155" stroke="#87867F" stroke-width="2" marker-end="url(#arrow)"/>
+
+        <!-- Lang backend label -->
+        <rect x="485" y="200" width="120" height="80" rx="8" fill="#FAF9F5" stroke="#D97757" stroke-width="1.5" stroke-dasharray="4 3"/>
+        <text x="545" y="222" text-anchor="middle" font-size="10" fill="#D97757">BACKENDS</text>
+        <text x="545" y="240" text-anchor="middle" font-size="11" fill="#3D3D3A">rust.rs</text>
+        <text x="545" y="256" text-anchor="middle" font-size="11" fill="#3D3D3A">csharp.rs</text>
+        <text x="545" y="272" text-anchor="middle" font-size="11" fill="#87867F">(future...)</text>
+        <line x1="545" y1="170" x2="545" y2="200" stroke="#D97757" stroke-width="1.5" stroke-dasharray="4 3"/>
+
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#87867F"/>
+          </marker>
+        </defs>
+      </svg>
+    </div>
+    <p class="caption">
+      The "Build &amp; Discover" stage builds the implementation project and reads the
+      compile-time annotation registry. Language backends plug into "Generate Tests".
+      Everything else is shared.
+    </p>
+  </section>
+
+  <!-- ============================================================= -->
+  <!-- Section 3: Module decomposition -->
+  <!-- ============================================================= -->
+  <section>
+    <div class="sec-head"><span class="num">03</span><h2>Modules</h2></div>
+    <p class="sec-intro">
+      The crate splits into three layers: core (language-agnostic), codegen backends
+      (language-specific), and the CLI entry point.
+    </p>
+
+    <div class="cards">
+      <div class="card">
+        <h3>spec <span class="badge core">core</span></h3>
+        <div class="desc">
+          Parse <code>.spec.yaml</code> and <code>binding.yaml</code> into typed structs.
+          Validate against schemas. Resolve <code>{workdir}</code> templates. This module
+          knows nothing about any programming language.
+        </div>
+        <div class="files">
+          <span>spec/mod.rs — Spec, Binding, types</span>
+          <span>spec/parse.rs — YAML parsing</span>
+          <span>spec/resolve.rs — binding + template resolution</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>compare <span class="badge core">core</span></h3>
+        <div class="desc">
+          Library for deep comparison of expected vs actual values. Used by generated
+          tests for their assertions. Handles nested objects, lists (order-sensitive),
+          oneof variant matching, extra fields (ignored), missing fields (mismatch).
+        </div>
+        <div class="files">
+          <span>compare.rs — deep_compare(expected, actual)</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>runner <span class="badge core">core</span></h3>
+        <div class="desc">
+          Orchestrates the pipeline: delegates to codegen, invokes the build and test
+          commands, collects per-case JSON output, and assembles the final
+          <code>RunReport</code>.
+        </div>
+        <div class="files">
+          <span>runner/mod.rs — run_spec() entry point</span>
+          <span>runner/output.rs — output collection</span>
+          <span>runner/process.rs — command execution</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>codegen <span class="badge backend">codegen</span></h3>
+        <div class="desc">
+          Shared codegen utilities and the <code>Backend</code> trait. Each backend
+          implements test file generation for one language. The trait takes a parsed
+          spec + binding and produces file contents to write.
+        </div>
+        <div class="files">
+          <span>codegen/mod.rs — Backend trait, utilities</span>
+          <span>codegen/rust.rs — Rust test emitter</span>
+          <span>codegen/csharp.rs — C# test emitter</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>cli <span class="badge lang">entry point</span></h3>
+        <div class="desc">
+          <code>clap</code>-based CLI. Accepts <code>--spec</code>, <code>--binding</code>,
+          <code>--workdir</code>, and output format flags. Calls <code>runner::run_spec()</code>
+          and writes JSON to stdout or a file.
+        </div>
+        <div class="files">
+          <span>main.rs — CLI entry point</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>types <span class="badge core">core</span></h3>
+        <div class="desc">
+          Shared result types: <code>CaseResult</code>, <code>Mismatch</code>,
+          <code>PerfMetrics</code>, <code>CoverageReport</code>, <code>RunError</code>.
+          These are the JSON output contract. Serializable via serde.
+        </div>
+        <div class="files">
+          <span>types.rs — all output types</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <!-- Section 4: Backend trait -->
+  <!-- ============================================================= -->
+  <section>
+    <div class="sec-head"><span class="num">04</span><h2>Backend trait</h2></div>
+    <p class="sec-intro">
+      The codegen layer is pluggable. Each language backend implements this trait.
+    </p>
+
+    <div class="code-label">codegen/mod.rs</div>
+    <div class="code-panel"><pre>
+<span class="kw">pub trait</span> <span class="fn">Backend</span> {
+    <span class="cm">/// Language identifier (e.g. "rust", "csharp").</span>
+    <span class="kw">fn</span> <span class="fn">language</span>(&amp;self) -&gt; &amp;<span class="kw">str</span>;
+
+    <span class="cm">/// Build the implementation project with specgate annotations enabled.</span>
+    <span class="cm">/// Returns the annotation registry (spec name → code symbol mapping).</span>
+    <span class="kw">fn</span> <span class="fn">build_and_discover</span>(
+        &amp;self,
+        project_root: &amp;Path,
+    ) -&gt; Result&lt;Registry, DiscoverError&gt;;
+
+    <span class="cm">/// Generate test file contents from a parsed spec and annotation registry.</span>
+    <span class="cm">/// Returns a list of (relative_path, file_contents) to write.</span>
+    <span class="kw">fn</span> <span class="fn">generate</span>(
+        &amp;self,
+        spec: &amp;Spec,
+        registry: &amp;Registry,
+        project_root: &amp;Path,
+    ) -&gt; Result&lt;Vec&lt;GeneratedFile&gt;, CodegenError&gt;;
+
+    <span class="cm">/// The shell command to build and run the generated tests.</span>
+    <span class="kw">fn</span> <span class="fn">run_command</span>(&amp;self, project_root: &amp;Path) -&gt; String;
+
+    <span class="cm">/// Parse test results from JSON files written by generated tests.</span>
+    <span class="kw">fn</span> <span class="fn">collect_results</span>(
+        &amp;self,
+        project_root: &amp;Path,
+    ) -&gt; Result&lt;Vec&lt;CaseResult&gt;, CollectError&gt;;
+}
+</pre></div>
+    <p class="caption">
+      A backend's job: (1) build the project and discover annotations, (2) generate test files,
+      (3) provide the run command, (4) collect JSON results. The runner owns orchestration.
+    </p>
+  </section>
+
+  <!-- ============================================================= -->
+  <!-- Section 5: What each backend generates -->
+  <!-- ============================================================= -->
+  <section>
+    <div class="sec-head"><span class="num">05</span><h2>Generated test code</h2></div>
+    <p class="sec-intro">
+      Each backend emits test code that follows the same pattern: construct inputs from
+      case data, call the implementation, serialize outputs as JSON, and write to a
+      well-known location so the harness can read them back.
+    </p>
+
+    <div class="tbl tbl-3" style="margin-bottom: 28px;">
+      <div class="row head">
+        <div class="cell">Concern</div>
+        <div class="cell">Rust backend</div>
+        <div class="cell">C# backend</div>
+      </div>
+      <div class="row">
+        <div class="cell">Test framework</div>
+        <div class="cell"><code>#[test]</code> functions</div>
+        <div class="cell"><code>[Fact]</code> / xUnit</div>
+      </div>
+      <div class="row">
+        <div class="cell">Type construction</div>
+        <div class="cell">Struct/enum literals from case YAML</div>
+        <div class="cell"><code>new T()</code> from case YAML</div>
+      </div>
+      <div class="row">
+        <div class="cell">Output capture</div>
+        <div class="cell">Per-annotation — see capture wiring below</div>
+        <div class="cell">Per-annotation — see capture wiring below</div>
+      </div>
+      <div class="row">
+        <div class="cell">Outcome detection</div>
+        <div class="cell"><code>match</code> on <code>Result</code> / enum</div>
+        <div class="cell">Try-catch or pattern match</div>
+      </div>
+      <div class="row">
+        <div class="cell">Generated file</div>
+        <div class="cell"><code>tests/specgate_generated.rs</code></div>
+        <div class="cell">Generated <code>.cs</code> in test project</div>
+      </div>
+    </div>
+
+    <p style="font-size: 14px; color: var(--gray-500); max-width: 720px;">
+      <strong>Key design:</strong> generated tests contain real assertions — they pass or fail
+      with <code>cargo test</code> / <code>dotnet test</code> like any normal test. They also
+      write structured JSON output so that separate tooling can collect results across
+      languages for cross-language spec conformance comparison.
+    </p>
+
+    <h3 style="font-family: var(--serif); font-weight: 500; font-size: 19px; color: var(--slate); margin: 28px 0 12px;">
+      Capture wiring
+    </h3>
+    <p class="sec-intro">
+      Each annotation type maps to a specific codegen strategy for how the generated
+      test captures its values.
+    </p>
+
+    <div class="tbl tbl-2" style="margin-bottom: 28px;">
+      <div class="row head">
+        <div class="cell">Annotation</div>
+        <div class="cell">How the generated test captures it</div>
+      </div>
+      <div class="row">
+        <div class="cell"><code>spec_capture</code> on struct</div>
+        <div class="cell">Read all public fields after operation returns, serialize to JSON object</div>
+      </div>
+      <div class="row">
+        <div class="cell"><code>spec_capture</code> on fields</div>
+        <div class="cell">Read only annotated fields after operation returns, serialize to JSON object</div>
+      </div>
+      <div class="row">
+        <div class="cell"><code>spec_checkpoint</code> (attribute)</div>
+        <div class="cell">Annotation macro records values to a thread-local log on each call;
+          generated test drains the log after operation returns and includes in JSON output</div>
+      </div>
+      <div class="row">
+        <div class="cell"><code>spec_checkpoint!</code> (inline)</div>
+        <div class="cell">Same thread-local log mechanism — macro evaluates the expression,
+          records the value, returns it so execution continues normally</div>
+      </div>
+      <div class="row">
+        <div class="cell"><code>spec_mock</code></div>
+        <div class="cell">Generated test injects a mock that returns the value from the spec
+          case's inputs, matched by mock name</div>
+      </div>
+      <div class="row">
+        <div class="cell"><code>spec_setup</code></div>
+        <div class="cell">Generated test calls the setup function with case input values
+          to construct the object under test</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <!-- Section 6: Execution model -->
+  <!-- ============================================================= -->
+  <section>
+    <div class="sec-head"><span class="num">06</span><h2>Execution model</h2></div>
+    <p class="sec-intro">
+      How test isolation, input delivery, and output collection work at runtime.
+    </p>
+
+    <div class="tbl tbl-2" style="margin-bottom: 28px;">
+      <div class="row head">
+        <div class="cell">Concern</div>
+        <div class="cell">Approach</div>
+      </div>
+      <div class="row">
+        <div class="cell">Case isolation</div>
+        <div class="cell">Each case gets its own subdirectory under <code>{workdir}/.specgate/cases/{case_name}/</code>.
+          Input files are written there. Output files are read from there. The directory is cleaned before each case.</div>
+      </div>
+      <div class="row">
+        <div class="cell">Test generation</div>
+        <div class="cell">All cases are generated into a single test file. Each case is a separate test function.
+          The generated test writes its output JSON to its case subdirectory.</div>
+      </div>
+      <div class="row">
+        <div class="cell">Build once, run all</div>
+        <div class="cell">Generated tests are built and run in one step (e.g. <code>cargo test</code>), then each test function
+          writes its output JSON to its case subdirectory.</div>
+      </div>
+      <div class="row">
+        <div class="cell">Input delivery</div>
+        <div class="cell">Inputs are inlined as literals in the generated test code — the codegen backend
+          constructs values directly from spec case data.</div>
+      </div>
+      <div class="row">
+        <div class="cell">Output collection</div>
+        <div class="cell">Each generated test writes a JSON file to its case directory.
+          After all tests run, the harness reads each case's JSON file and runs comparison.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <!-- Section 7: Key decisions -->
+  <!-- ============================================================= -->
+  <section>
+    <div class="sec-head"><span class="num">07</span><h2>Decisions</h2></div>
+    <p class="sec-intro">Decided and open architectural questions.</p>
+
+    <div class="decisions">
+      <div class="decision">
+        <div class="dt">Generated tests assert and write JSON</div>
+        <div class="dd">
+          Generated tests contain real assertions — they pass/fail natively with
+          <code>cargo test</code> / <code>dotnet test</code>. They also write structured
+          JSON output that separate tooling can use for cross-language conformance
+          comparison (e.g. C# ↔ Spec ↔ Rust). The harness itself just generates and runs.
+        </div>
+        <div class="status decided">✓ Decided</div>
+      </div>
+
+      <div class="decision">
+        <div class="dt">One test file per spec, one function per case</div>
+        <div class="dd">
+          All cases in a spec generate into a single test file. Each case is a separate
+          test function named after the case. The file is placed in a well-known location
+          so the harness knows where to find it.
+        </div>
+        <div class="status decided">✓ Decided</div>
+      </div>
+
+      <div class="decision">
+        <div class="dt">Build once, run all cases</div>
+        <div class="dd">
+          The generated test file is compiled once. All test functions run in the same binary.
+          This avoids per-case compilation overhead and is the natural model for both
+          <code>cargo test</code> and <code>dotnet test</code>.
+        </div>
+        <div class="status decided">✓ Decided</div>
+      </div>
+
+      <div class="decision">
+        <div class="dt">Checkpoint capture via thread-local log</div>
+        <div class="dd">
+          Both <code>spec_checkpoint</code> (attribute on method) and <code>spec_checkpoint!</code>
+          (inline macro wrapping an expression) record values to a thread-local log. The generated
+          test drains this log after the operation returns. This avoids modifying function signatures
+          and works identically for both checkpoint forms.
+        </div>
+        <div class="status decided">✓ Decided</div>
+      </div>
+
+      <div class="decision">
+        <div class="dt">Per-case isolation via subdirectories</div>
+        <div class="dd">
+          Each case runs in its own subdirectory under <code>.specgate/cases/{case_name}/</code>.
+          File-based inputs are written there; outputs are read from there.
+          The directory is cleaned before each case. No state leaks between cases.
+        </div>
+        <div class="status decided">✓ Decided</div>
+      </div>
+
+      <div class="decision">
+        <div class="dt">Generated tests live in the project's test directory</div>
+        <div class="dd">
+          The harness writes <code>tests/specgate_generated.rs</code> (Rust) or adds a
+          generated <code>.cs</code> to the test project (C#). This means the generated
+          tests compile with the same toolchain, features, and cfg flags as the user's
+          code. It also adds to their test coverage, and <code>cargo test</code> /
+          <code>dotnet test</code> picks them up naturally. No separate crate or scratch
+          directory needed.
+        </div>
+        <div class="status decided">✓ Decided</div>
+      </div>
+
+      <div class="decision">
+        <div class="dt">Annotations provide the type bridge</div>
+        <div class="dd">
+          The generated test does not need to construct arbitrary types from JSON.
+          <code>spec_setup</code> functions accept spec input primitives and return the
+          constructed object. <code>spec_capture</code> fields provide output values.
+          <code>spec_checkpoint</code> records intermediates via thread-local log. No
+          <code>Deserialize</code> or type-mapping table is required — the annotations
+          ARE the bridge between spec values and implementation types.
+        </div>
+        <div class="status decided">✓ Decided</div>
+      </div>
+
+      <div class="decision">
+        <div class="dt">Compile-time registry for name → symbol resolution</div>
+        <div class="dd">
+          The binding file does not declare which functions to call. Instead, proc-macro
+          annotations register metadata (spec name, kind, code path) into a compile-time
+          registry. The harness builds the implementation project first, reads the registry
+          to discover name → symbol mappings, then generates test code that calls the
+          resolved symbols directly. This keeps the binding minimal (<code>language</code> +
+          <code>project_root</code>) and makes annotations the single source of truth for
+          both instrumentation and code discovery.
+        </div>
+        <div class="status decided">✓ Decided</div>
+      </div>
+
+      <div class="decision open">
+        <div class="dt">Perf metrics and code coverage collection</div>
+        <div class="dd">
+          The spec declares <code>PerfMetrics</code> and <code>CoverageReport</code> as optional
+          outputs, but the mechanism for collecting them is unspecified. Perf metrics likely need
+          Gungraun/Valgrind wrapping. Coverage needs <code>llvm-cov</code> or <code>dotnet-coverage</code>.
+          These could be separate bindings, CLI flags, or post-processing steps.
+        </div>
+        <div class="status open-q">○ Open</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <!-- Section 9: Dependencies -->
+  <!-- ============================================================= -->
+  <section>
+    <div class="sec-head"><span class="num">08</span><h2>Dependencies</h2></div>
+    <p class="sec-intro">Crate dependencies for the harness.</p>
+
+    <div class="tbl tbl-3">
+      <div class="row head">
+        <div class="cell">Crate</div>
+        <div class="cell">Purpose</div>
+        <div class="cell">Used by</div>
+      </div>
+      <div class="row">
+        <div class="cell"><code>clap</code></div>
+        <div class="cell">CLI argument parsing</div>
+        <div class="cell">main.rs</div>
+      </div>
+      <div class="row">
+        <div class="cell"><code>serde</code> + <code>serde_json</code></div>
+        <div class="cell">JSON serialization of results</div>
+        <div class="cell">types, compare, runner</div>
+      </div>
+      <div class="row">
+        <div class="cell"><code>serde_yaml</code></div>
+        <div class="cell">YAML parsing of specs and bindings</div>
+        <div class="cell">spec</div>
+      </div>
+      <div class="row">
+        <div class="cell"><code>thiserror</code></div>
+        <div class="cell">Error types</div>
+        <div class="cell">all modules</div>
+      </div>
+      <div class="row">
+        <div class="cell"><code>chrono</code></div>
+        <div class="cell">Timestamps in results</div>
+        <div class="cell">runner</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <!-- Section 10: CLI interface -->
+  <!-- ============================================================= -->
+  <section>
+    <div class="sec-head"><span class="num">09</span><h2>CLI interface</h2></div>
+    <p class="sec-intro">The harness is invoked as a CLI tool.</p>
+
+    <div class="code-label">Usage</div>
+    <div class="code-panel"><pre>
+<span class="fn">specgate</span> run \
+  <span class="str">--spec</span> specs/parser.spec.yaml \
+  <span class="str">--binding</span> rust \
+  <span class="str">--workdir</span> /tmp/specgate-run \
+  <span class="str">--output</span> results.json
+
+<span class="cm"># Pass-through mode (skip codegen, run command directly)</span>
+<span class="fn">specgate</span> run \
+  <span class="str">--spec</span> specs/parser.spec.yaml \
+  <span class="str">--mode</span> passthrough \
+  <span class="str">--workdir</span> /tmp/specgate-run
+</pre></div>
+
+    <div class="tbl tbl-2" style="margin-top: 20px;">
+      <div class="row head">
+        <div class="cell">Flag</div>
+        <div class="cell">Description</div>
+      </div>
+      <div class="row">
+        <div class="cell"><code>--spec &lt;path&gt;</code></div>
+        <div class="cell">Path to the <code>.spec.yaml</code> file (required)</div>
+      </div>
+      <div class="row">
+        <div class="cell"><code>--binding &lt;name&gt;</code></div>
+        <div class="cell">Binding identifier — resolves to <code>bindings/&lt;name&gt;.yaml</code>. Overrides the spec's <code>binding:</code> field.</div>
+      </div>
+      <div class="row">
+        <div class="cell"><code>--bindings-dir &lt;dir&gt;</code></div>
+        <div class="cell">Directory containing binding files (default: <code>bindings/</code>)</div>
+      </div>
+      <div class="row">
+        <div class="cell"><code>--workdir &lt;dir&gt;</code></div>
+        <div class="cell">Working directory for execution and <code>{workdir}</code> resolution (default: temp dir)</div>
+      </div>
+      <div class="row">
+        <div class="cell"><code>--output &lt;file&gt;</code></div>
+        <div class="cell">Write JSON results to file instead of stdout</div>
+      </div>
+      <div class="row">
+        <div class="cell"><code>--case &lt;name&gt;</code></div>
+        <div class="cell">Run only this case (for debugging a single failure)</div>
+      </div>
+      <div class="row">
+        <div class="cell"><code>--verbose</code></div>
+        <div class="cell">Print build and run output to stderr</div>
+      </div>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

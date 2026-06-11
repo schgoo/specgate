@@ -63,9 +63,9 @@ emits an `AmbiguousConstruction` warning. The implementation may still work
 
 ```rust
 struct CircuitBreaker {
-    #[spec_state("breaker")]
+    #[spec_capture("breaker")]
     state: String,
-    #[spec_state("breaker")]
+    #[spec_capture("breaker")]
     failure_count: u32,
 }
 

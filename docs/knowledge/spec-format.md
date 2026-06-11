@@ -10,7 +10,7 @@ logical group of operations.
 | Field | Required | Description |
 |-------|----------|-------------|
 | `name` | yes | Dotted component name, e.g. `core.validate` |
-| `binding` | yes | Binding file identifier — resolves to `bindings/<binding>.yaml` |
+| `binding` | no | Binding file identifier — resolves to `bindings/<binding>.yaml`. Optional for language-agnostic specs; can be specified at run time. |
 | `target` | yes | Named target within the binding file |
 | `inputs` | no | Named inputs with type/source/desc |
 | `types` | no | Named type definitions (oneof or record) |
@@ -25,26 +25,26 @@ Types can be inline or named. Use named types for variants (`oneof`) or reuse.
 ```yaml
 # Named type with variants
 types:
-  Annotation:
+  Shape:
     oneof:
-      SpecOperation: { operation: string, kind: string }
-      SpecSetup: { operation: string, name: string, symbol: string }
+      Circle: { radius: float }
+      Rectangle: { width: float, height: float }
 
 # Named record type
 types:
-  TypeInfo:
+  Point:
     fields:
-      name: string
-      is_abstract: bool
+      x: float
+      y: float
 ```
 
 Bare keys (without `fields:` wrapper) are also valid for record types:
 
 ```yaml
 types:
-  TypeInfo:
-    name: string
-    is_abstract: bool
+  Point:
+    x: float
+    y: float
 ```
 
 **Types are suggestions, not rules.** They describe what fields must be available,
@@ -56,12 +56,12 @@ and assert outputs using the declared fields.
 
 ```yaml
 inputs:
-  annotations:
-    type: List<Annotation>
-  source:
-    type: string
-    source: fixture-file
-    desc: Rust source code to compile
+  shape:
+    type: Shape
+  precision:
+    type: int
+    source: config
+    desc: Decimal places for rounding
 ```
 
 - `type` is required
@@ -72,14 +72,13 @@ inputs:
 
 ```yaml
 outcome:
-  oneof: [Valid, Invalid]
+  oneof: [Ok, Error]
 
 outputs:
-  when Valid:
-    warnings: List<ValidationWarning>
-  when Invalid:
-    errors: List<ValidationError>
-    warnings: List<ValidationWarning>
+  when Ok:
+    result: float
+  when Error:
+    message: string
 ```
 
 Outcome can also be a single string: `outcome: Ok`
@@ -88,14 +87,14 @@ Outcome can also be a single string: `outcome: Ok`
 
 ```yaml
 cases:
-  - name: snake_case_name
-    desc: Human-readable description
+  - name: circle_area
+    desc: Computes area of a circle
     inputs:
-      annotations:
-        - SpecOperation: { operation: op_a, kind: Stateless }
+      shape:
+        Circle: { radius: 5.0 }
     expected:
-      outcome: Valid
-      warnings: []
+      outcome: Ok
+      result: 78.54
 ```
 
 - `name` is unique, snake_case

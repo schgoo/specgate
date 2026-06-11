@@ -27,7 +27,7 @@ types:
       SpecOperation: { operation: string, kind: string, symbol: string, parameter_types: List<string> }
       SpecSetup: { operation: string, name: string, symbol: string, params: List<string>, returns: string }
       SpecCheckpoint: { operation: string, symbol: string, accessibility: string }
-      SpecState: { operation: string, symbol: string }
+      SpecCapture: { operation: string, symbol: string }
       SpecMock: { operation: string, symbol: string, mock_name: string }
 
   ValidationError:
@@ -60,7 +60,7 @@ outputs:
 # Role-kind validity matrix
 #            Stateless  SM   Seq  ErrMap  Structural
 # Setup        ✓        ✓    ✓     ✓       ✗
-# State        ✗        ✓    ✗     ✗       ✗
+# Capture      ✗        ✓    ✗     ✗       ✗
 # Chkpt        ✗        ✗    ✓     ✗       ✗
 # Mock         ✓        ✓    ✓     ✓       ✗
 
@@ -95,11 +95,11 @@ cases:
       warnings: []
 
   - name: validate_statemachine_with_state
-    desc: StateMachine satisfies completeness when it has at least one State
+    desc: StateMachine satisfies completeness when it has at least one Capture
     inputs:
       annotations:
         - SpecOperation: { operation: op_a, kind: StateMachine }
-        - SpecState:     { operation: op_a, symbol: state_a }
+        - SpecCapture:     { operation: op_a, symbol: state_a }
     expected:
       outcome: Valid
       warnings: []
@@ -196,7 +196,7 @@ cases:
         - IncompleteOperation: { operation: op_a }
 
   - name: statemachine_missing_state
-    desc: StateMachine requires at least one State to be complete
+    desc: StateMachine requires at least one Capture to be complete
     inputs:
       annotations:
         - SpecOperation: { operation: op_a, kind: StateMachine }
@@ -205,40 +205,40 @@ cases:
       errors:
         - IncompleteOperation: { operation: op_a }
 
-  - name: state_on_pure
-    desc: State is only valid on StateMachine — invalid on Pure
+  - name: capture_on_stateless
+    desc: Capture is valid on Stateless — captured after only
     inputs:
       annotations:
         - SpecOperation: { operation: op_a, kind: Stateless }
-        - SpecState: { operation: op_a, symbol: x }
+        - SpecCapture: { operation: op_a, symbol: x }
     expected:
-      outcome: Invalid
-      errors:
-        - InvalidRoleForKind: { operation: op_a, symbol: x }
+      outcome: Valid
+      errors: []
+      warnings: []
 
   - name: checkpoint_on_statemachine
     desc: Checkpoint is only valid on Sequence — invalid on StateMachine
     inputs:
       annotations:
         - SpecOperation: { operation: op_a, kind: StateMachine }
-        - SpecState: { operation: op_a, symbol: s }
+        - SpecCapture: { operation: op_a, symbol: s }
         - SpecCheckpoint: { operation: op_a, symbol: c }
     expected:
       outcome: Invalid
       errors:
         - InvalidRoleForKind: { operation: op_a, symbol: c }
 
-  - name: state_on_sequence
-    desc: State is only valid on StateMachine — invalid on Sequence
+  - name: capture_on_sequence
+    desc: Capture is valid on Sequence — captured after only
     inputs:
       annotations:
         - SpecOperation: { operation: op_a, kind: Sequence }
         - SpecCheckpoint: { operation: op_a, symbol: c }
-        - SpecState: { operation: op_a, symbol: s }
+        - SpecCapture: { operation: op_a, symbol: s }
     expected:
-      outcome: Invalid
-      errors:
-        - InvalidRoleForKind: { operation: op_a, symbol: s }
+      outcome: Valid
+      errors: []
+      warnings: []
 
   - name: checkpoint_on_stateless
     desc: Checkpoint is only valid on Sequence — invalid on Stateless
@@ -321,7 +321,7 @@ cases:
         - DuplicateSetupName: { operation: op_a, name: default }
 
   - name: multiple_errors_same_operation
-    desc: StateMachine missing State and Checkpoint invalid for kind — both reported
+    desc: StateMachine missing Capture and Checkpoint invalid for kind — both reported
     inputs:
       annotations:
         - SpecOperation: { operation: op_a, kind: StateMachine }
@@ -478,7 +478,7 @@ cases:
     inputs:
       annotations:
         - SpecOperation: { operation: op_a, kind: StateMachine, symbol: "Machine::step" }
-        - SpecState: { operation: op_a, symbol: s }
+        - SpecCapture: { operation: op_a, symbol: s }
     expected:
       outcome: Valid
       warnings:
@@ -494,3 +494,71 @@ cases:
       outcome: Invalid
       errors:
         - InvalidRoleForKind: { operation: op_a, symbol: "Foo::do_thing" }
+
+  # ===== Checkpoint inline validation =====
+
+  - name: checkpoint_inline_valid_on_stateless
+    desc: Inline checkpoint is valid on Stateless operations
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Stateless }
+        - SpecCheckpoint: { operation: op_a, symbol: "process::checkpoint_1" }
+    expected:
+      outcome: Valid
+      errors: []
+      warnings: []
+
+  - name: checkpoint_inline_valid_on_statemachine
+    desc: Inline checkpoint is valid on StateMachine alongside Capture
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: StateMachine }
+        - SpecCapture: { operation: op_a, symbol: s }
+        - SpecCheckpoint: { operation: op_a, symbol: "process::checkpoint_1" }
+    expected:
+      outcome: Valid
+      errors: []
+      warnings: []
+
+  - name: checkpoint_on_structural
+    desc: Checkpoint is forbidden on Structural operations
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Structural }
+        - SpecCheckpoint: { operation: op_a, symbol: c }
+    expected:
+      outcome: Invalid
+      errors:
+        - InvalidRoleForKind: { operation: op_a, symbol: c }
+
+  - name: capture_on_structural
+    desc: Capture is forbidden on Structural operations
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Structural }
+        - SpecCapture: { operation: op_a, symbol: s }
+    expected:
+      outcome: Invalid
+      errors:
+        - InvalidRoleForKind: { operation: op_a, symbol: s }
+
+  - name: checkpoint_orphan
+    desc: Checkpoint references a non-existent operation
+    inputs:
+      annotations:
+        - SpecCheckpoint: { operation: missing_op, symbol: c }
+    expected:
+      outcome: Invalid
+      errors:
+        - OrphanAnnotation: { operation: missing_op, symbol: c }
+
+  - name: capture_on_errormap
+    desc: Capture is valid on ErrorMap operations
+    inputs:
+      annotations:
+        - SpecOperation: { operation: op_a, kind: ErrorMap }
+        - SpecCapture: { operation: op_a, symbol: s }
+    expected:
+      outcome: Valid
+      errors: []
+      warnings: []

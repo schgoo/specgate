@@ -10,3 +10,5 @@ Read this file first. Then read only the topics relevant to your current task.
 | Construction & setup | `construction.md` | When the entry point is a method (needs `self`/`this`) |
 | Binding files | `bindings.md` | When creating or modifying a binding file |
 | Validation rules | `validation.md` | When you need to understand what makes annotations valid or invalid |
+| Rust conventions | `rust.md` | When implementing in Rust |
+| C# conventions | `csharp.md` | When implementing in C# |

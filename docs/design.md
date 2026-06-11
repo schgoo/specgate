@@ -13,7 +13,7 @@ This system closes that gap.
 | **Operation** | A named behavioral unit the spec makes claims about (e.g., `findUserByKey`). |
 | **Claim** | A single assertion the spec makes about an operation. Each claim is one scorecard entry. |
 | **Kind** | The operation's type: `Stateless`, `StateMachine`, `Sequence`, `ErrorMap`, `Structural`. Determines extraction and validation strategy. |
-| **Role** | What an annotation contributes to the operation: `Setup`, `Checkpoint`, `State`, `Mock`. |
+| **Role** | What an annotation contributes to the operation: `Setup`, `Checkpoint`, `Capture`, `Mock`. |
 | **Context** | Ambient state an operation depends on (config, identity, feature flags) — not a direct parameter. |
 | **Dependency** | An external service or non-deterministic source the operation interacts with. Bidirectional: outbound calls are outputs, responses are inputs. |
 | **Measurable claim** | Has instrumentation. Validated by running N trials against a threshold. |

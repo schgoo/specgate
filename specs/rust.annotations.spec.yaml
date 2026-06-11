@@ -36,7 +36,7 @@ types:
       SpecCheckpoint:
         operation: string
         symbol: string
-      SpecState:
+      SpecCapture:
         operation: string
         symbol: string
       SpecMock:
@@ -138,17 +138,17 @@ cases:
         - SpecCheckpoint: { operation: op_a, symbol: "fixture::Handler::get_routing_hint" }
 
   - name: state_on_field
-    desc: spec_state on a struct field extracts a State annotation
+    desc: spec_capture on a struct field extracts a Capture annotation
     inputs:
       source: |
         struct Machine {
-            #[spec_state("op_a")]
+            #[spec_capture("op_a")]
             current: u32,
         }
     expected:
       outcome: Ok
       annotations:
-        - SpecState: { operation: op_a, symbol: "fixture::Machine::current" }
+        - SpecCapture: { operation: op_a, symbol: "fixture::Machine::current" }
 
   - name: setup_environment
     desc: spec_setup for environment prep — no return type, no self
@@ -213,7 +213,7 @@ cases:
     inputs:
       source: |
         struct Request {
-            #[spec_state("find_user")]
+            #[spec_capture("find_user")]
             retries: u32,
         }
         impl Request {
@@ -236,7 +236,7 @@ cases:
     expected:
       outcome: Ok
       annotations:
-        - SpecState: { operation: find_user, symbol: "fixture::Request::retries" }
+        - SpecCapture: { operation: find_user, symbol: "fixture::Request::retries" }
         - SpecOperation: { operation: find_user, kind: Sequence, symbol: "fixture::Request::execute" }
         - SpecCheckpoint: { operation: find_user, symbol: "fixture::Request::get_routing_hint" }
         - SpecMock: { operation: find_user, symbol: "fixture::Request::call_api", mock_name: http }
@@ -247,9 +247,9 @@ cases:
     inputs:
       source: |
         struct CircuitBreaker {
-            #[spec_state("breaker")]
+            #[spec_capture("breaker")]
             state: String,
-            #[spec_state("breaker")]
+            #[spec_capture("breaker")]
             failure_count: u32,
         }
         impl CircuitBreaker {
@@ -271,8 +271,8 @@ cases:
     expected:
       outcome: Ok
       annotations:
-        - SpecState: { operation: breaker, symbol: "fixture::CircuitBreaker::state" }
-        - SpecState: { operation: breaker, symbol: "fixture::CircuitBreaker::failure_count" }
+        - SpecCapture: { operation: breaker, symbol: "fixture::CircuitBreaker::state" }
+        - SpecCapture: { operation: breaker, symbol: "fixture::CircuitBreaker::failure_count" }
         - SpecOperation: { operation: breaker, kind: StateMachine, symbol: "fixture::CircuitBreaker::on_result" }
         - SpecMock: { operation: breaker, symbol: "fixture::CircuitBreaker::call_backend", mock_name: backend }
         - SpecSetup: { operation: breaker, name: default, symbol: "fixture::setup_breaker", params: [threshold], returns: CircuitBreaker }
@@ -361,7 +361,7 @@ cases:
         fn stateless_op() {}
 
         struct Machine {
-            #[spec_state("op_b")]
+            #[spec_capture("op_b")]
             counter: u32,
         }
         impl Machine {
@@ -386,7 +386,7 @@ cases:
       outcome: Ok
       annotations:
         - SpecOperation: { operation: op_a, kind: Stateless, symbol: "fixture::stateless_op" }
-        - SpecState: { operation: op_b, symbol: "fixture::Machine::counter" }
+        - SpecCapture: { operation: op_b, symbol: "fixture::Machine::counter" }
         - SpecOperation: { operation: op_b, kind: StateMachine, symbol: "fixture::Machine::step" }
         - SpecOperation: { operation: op_c, kind: Sequence, symbol: "fixture::Pipeline::run" }
         - SpecCheckpoint: { operation: op_c, symbol: "fixture::Pipeline::stage_1" }
@@ -451,13 +451,13 @@ cases:
       source: |
         #[derive(Debug, Clone)]
         struct Request {
-            #[spec_state("op_a")]
+            #[spec_capture("op_a")]
             status: u32,
         }
     expected:
       outcome: Ok
       annotations:
-        - SpecState: { operation: op_a, symbol: "fixture::Request::status" }
+        - SpecCapture: { operation: op_a, symbol: "fixture::Request::status" }
 
   # ===== ERROR =====
 
@@ -534,15 +534,15 @@ cases:
         - CompileError: { message: "missing required parameter: kind" }
 
   - name: state_on_function
-    desc: spec_state on a function is rejected — must be on a field
+    desc: spec_capture on a function is rejected — must be on a struct or field
     inputs:
       source: |
-        #[spec_state("op_a")]
+        #[spec_capture("op_a")]
         fn handler() {}
     expected:
       outcome: Error
       errors:
-        - CompileError: { message: "spec_state must be placed on a struct field" }
+        - CompileError: { message: "spec_capture must be placed on a struct or struct field" }
 
   - name: checkpoint_on_field
     desc: spec_checkpoint on a struct field is rejected — must be on a method
@@ -556,3 +556,123 @@ cases:
       outcome: Error
       errors:
         - CompileError: { message: "spec_checkpoint must be placed on a method" }
+
+  # ===== Struct-level capture =====
+
+  - name: capture_on_struct
+    desc: spec_capture on a struct captures all public fields
+    inputs:
+      source: |
+        #[spec_capture("op_a")]
+        struct Result {
+            pub status: u16,
+            pub body: String,
+        }
+    expected:
+      outcome: Ok
+      annotations:
+        - SpecCapture: { operation: op_a, symbol: "fixture::Result::status" }
+        - SpecCapture: { operation: op_a, symbol: "fixture::Result::body" }
+
+  - name: capture_on_struct_skips_private
+    desc: Struct-level capture only captures public fields — private fields are excluded
+    inputs:
+      source: |
+        #[spec_capture("op_a")]
+        struct Result {
+            pub status: u16,
+            internal_id: u64,
+        }
+    expected:
+      outcome: Ok
+      annotations:
+        - SpecCapture: { operation: op_a, symbol: "fixture::Result::status" }
+
+  - name: capture_struct_and_field_conflict
+    desc: Both struct-level and field-level capture on the same type is an error
+    inputs:
+      source: |
+        #[spec_capture("op_a")]
+        struct Result {
+            #[spec_capture("op_a")]
+            status: u16,
+        }
+    expected:
+      outcome: Error
+      errors:
+        - CompileError: { message: "spec_capture on struct and field cannot be combined" }
+
+  - name: capture_on_stateless_return
+    desc: spec_capture on a return type for a Stateless operation — captured after only
+    inputs:
+      source: |
+        #[spec_capture("op_a")]
+        struct Output {
+            pub value: f64,
+        }
+
+        impl Output {
+            #[spec_operation("op_a", kind = Stateless)]
+            pub fn compute(x: f64) -> Output { Output { value: x * 2.0 } }
+        }
+    expected:
+      outcome: Ok
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Stateless, symbol: "fixture::Output::compute" }
+        - SpecCapture: { operation: op_a, symbol: "fixture::Output::value" }
+
+  # ===== Inline checkpoint =====
+
+  - name: checkpoint_inline
+    desc: spec_checkpoint! inline macro captures an expression value
+    inputs:
+      source: |
+        #[spec_operation("op_a", kind = Sequence)]
+        fn process(input: &str) -> Output {
+            let valid = spec_checkpoint!("op_a", validator.check(input));
+            Output { valid }
+        }
+    expected:
+      outcome: Ok
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Sequence, symbol: "fixture::process" }
+        - SpecCheckpoint: { operation: op_a, symbol: "fixture::process::checkpoint_1" }
+
+  - name: checkpoint_inline_multiple
+    desc: Multiple inline checkpoints in the same function
+    inputs:
+      source: |
+        #[spec_operation("op_a", kind = Sequence)]
+        fn pipeline(input: &str) -> Output {
+            let a = spec_checkpoint!("op_a", step_one(input));
+            let b = spec_checkpoint!("op_a", step_two(a));
+            Output { result: b }
+        }
+    expected:
+      outcome: Ok
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Sequence, symbol: "fixture::pipeline" }
+        - SpecCheckpoint: { operation: op_a, symbol: "fixture::pipeline::checkpoint_1" }
+        - SpecCheckpoint: { operation: op_a, symbol: "fixture::pipeline::checkpoint_2" }
+
+  - name: checkpoint_attribute_and_inline
+    desc: Both attribute and inline checkpoints on the same operation
+    inputs:
+      source: |
+        impl Pipeline {
+            #[spec_checkpoint("op_a")]
+            fn validate(&self, input: &str) -> bool { true }
+
+            #[spec_operation("op_a", kind = Sequence)]
+            fn process(&self, input: &str) -> Output {
+                let valid = self.validate(input);
+                let parsed = spec_checkpoint!("op_a", third_party::parse(input));
+                Output { valid, parsed }
+            }
+        }
+    expected:
+      outcome: Ok
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Sequence, symbol: "fixture::Pipeline::process" }
+        - SpecCheckpoint: { operation: op_a, symbol: "fixture::Pipeline::validate" }
+        - SpecCheckpoint: { operation: op_a, symbol: "fixture::Pipeline::process::checkpoint_1" }

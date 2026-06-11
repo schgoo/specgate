@@ -1,143 +1,19 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "SpecGate Binding File",
-  "description": "Schema for SpecGate binding files — declares language, build targets, and input/output wiring for the harness.",
+  "description": "Schema for SpecGate binding files — connects a spec to a language-specific implementation project.",
   "type": "object",
-  "required": ["language", "targets"],
+  "required": ["language", "project_root"],
   "additionalProperties": false,
   "properties": {
     "language": {
       "type": "string",
-      "description": "Target language identifier, e.g. 'rust', 'csharp'.",
+      "description": "Target language identifier. Selects the codegen backend and compile-time registry reader.",
       "enum": ["rust", "csharp"]
     },
-    "targets": {
-      "type": "object",
-      "description": "Named execution targets referenced by spec files via the 'target' field.",
-      "additionalProperties": {
-        "$ref": "#/definitions/target"
-      },
-      "minProperties": 1
-    }
-  },
-  "definitions": {
-    "target": {
-      "type": "object",
-      "description": "An execution target — either a command to run or a function to call.",
-      "oneOf": [
-        { "$ref": "#/definitions/commandTarget" },
-        { "$ref": "#/definitions/callTarget" }
-      ]
-    },
-    "commandTarget": {
-      "type": "object",
-      "required": ["command"],
-      "additionalProperties": false,
-      "properties": {
-        "command": {
-          "type": "string",
-          "description": "Shell command to execute."
-        },
-        "inputs": {
-          "$ref": "#/definitions/inputMapping",
-          "description": "How spec inputs are delivered to the command."
-        },
-        "outputs": {
-          "$ref": "#/definitions/outputMapping",
-          "description": "How to read outputs after the command runs."
-        }
-      }
-    },
-    "callTarget": {
-      "type": "object",
-      "required": ["call"],
-      "additionalProperties": false,
-      "properties": {
-        "call": {
-          "type": "string",
-          "description": "Fully qualified function path to invoke, e.g. 'specgate_core::validate'."
-        },
-        "outputs": {
-          "$ref": "#/definitions/outputMapping",
-          "description": "How to read outputs after the call returns. If omitted, outputs come from the return value."
-        }
-      }
-    },
-    "inputMapping": {
-      "type": "object",
-      "description": "Maps spec input names to delivery mechanisms. Each key is a spec input name.",
-      "additionalProperties": {
-        "$ref": "#/definitions/inputDelivery"
-      }
-    },
-    "inputDelivery": {
-      "type": "object",
-      "description": "How a single input value is delivered to the command. Exactly one key specifies the mechanism.",
-      "oneOf": [
-        {
-          "required": ["file"],
-          "additionalProperties": false,
-          "properties": {
-            "file": {
-              "type": "string",
-              "description": "File path to write the input value to. Supports {workdir} template."
-            }
-          }
-        },
-        {
-          "required": ["env"],
-          "additionalProperties": false,
-          "properties": {
-            "env": {
-              "type": "string",
-              "description": "Environment variable name to set."
-            }
-          }
-        },
-        {
-          "required": ["arg"],
-          "additionalProperties": false,
-          "properties": {
-            "arg": {
-              "type": "string",
-              "description": "CLI flag name (e.g. '--threshold'). Value is appended after the flag."
-            }
-          }
-        },
-        {
-          "required": ["positional"],
-          "additionalProperties": false,
-          "properties": {
-            "positional": {
-              "type": "integer",
-              "description": "Positional argument index (0-based)."
-            }
-          }
-        }
-      ]
-    },
-    "outputMapping": {
-      "type": "object",
-      "description": "How to read outputs after execution.",
-      "additionalProperties": false,
-      "properties": {
-        "file": {
-          "type": "string",
-          "description": "File path to read output from. The file contains JSON matching the spec's output types."
-        },
-        "stdout": {
-          "type": "boolean",
-          "description": "If true, parse stdout as JSON for outputs."
-        },
-        "stderr": {
-          "type": "boolean",
-          "description": "If true, parse stderr for error outputs."
-        },
-        "exit_code": {
-          "type": "string",
-          "description": "Spec output field name to map the process exit code to."
-        }
-      }
+    "project_root": {
+      "type": "string",
+      "description": "Path to the implementation project, relative to the binding file. The harness builds this project to populate the compile-time annotation registry, then generates tests here."
     }
   }
 }

@@ -3,7 +3,7 @@
   "title": "SpecGate Component Spec",
   "description": "Schema for SpecGate .spec.yaml files — declares inputs, types, outputs, and test cases for a single component.",
   "type": "object",
-  "required": ["name", "binding", "target", "outcome", "outputs", "cases"],
+  "required": ["name", "target", "outcome", "outputs", "cases"],
   "additionalProperties": false,
   "properties": {
     "name": {

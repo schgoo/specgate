@@ -1,0 +1,190 @@
+# yaml-language-server: $schema=../spec-schema.json
+# SpecGate component: harness.core
+#
+# The harness core pipeline. Parses a spec, resolves its binding,
+# delegates to a language backend for test generation, runs the
+# generated tests, collects JSON results, and emits a run report.
+#
+# This spec tests the orchestration layer only. It uses a mock backend
+# that emits trivial test files with predetermined outcomes — no real
+# compiler or toolchain is needed. Language-specific codegen is tested
+# by harness.rust and harness.csharp.
+
+name: harness.core
+target: test
+
+inputs:
+  spec_path:
+    type: string
+    desc: Path to the .spec.yaml file to run
+
+types:
+  CaseResult:
+    name: string
+    status: string
+    duration_ms: int
+
+  RunReport:
+    spec_name: string
+    binding: string
+    timestamp: string
+    duration_ms: int
+    results: List<CaseResult>
+    passed: int
+    failed: int
+    total: int
+
+  RunError:
+    oneof:
+      SpecNotFound: { path: string }
+      SpecInvalid: { detail: string }
+      BindingNotFound: { binding: string }
+      BackendNotFound: { language: string }
+      GenerateFailed: { detail: string }
+      BuildFailed: { detail: string }
+
+outcome:
+  oneof: [Complete, Error]
+
+outputs:
+  when Complete:
+    report: RunReport
+  when Error:
+    error: RunError
+
+cases:
+
+  # All cases use a mock backend that emits predetermined outcomes.
+  # The mock binding is "mock" — it resolves to a built-in test backend.
+
+  # ===== Happy path =====
+
+  - name: single_case_pass
+    desc: One spec case where the mock backend reports pass
+    inputs:
+      spec_path: fixtures/simple_pass.spec.yaml
+    expected:
+      outcome: Complete
+      report:
+        passed: 1
+        failed: 0
+        total: 1
+        results:
+          - { name: basic_case, status: pass }
+
+  - name: single_case_fail
+    desc: One spec case where the mock backend reports fail
+    inputs:
+      spec_path: fixtures/simple_fail.spec.yaml
+    expected:
+      outcome: Complete
+      report:
+        passed: 0
+        failed: 1
+        total: 1
+        results:
+          - { name: basic_case, status: fail }
+
+  - name: multiple_cases_mixed
+    desc: Three cases — two pass, one fails
+    inputs:
+      spec_path: fixtures/multi_mixed.spec.yaml
+    expected:
+      outcome: Complete
+      report:
+        passed: 2
+        failed: 1
+        total: 3
+
+  - name: all_cases_pass
+    desc: All cases pass — report reflects full success
+    inputs:
+      spec_path: fixtures/multi_pass.spec.yaml
+    expected:
+      outcome: Complete
+      report:
+        passed: 3
+        failed: 0
+        total: 3
+
+  # ===== Setup errors =====
+
+  - name: spec_not_found
+    desc: Spec file does not exist
+    inputs:
+      spec_path: fixtures/nonexistent.spec.yaml
+    expected:
+      outcome: Error
+      error:
+        SpecNotFound: { path: fixtures/nonexistent.spec.yaml }
+
+  - name: spec_invalid_yaml
+    desc: Spec file exists but is not valid YAML
+    inputs:
+      spec_path: fixtures/bad_yaml.spec.yaml
+    expected:
+      outcome: Error
+      error:
+        SpecInvalid: {}
+
+  - name: binding_not_found
+    desc: Fixture spec references a binding that does not exist
+    inputs:
+      spec_path: fixtures/bad_binding.spec.yaml
+    expected:
+      outcome: Error
+      error:
+        BindingNotFound: { binding: nonexistent }
+
+  - name: backend_not_found
+    desc: Fixture spec's binding declares a language with no registered backend
+    inputs:
+      spec_path: fixtures/unknown_lang.spec.yaml
+    expected:
+      outcome: Error
+      error:
+        BackendNotFound: { language: unknown_lang }
+
+  # ===== Build and codegen errors =====
+
+  - name: generate_fails
+    desc: Backend fails to generate test code
+    inputs:
+      spec_path: fixtures/generate_error.spec.yaml
+    expected:
+      outcome: Error
+      error:
+        GenerateFailed: {}
+
+  - name: build_fails
+    desc: Generated test code fails to compile
+    inputs:
+      spec_path: fixtures/build_error.spec.yaml
+    expected:
+      outcome: Error
+      error:
+        BuildFailed: {}
+
+  # ===== Report structure =====
+
+  - name: report_includes_metadata
+    desc: Report includes spec name, binding, and timestamp
+    inputs:
+      spec_path: fixtures/simple_pass.spec.yaml
+    expected:
+      outcome: Complete
+      report:
+        spec_name: simple_pass
+        binding: mock
+
+  - name: empty_cases_vacuous_pass
+    desc: Spec with no cases produces a report with zero results
+    inputs:
+      spec_path: fixtures/no_cases.spec.yaml
+    expected:
+      outcome: Complete
+      report:
+        passed: 0
+        failed: 0
+        total: 0
+        results: []
