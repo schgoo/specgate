@@ -1,9 +1,9 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "SpecGate Component Spec",
-  "description": "Schema for SpecGate .spec.yaml files — declares inputs, types, outputs, and test cases for a single component.",
+  "description": "Schema for SpecGate .spec.yaml files — declares inputs, types, outputs, and test cases for a single component. Supports single-operation specs (inputs/outcome/outputs at top level) and state machine specs (state/operations).",
   "type": "object",
-  "required": ["name", "target", "outcome", "outputs", "cases"],
+  "required": ["name", "target", "cases"],
   "additionalProperties": false,
   "properties": {
     "name": {
@@ -22,7 +22,7 @@
     },
     "inputs": {
       "type": "object",
-      "description": "Named inputs to the component. Each key is an input name, value describes its type.",
+      "description": "Named inputs to the component (single-operation specs). Mutually exclusive with 'operations'.",
       "additionalProperties": {
         "$ref": "#/definitions/inputDeclaration"
       },
@@ -36,7 +36,7 @@
       }
     },
     "outcome": {
-      "description": "Outcome declaration. Use oneof for variant outcomes, or a string for a single outcome type.",
+      "description": "Outcome declaration for single-operation specs. Use oneof for variant outcomes, or a string for a single outcome type. Mutually exclusive with 'operations'.",
       "oneOf": [
         {
           "type": "object",
@@ -59,7 +59,7 @@
     },
     "outputs": {
       "type": "object",
-      "description": "Output declarations keyed by outcome branch, e.g. 'when Valid'.",
+      "description": "Output declarations keyed by outcome branch, e.g. 'when Valid'. For single-operation specs.",
       "additionalProperties": {
         "type": "object",
         "description": "Named outputs for this outcome branch.",
@@ -76,6 +76,33 @@
             }
           ]
         }
+      }
+    },
+    "state": {
+      "type": "object",
+      "description": "State variables and their types for StateMachine specs. Types match what SpecCapture getters return.",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "minProperties": 1
+    },
+    "init": {
+      "type": "object",
+      "description": "Initial state values. Required when 'state' is present. Matches what SpecSetup constructor produces."
+    },
+    "operations": {
+      "type": "object",
+      "description": "Named operations for StateMachine specs. Each key is an operation name. Mutually exclusive with top-level 'inputs'.",
+      "additionalProperties": {
+        "$ref": "#/definitions/operationDeclaration"
+      },
+      "minProperties": 1
+    },
+    "invariants": {
+      "type": "object",
+      "description": "Approved invariants. Keys are invariant names, values are Quint-compatible expressions. Proposed by specgate propose-invariants, approved by user.",
+      "additionalProperties": {
+        "type": "string"
       }
     },
     "cases": {
@@ -133,9 +160,82 @@
         "type": "string"
       }
     },
+    "operationDeclaration": {
+      "type": "object",
+      "description": "A named operation in a state machine spec.",
+      "properties": {
+        "inputs": {
+          "type": "object",
+          "description": "Named inputs for this operation.",
+          "additionalProperties": {
+            "oneOf": [
+              { "type": "string" },
+              { "$ref": "#/definitions/inputDeclaration" }
+            ]
+          }
+        },
+        "outcome": {
+          "description": "Outcome declaration for this operation.",
+          "oneOf": [
+            {
+              "type": "object",
+              "required": ["oneof"],
+              "properties": {
+                "oneof": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "minItems": 2
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "outputs": {
+          "type": "object",
+          "description": "Per-outcome output fields for this operation.",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "testStep": {
+      "type": "object",
+      "description": "A single step in a multi-step test case.",
+      "required": ["operation"],
+      "additionalProperties": false,
+      "properties": {
+        "operation": {
+          "type": "string",
+          "description": "Operation name from the operations section."
+        },
+        "inputs": {
+          "type": "object",
+          "description": "Input values for this step."
+        },
+        "expected": {
+          "type": "object",
+          "description": "Expected return value (partial match — omitted fields not checked).",
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "description": "Expected outcome variant."
+            }
+          },
+          "additionalProperties": true
+        },
+        "assert_state": {
+          "type": "object",
+          "description": "Expected state after this step (partial match — omitted fields not checked)."
+        }
+      }
+    },
     "testCase": {
       "type": "object",
-      "required": ["name", "desc", "expected"],
+      "required": ["name", "desc"],
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -149,12 +249,11 @@
         },
         "inputs": {
           "type": "object",
-          "description": "Input values for this case. Keys must match the spec's inputs."
+          "description": "Input values for single-operation cases. Mutually exclusive with 'steps'."
         },
         "expected": {
           "type": "object",
-          "required": ["outcome"],
-          "description": "Expected outputs. Must include 'outcome' and any output fields declared for that outcome branch.",
+          "description": "Expected outputs for single-operation cases. Must include 'outcome'. Mutually exclusive with 'steps'.",
           "properties": {
             "outcome": {
               "type": "string",
@@ -162,6 +261,14 @@
             }
           },
           "additionalProperties": true
+        },
+        "steps": {
+          "type": "array",
+          "description": "Ordered operation sequence for StateMachine specs. Mutually exclusive with top-level 'inputs'/'expected'.",
+          "items": {
+            "$ref": "#/definitions/testStep"
+          },
+          "minItems": 1
         }
       }
     }

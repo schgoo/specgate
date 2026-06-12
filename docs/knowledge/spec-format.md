@@ -12,11 +12,19 @@ logical group of operations.
 | `name` | yes | Dotted component name, e.g. `core.validate` |
 | `binding` | no | Binding file identifier — resolves to `bindings/<binding>.yaml`. Optional for language-agnostic specs; can be specified at run time. |
 | `target` | yes | Named target within the binding file |
-| `inputs` | no | Named inputs with type/source/desc |
+| `inputs` | cond | Named inputs with type/source/desc (single-operation specs) |
 | `types` | no | Named type definitions (oneof, causes, or record) |
-| `outcome` | yes | Outcome variants or single type |
-| `outputs` | yes | Per-outcome output fields |
+| `outcome` | cond | Outcome variants or single type (single-operation specs) |
+| `outputs` | cond | Per-outcome output fields (single-operation specs) |
+| `state` | no | State variables and types (StateMachine specs) |
+| `init` | no | Initial state values (required when `state` is present) |
+| `operations` | no | Named operations with inputs/outcomes (StateMachine specs) |
+| `invariants` | no | Approved invariants (proposed by `specgate propose-invariants`) |
 | `cases` | yes | Test cases (≥1) |
+
+A spec is either **single-operation** (has `inputs`/`outcome`/`outputs` at the top
+level) or **multi-operation / state machine** (has `state`/`operations`). These are
+mutually exclusive.
 
 ## Type declarations
 
@@ -165,3 +173,90 @@ cases:
 - `[...]` is YAML flow sequence — quote if used as a string value
 - `{ }` is YAML flow mapping — both inline and block indent are equivalent
 - Add `# yaml-language-server: $schema=../spec-schema.json` at the top for editor support
+
+## State machine specs
+
+State machine specs describe components with multiple operations that share state.
+They use `state`, `init`, `operations`, and optionally `invariants` instead of
+top-level `inputs`/`outcome`/`outputs`.
+
+```yaml
+name: harness.core
+binding: rust
+target: test
+
+state:
+  backends: Set<string>
+
+init:
+  backends: [mock]
+
+operations:
+  register_backend:
+    inputs: { name: string }
+  run_spec:
+    inputs: { spec_path: string }
+    outcome:
+      oneof: [Complete, Error]
+
+invariants:
+  mock_always_registered: "mock ∈ backends"
+  at_least_one_backend: "backends.size() >= 1"
+```
+
+- `state` declares state variable names and types. Types match what `SpecCapture`
+  getters return.
+- `init` declares the initial state values (what `SpecSetup` constructor produces).
+- `operations` declares each operation's inputs and optional outcome. No
+  transition expressions — those are inferred from traces.
+- `invariants` are proposed by `specgate propose-invariants` from observed
+  traces. The user approves each one. Invariant expressions are opaque strings
+  consumed by Quint generation.
+
+## Multi-step test cases
+
+For state machine specs, cases use `steps` instead of flat `inputs`/`expected`:
+
+```yaml
+cases:
+  - name: register_then_run
+    desc: Register a backend then run a spec
+    steps:
+      - operation: register_backend
+        inputs: { name: rust }
+        assert_state:
+          backends: [mock, rust]
+      - operation: run_spec
+        inputs: { spec_path: fixtures/simple_pass.spec.yaml }
+        expected:
+          outcome: Complete
+          report: { passed: 1, total: 1 }
+```
+
+Each step has:
+- `operation` (required) — operation name from the `operations` section
+- `inputs` (optional) — input values for this call
+- `expected` (optional) — expected return value (partial match)
+- `assert_state` (optional) — expected state after this step (partial match)
+
+Partial matching: omitted fields in `expected` or `assert_state` are not checked.
+
+Cases without `steps` use flat `inputs`/`expected` — backward compatible for
+single-operation specs.
+
+## Spec boundary rule
+
+**One spec = one state boundary.** Operations that share state belong in the same
+spec. Operations with independent state belong in separate specs. No spec
+composition or include mechanism exists.
+
+If a spec gets too big because too many operations share state, that is a signal
+the component is too coupled — refactor the code. If there are just too many test
+cases, split into case-only files:
+
+```
+specs/harness.core.spec.yaml           # state, operations, types, invariants
+specs/harness.core.cases/
+  happy_path.yaml                      # cases only
+  error_handling.yaml
+```

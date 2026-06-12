@@ -55,11 +55,13 @@ This system closes that gap.
 │                                                         │
 │  Spec files ─── YAML (validated by JSON Schema)         │
 │    Operations, types, outcomes, test cases              │
+│    State declarations + approved invariants             │
 │    Canonical format for all mechanisms                  │
 │                                                         │
-│  Quint models ── auto-generated from YAML (optional)    │
+│  Quint models ── auto-generated from traces (optional)  │
 │    State machines with invariants + temporal properties │
 │    Format: .qnt files, never hand-edited                │
+│    Transitions/guards inferred from observed traces     │
 │                                                         │
 │  Narrative ── ~10% of claims                            │
 │    Human-reviewed only, not machine-checked             │
@@ -79,14 +81,15 @@ This system closes that gap.
 │  1. Completeness check ─ annotation structure (seconds) │
 │  2. Coverage check ──── claim ↔ annotation match (secs) │
 │  3. Conformance check ─ run generated tests (minutes)   │
-│  4. Scorecard ───────── unified conformance report      │
+│  4. Trace collection ── ITF traces for Quint (optional) │
+│  5. Scorecard ───────── unified conformance report      │
 └─────────────────────────────────────────────────────────┘
 ```
 
 Three mechanisms because a single format does not fit all claim types. The YAML
-spec is the canonical source; Quint models are derived from it for formal
-verification. Test tables, structural rules, and state machine properties are
-all expressed in the same YAML format.
+spec is the canonical source; Quint models are derived from observed execution
+traces for formal verification. Test tables, structural rules, and state machine
+properties are all expressed in the same YAML format.
 
 ### Three file types
 
@@ -163,11 +166,19 @@ logical group of related operations).
 | `name` | str | yes | Dotted component name (e.g., `core.validate`) |
 | `binding` | str | yes | Binding file identifier (resolves to `bindings/<binding>.yaml`) |
 | `target` | str | yes | Named target within the binding file |
-| `inputs` | map | no | Named, typed parameters |
+| `inputs` | map | no | Named, typed parameters (single-operation specs) |
 | `types` | map | no | Named type definitions (oneof or record) |
-| `outcome` | oneof/str | yes | Named outcome variants or single type |
-| `outputs` | map | yes | Per-outcome output fields (keyed by `when <Variant>`) |
+| `outcome` | oneof/str | cond | Named outcome variants or single type (single-operation specs) |
+| `outputs` | map | cond | Per-outcome output fields (keyed by `when <Variant>`) |
+| `state` | map | no | State variables and types (StateMachine specs) |
+| `init` | map | no | Initial state values (required when `state` is present) |
+| `operations` | map | no | Named operations with inputs/outcomes (StateMachine specs) |
+| `invariants` | map | no | Approved invariants (proposed by `specgate propose-invariants`) |
 | `cases` | list | yes | Concrete test cases (≥1) |
+
+A spec is either **single-operation** (has `inputs`/`outcome`/`outputs` at the top level)
+or **multi-operation / state machine** (has `state`/`operations`). These are mutually
+exclusive — a spec cannot have both `inputs` and `operations`.
 
 Each input entry has `type` (required), plus optional `source` and `desc`.
 
@@ -211,8 +222,87 @@ Each `cases` entry has:
 |-------|----------|-------------|
 | `name` | yes | Unique snake_case test name |
 | `desc` | yes | Human-readable description |
-| `inputs` | no | Values for inputs |
-| `expected` | yes | Expected outcome + outputs |
+| `inputs` | cond | Values for inputs (single-operation specs, or single-step state machine cases) |
+| `expected` | cond | Expected outcome + outputs (single-operation, or per-step in state machine) |
+| `steps` | cond | Ordered operation sequence (StateMachine specs only) |
+
+A case uses either flat `inputs`/`expected` (backward-compatible single-operation) or
+`steps` (multi-step state machine). These are mutually exclusive.
+
+**Multi-step cases** (StateMachine specs only):
+
+Each step has:
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `operation` | yes | Operation name from the `operations` section |
+| `inputs` | no | Input values for this operation |
+| `expected` | no | Expected return value (partial match — omitted fields are not checked) |
+| `assert_state` | no | Expected state after this step (partial match) |
+
+The component lifecycle per case:
+
+```
+SpecSetup → creates component instance
+SpecCapture → verify init state matches `init`
+─────────────────────────────────────────────
+Step 1: call operation, SpecCapture → read state
+Step 2: call operation, SpecCapture → read state
+  ...
+```
+
+No operation is inherently "first" — ordering comes from the test case. Guards
+(inferred from traces in wave 2) capture the real ordering constraints.
+
+**State machine spec example**:
+
+```yaml
+# yaml-language-server: $schema=../spec-schema.json
+name: harness.core
+binding: rust
+target: test
+
+# State variables — types match what SpecCapture getters return
+state:
+  backends: Set<string>
+
+# Initial state — matches what SpecSetup constructor produces
+init:
+  backends: [mock]
+
+# Operations — inputs and outcomes (no transition expressions)
+operations:
+  register_backend:
+    inputs: { name: string }
+  run_spec:
+    inputs: { spec_path: string }
+    outcome:
+      oneof: [Complete, Error]
+
+# Invariants — approved from wave 1 proposals
+invariants:
+  mock_always_registered: "mock ∈ backends"
+  at_least_one_backend: "backends.size() >= 1"
+
+types: ...
+outputs: ...
+
+cases:
+  - name: register_then_run
+    desc: Register a backend then run a spec
+    steps:
+      - operation: register_backend
+        inputs: { name: rust }
+      - operation: run_spec
+        inputs: { spec_path: fixtures/simple_pass.spec.yaml }
+        expected:
+          outcome: Complete
+          report: { passed: 1, total: 1 }
+```
+
+Key difference from single-operation specs: no `transition` or `guard` fields.
+Those are inferred from traces and live in the generated Quint model. The YAML
+has only what humans write and approve: state declarations, invariants, and cases.
 
 **JSON Schema**: a `spec-schema.json` file provides editor autocompletion, inline
 validation, and catches YAML parsing pitfalls (bare booleans, missing required
@@ -220,11 +310,43 @@ fields, wrong types). Editors (VS Code with Red Hat YAML extension, Rider,
 IntelliJ) consume it natively via a `# yaml-language-server: $schema=` comment
 or project-level configuration.
 
-**Quint generation**: an optional step translates YAML → `.qnt` files for model
-checking. The mapping is mechanical: inputs become function parameters,
-`oneof` outcomes become Quint `variant` types, `when` output blocks become
-variant payloads, and cases become assert statements. Quint files are never
-hand-edited — they are regenerated from YAML on every change.
+**Quint generation**: Quint models are generated from **observed execution traces**, not
+directly from YAML. The user never writes Quint expressions. The pipeline:
+
+1. Run annotated code → collect ITF traces via `SpecCapture` (wave 1)
+2. Analyze traces → propose candidate invariants → user approves
+3. Generate `.qnt` model from traces + approved invariants (wave 2)
+4. `quint run` explores novel operation sequences, checking invariants
+5. Export novel ITF traces → replay as proptests → collect more traces → refine
+
+Transitions and guards are inferred from trace patterns (set-add, set-remove,
+increment, assignment). Complex transitions fall back to `nondet` — Quint still
+checks invariants. The YAML spec stores only what humans write and approve: state
+declarations, invariant expressions, and test cases. Generated `.qnt` files are
+never hand-edited — they are regenerated from traces on every change.
+
+**Trace format**: Traces use Quint's **ITF (Informal Trace Format)** — JSON with
+states and actions. Each test run produces one ITF trace:
+
+```json
+{
+  "meta": { "spec": "harness.core", "test": "register_then_run" },
+  "states": [
+    { "backends": ["mock"] },
+    { "backends": ["mock", "rust"] },
+    { "backends": ["mock", "rust"] }
+  ],
+  "actions": [
+    { "name": "init" },
+    { "name": "register_backend", "inputs": { "name": "rust" } },
+    { "name": "run_spec", "inputs": { "spec_path": "fixtures/simple_pass.spec.yaml" } }
+  ]
+}
+```
+
+The invariant proposer analyzes the `states` array across all traces to find
+universal patterns (always-contains, never-empty, monotonic growth, implication,
+bounded, idempotent).
 
 ---
 
@@ -250,6 +372,41 @@ Write spec first → generate code with annotations → validate against spec.
 
 Both workflows share the same spec format, annotation system, and validation harness.
 
+### Two-wave architecture for state machines
+
+State machine specs use a two-wave approach that infers formal properties from
+observed behavior rather than requiring manual Quint expressions.
+
+**Wave 1: Observe + Propose**
+
+```
+1. Annotate code with SpecOperation, SpecCapture, SpecSetup, SpecMock
+2. Run existing tests with instrumentation enabled
+3. Collect ITF traces — (state_before, operation, inputs, state_after) per step
+4. Analyze traces — detect patterns, propose candidate invariants
+5. User reviews — approve ("yes, this is a spec commitment") or reject each
+6. Approved invariants go into the YAML spec
+```
+
+Invariant inference is deterministic pattern detection over collected data (not
+stochastic). Patterns detected: always-contains, never-empty, monotonic growth,
+implication, bounded, idempotent. May be wrong due to limited test coverage —
+that is why the user signs off.
+
+**Wave 2: Verify + Explore**
+
+```
+1. Generate Quint model from traces + approved invariants
+2. Quint random simulation (quint run) explores novel operation sequences
+3. Export novel ITF traces
+4. Replay ITF traces as proptests against real code
+5. Collect more traces from proptests → refine model → repeat
+```
+
+The virtuous cycle: more traces → better model → more exploration → more traces.
+Wave 2 is optional — wave 1 alone provides value by formalizing observed behavior
+into approved invariants.
+
 ---
 
 ## Annotation system
@@ -262,6 +419,20 @@ a piece — the harness collects all annotations sharing the same operation name
 Why: real code distributes an operation across constructors, base classes, properties,
 and pipeline stages. A single-function annotation would require wrappers that do not
 cover all patterns.
+
+### State machine support
+
+The existing five annotations are sufficient for state machines — no new annotations
+needed. `SpecCapture` is the key enabler: it provides state observation between steps,
+making trace collection possible for the two-wave architecture.
+
+| Annotation | Role in State Machines |
+|------------|------------------------|
+| `SpecOperation` | Links each method to its operation name. Multiple per component. |
+| `SpecSetup` | Creates the component instance before step sequences. |
+| `SpecCapture` | **State observation.** Read before/after each step to build traces. Required for StateMachine kind. Can annotate a method (lens) or field (direct). |
+| `SpecCheckpoint` | Within-step observation (intermediate state during a single operation). |
+| `SpecMock` | Mock injection. Semantics unchanged for state machines. |
 
 ### Roles
 
@@ -610,6 +781,44 @@ This dissolves most implementation-pattern gaps:
 - **Cross-object state**: the spec sees the operation boundary, not the objects behind it.
 - **Extension methods**: just another way to provide inputs.
 - **Interior mutability**: the spec sees outputs, not internal mutation strategy.
+
+---
+
+## Spec boundaries = state boundaries
+
+**Design principle: one spec = one state machine. No composition, no includes.**
+
+Operations that share state belong in the same spec. Operations with independent
+state belong in separate specs. Cross-spec interaction happens through inputs/outputs,
+not shared state.
+
+### Why no spec composition
+
+If two operations share state, splitting them across specs creates coupling between
+specs — spec B references spec A's state variables. That coupling is a design smell.
+The Independence Axiom: if they're coupled, they're one functional unit.
+
+### When a spec gets too big
+
+Two sources of growth, two responses:
+
+1. **Too many operations sharing state** — the component is too coupled. Refactor
+   the code, not the spec format. SpecGate is telling you something.
+2. **Too many test cases** — split cases into separate files:
+   ```
+   specs/harness.core.spec.yaml           # state, operations, types, invariants
+   specs/harness.core.cases/
+     happy_path.yaml                      # test cases only
+     error_handling.yaml
+     multi_backend.yaml
+   ```
+
+### SpecGate as a coupling detector
+
+You try to spec your component, you find you can't split it without shared state
+everywhere, and that is SpecGate telling you the component has too many
+responsibilities. The spec boundary pressure is the same as "if it's hard to test,
+the design is wrong" — but formalized into a concrete, measurable artifact.
 
 ---
 

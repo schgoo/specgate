@@ -117,28 +117,30 @@
 
 **Context**: Spec cases are concrete examples (`{a: 2, b: 3} → 5`) that an implementation could hardcode. Property-based tests define universal assertions over value ranges — randomized inputs that can't be gamed.
 
-**Status**: Open — design after harness runs end-to-end.
+**Status**: Reframed — subsumed by the two-wave architecture (see design.md § Workflows).
 
-**Proposed syntax**:
+**Original approach**: A `properties` section with explicit `for_all`/`assert` syntax:
 ```yaml
 properties:
   add_commutative:
     for_all: { a: int(-1000, 1000), b: int(-1000, 1000) }
     assert: add(a, b) == add(b, a)
-  add_identity:
-    for_all: { a: int }
-    assert: add(a, 0) == a
 ```
 
-**Language mapping**:
-- Rust: `proptest!` or `quickcheck` macros
-- C#: `FsCheck` or similar
+**New approach (wave 2)**: Property testing is now automatic, not hand-written:
 
-**Rationale**: The implement-spec skill reads spec cases to understand requirements but doesn't run the harness (treat like ML validation data). Properties strengthen this — even if the skill sees the property definition, it can't hardcode outputs for randomized inputs.
+1. **Wave 1**: Run existing tests with instrumentation → collect ITF traces → propose invariants from observed patterns → user approves
+2. **Wave 2**: Generate Quint model from traces + approved invariants → `quint run` random simulation explores novel operation sequences → export ITF traces → replay as proptests
 
-**Needs**: Value range DSL design, spec-schema.json update, spec-format.md update, generator support for both languages.
+The user never writes property assertions manually. Invariants are inferred from trace analysis (always-contains, never-empty, monotonic growth, implication, bounded, idempotent) and proposed to the user for approval. The approved invariants become the property tests.
 
-**Impact**: Adds a third tier to specs: cases (concrete), properties (universal), types/constraints (structural). Significantly increases confidence that implementations are correct, not just case-fitted.
+**Language mapping** (unchanged):
+- Rust: `proptest!` for trace replay
+- C#: equivalent property test framework
+
+**What changed**: The `properties` YAML section is no longer needed. Instead, `invariants` holds approved properties, and wave 2 tooling generates the proptests. The three tiers become: cases (concrete, hand-written), invariants (universal, inferred + approved), types/constraints (structural).
+
+**Tooling needed**: `specgate trace`, `specgate propose-invariants`, `specgate quint-gen`, `specgate proptest-gen`.
 
 ---
 
