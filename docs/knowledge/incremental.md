@@ -34,10 +34,10 @@ updating. This replaces the greenfield steps in `implement-spec.md`.
    - Remove dead code from removed cases
    - Run all tests — new and existing — until they pass
 
-6. **Update internal tests**
-   - Add unit tests for any new helper functions
-   - Remove unit tests for deleted helpers
-   - Verify existing internal tests still pass
+6. **Unit tests fill gaps**
+   - Add unit tests for code paths not reachable through spec cases
+   - Remove unit tests for deleted code
+   - Verify existing unit tests still pass
 
 7. **Coverage**
    - Run coverage tool (see `implement-spec.md` for commands)

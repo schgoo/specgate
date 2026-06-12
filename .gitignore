@@ -11,3 +11,6 @@ target/
 # IDE
 .idea/
 *.swp
+
+# AI Session Data
+.copilot/

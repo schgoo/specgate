@@ -40,6 +40,55 @@ extraction works.
 | ErrorMap | Captured fields / observations, error variant | Error classification |
 | Structural | Static analysis (no runtime) | Deny/must rules |
 
+## Test generation for StateMachine specs
+
+State machine specs have `state`, `init`, `operations`, and cases with `steps`.
+Each test follows the component lifecycle:
+
+```
+1. Create component instance (SpecSetup)
+2. Verify initial state matches `init`
+3. For each step:
+   a. Call the operation with inputs
+   b. If step has `expected` — assert return value (partial match)
+   c. If step has `assert_state` — read state via SpecCapture, assert (partial match)
+```
+
+### Test structure (Rust example)
+
+```rust
+#[test]
+fn register_then_run() {
+    // Setup — SpecSetup creates the component
+    let mut harness = Harness::new(repo_root());
+
+    // Verify init state
+    assert!(harness.backend_names().contains("mock"));
+
+    // Step 1: register_backend
+    harness.register_backend("rust".into(), rust_backend());
+    // assert_state (if present in spec)
+    assert!(harness.backend_names().contains("rust"));
+
+    // Step 2: run_spec
+    let result = harness.run_spec("fixtures/simple_pass.spec.yaml");
+    // expected (if present in spec)
+    match result {
+        RunOutcome::Complete { report } => {
+            assert_eq!(report.passed, 1);
+            assert_eq!(report.total, 1);
+        }
+        other => panic!("expected Complete, got {:?}", other),
+    }
+}
+```
+
+### Single-step state machine cases
+
+When a state machine case has only one step, the test still follows the lifecycle
+(create, verify init, call operation, assert). It just has one step instead of
+many. This differs from a Stateless test only in that state is verified.
+
 ## Completeness
 
 | Kind | Incomplete if |

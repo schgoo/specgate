@@ -61,6 +61,8 @@ How to detect bootstrap mode:
 
 ## What the spec tells you
 
+### Single-operation specs
+
 - `name` — the component name (use for module/crate naming)
 - `binding` — which binding file to use (optional — absent in bootstrap mode)
 - `target` — how to build/run (you'll create this in the binding file)
@@ -69,6 +71,17 @@ How to detect bootstrap mode:
 - `outcome` — what the operation returns (variants or single type)
 - `outputs` — what's observable per outcome
 - `cases` — concrete test cases (input → expected outcome + outputs)
+
+### State machine specs
+
+- `state` — named state variables the component holds (types match SpecCapture getters)
+- `init` — initial state values (what the constructor produces)
+- `operations` — named operations with their own inputs/outcomes/outputs
+- `invariants` — approved invariants (properties the component must maintain)
+- `cases` with `steps` — ordered operation sequences on the same component instance
+
+A spec is one or the other — if it has `operations`, it's a state machine spec.
+See `spec-format.md` for the full format and `kinds.md` for test generation patterns.
 
 ## Project scaffolding
 
@@ -81,10 +94,14 @@ to the workspace if one exists.
 Follow a test-driven workflow: write tests from spec cases **before** implementing.
 
 1. **Spec-case tests come first** — each spec case becomes a test function.
-   These are your TDD red-green loop. Write them, watch them fail, implement
-   until they pass.
-2. **Internal tests come after** — once spec cases pass, add unit tests for
-   helper functions, internal invariants, and edge cases the spec doesn't cover.
+   These are integration tests exercising the full component. They are your TDD
+   red-green loop. Write them, watch them fail, implement until they pass.
+   For state machine specs, each case follows the component lifecycle
+   (create → step → assert → step → assert) — see `kinds.md` for patterns.
+2. **Unit tests fill gaps** — once spec cases pass, add unit tests for code paths
+   that can't be adequately tested through the integration path. If a behavior
+   IS reachable through a spec case, test it there — don't duplicate coverage
+   with a unit test.
 3. **100% line coverage** — measure with a coverage tool, not by inspection.
    - Rust: `cargo llvm-cov --summary-only` (install with `cargo install cargo-llvm-cov` if needed)
    - C#: `dotnet test --collect:"XPlat Code Coverage"` + `reportgenerator`
@@ -132,6 +149,22 @@ Then:
 - **Mark the flagged test as `#[ignore]`** with a comment explaining the
   suspected spec issue, so the rest of the suite still passes
 
+### When a spec uses features the harness doesn't consume yet
+
+State machine specs may use `state`, `init`, `operations`, `invariants`, or
+`steps` before the harness parser or code generator understands those fields.
+This is expected — the spec format is ahead of the tooling.
+
+In this situation:
+
+- **Implement the component to satisfy the spec's intent** — the `operations`
+  and `steps` tell you what the component's API looks like and how it behaves
+- **Write tests that follow the spec cases** — translate `steps` into
+  sequential method calls by hand (see `kinds.md` for the pattern)
+- **Do not skip or simplify cases** because the harness can't generate them yet
+- **Do not remove spec fields** that the harness doesn't consume — they are
+  there for future tooling and for human readers
+
 ## Knowledge base
 
 Before implementing, read `docs/knowledge/index.md` to see available topics.
@@ -141,6 +174,7 @@ Then read only what you need:
 - Always read: `rust.md` or `csharp.md` (whichever language you're implementing in)
 - Read if placing annotations: `annotations.md`
 - Read if kind is not Stateless: `kinds.md`
+- Read if spec has `operations` section: `kinds.md` (StateMachine test patterns)
 - Read if entry point is a method: `construction.md`
 - Read if creating binding: `bindings.md`
 - Read if you need validation rules: `validation.md`
@@ -151,7 +185,7 @@ Then read only what you need:
 - [ ] All spec types implemented as idiomatic language types
 - [ ] Every spec case has a corresponding test function
 - [ ] Core logic implemented — all spec-case tests pass
-- [ ] Internal helper functions have their own unit tests
+- [ ] Unit tests added for code paths not reachable through spec cases
 - [ ] Tests build and pass (`cargo test` / `dotnet test`)
 - [ ] Coverage measured and reported (target: 100% line coverage)
 - [ ] Uncovered branches identified and tested, or justified if untestable

@@ -15,6 +15,7 @@
 | ISS-007 | Property-based testing in specs | Open | 2026-06-12 |
 | ISS-008 | Command target exit code bug | Open | 2026-06-12 |
 | ISS-009 | ohno migration for error types | Open | 2026-06-12 |
+| ISS-010 | Spec YAML schema validation in Rust | Open | 2026-06-12 |
 
 ---
 
@@ -163,6 +164,23 @@ The user never writes property assertions manually. Invariants are inferred from
 **Status**: Open — deferred until harness runs end-to-end.
 
 **Impact**: Affects `specgate-types` (RunError), `specgate-rust-backend` (GenerateError), and all code that matches on these types. Non-breaking for external consumers if done correctly (struct-based errors are additive).
+
+---
+
+## ISS-010: Spec YAML Schema Validation in Rust
+
+**Context**: Spec YAML files are validated by `spec-schema.json` in editors (via `yaml-language-server` directive), but there is no programmatic schema validation in the Rust toolchain. The harness parses YAML with `serde_yaml` but does not validate against the JSON Schema — structural errors (wrong field names, missing required fields, mutually exclusive field violations like `inputs` + `operations`) are caught ad-hoc or not at all.
+
+**Status**: Open.
+
+**Options**:
+- `jsonschema` crate — mature, supports draft-07, validates `serde_json::Value` against a schema
+- `valico` crate — alternative JSON Schema validator
+- Custom validation in the harness parser — less general but no new dependency
+
+**Scope**: Add a `validate_spec_schema(yaml_str) -> Result<(), Vec<SchemaError>>` to `specgate-types` or `specgate-harness`. Call it during `run_spec` before parsing into `SpecDocument`. Also usable as a standalone `specgate validate` CLI command.
+
+**Impact**: Catches spec authoring errors early with actionable messages. Especially important now that specs have two modes (single-operation vs state machine) with mutual exclusivity constraints.
 
 ---
 
