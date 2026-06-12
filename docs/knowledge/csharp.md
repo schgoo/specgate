@@ -99,71 +99,100 @@ compiles to a pass-through when `SPECGATE` is not defined.
 | `List<T>` | `List<T>` or `IReadOnlyList<T>` |
 | `Option<T>` | `T?` (nullable) |
 | `Map<K, V>` | `Dictionary<K, V>` or `IReadOnlyDictionary<K, V>` |
-| `oneof` | Abstract record with derived types, or discriminated union pattern |
+| `oneof` | OneOf (see below) |
+| `causes` | Base record + derived records (see below) |
 | record (fields) | `record` or `class` with properties |
 
-## Mapping spec oneof to C#
+## Error handling
+
+Spec `causes` map to base record + derived records. Adding a new cause is
+non-breaking — no signatures change. 3rd party errors are wrapped via the
+`InnerException` property. Use [OneOf](https://github.com/mcintyre321/OneOf)
+(MIT) for `oneof` data types and outcome return types, but NOT for error causes.
+
+**Dependencies:** `OneOf` + `OneOf.SourceGenerator`
+
+### Spec
 
 ```yaml
-# Spec
 types:
   Shape:
     oneof:
       Circle: { radius: float }
       Rectangle: { width: float, height: float }
+
+  GeometryError:
+    causes:
+      NegativeDimension: { field: string }
+      TooManyVertices: { count: int }
+
+outcome:
+  oneof: [Ok, Error, Unrecoverable]
+outputs:
+  when Ok:
+    area: float
+  when Error:
+    error: GeometryError
+  when Unrecoverable:
+    message: string
 ```
+
+### C# mapping
 
 ```csharp
-// Option A: abstract record hierarchy
-public abstract record Shape;
-public record Circle(double Radius) : Shape;
-public record Rectangle(double Width, double Height) : Shape;
+// oneof → OneOf with exhaustive matching
+public record Circle(double Radius);
+public record Rectangle(double Width, double Height);
 
-// Option B: tagged JSON with System.Text.Json
-[JsonDerivedType(typeof(Circle), "Circle")]
-[JsonDerivedType(typeof(Rectangle), "Rectangle")]
-public abstract record Shape;
+[GenerateOneOf]
+public partial class Shape : OneOfBase<Circle, Rectangle> { }
+
+// causes → base record + derived (adding new causes is non-breaking)
+public abstract record GeometryCause;
+public record NegativeDimension(string Field) : GeometryCause;
+public record TooManyVertices(int Count) : GeometryCause;
+
+// Error wrapper holds cause + optional inner exception (for 3rd party errors)
+public class GeometryError(GeometryCause cause, Exception? inner = null)
+{
+    public GeometryCause Cause => cause;
+    public Exception? InnerException => inner;
+}
+
+// outcome oneof → OneOf return type (Unrecoverable → throw)
+public OneOf<double, GeometryError> ComputeArea(Shape shape) { ... }
 ```
 
-## Generating tests from spec cases
+### Error vs Unrecoverable
 
-Each spec case maps to one `[Fact]` or `[Theory]`:
+| Spec outcome | C# pattern | Test assertion |
+|---|---|---|
+| `when Ok` | `result.AsT0` | `Assert.Equal(expected, result.AsT0)` |
+| `when Error` | `result.AsT1` | `Assert.IsType<T>(error.Cause)` |
+| `when Unrecoverable` | `throw` exception | `Assert.Throws<T>()` |
+
+Error = caller can handle it. Unrecoverable = continuing would make things worse.
 
 ```csharp
 [Fact]
 public void CircleArea()
 {
-    // Arrange
-    var shape = new Circle(5.0);
-
-    // Act
-    var area = Geometry.ComputeArea(shape);
-
-    // Assert
-    Assert.Equal(78.54, area, precision: 2);
+    var result = Geometry.ComputeArea(new Circle(5.0));
+    Assert.Equal(78.54, result.AsT0, precision: 2);
 }
 
 [Fact]
-public void DivideByZero()
+public void NegativeRadius()
 {
-    // Act
-    var result = Calculator.Divide(10, 0);
-
-    // Assert
-    var error = Assert.IsType<CalcResult.Error>(result);
-    Assert.Equal("division by zero", error.Message);
+    var error = Geometry.ComputeArea(new Circle(-1)).AsT1;
+    Assert.IsType<NegativeDimension>(error.Cause);
 }
-```
 
-## Error handling
-
-Use result types that match the spec outcome model:
-
-```csharp
-public abstract record CalcResult
+[Fact]
+public void NullShapeAborts()
 {
-    public record Ok(double Value) : CalcResult;
-    public record Error(string Message) : CalcResult;
+    Assert.Throws<ArgumentNullException>(
+        () => Geometry.ComputeArea(null!));
 }
 ```
 

@@ -8,12 +8,62 @@
   "properties": {
     "language": {
       "type": "string",
-      "description": "Target language identifier. Selects the codegen backend and compile-time registry reader.",
+      "description": "Target language identifier. Selects the codegen backend.",
       "enum": ["rust", "csharp"]
     },
     "project_root": {
       "type": "string",
-      "description": "Path to the implementation project, relative to the binding file. The harness builds this project to populate the compile-time annotation registry, then generates tests here."
+      "description": "Path to the implementation project, relative to the binding file."
+    },
+    "targets": {
+      "type": "object",
+      "description": "Named execution targets. Each key is a target name referenced by specs via the 'target' field.",
+      "additionalProperties": {
+        "$ref": "#/definitions/targetDefinition"
+      }
+    }
+  },
+  "definitions": {
+    "targetDefinition": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "description": "Target kind: 'command' runs a shell command, 'api' calls a function directly.",
+          "enum": ["command", "api"]
+        },
+        "build": {
+          "type": "string",
+          "description": "Optional build command to run before execution (overrides the backend's default build). E.g. 'cargo build -p specgate-cli'."
+        },
+        "command": {
+          "type": "string",
+          "description": "Shell command to execute (for command targets). Supports {spec_path} and {workdir} templates."
+        },
+        "function": {
+          "type": "string",
+          "description": "Fully qualified function to call (for api targets), e.g. 'specgate_harness::Harness::run_spec'."
+        },
+        "constructor": {
+          "type": "string",
+          "description": "Fully qualified constructor for the receiver type (for api targets with methods)."
+        },
+        "outputs": {
+          "type": "object",
+          "description": "Where to read output from.",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path to output file. Supports {workdir} template."
+            },
+            "stdout": {
+              "type": "string",
+              "description": "Parse stdout as this format (e.g. 'json')."
+            }
+          }
+        }
+      }
     }
   }
 }

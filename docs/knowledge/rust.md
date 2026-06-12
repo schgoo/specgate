@@ -16,7 +16,7 @@ Add the crate to the workspace `Cargo.toml` if one exists.
 ## Common dependencies
 
 - `serde` + `serde_json` + `serde_yaml` — serialization
-- `thiserror` — error type derivation
+- `ohno` — error types (project convention — never use thiserror/anyhow)
 - `clap` — CLI argument parsing (if building a CLI)
 
 ## Annotations (when available)
@@ -178,14 +178,101 @@ fn divide_by_zero() {
 
 ## Error handling
 
-Use `thiserror` for domain error types:
+Use `ohno` (from [microsoft/oxidizer](https://github.com/microsoft/oxidizer))
+for all error types. Never use thiserror/anyhow.
+
+ohno uses **structs, not enums**. Enum variants are publicly accessible and
+become API surface — adding/removing variants is a breaking change. Struct-based
+errors avoid this, and each error becomes a first-class type with its own
+metadata, backtrace, and enrichment chain. `#[ohno::error]` adds an `OhnoCore`
+field and derives `Error`, `Display`, `Debug`. `::new()` and `::caused_by()` are
+auto-generated. `#[from(...)]` generates `From<T>` for `?`. `#[ohno::enrich_err]`
+adds file/line context.
+
+### Spec
+
+```yaml
+types:
+  Shape:
+    oneof:
+      Circle: { radius: float }
+      Rectangle: { width: float, height: float }
+
+  GeometryError:
+    causes:
+      NegativeDimension: { field: string }
+      TooManyVertices: { count: int }
+
+outcome:
+  oneof: [Ok, Error, Unrecoverable]
+outputs:
+  when Ok:
+    area: float
+  when Error:
+    error: GeometryError
+  when Unrecoverable:
+    message: string
+```
+
+### Rust mapping
 
 ```rust
-#[derive(Debug, thiserror::Error)]
-pub enum ParseError {
-    #[error("unexpected token: {token}")]
-    UnexpectedToken { token: String },
-    #[error("missing closing delimiter")]
-    MissingDelimiter,
+// oneof → enum
+pub enum Shape {
+    Circle { radius: f64 },
+    Rectangle { width: f64, height: f64 },
+}
+
+// causes → one ohno struct per cause, composed with #[from]
+#[ohno::error]
+#[display("negative dimension: {field}")]
+pub struct NegativeDimension { pub field: String }
+
+#[ohno::error]
+#[display("too many vertices: {count}")]
+pub struct TooManyVertices { pub count: i64 }
+
+// #[from] also works for 3rd party errors — wraps them in the chain
+#[ohno::error]
+#[display("geometry error")]
+#[from(NegativeDimension, TooManyVertices, std::io::Error)]
+pub struct GeometryError;
+
+// caused_by() wraps any error manually
+let err = NegativeDimension::caused_by("radius", some_3rd_party_error);
+
+// outcome oneof → Result (Unrecoverable → panic)
+#[ohno::enrich_err("computing area")]
+pub fn compute_area(shape: &Shape) -> Result<f64, GeometryError> { ... }
+```
+
+### Error vs Unrecoverable
+
+| Spec outcome | Rust pattern | Test assertion |
+|---|---|---|
+| `when Ok` | `Result::Ok(T)` | `.unwrap()` |
+| `when Error` | `Result::Err(E)` | `find_source::<T>()` on the error chain |
+| `when Unrecoverable` | `panic!()` | `#[should_panic(expected = "...")]` |
+
+Error = caller can handle it. Unrecoverable = continuing would make things worse.
+
+```rust
+#[test]
+fn circle_area() {
+    let area = compute_area(&Shape::Circle { radius: 5.0 }).unwrap();
+    assert!((area - 78.54).abs() < 0.01);
+}
+
+#[test]
+fn negative_radius() {
+    use ohno::ErrorExt;
+    let err = compute_area(&Shape::Circle { radius: -1.0 }).unwrap_err();
+    assert!(err.find_source::<NegativeDimension>().is_some());
+}
+
+#[test]
+#[should_panic(expected = "shape must not be null")]
+fn null_shape_aborts() {
+    compute_area_unchecked(std::ptr::null());
 }
 ```

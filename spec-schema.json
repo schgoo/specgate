@@ -109,11 +109,16 @@
     },
     "typeDefinition": {
       "type": "object",
-      "description": "A named type. Use 'oneof' for variant types. Otherwise keys are record fields with type expression values.",
+      "description": "A named type. Use 'oneof' for variant types, 'causes' for error types, or bare keys / 'fields' for records.",
       "properties": {
         "oneof": {
           "type": "object",
-          "description": "Variant type — each key is a variant name, value is an object describing its fields.",
+          "description": "Variant type (discriminated union) — each key is a variant name, value is an object describing its fields.",
+          "additionalProperties": true
+        },
+        "causes": {
+          "type": "object",
+          "description": "Error type — each key is a possible cause name, value is an object describing its fields. Maps to error chains (Rust/ohno) or OneOf (C#), not discriminated unions.",
           "additionalProperties": true
         },
         "fields": {

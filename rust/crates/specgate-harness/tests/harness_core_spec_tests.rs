@@ -174,7 +174,12 @@ fn all_cases_fail() {
     assert_eq!(report.failed, 2);
     assert_eq!(report.total, 2);
     assert_eq!(report.results.len(), 2);
-    assert!(report.results.iter().all(|result| result.status == CaseStatus::Fail));
+    assert!(
+        report
+            .results
+            .iter()
+            .all(|result| result.status == CaseStatus::Fail)
+    );
 }
 
 #[test]

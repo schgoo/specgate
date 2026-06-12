@@ -1,0 +1,130 @@
+# yaml-language-server: $schema=../spec-schema.json
+# SpecGate component: harness.cli
+#
+# The CLI binary. Wraps the harness pipeline as a command-line tool.
+# Takes a spec path, runs it through the harness, and prints the
+# RunOutcome as JSON to stdout. This is the command target that
+# other specs use to test themselves end-to-end.
+#
+# This spec uses a command target — the generated tests invoke the
+# built binary and parse its stdout JSON output.
+
+name: harness.cli
+binding: rust
+target: test
+
+inputs:
+  spec_path:
+    type: string
+    desc: Path to the .spec.yaml file to run
+
+types:
+  CaseResult:
+    name: string
+    status: string
+    duration_ms: int
+
+  RunReport:
+    spec_name: string
+    binding: string
+    timestamp: string
+    duration_ms: int
+    results: List<CaseResult>
+    passed: int
+    failed: int
+    total: int
+
+  RunError:
+    causes:
+      SpecNotFound: { path: string }
+      SpecInvalid: { detail: string }
+      BindingNotFound: { binding: string }
+      BackendNotFound: { language: string }
+      GenerateFailed: { detail: string }
+      BuildFailed: { detail: string }
+
+outcome:
+  oneof: [Complete, Error]
+
+outputs:
+  when Complete:
+    report: RunReport
+  when Error:
+    error: RunError
+
+cases:
+
+  # ===== Happy path =====
+
+  - name: single_case_pass
+    desc: CLI runs a single passing spec and prints Complete JSON
+    inputs:
+      spec_path: fixtures/simple_pass.spec.yaml
+    expected:
+      outcome: Complete
+      report:
+        passed: 1
+        failed: 0
+        total: 1
+
+  - name: multiple_cases_mixed
+    desc: CLI runs a spec with mixed results and prints correct counts
+    inputs:
+      spec_path: fixtures/multi_mixed.spec.yaml
+    expected:
+      outcome: Complete
+      report:
+        passed: 2
+        failed: 1
+        total: 3
+
+  # ===== Error cases =====
+
+  - name: spec_not_found
+    desc: CLI prints Error JSON when spec file does not exist
+    inputs:
+      spec_path: fixtures/nonexistent.spec.yaml
+    expected:
+      outcome: Error
+      error:
+        SpecNotFound: { path: fixtures/nonexistent.spec.yaml }
+
+  - name: spec_invalid_yaml
+    desc: CLI prints Error JSON when spec is malformed
+    inputs:
+      spec_path: fixtures/bad_yaml.spec.yaml
+    expected:
+      outcome: Error
+      error:
+        SpecInvalid: {}
+
+  # ===== Output format =====
+
+  - name: json_to_stdout
+    desc: CLI output is valid JSON parseable as RunOutcome
+    inputs:
+      spec_path: fixtures/simple_pass.spec.yaml
+    expected:
+      outcome: Complete
+      report:
+        spec_name: simple_pass
+        binding: mock
+
+  - name: exit_code_zero_on_complete
+    desc: CLI exits 0 when spec completes (even with failures)
+    inputs:
+      spec_path: fixtures/simple_fail.spec.yaml
+    expected:
+      outcome: Complete
+      report:
+        passed: 0
+        failed: 1
+
+  - name: exit_code_nonzero_on_error
+    desc: CLI exits nonzero when spec cannot be loaded
+    inputs:
+      spec_path: fixtures/nonexistent.spec.yaml
+    expected:
+      outcome: Error
+      error:
+        SpecNotFound: {}

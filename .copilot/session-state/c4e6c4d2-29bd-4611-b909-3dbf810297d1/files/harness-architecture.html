@@ -244,10 +244,24 @@
         <div class="dot-col"><span class="dot"></span><span class="line"></span></div>
         <div class="body">
           <h3>Resolve binding</h3>
-          <p>Look up the binding file from <code>binding:</code> field (or CLI override).
-             Validate against <code>binding-schema.json</code>. Extract <code>language</code>
-             and <code>project_root</code>.</p>
+          <p>Look up the binding file from <code>binding:</code> field (defaults to
+             <code>"mock"</code> when absent). Validate against <code>binding-schema.json</code>.
+             Extract <code>language</code> and <code>project_root</code>.
+             Select backend from the language identifier in the backends registry.</p>
           <div class="tags"><span class="tag">binding-schema.json</span></div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="num-col">2b</div>
+        <div class="dot-col"><span class="dot"></span><span class="line"></span></div>
+        <div class="body">
+          <h3>Prepare workdir</h3>
+          <p>Create a unique scratch directory at
+             <code>rust/target/specgate-harness/{spec_name}/run-{timestamp}/</code>.
+             Generated test files and result JSON are written here.
+             Unique suffixes prevent collisions between parallel runs.</p>
+          <div class="tags"><span class="tag">isolation</span></div>
         </div>
       </div>
 
@@ -256,7 +270,7 @@
         <div class="dot-col"><span class="dot"></span><span class="line"></span></div>
         <div class="body">
           <h3>Build &amp; discover</h3>
-          <p>Build the implementation project with the <code>specgate</code> Cargo feature
+          <p>Build the implementation project with the <code>test-util</code> feature flag
              enabled. Proc-macro annotations populate a compile-time registry of spec
              names → code symbols. The harness reads this registry to resolve which
              functions/methods implement each spec operation, setup, capture, etc.</p>
@@ -411,27 +425,53 @@
   <section>
     <div class="sec-head"><span class="num">03</span><h2>Modules</h2></div>
     <p class="sec-intro">
-      The crate splits into three layers: core (language-agnostic), codegen backends
-      (language-specific), and the CLI entry point.
+      The system is split across two crates in a Cargo workspace at <code>rust/</code>,
+      plus language-specific backend crates.
     </p>
 
     <div class="cards">
       <div class="card">
-        <h3>spec <span class="badge core">core</span></h3>
+        <h3>specgate-types <span class="badge core">crate</span></h3>
         <div class="desc">
-          Parse <code>.spec.yaml</code> and <code>binding.yaml</code> into typed structs.
-          Validate against schemas. Resolve <code>{workdir}</code> templates. This module
-          knows nothing about any programming language.
+          Shared types used by all crates: <code>SpecDocument</code>, <code>BindingFile</code>,
+          <code>CaseResult</code>, <code>RunReport</code>, <code>RunError</code>,
+          <code>RunOutcome</code>. These are the serialized JSON contracts. No business logic.
         </div>
         <div class="files">
-          <span>spec/mod.rs — Spec, Binding, types</span>
-          <span>spec/parse.rs — YAML parsing</span>
-          <span>spec/resolve.rs — binding + template resolution</span>
+          <span>spec_document.rs — SpecDocument, SpecCase</span>
+          <span>binding_file.rs — BindingFile</span>
+          <span>report.rs — CaseResult, RunReport, RunError, RunOutcome</span>
         </div>
       </div>
 
       <div class="card">
-        <h3>compare <span class="badge core">core</span></h3>
+        <h3>specgate-harness <span class="badge core">crate</span></h3>
+        <div class="desc">
+          The harness library. Contains the <code>Backend</code> trait, the
+          <code>Harness</code> orchestrator (pipeline entry point), and the
+          <code>MockBackend</code> (behind <code>test-util</code> feature flag).
+          No CLI yet — used as a library by tests.
+        </div>
+        <div class="files">
+          <span>backend.rs — Backend trait, Discovery, GeneratedArtifact</span>
+          <span>harness.rs — Harness::run_spec() pipeline</span>
+          <span>mock_backend.rs — MockBackend (test-util only)</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>specgate-rust-backend <span class="badge backend">crate (planned)</span></h3>
+        <div class="desc">
+          Rust codegen backend. Implements the <code>Backend</code> trait to generate
+          <code>tests/specgate_generated.rs</code> from specs and annotations.
+        </div>
+        <div class="files">
+          <span>rust_backend.rs — Backend impl for Rust</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>compare <span class="badge core">planned</span></h3>
         <div class="desc">
           Library for deep comparison of expected vs actual values. Used by generated
           tests for their assertions. Handles nested objects, lists (order-sensitive),
@@ -443,54 +483,13 @@
       </div>
 
       <div class="card">
-        <h3>runner <span class="badge core">core</span></h3>
+        <h3>cli <span class="badge lang">planned</span></h3>
         <div class="desc">
-          Orchestrates the pipeline: delegates to codegen, invokes the build and test
-          commands, collects per-case JSON output, and assembles the final
-          <code>RunReport</code>.
-        </div>
-        <div class="files">
-          <span>runner/mod.rs — run_spec() entry point</span>
-          <span>runner/output.rs — output collection</span>
-          <span>runner/process.rs — command execution</span>
-        </div>
-      </div>
-
-      <div class="card">
-        <h3>codegen <span class="badge backend">codegen</span></h3>
-        <div class="desc">
-          Shared codegen utilities and the <code>Backend</code> trait. Each backend
-          implements test file generation for one language. The trait takes a parsed
-          spec + binding and produces file contents to write.
-        </div>
-        <div class="files">
-          <span>codegen/mod.rs — Backend trait, utilities</span>
-          <span>codegen/rust.rs — Rust test emitter</span>
-          <span>codegen/csharp.rs — C# test emitter</span>
-        </div>
-      </div>
-
-      <div class="card">
-        <h3>cli <span class="badge lang">entry point</span></h3>
-        <div class="desc">
-          <code>clap</code>-based CLI. Accepts <code>--spec</code>, <code>--binding</code>,
-          <code>--workdir</code>, and output format flags. Calls <code>runner::run_spec()</code>
-          and writes JSON to stdout or a file.
+          <code>clap</code>-based CLI entry point. Not yet implemented — the harness
+          is currently used as a library via <code>Harness::new(repo_root).run_spec(path)</code>.
         </div>
         <div class="files">
           <span>main.rs — CLI entry point</span>
-        </div>
-      </div>
-
-      <div class="card">
-        <h3>types <span class="badge core">core</span></h3>
-        <div class="desc">
-          Shared result types: <code>CaseResult</code>, <code>Mismatch</code>,
-          <code>PerfMetrics</code>, <code>CoverageReport</code>, <code>RunError</code>.
-          These are the JSON output contract. Serializable via serde.
-        </div>
-        <div class="files">
-          <span>types.rs — all output types</span>
         </div>
       </div>
     </div>
@@ -505,41 +504,46 @@
       The codegen layer is pluggable. Each language backend implements this trait.
     </p>
 
-    <div class="code-label">codegen/mod.rs</div>
+    <div class="code-label">backend.rs (specgate-harness)</div>
     <div class="code-panel"><pre>
-<span class="kw">pub trait</span> <span class="fn">Backend</span> {
-    <span class="cm">/// Language identifier (e.g. "rust", "csharp").</span>
-    <span class="kw">fn</span> <span class="fn">language</span>(&amp;self) -&gt; &amp;<span class="kw">str</span>;
-
-    <span class="cm">/// Build the implementation project with specgate annotations enabled.</span>
-    <span class="cm">/// Returns the annotation registry (spec name → code symbol mapping).</span>
+<span class="kw">pub trait</span> <span class="fn">Backend</span>: Send + Sync {
+    <span class="cm">/// Build the implementation project and discover annotations.</span>
+    <span class="cm">/// Returns a Discovery with case metadata.</span>
     <span class="kw">fn</span> <span class="fn">build_and_discover</span>(
         &amp;self,
-        project_root: &amp;Path,
-    ) -&gt; Result&lt;Registry, DiscoverError&gt;;
+        binding: &amp;BindingFile,
+        spec: &amp;SpecDocument,
+    ) -&gt; Result&lt;Discovery, RunError&gt;;
 
-    <span class="cm">/// Generate test file contents from a parsed spec and annotation registry.</span>
-    <span class="cm">/// Returns a list of (relative_path, file_contents) to write.</span>
+    <span class="cm">/// Generate test file contents from a parsed spec and discovery.</span>
+    <span class="cm">/// Writes files to the workdir and returns a GeneratedArtifact.</span>
     <span class="kw">fn</span> <span class="fn">generate</span>(
         &amp;self,
-        spec: &amp;Spec,
-        registry: &amp;Registry,
-        project_root: &amp;Path,
-    ) -&gt; Result&lt;Vec&lt;GeneratedFile&gt;, CodegenError&gt;;
+        binding: &amp;BindingFile,
+        spec: &amp;SpecDocument,
+        discovery: &amp;Discovery,
+        workdir: &amp;Path,
+    ) -&gt; Result&lt;GeneratedArtifact, RunError&gt;;
 
-    <span class="cm">/// The shell command to build and run the generated tests.</span>
-    <span class="kw">fn</span> <span class="fn">run_command</span>(&amp;self, project_root: &amp;Path) -&gt; String;
+    <span class="cm">/// Execute the generated tests (e.g. cargo test).</span>
+    <span class="kw">fn</span> <span class="fn">run_command</span>(
+        &amp;self,
+        binding: &amp;BindingFile,
+        generated: &amp;GeneratedArtifact,
+    ) -&gt; Result&lt;(), RunError&gt;;
 
-    <span class="cm">/// Parse test results from JSON files written by generated tests.</span>
+    <span class="cm">/// Collect test results from JSON files written by generated tests.</span>
     <span class="kw">fn</span> <span class="fn">collect_results</span>(
         &amp;self,
-        project_root: &amp;Path,
-    ) -&gt; Result&lt;Vec&lt;CaseResult&gt;, CollectError&gt;;
+        generated: &amp;GeneratedArtifact,
+    ) -&gt; Result&lt;Vec&lt;CaseResult&gt;, RunError&gt;;
 }
 </pre></div>
     <p class="caption">
-      A backend's job: (1) build the project and discover annotations, (2) generate test files,
-      (3) provide the run command, (4) collect JSON results. The runner owns orchestration.
+      All methods take <code>&amp;BindingFile</code> for project context and return unified
+      <code>RunError</code>. Supporting types: <code>Discovery</code> (case metadata from build),
+      <code>GeneratedArtifact</code> (paths to generated files + results).
+      The <code>Harness</code> struct owns orchestration.
     </p>
   </section>
 
@@ -654,18 +658,20 @@
       </div>
       <div class="row">
         <div class="cell">Case isolation</div>
-        <div class="cell">Each case gets its own subdirectory under <code>{workdir}/.specgate/cases/{case_name}/</code>.
-          Input files are written there. Output files are read from there. The directory is cleaned before each case.</div>
+        <div class="cell">Each harness run gets a unique subdirectory under
+          <code>rust/target/specgate-harness/{spec_name}/run-{timestamp}/</code>.
+          Generated test files and result JSON are written there. No state leaks between runs.</div>
       </div>
       <div class="row">
         <div class="cell">Test generation</div>
-        <div class="cell">All cases are generated into a single test file. Each case is a separate test function.
-          The generated test writes its output JSON to its case subdirectory.</div>
+        <div class="cell">The backend generates test files into the workdir. For the mock backend,
+          this is a single file. Real backends will generate into the project's test directory.</div>
       </div>
       <div class="row">
         <div class="cell">Build once, run all</div>
-        <div class="cell">Generated tests are built and run in one step (e.g. <code>cargo test</code>), then each test function
-          writes its output JSON to its case subdirectory.</div>
+        <div class="cell">Generated tests are built and run in one step (e.g. <code>cargo test</code>).
+          The backend's <code>run_command</code> handles execution, <code>collect_results</code>
+          gathers per-case JSON output.</div>
       </div>
       <div class="row">
         <div class="cell">Input delivery</div>
@@ -731,24 +737,23 @@
       </div>
 
       <div class="decision">
-        <div class="dt">Per-case isolation via subdirectories</div>
+        <div class="dt">Per-run isolation via unique workdirs</div>
         <div class="dd">
-          Each case runs in its own subdirectory under <code>.specgate/cases/{case_name}/</code>.
-          File-based inputs are written there; outputs are read from there.
-          The directory is cleaned before each case. No state leaks between cases.
+          Each harness run creates a unique subdirectory under
+          <code>rust/target/specgate-harness/{spec_name}/run-{timestamp}/</code>.
+          Generated test files and result JSON are written there. Unique suffixes
+          prevent parallel test collisions. Workdirs are not cleaned automatically.
         </div>
         <div class="status decided">✓ Decided</div>
       </div>
 
       <div class="decision">
-        <div class="dt">Generated tests live in the project's test directory</div>
+        <div class="dt">Generated tests location (deferred)</div>
         <div class="dd">
-          The harness writes <code>tests/specgate_generated.rs</code> (Rust) or adds a
-          generated <code>.cs</code> to the test project (C#). This means the generated
-          tests compile with the same toolchain, features, and cfg flags as the user's
-          code. It also adds to their test coverage, and <code>cargo test</code> /
-          <code>dotnet test</code> picks them up naturally. No separate crate or scratch
-          directory needed.
+          The mock backend writes to the workdir scratch directory. The real Rust
+          backend (planned) will write to <code>tests/specgate_generated.rs</code> in
+          the target project so tests compile with the same toolchain and features.
+          The exact location is a backend decision, not a core harness concern.
         </div>
         <div class="status decided">✓ Decided</div>
       </div>
@@ -807,29 +812,29 @@
         <div class="cell">Used by</div>
       </div>
       <div class="row">
-        <div class="cell"><code>clap</code></div>
-        <div class="cell">CLI argument parsing</div>
-        <div class="cell">main.rs</div>
-      </div>
-      <div class="row">
         <div class="cell"><code>serde</code> + <code>serde_json</code></div>
         <div class="cell">JSON serialization of results</div>
-        <div class="cell">types, compare, runner</div>
+        <div class="cell">specgate-types, specgate-harness</div>
       </div>
       <div class="row">
         <div class="cell"><code>serde_yaml</code></div>
         <div class="cell">YAML parsing of specs and bindings</div>
-        <div class="cell">spec</div>
+        <div class="cell">specgate-harness</div>
       </div>
       <div class="row">
-        <div class="cell"><code>thiserror</code></div>
-        <div class="cell">Error types</div>
-        <div class="cell">all modules</div>
+        <div class="cell"><code>time</code></div>
+        <div class="cell">RFC 3339 timestamps in reports</div>
+        <div class="cell">specgate-harness</div>
       </div>
       <div class="row">
-        <div class="cell"><code>chrono</code></div>
-        <div class="cell">Timestamps in results</div>
-        <div class="cell">runner</div>
+        <div class="cell"><code>ohno</code></div>
+        <div class="cell">Error types (project convention: always use ohno)</div>
+        <div class="cell">all crates</div>
+      </div>
+      <div class="row">
+        <div class="cell"><code>specgate-types</code></div>
+        <div class="cell">Shared types (SpecDocument, BindingFile, RunReport, RunError)</div>
+        <div class="cell">specgate-harness, backends</div>
       </div>
     </div>
   </section>

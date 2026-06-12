@@ -49,6 +49,22 @@ fn build_and_discover_reads_mock_result_inputs() {
 }
 
 #[test]
+fn build_and_discover_ignores_non_string_mock_result_inputs() {
+    let backend = MockBackend;
+    let mut case = spec_case("alpha", None);
+    case.inputs.insert(
+        "mock_result".to_string(),
+        serde_yaml::to_value(1).expect("value should serialize"),
+    );
+
+    let discovery = backend
+        .build_and_discover(&mock_binding(), &spec_with_cases(vec![case]))
+        .expect("discovery should succeed");
+
+    assert_eq!(discovery.cases[0].mock_status, None);
+}
+
+#[test]
 fn generate_writes_case_names_to_generated_file() {
     let backend = MockBackend;
     let workdir = create_scratch_dir("generate_writes_case_names");
@@ -132,6 +148,28 @@ fn run_command_writes_results_json() {
 }
 
 #[test]
+fn run_command_writes_empty_results_json_when_no_cases_exist() {
+    let backend = MockBackend;
+    let workdir = create_scratch_dir("run_command_writes_empty_results");
+    let generated = GeneratedArtifact {
+        generated_test_path: workdir.join("generated.mock"),
+        results_path: workdir.join("results.json"),
+        cases: Vec::new(),
+        spec_name: "plain_spec".to_string(),
+    };
+
+    backend
+        .run_command(&mock_binding(), &generated)
+        .expect("run should succeed");
+
+    let results = serde_json::from_str::<Vec<CaseResult>>(
+        &fs::read_to_string(&generated.results_path).expect("results should exist"),
+    )
+    .expect("results json should parse");
+    assert!(results.is_empty());
+}
+
+#[test]
 fn run_command_returns_error_when_results_cannot_be_written() {
     let backend = MockBackend;
     let workdir = create_scratch_dir("run_command_write_error");
@@ -204,6 +242,7 @@ fn mock_binding() -> BindingFile {
     BindingFile {
         language: "mock".to_string(),
         project_root: ".".to_string(),
+        targets: BTreeMap::new(),
     }
 }
 

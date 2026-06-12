@@ -12,6 +12,9 @@
 | ISS-004 | External test case files | Open | 2026-06-11 |
 | ISS-005 | Claims syntax (non-functional and narrative) | Open | 2026-06-11 |
 | ISS-006 | Report renderer (report.render) | Open | 2026-06-11 |
+| ISS-007 | Property-based testing in specs | Open | 2026-06-12 |
+| ISS-008 | Command target exit code bug | Open | 2026-06-12 |
+| ISS-009 | ohno migration for error types | Open | 2026-06-12 |
 
 ---
 
@@ -110,5 +113,56 @@
 
 ---
 
+## ISS-007: Property-Based Testing in Specs
+
+**Context**: Spec cases are concrete examples (`{a: 2, b: 3} → 5`) that an implementation could hardcode. Property-based tests define universal assertions over value ranges — randomized inputs that can't be gamed.
+
+**Status**: Open — design after harness runs end-to-end.
+
+**Proposed syntax**:
+```yaml
+properties:
+  add_commutative:
+    for_all: { a: int(-1000, 1000), b: int(-1000, 1000) }
+    assert: add(a, b) == add(b, a)
+  add_identity:
+    for_all: { a: int }
+    assert: add(a, 0) == a
+```
+
+**Language mapping**:
+- Rust: `proptest!` or `quickcheck` macros
+- C#: `FsCheck` or similar
+
+**Rationale**: The implement-spec skill reads spec cases to understand requirements but doesn't run the harness (treat like ML validation data). Properties strengthen this — even if the skill sees the property definition, it can't hardcode outputs for randomized inputs.
+
+**Needs**: Value range DSL design, spec-schema.json update, spec-format.md update, generator support for both languages.
+
+**Impact**: Adds a third tier to specs: cases (concrete), properties (universal), types/constraints (structural). Significantly increases confidence that implementations are correct, not just case-fitted.
+
+---
+
+## ISS-008: Command Target Exit Code Bug
+
+**Context**: `render_command_case` in `generator.rs` (~line 495) always emits `assert!(output.status.success())`. This fails for spec cases where the expected outcome is `Error` and the command exits non-zero.
+
+**Status**: Open — known bug. Spec cases `command_target_error_exit` and `command_target_mixed_outcomes` expose this.
+
+**Fix**: Skip the success assertion when `expected.outcome == Error`. Parse stdout/stderr for error JSON regardless of exit code.
+
+**Impact**: Blocks command-target specs from testing error paths. API-target and annotation-target paths are unaffected.
+
+---
+
+## ISS-009: ohno Migration for Error Types
+
+**Context**: `RunError` and `GenerateError` are still plain Rust enums. Per the error model redesign (checkpoint 020), they should migrate to `#[ohno::error]` structs. The `causes` spec keyword maps to individual ohno structs composed with `#[from]` and inspected with `find_source::<T>()`.
+
+**Status**: Open — deferred until harness runs end-to-end.
+
+**Impact**: Affects `specgate-types` (RunError), `specgate-rust-backend` (GenerateError), and all code that matches on these types. Non-breaking for external consumers if done correctly (struct-based errors are additive).
+
+---
+
 **Version**: 1.0
-**Last Updated**: 2026-06-11
+**Last Updated**: 2026-06-12

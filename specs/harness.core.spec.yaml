@@ -35,7 +35,7 @@ types:
     total: int
 
   RunError:
-    oneof:
+    causes:
       SpecNotFound: { path: string }
       SpecInvalid: { detail: string }
       BindingNotFound: { binding: string }

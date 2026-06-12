@@ -110,6 +110,28 @@ See the language-specific knowledge files for test code examples.
 - **Spec cases are exhaustive** — every case must have a corresponding test
 - **Tests must actually run and pass** — build and verify before finishing
 
+### When a spec expectation seems wrong
+
+The spec is the source of truth — if a test fails, the implementation is
+wrong, not the spec. However, specs can have bugs. If you encounter a case
+where:
+
+1. The expected values are internally inconsistent (e.g., `passed: 2` but `total: 1`)
+2. The expectation contradicts the spec's own type definitions or outcome variants
+3. Two cases contradict each other
+4. You cannot see any implementation that could produce the expected output
+
+Then:
+
+- **Do not silently modify the spec** — it is owned by the user
+- **Do not loop endlessly** trying to make an impossible case pass
+- **Flag the issue clearly** — explain what the expectation says, why you
+  believe it cannot be met, and what you think the correct expectation is
+- **Continue implementing other cases** — don't block all progress on one
+  questionable case
+- **Mark the flagged test as `#[ignore]`** with a comment explaining the
+  suspected spec issue, so the rest of the suite still passes
+
 ## Knowledge base
 
 Before implementing, read `docs/knowledge/index.md` to see available topics.
@@ -135,3 +157,25 @@ Then read only what you need:
 - [ ] Uncovered branches identified and tested, or justified if untestable
 - [ ] If annotated mode: annotations present, binding file created
 - [ ] If bootstrap mode: conventional tests cover all cases
+- [ ] **Spec harness validation** — run the spec through the harness (see below)
+
+## Running the spec harness
+
+After implementation passes all tests, validate that the spec harness can
+generate and run the tests deterministically:
+
+1. **Check if a binding exists** for this spec — look at the spec's `binding:`
+   field and the corresponding `bindings/<name>.yaml` file
+2. **Check if the binding defines targets** — if the spec has `target: test`
+   (or similar), the binding should have a matching `targets.test` entry
+3. **If both exist**, run the harness:
+   - Rust: `cargo run -p specgate-cli -- run <spec-file>` (if CLI exists)
+   - Or programmatically: create a test that calls `Harness::run_spec("<spec-file>")`
+     with the appropriate backend registered
+4. **If the harness run succeeds**, all spec cases should produce `pass` results
+5. **If the harness or CLI doesn't exist yet** (bootstrap phase), skip this step
+   but note it as a follow-up
+
+The point: the spec harness should be able to generate and execute the same
+tests you wrote by hand. If it can't, something is missing from the spec,
+binding, or backend.

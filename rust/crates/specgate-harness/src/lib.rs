@@ -5,6 +5,7 @@ pub mod mock_backend;
 #[cfg(not(feature = "test-util"))]
 mod mock_backend;
 
+pub use backend::{Backend, DiscoveredCase, Discovery, GeneratedArtifact};
 pub use harness::Harness;
 #[cfg(feature = "test-util")]
 pub use mock_backend::MockBackend;

@@ -104,6 +104,7 @@ impl Harness {
             return Ok(BindingFile {
                 language: "mock".to_string(),
                 project_root: ".".to_string(),
+                targets: HashMap::new().into_iter().collect(),
             });
         }
 
@@ -264,7 +265,10 @@ mod tests {
     #[test]
     fn prepare_workdir_returns_build_failed_when_parent_is_a_file() {
         let repo_root = scratch_path("prepare_workdir_error");
-        let file_path = repo_root.join("rust").join("target").join("specgate-harness");
+        let file_path = repo_root
+            .join("rust")
+            .join("target")
+            .join("specgate-harness");
         fs::create_dir_all(file_path.parent().expect("parent should exist"))
             .expect("parent directories should be created");
         fs::write(&file_path, "not a directory").expect("sentinel file should be written");
@@ -364,7 +368,9 @@ mod tests {
     }
 
     fn write_spec(repo_root: &Path, spec_name: &str) {
-        let spec_path = repo_root.join("specs").join(format!("{spec_name}.spec.yaml"));
+        let spec_path = repo_root
+            .join("specs")
+            .join(format!("{spec_name}.spec.yaml"));
         fs::create_dir_all(spec_path.parent().expect("spec parent should exist"))
             .expect("spec directory should be created");
         fs::write(

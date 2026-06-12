@@ -1,5 +1,9 @@
 [workspace]
-members = ["crates/specgate-harness", "crates/specgate-types"]
+members = [
+    "crates/specgate-harness",
+    "crates/specgate-rust-backend",
+    "crates/specgate-types",
+]
 resolver = "3"
 
 [workspace.package]

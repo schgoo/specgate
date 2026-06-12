@@ -31,7 +31,7 @@ types:
       SpecMock: { operation: string, symbol: string, mock_name: string }
 
   ValidationError:
-    oneof:
+    causes:
       MissingEntryPoint: { operation: string }
       DuplicateEntryPoint: { operation: string }
       IncompleteOperation: { operation: string }
@@ -42,7 +42,7 @@ types:
       DuplicateSetupName: { operation: string, name: string }
 
   ValidationWarning:
-    oneof:
+    causes:
       AbstractTypeNoGenerator: { operation: string }
       PrivateCheckpoint: { symbol: string }
       AmbiguousConstruction: { operation: string, type: string }

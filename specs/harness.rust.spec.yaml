@@ -10,9 +10,22 @@
 # - Injects spec_mock return values
 # - Asserts expected vs actual values
 # - Writes structured JSON output for cross-language tooling
+#
+# Two target modes are supported:
+# 1. Annotation-based (function target): spec references annotated code
+#    via SpecOperation/SpecSetup/SpecCapture/SpecCheckpoint/SpecMock.
+#    The generator resolves symbols from annotations.json and emits
+#    direct function calls.
+# 2. Command/API target: spec declares an API entry point directly
+#    (e.g. a public function with typed input/output). No annotations
+#    needed — the generator emits code that calls the function,
+#    serializes the return value, and matches against expected output.
+#    This is used for specs whose system under test is a library API
+#    with structured return types (e.g. harness.core testing itself).
 
 name: harness.rust
-target: test
+binding: rust
+target: generate
 
 inputs:
   spec:
@@ -28,7 +41,7 @@ types:
     content: string
 
   GenerateError:
-    oneof:
+    causes:
       MissingSetup: { operation: string }
       MissingCapture: { operation: string }
       UnsupportedType: { type_name: string, detail: string }
@@ -229,3 +242,188 @@ cases:
       outcome: Ok
       files:
         - path: tests/specgate_generated.rs
+
+  # ===== Command/API target =====
+  # These cases test the non-annotation codegen path. The spec's target
+  # field resolves to a named target in the binding file. Command targets
+  # define a shell command; API targets define a function + constructor.
+  # The generator emits code accordingly — no annotations needed.
+
+  - name: api_target_simple
+    desc: Generates test that calls a public API function directly via binding target
+    inputs:
+      spec:
+        name: harness.core
+        target: api
+        binding: rust
+        cases:
+          - name: single_pass
+            inputs: { spec_path: "fixtures/simple_pass.spec.yaml" }
+            expected: { outcome: Complete, report: { passed: 1, failed: 0, total: 1 } }
+      annotations: []
+      binding_target:
+        kind: api
+        function: "specgate_harness::Harness::run_spec"
+        constructor: "specgate_harness::Harness::new"
+    expected:
+      outcome: Ok
+      files:
+        - path: tests/specgate_generated.rs
+
+  - name: api_target_error_variant
+    desc: Generates test that asserts an error variant from a binding API target
+    inputs:
+      spec:
+        name: harness.core
+        target: api
+        binding: rust
+        cases:
+          - name: spec_not_found
+            inputs: { spec_path: "fixtures/nonexistent.spec.yaml" }
+            expected: { outcome: Error, error: { SpecNotFound: { path: "fixtures/nonexistent.spec.yaml" } } }
+      annotations: []
+      binding_target:
+        kind: api
+        function: "specgate_harness::Harness::run_spec"
+        constructor: "specgate_harness::Harness::new"
+    expected:
+      outcome: Ok
+      files:
+        - path: tests/specgate_generated.rs
+
+  - name: api_target_multiple_cases
+    desc: Multiple cases for a binding API target all land in one test file
+    inputs:
+      spec:
+        name: harness.core
+        target: api
+        binding: rust
+        cases:
+          - name: pass_case
+            inputs: { spec_path: "fixtures/simple_pass.spec.yaml" }
+            expected: { outcome: Complete, report: { passed: 1, total: 1 } }
+          - name: fail_case
+            inputs: { spec_path: "fixtures/simple_fail.spec.yaml" }
+            expected: { outcome: Complete, report: { passed: 0, failed: 1, total: 1 } }
+          - name: not_found
+            inputs: { spec_path: "fixtures/nonexistent.spec.yaml" }
+            expected: { outcome: Error, error: { SpecNotFound: {} } }
+      annotations: []
+      binding_target:
+        kind: api
+        function: "specgate_harness::Harness::run_spec"
+        constructor: "specgate_harness::Harness::new"
+    expected:
+      outcome: Ok
+      files:
+        - path: tests/specgate_generated.rs
+
+  - name: command_target_simple
+    desc: Generates test that runs a shell command and parses JSON output
+    inputs:
+      spec:
+        name: harness.core
+        target: test
+        binding: rust
+        cases:
+          - name: single_pass
+            inputs: { spec_path: "fixtures/simple_pass.spec.yaml" }
+            expected: { outcome: Complete, report: { passed: 1, total: 1 } }
+      annotations: []
+      binding_target:
+        kind: command
+        command: "./target/debug/specgate run {spec_path}"
+        outputs:
+          stdout: json
+    expected:
+      outcome: Ok
+      files:
+        - path: tests/specgate_generated.rs
+
+  - name: command_target_error_exit
+    desc: Command with nonzero exit still parses stderr/stdout for error JSON
+    inputs:
+      spec:
+        name: harness.core
+        target: test
+        binding: rust
+        cases:
+          - name: spec_not_found
+            inputs: { spec_path: "fixtures/nonexistent.spec.yaml" }
+            expected: { outcome: Error, error: { SpecNotFound: { path: "fixtures/nonexistent.spec.yaml" } } }
+      annotations: []
+      binding_target:
+        kind: command
+        command: "./target/debug/specgate run {spec_path}"
+        outputs:
+          stdout: json
+    expected:
+      outcome: Ok
+      files:
+        - path: tests/specgate_generated.rs
+
+  - name: command_target_mixed_outcomes
+    desc: Command target handles cases with different outcomes in one file
+    inputs:
+      spec:
+        name: harness.core
+        target: test
+        binding: rust
+        cases:
+          - name: pass_case
+            inputs: { spec_path: "fixtures/simple_pass.spec.yaml" }
+            expected: { outcome: Complete, report: { passed: 1 } }
+          - name: not_found
+            inputs: { spec_path: "fixtures/nonexistent.spec.yaml" }
+            expected: { outcome: Error, error: { SpecNotFound: {} } }
+          - name: invalid_yaml
+            inputs: { spec_path: "fixtures/bad_yaml.spec.yaml" }
+            expected: { outcome: Error, error: { SpecInvalid: {} } }
+      annotations: []
+      binding_target:
+        kind: command
+        command: "./target/debug/specgate run {spec_path}"
+        outputs:
+          stdout: json
+    expected:
+      outcome: Ok
+      files:
+        - path: tests/specgate_generated.rs
+
+  - name: command_target_missing_command
+    desc: Command target in binding without command field fails generation
+    inputs:
+      spec:
+        name: harness.core
+        target: test
+        binding: rust
+        cases:
+          - name: basic
+            inputs: { spec_path: "fixtures/simple_pass.spec.yaml" }
+            expected: { outcome: Complete }
+      annotations: []
+      binding_target:
+        kind: command
+    expected:
+      outcome: Error
+      errors:
+        - UnsupportedType: { type_name: "binding_target", detail: "command target requires command field" }
+
+  - name: api_target_missing_function
+    desc: API target in binding without function field fails generation
+    inputs:
+      spec:
+        name: harness.core
+        target: api
+        binding: rust
+        cases:
+          - name: basic
+            inputs: { spec_path: "fixtures/simple_pass.spec.yaml" }
+            expected: { outcome: Complete }
+      annotations: []
+      binding_target:
+        kind: api
+    expected:
+      outcome: Error
+      errors:
+        - UnsupportedType: { type_name: "binding_target", detail: "api target requires function field" }

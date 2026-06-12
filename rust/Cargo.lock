@@ -148,6 +148,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "specgate-rust-backend"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "specgate-harness",
+ "specgate-types",
+]
+
+[[package]]
 name = "specgate-types"
 version = "0.1.0"
 dependencies = [
