@@ -6,9 +6,7 @@
 # generated tests, collects JSON results, and emits a run report.
 #
 # This is a StateMachine spec — the harness holds state (registered
-# backends) that operations depend on. Currently one operation
-# (run_spec); register_backend will be added when the implementation
-# supports dynamic backend registration.
+# backends) that operations depend on.
 #
 # All cases use a mock backend registered during construction.
 # Language-specific codegen is tested by harness.rust and harness.csharp.
@@ -26,6 +24,14 @@ init:
 
 # Operations
 operations:
+  register_backend:
+    inputs:
+      name:
+        type: string
+        desc: Name to register the backend under (e.g., "rust", "csharp")
+      backend:
+        type: Backend
+        desc: Backend implementation to register
   run_spec:
     inputs:
       spec_path:
@@ -40,6 +46,10 @@ operations:
         error: RunError
 
 types:
+  Backend:
+    oneof:
+      RustBackend: {}
+
   CaseResult:
     name: string
     status: string
@@ -71,6 +81,37 @@ invariants:
   at_least_one_backend: "backends.size() >= 1"
 
 cases:
+
+  # ===== Backend registration =====
+
+  - name: register_adds_to_backends
+    desc: Registering a backend adds its name to the backends set
+    steps:
+      - operation: register_backend
+        inputs:
+          name: rust
+          backend:
+            RustBackend: {}
+        assert_state:
+          backends: [mock, rust]
+
+  - name: register_idempotent
+    desc: Registering a backend with an existing name replaces it silently
+    steps:
+      - operation: register_backend
+        inputs:
+          name: rust
+          backend:
+            RustBackend: {}
+        assert_state:
+          backends: [mock, rust]
+      - operation: register_backend
+        inputs:
+          name: rust
+          backend:
+            RustBackend: {}
+        assert_state:
+          backends: [mock, rust]
 
   # ===== Happy path =====
 
