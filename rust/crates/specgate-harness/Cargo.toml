@@ -11,3 +11,6 @@ serde_json.workspace = true
 serde_yaml.workspace = true
 specgate-types = { path = "../specgate-types" }
 time.workspace = true
+
+[dev-dependencies]
+specgate-rust-backend = { path = "../specgate-rust-backend" }

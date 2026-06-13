@@ -7,7 +7,9 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use specgate_rust_backend::{Annotation, GenerateError, OperationKind, generate_test_file};
-use specgate_types::{BindingTarget, BindingTargetKind, BindingTargetOutputs, SpecCase, SpecDocument};
+use specgate_types::{
+    BindingTarget, BindingTargetKind, BindingTargetOutputs, SpecCase, SpecDocument,
+};
 
 fn make_spec(name: &str, cases: Vec<SpecCase>) -> SpecDocument {
     SpecDocument {
@@ -22,7 +24,12 @@ fn make_spec(name: &str, cases: Vec<SpecCase>) -> SpecDocument {
     }
 }
 
-fn make_case(name: &str, desc: &str, inputs: serde_yaml::Value, expected: serde_yaml::Value) -> SpecCase {
+fn make_case(
+    name: &str,
+    desc: &str,
+    inputs: serde_yaml::Value,
+    expected: serde_yaml::Value,
+) -> SpecCase {
     let inputs_map = match inputs {
         serde_yaml::Value::Mapping(m) => m
             .into_iter()
@@ -185,7 +192,10 @@ fn mock_injection() {
         vec![make_case(
             "success_response",
             "success response",
-            serde_yaml::from_str(r#"{ url: "https://example.com", mock_backend: { status: 200, body: ok } }"#).unwrap(),
+            serde_yaml::from_str(
+                r#"{ url: "https://example.com", mock_backend: { status: 200, body: ok } }"#,
+            )
+            .unwrap(),
             serde_yaml::from_str("{ outcome: Ok, status: 200 }").unwrap(),
         )],
     );
@@ -225,15 +235,44 @@ fn multiple_cases_one_file() {
     let spec = make_spec(
         "calc",
         vec![
-            make_case("add_positive", "add positive", serde_yaml::from_str("{ a: 2, b: 3 }").unwrap(), serde_yaml::from_str("{ outcome: Ok, result: 5 }").unwrap()),
-            make_case("add_negative", "add negative", serde_yaml::from_str("{ a: -1, b: 1 }").unwrap(), serde_yaml::from_str("{ outcome: Ok, result: 0 }").unwrap()),
-            make_case("add_zero", "add zero", serde_yaml::from_str("{ a: 0, b: 0 }").unwrap(), serde_yaml::from_str("{ outcome: Ok, result: 0 }").unwrap()),
+            make_case(
+                "add_positive",
+                "add positive",
+                serde_yaml::from_str("{ a: 2, b: 3 }").unwrap(),
+                serde_yaml::from_str("{ outcome: Ok, result: 5 }").unwrap(),
+            ),
+            make_case(
+                "add_negative",
+                "add negative",
+                serde_yaml::from_str("{ a: -1, b: 1 }").unwrap(),
+                serde_yaml::from_str("{ outcome: Ok, result: 0 }").unwrap(),
+            ),
+            make_case(
+                "add_zero",
+                "add zero",
+                serde_yaml::from_str("{ a: 0, b: 0 }").unwrap(),
+                serde_yaml::from_str("{ outcome: Ok, result: 0 }").unwrap(),
+            ),
         ],
     );
     let annotations = vec![
-        Annotation::SpecOperation { operation: "calc".into(), kind: OperationKind::Stateless, symbol: "calc::Calculator::add".into() },
-        Annotation::SpecSetup { operation: "calc".into(), name: "default".into(), symbol: "calc::setup_calc".into(), params: vec![], returns: None },
-        Annotation::SpecCapture { operation: "calc".into(), symbol: "calc::Calculator::result".into(), capture_all: false },
+        Annotation::SpecOperation {
+            operation: "calc".into(),
+            kind: OperationKind::Stateless,
+            symbol: "calc::Calculator::add".into(),
+        },
+        Annotation::SpecSetup {
+            operation: "calc".into(),
+            name: "default".into(),
+            symbol: "calc::setup_calc".into(),
+            params: vec![],
+            returns: None,
+        },
+        Annotation::SpecCapture {
+            operation: "calc".into(),
+            symbol: "calc::Calculator::result".into(),
+            capture_all: false,
+        },
     ];
 
     let result = generate_test_file(&spec, &annotations, None, test_path(), results_path());
@@ -255,9 +294,23 @@ fn struct_level_capture() {
         )],
     );
     let annotations = vec![
-        Annotation::SpecOperation { operation: "fetch".into(), kind: OperationKind::Stateless, symbol: "http::fetch".into() },
-        Annotation::SpecSetup { operation: "fetch".into(), name: "default".into(), symbol: "http::setup_fetch".into(), params: vec![], returns: None },
-        Annotation::SpecCapture { operation: "fetch".into(), symbol: "http::FetchResult".into(), capture_all: true },
+        Annotation::SpecOperation {
+            operation: "fetch".into(),
+            kind: OperationKind::Stateless,
+            symbol: "http::fetch".into(),
+        },
+        Annotation::SpecSetup {
+            operation: "fetch".into(),
+            name: "default".into(),
+            symbol: "http::setup_fetch".into(),
+            params: vec![],
+            returns: None,
+        },
+        Annotation::SpecCapture {
+            operation: "fetch".into(),
+            symbol: "http::FetchResult".into(),
+            capture_all: true,
+        },
     ];
 
     let result = generate_test_file(&spec, &annotations, None, test_path(), results_path());
@@ -272,31 +325,59 @@ fn struct_level_capture() {
 fn missing_setup() {
     let spec = make_spec(
         "calc",
-        vec![make_case("basic", "basic", serde_yaml::from_str("{ a: 1 }").unwrap(), serde_yaml::from_str("{ outcome: Ok }").unwrap())],
+        vec![make_case(
+            "basic",
+            "basic",
+            serde_yaml::from_str("{ a: 1 }").unwrap(),
+            serde_yaml::from_str("{ outcome: Ok }").unwrap(),
+        )],
     );
-    let annotations = vec![
-        Annotation::SpecOperation { operation: "calc".into(), kind: OperationKind::Stateless, symbol: "calc::add".into() },
-    ];
+    let annotations = vec![Annotation::SpecOperation {
+        operation: "calc".into(),
+        kind: OperationKind::Stateless,
+        symbol: "calc::add".into(),
+    }];
 
     let result = generate_test_file(&spec, &annotations, None, test_path(), results_path());
     let errors = result.expect_err("missing setup should fail");
-    assert!(errors.iter().any(|e| matches!(e, GenerateError::MissingSetup { operation } if operation == "calc")));
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, GenerateError::MissingSetup { operation } if operation == "calc"))
+    );
 }
 
 #[test]
 fn missing_capture() {
     let spec = make_spec(
         "breaker",
-        vec![make_case("trip", "trip", serde_yaml::from_str("{ success: false }").unwrap(), serde_yaml::from_str("{ outcome: Ok }").unwrap())],
+        vec![make_case(
+            "trip",
+            "trip",
+            serde_yaml::from_str("{ success: false }").unwrap(),
+            serde_yaml::from_str("{ outcome: Ok }").unwrap(),
+        )],
     );
     let annotations = vec![
-        Annotation::SpecOperation { operation: "breaker".into(), kind: OperationKind::StateMachine, symbol: "cb::on_result".into() },
-        Annotation::SpecSetup { operation: "breaker".into(), name: "default".into(), symbol: "cb::setup".into(), params: vec![], returns: None },
+        Annotation::SpecOperation {
+            operation: "breaker".into(),
+            kind: OperationKind::StateMachine,
+            symbol: "cb::on_result".into(),
+        },
+        Annotation::SpecSetup {
+            operation: "breaker".into(),
+            name: "default".into(),
+            symbol: "cb::setup".into(),
+            params: vec![],
+            returns: None,
+        },
     ];
 
     let result = generate_test_file(&spec, &annotations, None, test_path(), results_path());
     let errors = result.expect_err("missing capture for statemachine should fail");
-    assert!(errors.iter().any(|e| matches!(e, GenerateError::MissingCapture { operation } if operation == "breaker")));
+    assert!(errors.iter().any(
+        |e| matches!(e, GenerateError::MissingCapture { operation } if operation == "breaker")
+    ));
 }
 
 // ===== JSON output =====
@@ -305,12 +386,31 @@ fn missing_capture() {
 fn generates_json_output() {
     let spec = make_spec(
         "calc",
-        vec![make_case("basic", "basic", serde_yaml::from_str("{ a: 1, b: 2 }").unwrap(), serde_yaml::from_str("{ outcome: Ok, result: 3 }").unwrap())],
+        vec![make_case(
+            "basic",
+            "basic",
+            serde_yaml::from_str("{ a: 1, b: 2 }").unwrap(),
+            serde_yaml::from_str("{ outcome: Ok, result: 3 }").unwrap(),
+        )],
     );
     let annotations = vec![
-        Annotation::SpecOperation { operation: "calc".into(), kind: OperationKind::Stateless, symbol: "calc::add".into() },
-        Annotation::SpecSetup { operation: "calc".into(), name: "default".into(), symbol: "calc::setup".into(), params: vec![], returns: None },
-        Annotation::SpecCapture { operation: "calc".into(), symbol: "calc::Result::value".into(), capture_all: false },
+        Annotation::SpecOperation {
+            operation: "calc".into(),
+            kind: OperationKind::Stateless,
+            symbol: "calc::add".into(),
+        },
+        Annotation::SpecSetup {
+            operation: "calc".into(),
+            name: "default".into(),
+            symbol: "calc::setup".into(),
+            params: vec![],
+            returns: None,
+        },
+        Annotation::SpecCapture {
+            operation: "calc".into(),
+            symbol: "calc::Result::value".into(),
+            capture_all: false,
+        },
     ];
 
     let result = generate_test_file(&spec, &annotations, None, test_path(), results_path());
@@ -333,9 +433,22 @@ fn inline_checkpoint() {
         )],
     );
     let annotations = vec![
-        Annotation::SpecOperation { operation: "pipeline".into(), kind: OperationKind::Sequence, symbol: "pipe::process".into() },
-        Annotation::SpecSetup { operation: "pipeline".into(), name: "default".into(), symbol: "pipe::setup".into(), params: vec![], returns: None },
-        Annotation::SpecCheckpoint { operation: "pipeline".into(), symbol: "pipe::process::checkpoint_1".into() },
+        Annotation::SpecOperation {
+            operation: "pipeline".into(),
+            kind: OperationKind::Sequence,
+            symbol: "pipe::process".into(),
+        },
+        Annotation::SpecSetup {
+            operation: "pipeline".into(),
+            name: "default".into(),
+            symbol: "pipe::setup".into(),
+            params: vec![],
+            returns: None,
+        },
+        Annotation::SpecCheckpoint {
+            operation: "pipeline".into(),
+            symbol: "pipe::process::checkpoint_1".into(),
+        },
     ];
 
     let result = generate_test_file(&spec, &annotations, None, test_path(), results_path());
@@ -354,7 +467,10 @@ fn api_target_simple() {
             "single_pass",
             "single pass",
             serde_yaml::from_str(r#"{ spec_path: "fixtures/simple_pass.spec.yaml" }"#).unwrap(),
-            serde_yaml::from_str("{ outcome: Complete, report: { passed: 1, failed: 0, total: 1 } }").unwrap(),
+            serde_yaml::from_str(
+                "{ outcome: Complete, report: { passed: 1, failed: 0, total: 1 } }",
+            )
+            .unwrap(),
         )],
     );
     let target = BindingTarget {
@@ -404,9 +520,28 @@ fn api_target_multiple_cases() {
     let spec = make_spec(
         "harness.core",
         vec![
-            make_case("pass_case", "pass", serde_yaml::from_str(r#"{ spec_path: "fixtures/simple_pass.spec.yaml" }"#).unwrap(), serde_yaml::from_str("{ outcome: Complete, report: { passed: 1, total: 1 } }").unwrap()),
-            make_case("fail_case", "fail", serde_yaml::from_str(r#"{ spec_path: "fixtures/simple_fail.spec.yaml" }"#).unwrap(), serde_yaml::from_str("{ outcome: Complete, report: { passed: 0, failed: 1, total: 1 } }").unwrap()),
-            make_case("not_found", "not found", serde_yaml::from_str(r#"{ spec_path: "fixtures/nonexistent.spec.yaml" }"#).unwrap(), serde_yaml::from_str("{ outcome: Error, error: { SpecNotFound: {} } }").unwrap()),
+            make_case(
+                "pass_case",
+                "pass",
+                serde_yaml::from_str(r#"{ spec_path: "fixtures/simple_pass.spec.yaml" }"#).unwrap(),
+                serde_yaml::from_str("{ outcome: Complete, report: { passed: 1, total: 1 } }")
+                    .unwrap(),
+            ),
+            make_case(
+                "fail_case",
+                "fail",
+                serde_yaml::from_str(r#"{ spec_path: "fixtures/simple_fail.spec.yaml" }"#).unwrap(),
+                serde_yaml::from_str(
+                    "{ outcome: Complete, report: { passed: 0, failed: 1, total: 1 } }",
+                )
+                .unwrap(),
+            ),
+            make_case(
+                "not_found",
+                "not found",
+                serde_yaml::from_str(r#"{ spec_path: "fixtures/nonexistent.spec.yaml" }"#).unwrap(),
+                serde_yaml::from_str("{ outcome: Error, error: { SpecNotFound: {} } }").unwrap(),
+            ),
         ],
     );
     let target = BindingTarget {
@@ -486,7 +621,9 @@ fn command_target_error_exit() {
     // The generated code should NOT assert success when expected outcome is Error
     let has_success_assert = file.content.contains("assert!(output.status.success()");
     if has_success_assert {
-        eprintln!("WARNING: command_target_error_exit generates assert!(output.status.success()) which will fail for expected error cases — this is the known exit code bug");
+        eprintln!(
+            "WARNING: command_target_error_exit generates assert!(output.status.success()) which will fail for expected error cases — this is the known exit code bug"
+        );
     }
 }
 
@@ -496,7 +633,12 @@ fn command_target_error_exit() {
 fn command_target_missing_command() {
     let spec = make_spec(
         "harness.core",
-        vec![make_case("basic", "basic", serde_yaml::from_str(r#"{ spec_path: "fixtures/simple_pass.spec.yaml" }"#).unwrap(), serde_yaml::from_str("{ outcome: Complete }").unwrap())],
+        vec![make_case(
+            "basic",
+            "basic",
+            serde_yaml::from_str(r#"{ spec_path: "fixtures/simple_pass.spec.yaml" }"#).unwrap(),
+            serde_yaml::from_str("{ outcome: Complete }").unwrap(),
+        )],
     );
     let target = BindingTarget {
         kind: BindingTargetKind::Command,
@@ -519,7 +661,12 @@ fn command_target_missing_command() {
 fn api_target_missing_function() {
     let spec = make_spec(
         "harness.core",
-        vec![make_case("basic", "basic", serde_yaml::from_str(r#"{ spec_path: "fixtures/simple_pass.spec.yaml" }"#).unwrap(), serde_yaml::from_str("{ outcome: Complete }").unwrap())],
+        vec![make_case(
+            "basic",
+            "basic",
+            serde_yaml::from_str(r#"{ spec_path: "fixtures/simple_pass.spec.yaml" }"#).unwrap(),
+            serde_yaml::from_str("{ outcome: Complete }").unwrap(),
+        )],
     );
     let target = BindingTarget {
         kind: BindingTargetKind::Api,

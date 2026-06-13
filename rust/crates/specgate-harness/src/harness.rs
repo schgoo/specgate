@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -44,6 +44,15 @@ impl Harness {
     #[must_use]
     pub fn repo_root(&self) -> &Path {
         &self.repo_root
+    }
+
+    pub fn register_backend(&mut self, name: String, backend: Arc<dyn Backend>) {
+        self.backends.insert(name, backend);
+    }
+
+    #[must_use]
+    pub fn backend_names(&self) -> HashSet<String> {
+        self.backends.keys().cloned().collect()
     }
 
     pub fn run_spec(&self, spec_path: impl AsRef<Path>) -> RunOutcome {

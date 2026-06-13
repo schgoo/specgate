@@ -1,7 +1,49 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use specgate_harness::Harness;
+use specgate_rust_backend::RustBackend;
 use specgate_types::{CaseStatus, RunError, RunOutcome};
+
+#[test]
+fn register_adds_to_backends() {
+    let mut harness = harness();
+
+    assert_eq!(
+        harness.backend_names(),
+        HashSet::from([String::from("mock")])
+    );
+
+    harness.register_backend("rust".into(), Arc::new(RustBackend::default()));
+
+    assert_eq!(
+        harness.backend_names(),
+        HashSet::from([String::from("mock"), String::from("rust")])
+    );
+}
+
+#[test]
+fn register_idempotent() {
+    let mut harness = harness();
+
+    assert_eq!(
+        harness.backend_names(),
+        HashSet::from([String::from("mock")])
+    );
+
+    harness.register_backend("rust".into(), Arc::new(RustBackend::default()));
+    assert_eq!(
+        harness.backend_names(),
+        HashSet::from([String::from("mock"), String::from("rust")])
+    );
+
+    harness.register_backend("rust".into(), Arc::new(RustBackend::default()));
+    assert_eq!(
+        harness.backend_names(),
+        HashSet::from([String::from("mock"), String::from("rust")])
+    );
+}
 
 #[test]
 fn single_case_pass() {
