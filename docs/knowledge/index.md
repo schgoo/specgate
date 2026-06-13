@@ -13,3 +13,4 @@ Read this file first. Then read only the topics relevant to your current task.
 | Rust conventions | `rust.md` | When implementing in Rust |
 | C# conventions | `csharp.md` | When implementing in C# |
 | Incremental updates | `incremental.md` | When an implementation already exists and the spec has changed |
+| Greenfield setup | `greenfield.md` | When no implementation exists yet for the spec |

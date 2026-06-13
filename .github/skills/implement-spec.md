@@ -1,71 +1,75 @@
 ---
 name: implement-spec
 description: >
-  Implements a SpecGate spec file — generates source code, tests, and build
-  infrastructure from a .spec.yaml file. Use when asked to "implement this spec",
-  "generate code from spec", "implement <component>", or when given a .spec.yaml
-  file to implement.
+  Implements SpecGate spec files — generates source code, tests, and build
+  infrastructure from .spec.yaml files. Diffs specs against the last
+  implementation commit to determine what changed and what needs updating.
+  Use when asked to "implement specs", "run implementation", or when
+  spec files have been modified.
 ---
 
 # SpecGate Spec Implementation Skill
 
-You are implementing a SpecGate component from its spec file. Your job is to
-produce working source code with tests that verify the spec's cases.
+You are implementing SpecGate components from their spec files. Your job is to
+produce working source code with tests that verify each spec's cases.
 
-## Workflow
+## Diff-based workflow
 
-1. **Read the spec file** the user provides or references
+Implementation is driven by spec changes, not by manual file selection.
+
+1. **Read the marker file** `.specgate/last-implement.sha` — this contains the
+   commit SHA from the last successful implementation run
+2. **Diff all specs** from that SHA to HEAD:
+   ```
+   git diff <sha> HEAD -- specs/**/*.spec.yaml
+   ```
+3. **Build the affected set** — specs that changed, plus any specs whose
+   `depends_on` list includes a changed spec (walk the DAG transitively)
+4. **Topological sort** — order the affected set from lowest dependency to
+   highest (roots first, leaves last). Specs with no `depends_on` come first.
+   This ensures types and shared contracts are updated before consumers.
+5. **For each affected spec** (in dependency order), determine what changed and
+   apply the appropriate workflow (greenfield, incremental, or dependency-only —
+   see below)
+6. **Build and test** the full workspace to verify nothing is broken
+7. **Update the marker** — write the current HEAD SHA to `.specgate/last-implement.sha`
+
+### If no marker file exists
+
+This is the first run. Treat all specs as greenfield.
+
+### Change categories
+
+For each affected spec, classify the changes:
+
+- **New spec** (file added) → greenfield workflow
+- **Cases changed** (new cases, modified expected values) → incremental workflow
+- **Types/operations changed** (structural changes) → incremental workflow
+- **Dependency-only** (spec itself unchanged, but a `depends_on` dependency changed) →
+  verify the implementation still compiles and tests pass. If types from the
+  dependency changed shape, update the consuming code to match.
+
+## Per-spec workflow
+
+1. **Read the spec file** being implemented
 2. **Read `docs/knowledge/index.md`** to see what knowledge topics are available
 3. **Read only the knowledge files relevant to this spec** — don't load everything
 4. **Check if implementation already exists** — look for the crate/project, existing
    test files, and source modules that correspond to this spec's component name
-   - **If YES** → read `docs/knowledge/incremental.md` and follow the incremental
-     workflow. Do NOT continue with the greenfield steps below.
-   - **If NO** → continue with the greenfield workflow below
-5. **Determine implementation mode** (see below)
-6. **Plan your implementation** based on the spec's types, inputs, outputs, and cases
-7. **Scaffold the project** if it doesn't exist (Cargo.toml, project structure)
-8. **Write tests first (TDD)** — generate test functions from spec cases before implementing
-9. **Implement** the component logic until all tests pass
-10. **Add internal tests** for helper functions and edge cases not in the spec
-11. **Build and run all tests** to verify
-
-## Implementation modes
-
-### Annotated mode (default)
-
-Use when the SpecGate annotation crate exists for this language and the spec
-has a `binding:` field. Generate code with `spec_operation`, `spec_setup`,
-`spec_mock`, etc. annotations. Create a binding file if needed.
-
-### Bootstrap mode
-
-Use when the annotation crate does NOT exist yet (check if the proc macro
-or attribute crate is available in the project's dependencies). In this mode:
-
-- **Do not use annotations** — they don't exist yet
-- **Generate conventional tests** from spec cases (e.g., `#[test]` in Rust,
-  `[Fact]`/`[Theory]` in C#)
-- **Each spec case becomes a test function** — construct inputs, call the
-  implementation, assert outputs match expected values
-- **The spec's type definitions guide your Rust/C# types** — oneof → enum,
-  fields → struct
-- **The spec is the source of truth** — if a test fails, the implementation
-  is wrong, not the spec
-
-How to detect bootstrap mode:
-1. Check if the SpecGate annotation package exists as a dependency or in the
-   workspace (e.g., a proc macro crate for Rust, an attribute NuGet for C#)
-2. If not → bootstrap mode
-3. If yes → annotated mode
+   - **If YES** → read `docs/knowledge/incremental.md` for the update workflow
+   - **If NO** → read `docs/knowledge/greenfield.md` for the new-project workflow
+5. **Follow the chosen workflow**, then return here for the shared reference
+   sections below (spec format guide, rules, checklist, harness validation)
 
 ## What the spec tells you
 
 ### Single-operation specs
 
 - `name` — the component name (use for module/crate naming)
-- `binding` — which binding file to use (optional — absent in bootstrap mode)
-- `target` — how to build/run (you'll create this in the binding file)
+- `binding` — which binding file(s) to use (`{ name, target }` object or list)
+  - `binding.name` resolves to `bindings/<name>.yaml`
+  - `binding.target` selects the execution target within that binding
+- `depends_on` — specs this spec depends on for shared types
 - `inputs` — what the entry point takes
 - `types` — type definitions (oneof = enum/union, fields = struct)
 - `outcome` — what the operation returns (variants or single type)
@@ -82,12 +86,6 @@ How to detect bootstrap mode:
 
 A spec is one or the other — if it has `operations`, it's a state machine spec.
 See `spec-format.md` for the full format and `kinds.md` for test generation patterns.
-
-## Project scaffolding
-
-If the project doesn't exist yet, create it following the conventions in
-`docs/knowledge/rust.md` or `docs/knowledge/csharp.md`. Add the crate/project
-to the workspace if one exists.
 
 ## Generating tests from spec cases (TDD)
 
@@ -200,8 +198,8 @@ generate and run the tests deterministically:
 
 1. **Check if a binding exists** for this spec — look at the spec's `binding:`
    field and the corresponding `bindings/<name>.yaml` file
-2. **Check if the binding defines targets** — if the spec has `target: test`
-   (or similar), the binding should have a matching `targets.test` entry
+2. **Check if the binding defines targets** — if the spec's binding has
+   `target: test` (or similar), the binding file should have a matching entry
 3. **If both exist**, run the harness:
    - Rust: `cargo run -p specgate-cli -- run <spec-file>` (if CLI exists)
    - Or programmatically: create a test that calls `Harness::run_spec("<spec-file>")`

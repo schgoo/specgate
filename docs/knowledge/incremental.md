@@ -1,7 +1,8 @@
 # Incremental spec implementation
 
 Follow this workflow when an implementation already exists for the spec you're
-updating. This replaces the greenfield steps in `implement-spec.md`.
+updating. After completing these steps, return to `implement-spec.md`
+for the shared reference sections (rules, checklist, harness validation).
 
 ## Workflow
 
