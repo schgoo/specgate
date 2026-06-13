@@ -15,6 +15,9 @@ name: harness.core
 binding:
   name: rust
   target: test
+depends_on:
+  - core.spec_document
+  - core.binding_document
 
 # State variables — what SpecCapture getters expose
 state:

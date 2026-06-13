@@ -69,7 +69,7 @@ impl Backend for RustBackend {
         let file = generate_test_file(
             spec,
             &annotations,
-            binding.targets.get(&spec.target),
+            binding.targets.get(&spec.target().unwrap_or_default()),
             &generated_test_path,
             &results_path,
         )
@@ -885,8 +885,17 @@ mod tests {
     fn spec(name: &str) -> SpecDocument {
         SpecDocument {
             name: name.to_string(),
-            binding: Some("rust".to_string()),
-            target: "test".to_string(),
+            binding: Some(specgate_types::BindingDecl::Single(
+                specgate_types::BindingEntry {
+                    name: "rust".to_string(),
+                    target: "test".to_string(),
+                },
+            )),
+            depends_on: Vec::new(),
+            state: BTreeMap::new(),
+            init: BTreeMap::new(),
+            operations: BTreeMap::new(),
+            invariants: BTreeMap::new(),
             inputs: BTreeMap::new(),
             types: BTreeMap::new(),
             outcome: serde_yaml::Value::String("Ok".to_string()),
@@ -914,6 +923,7 @@ mod tests {
                         serde_yaml::to_value(3).expect("value should serialize"),
                     ),
                 ]),
+                steps: Vec::new(),
             }],
         }
     }

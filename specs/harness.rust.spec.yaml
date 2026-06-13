@@ -27,6 +27,9 @@ name: harness.rust
 binding:
   name: rust
   target: generate
+depends_on:
+  - core.spec_document
+  - core.binding_document
 
 inputs:
   spec:

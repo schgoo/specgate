@@ -249,8 +249,17 @@ fn mock_binding() -> BindingFile {
 fn spec_with_name(name: &str) -> SpecDocument {
     SpecDocument {
         name: name.to_string(),
-        binding: Some("mock".to_string()),
-        target: "test".to_string(),
+        binding: Some(specgate_types::BindingDecl::Single(
+            specgate_types::BindingEntry {
+                name: "mock".to_string(),
+                target: "test".to_string(),
+            },
+        )),
+        depends_on: Vec::new(),
+        state: BTreeMap::new(),
+        init: BTreeMap::new(),
+        operations: BTreeMap::new(),
+        invariants: BTreeMap::new(),
         inputs: BTreeMap::new(),
         types: BTreeMap::new(),
         outcome: serde_yaml::Value::String("Complete".to_string()),
@@ -279,6 +288,7 @@ fn spec_case(name: &str, mock_result: Option<&str>) -> SpecCase {
         desc: format!("case {name}"),
         inputs,
         expected: BTreeMap::new(),
+        steps: Vec::new(),
     }
 }
 

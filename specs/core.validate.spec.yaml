@@ -9,6 +9,8 @@ name: core.validate
 binding:
   name: rust
   target: validate
+depends_on:
+  - core.spec_document
 
 inputs:
   annotations:

@@ -8,14 +8,21 @@ use std::path::Path;
 
 use specgate_rust_backend::{Annotation, GenerateError, OperationKind, generate_test_file};
 use specgate_types::{
-    BindingTarget, BindingTargetKind, BindingTargetOutputs, SpecCase, SpecDocument,
+    BindingDecl, BindingEntry, BindingTarget, BindingTargetOutputs, SpecCase, SpecDocument,
 };
 
 fn make_spec(name: &str, cases: Vec<SpecCase>) -> SpecDocument {
     SpecDocument {
         name: name.to_string(),
-        binding: None,
-        target: "test".to_string(),
+        binding: Some(BindingDecl::Single(BindingEntry {
+            name: "rust".to_string(),
+            target: "test".to_string(),
+        })),
+        depends_on: Vec::new(),
+        state: BTreeMap::new(),
+        init: BTreeMap::new(),
+        operations: BTreeMap::new(),
+        invariants: BTreeMap::new(),
         inputs: BTreeMap::new(),
         types: BTreeMap::new(),
         outcome: serde_yaml::Value::String("Ok".to_string()),
@@ -49,6 +56,7 @@ fn make_case(
         desc: desc.to_string(),
         inputs: inputs_map,
         expected: expected_map,
+        steps: Vec::new(),
     }
 }
 
@@ -474,7 +482,6 @@ fn api_target_simple() {
         )],
     );
     let target = BindingTarget {
-        kind: BindingTargetKind::Api,
         build: None,
         command: None,
         function: Some("specgate_harness::Harness::run_spec".into()),
@@ -501,7 +508,6 @@ fn api_target_error_variant() {
         )],
     );
     let target = BindingTarget {
-        kind: BindingTargetKind::Api,
         build: None,
         command: None,
         function: Some("specgate_harness::Harness::run_spec".into()),
@@ -545,7 +551,6 @@ fn api_target_multiple_cases() {
         ],
     );
     let target = BindingTarget {
-        kind: BindingTargetKind::Api,
         build: None,
         command: None,
         function: Some("specgate_harness::Harness::run_spec".into()),
@@ -574,7 +579,6 @@ fn command_target_simple() {
         )],
     );
     let target = BindingTarget {
-        kind: BindingTargetKind::Command,
         build: None,
         command: Some("./target/debug/specgate run {spec_path}".into()),
         function: None,
@@ -603,7 +607,6 @@ fn command_target_error_exit() {
         )],
     );
     let target = BindingTarget {
-        kind: BindingTargetKind::Command,
         build: None,
         command: Some("./target/debug/specgate run {spec_path}".into()),
         function: None,
@@ -641,7 +644,6 @@ fn command_target_missing_command() {
         )],
     );
     let target = BindingTarget {
-        kind: BindingTargetKind::Command,
         build: None,
         command: None,
         function: None,
@@ -653,7 +655,7 @@ fn command_target_missing_command() {
     let errors = result.expect_err("command target without command should fail");
     assert!(errors.iter().any(|e| matches!(e,
         GenerateError::UnsupportedType { type_name, detail }
-        if type_name == "binding_target" && detail.contains("command")
+        if type_name == "binding_target" && detail.contains("command or function")
     )));
 }
 
@@ -669,7 +671,6 @@ fn api_target_missing_function() {
         )],
     );
     let target = BindingTarget {
-        kind: BindingTargetKind::Api,
         build: None,
         command: None,
         function: None,
@@ -681,6 +682,6 @@ fn api_target_missing_function() {
     let errors = result.expect_err("api target without function should fail");
     assert!(errors.iter().any(|e| matches!(e,
         GenerateError::UnsupportedType { type_name, detail }
-        if type_name == "binding_target" && detail.contains("function")
+        if type_name == "binding_target" && detail.contains("command or function")
     )));
 }

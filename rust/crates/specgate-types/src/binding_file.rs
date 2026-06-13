@@ -12,7 +12,6 @@ pub struct BindingFile {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BindingTarget {
-    pub kind: BindingTargetKind,
     #[serde(default)]
     pub build: Option<String>,
     #[serde(default)]
@@ -25,11 +24,16 @@ pub struct BindingTarget {
     pub outputs: BindingTargetOutputs,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum BindingTargetKind {
-    Command,
-    Api,
+impl BindingTarget {
+    #[must_use]
+    pub fn is_command(&self) -> bool {
+        self.command.is_some()
+    }
+
+    #[must_use]
+    pub fn is_api(&self) -> bool {
+        self.function.is_some()
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]

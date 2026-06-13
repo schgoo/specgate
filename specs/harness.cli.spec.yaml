@@ -13,6 +13,8 @@ name: harness.cli
 binding:
   name: rust
   target: test
+depends_on:
+  - core.spec_document
 
 inputs:
   spec_path:

@@ -62,7 +62,7 @@ impl Harness {
         let result = (|| {
             let spec_path = self.resolve_spec_path(spec_path.as_ref())?;
             let spec = parse_spec_document(&spec_path)?;
-            let binding_name = spec.binding.clone().unwrap_or_else(|| "mock".to_string());
+            let binding_name = spec.binding_name().unwrap_or_else(|| "mock".to_string());
             let binding = self.resolve_binding(&binding_name)?;
             let backend =
                 self.backends

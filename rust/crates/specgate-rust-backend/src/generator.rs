@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_yaml::{Mapping, Value};
-use specgate_types::{BindingTarget, BindingTargetKind, SpecCase, SpecDocument};
+use specgate_types::{BindingTarget, SpecCase, SpecDocument};
 
 use crate::annotations::{Annotation, OperationKind};
 
@@ -68,10 +68,16 @@ fn resolve_codegen_target(
 ) -> Result<CodegenTarget, Vec<GenerateError>> {
     if annotations.is_empty() {
         if let Some(binding_target) = binding_target {
-            return match binding_target.kind {
-                BindingTargetKind::Api => resolve_api_target(binding_target),
-                BindingTargetKind::Command => resolve_command_target(binding_target),
-            };
+            if binding_target.is_command() {
+                return resolve_command_target(binding_target);
+            }
+            if binding_target.is_api() {
+                return resolve_api_target(binding_target);
+            }
+            return Err(vec![GenerateError::UnsupportedType {
+                type_name: "binding_target".to_string(),
+                detail: "binding target requires command or function field".to_string(),
+            }]);
         }
     }
 
@@ -889,7 +895,7 @@ mod tests {
     use crate::annotations::{Annotation, OperationKind};
     use serde_yaml::{Mapping, Value};
     use specgate_types::{
-        BindingTarget, BindingTargetKind, BindingTargetOutputs, SpecCase, SpecDocument,
+        BindingDecl, BindingEntry, BindingTarget, BindingTargetOutputs, SpecCase, SpecDocument,
     };
     use std::collections::BTreeMap;
     use std::path::Path;
@@ -1588,7 +1594,6 @@ mod tests {
             ),
             &[],
             Some(&BindingTarget {
-                kind: BindingTargetKind::Command,
                 build: None,
                 command: None,
                 function: None,
@@ -1604,7 +1609,7 @@ mod tests {
             error,
             vec![GenerateError::UnsupportedType {
                 type_name: "binding_target".to_string(),
-                detail: "command target requires command field".to_string(),
+                detail: "binding target requires command or function field".to_string(),
             }]
         );
     }
@@ -1656,7 +1661,7 @@ mod tests {
             error,
             vec![GenerateError::UnsupportedType {
                 type_name: "binding_target".to_string(),
-                detail: "api target requires function field".to_string(),
+                detail: "binding target requires command or function field".to_string(),
             }]
         );
     }
@@ -2000,8 +2005,15 @@ mod tests {
     fn spec_with_target_and_cases(name: &str, target: &str, cases: Vec<SpecCase>) -> SpecDocument {
         SpecDocument {
             name: name.to_string(),
-            binding: Some("rust".to_string()),
-            target: target.to_string(),
+            binding: Some(BindingDecl::Single(BindingEntry {
+                name: "rust".to_string(),
+                target: target.to_string(),
+            })),
+            depends_on: Vec::new(),
+            state: BTreeMap::new(),
+            init: BTreeMap::new(),
+            operations: BTreeMap::new(),
+            invariants: BTreeMap::new(),
             inputs: BTreeMap::new(),
             types: BTreeMap::new(),
             outcome: Value::String("Ok".to_string()),
@@ -2020,6 +2032,7 @@ mod tests {
             desc: format!("case {name}"),
             inputs,
             expected,
+            steps: Vec::new(),
         }
     }
 
@@ -2074,7 +2087,6 @@ mod tests {
 
     fn api_binding_target(function: &str, constructor: Option<&str>) -> BindingTarget {
         BindingTarget {
-            kind: BindingTargetKind::Api,
             build: None,
             command: None,
             function: if function.is_empty() {
@@ -2089,7 +2101,6 @@ mod tests {
 
     fn command_binding_target(command: &str, output_file: Option<&str>) -> BindingTarget {
         BindingTarget {
-            kind: BindingTargetKind::Command,
             build: None,
             command: Some(command.to_string()),
             function: None,
