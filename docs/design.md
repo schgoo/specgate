@@ -820,6 +820,26 @@ everywhere, and that is SpecGate telling you the component has too many
 responsibilities. The spec boundary pressure is the same as "if it's hard to test,
 the design is wrong" — but formalized into a concrete, measurable artifact.
 
+### Shared types are not shared state
+
+Components often share type definitions (data structures, schemas) across spec
+boundaries. This is normal interface coupling, not the kind of state coupling that
+forces specs together. Shared types are handled via `depends_on`:
+
+```yaml
+name: harness.rust
+depends_on: [core.spec_document]
+```
+
+Types that cross boundaries get their own spec (e.g., `core.spec_document` defines
+`SpecDocument`, `SpecCase`, etc.). Consumer specs declare the dependency. When the
+types spec changes, `specgate validate` re-validates all downstream specs.
+
+Without `depends_on`, following the shared-types chain would collapse all specs into
+one — `harness.rust` shares `SpecDocument` with `harness.core` AND shares `Annotation`
+with `rust.annotations`, merging everything. The DAG preserves modularity while making
+contracts explicit.
+
 ---
 
 ## Cross-language abstractions

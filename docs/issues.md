@@ -16,6 +16,7 @@
 | ISS-008 | Command target exit code bug | Open | 2026-06-12 |
 | ISS-009 | ohno migration for error types | Open | 2026-06-12 |
 | ISS-010 | Spec YAML schema validation in Rust | Open | 2026-06-12 |
+| ISS-011 | Spec dependency DAG and shared types spec | Open | 2026-06-13 |
 
 ---
 
@@ -184,5 +185,32 @@ The user never writes property assertions manually. Invariants are inferred from
 
 ---
 
+## ISS-011: Spec Dependency DAG and Shared Types Spec
+
+**Context**: `harness.core` and `harness.rust` both depend on `SpecDocument` (defined in `specgate-types`), but neither spec declares this dependency. If `SpecDocument` changes shape (e.g., adding `state`/`operations` for state machine support), the system doesn't know to re-validate downstream specs. More broadly, specs that share types across boundaries need a way to declare and enforce those contracts.
+
+**Design decisions made**:
+
+1. **Spec boundary rule is about shared mutable state, not shared types.** Operations sharing state belong in one spec. Operations sharing types (read-only data contracts) stay in separate specs but declare the dependency.
+
+2. **Shared types get their own spec.** A `core.spec_document` (or similar) spec defines the shared types: `SpecDocument`, `SpecCase`, `TestStep`, `BindingFile`, etc. Consumer specs declare `depends_on: [core.spec_document]`.
+
+3. **`spec-schema.json` is maintained separately but tested for consistency.** The types spec is the source of truth for type shapes. A conformance test asserts that `SpecDocument` (Rust struct) can round-trip everything `spec-schema.json` allows, and that the schema rejects anything the types spec doesn't define. The JSON Schema adds validation rules (patterns, mutual exclusivity, minItems) that go beyond type shapes.
+
+4. **`spec-schema.json` should be versioned.** Schema changes are breaking changes for consumers. A version field enables forward/backward compatibility detection.
+
+5. **`depends_on` field in specs.** A list of spec names. When `specgate validate` runs, it builds the DAG and re-validates anything downstream of a changed spec. No special format needed — the contract is the type definitions in the dependency's spec.
+
+**Scope**:
+- Add `depends_on` to spec format and `spec-schema.json`
+- Write a `core.spec_document` spec defining shared types
+- Add version field to `spec-schema.json`
+- Add conformance test: `SpecDocument` struct ↔ `spec-schema.json` ↔ types spec
+- Update `specgate validate` (future) to build and check the DAG
+
+**Why not merge specs instead**: Following the type-sharing chain merges everything — `harness.rust` shares `SpecDocument` with `harness.core` AND shares `Annotation` with `rust.annotations`. Merging on types collapses all specs into one. The DAG preserves modularity while making contracts explicit.
+
+---
+
 **Version**: 1.0
-**Last Updated**: 2026-06-12
+**Last Updated**: 2026-06-13
