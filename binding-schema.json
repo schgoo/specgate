@@ -26,24 +26,19 @@
   "definitions": {
     "targetDefinition": {
       "type": "object",
-      "required": ["kind"],
+      "description": "An execution target. Provide 'command' for shell-based targets or 'function' for direct API calls.",
       "properties": {
-        "kind": {
-          "type": "string",
-          "description": "Target kind: 'command' runs a shell command, 'api' calls a function directly.",
-          "enum": ["command", "api"]
-        },
         "build": {
           "type": "string",
           "description": "Optional build command to run before execution (overrides the backend's default build). E.g. 'cargo build -p specgate-cli'."
         },
         "command": {
           "type": "string",
-          "description": "Shell command to execute (for command targets). Supports {spec_path} and {workdir} templates."
+          "description": "Shell command to execute. Supports {spec_path} and {workdir} templates."
         },
         "function": {
           "type": "string",
-          "description": "Fully qualified function to call (for api targets), e.g. 'specgate_harness::Harness::run_spec'."
+          "description": "Fully qualified function to call, e.g. 'specgate_harness::Harness::run_spec'."
         },
         "constructor": {
           "type": "string",

@@ -3,7 +3,7 @@
   "title": "SpecGate Component Spec",
   "description": "Schema for SpecGate .spec.yaml files — declares inputs, types, outputs, and test cases for a single component. Supports single-operation specs (inputs/outcome/outputs at top level) and state machine specs (state/operations).",
   "type": "object",
-  "required": ["name", "target", "cases"],
+  "required": ["name", "cases"],
   "additionalProperties": false,
   "properties": {
     "name": {
@@ -12,13 +12,15 @@
       "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9_]*)+$"
     },
     "binding": {
-      "type": "string",
-      "description": "Binding file identifier. Resolves to bindings/<binding>.yaml.",
-      "pattern": "^[a-z][a-z0-9_]*$"
-    },
-    "target": {
-      "type": "string",
-      "description": "Name of the execution target defined in the binding file (e.g. 'build', 'test', 'validate')"
+      "description": "Binding declaration(s). Each entry maps a binding file to an execution target. Use a single object for single-language specs, or a list for multi-language specs.",
+      "oneOf": [
+        { "$ref": "#/definitions/bindingEntry" },
+        {
+          "type": "array",
+          "items": { "$ref": "#/definitions/bindingEntry" },
+          "minItems": 1
+        }
+      ]
     },
     "inputs": {
       "type": "object",
@@ -105,6 +107,13 @@
         "type": "string"
       }
     },
+    "depends_on": {
+      "type": "array",
+      "description": "Spec dependency DAG. Lists spec names this spec depends on for shared types. When a dependency changes, this spec is re-validated.",
+      "items": {
+        "type": "string"
+      }
+    },
     "cases": {
       "type": "array",
       "description": "Test cases exercising the component.",
@@ -115,6 +124,23 @@
     }
   },
   "definitions": {
+    "bindingEntry": {
+      "type": "object",
+      "description": "A binding-to-target mapping. 'name' resolves to bindings/<name>.yaml, 'target' selects the execution target within that binding.",
+      "required": ["name", "target"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Binding file identifier. Resolves to bindings/<name>.yaml.",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "target": {
+          "type": "string",
+          "description": "Execution target defined in the binding file (e.g. 'test', 'build', 'generate')."
+        }
+      }
+    },
     "inputDeclaration": {
       "type": "object",
       "description": "An input declaration with type, optional source annotation, and optional description.",

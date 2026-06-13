@@ -1,0 +1,156 @@
+# yaml-language-server: $schema=../spec-schema.json
+# SpecGate component: core.binding_document
+#
+# Defines the shape of a valid binding file (bindings/<name>.yaml).
+# Binding files connect specs to language-specific implementations by
+# declaring targets (command, api, or types).
+#
+# This spec is the source of truth for the binding file format. The JSON
+# Schema (binding-schema.json) must be consistent with these type
+# definitions.
+#
+# Kind: Structural — type definitions and validation rules only.
+
+name: core.binding_document
+binding:
+  - name: rust
+    target: test
+
+types:
+
+  # === Top-level document ===
+
+  BindingFile:
+    language: string                        # e.g. "rust", "csharp"
+    project_root: string                    # path relative to binding file
+    targets: map<string, BindingTarget>     # named execution targets
+
+  # === Target definition ===
+
+  BindingTarget:
+    build: string                           # optional — build command
+    command: string                         # optional — shell command
+    function: string                        # optional — qualified function
+    constructor: string                     # optional — qualified constructor
+    outputs: BindingTargetOutputs           # optional
+
+  BindingTargetOutputs:
+    file: string                            # optional — output file path
+    stdout: string                          # optional — parse stdout format
+
+cases:
+
+  - name: valid_command_target
+    desc: Binding with a command target parses correctly
+    input:
+      language: rust
+      project_root: "."
+      targets:
+        test:
+          build: "cargo build"
+          command: "./target/debug/specgate run {spec_path}"
+          outputs:
+            stdout: json
+    outcome: Valid
+    outputs:
+      language: rust
+      target_count: 1
+
+  - name: valid_api_target
+    desc: Binding with an api target parses correctly
+    input:
+      language: rust
+      project_root: "."
+      targets:
+        generate:
+          function: "specgate_rust_backend::RustBackend::generate"
+          constructor: "specgate_rust_backend::RustBackend::new"
+    outcome: Valid
+    outputs:
+      language: rust
+      target_count: 1
+
+
+
+  - name: multiple_targets
+    desc: Binding with multiple targets of different kinds
+    input:
+      language: rust
+      project_root: "."
+      targets:
+        test:
+          command: "./run-tests"
+        generate:
+          function: "backend::generate"
+    outcome: Valid
+    outputs:
+      language: rust
+      target_count: 2
+
+  - name: missing_language
+    desc: Binding without language field is invalid
+    input:
+      project_root: "."
+      targets: {}
+    outcome: Invalid
+    outputs:
+      error: missing required field 'language'
+
+  - name: missing_project_root
+    desc: Binding without project_root is invalid
+    input:
+      language: rust
+      targets: {}
+    outcome: Invalid
+    outputs:
+      error: missing required field 'project_root'
+
+  - name: empty_targets
+    desc: Binding with no targets is valid (targets are optional)
+    input:
+      language: csharp
+      project_root: "../csharp"
+    outcome: Valid
+    outputs:
+      language: csharp
+      target_count: 0
+
+  - name: target_with_both_command_and_function
+    desc: Target with both command and function is ambiguous and invalid
+    input:
+      language: rust
+      project_root: "."
+      targets:
+        test:
+          command: "./run-tests"
+          function: "backend::run"
+    outcome: Invalid
+    outputs:
+      error: target cannot have both command and function
+
+  - name: target_with_neither_command_nor_function
+    desc: Target with no execution mechanism is invalid
+    input:
+      language: rust
+      project_root: "."
+      targets:
+        test:
+          build: "cargo build"
+    outcome: Invalid
+    outputs:
+      error: target must have command or function
+
+  - name: target_with_file_output
+    desc: Target using file-based output
+    input:
+      language: rust
+      project_root: "."
+      targets:
+        test:
+          command: "./run-tests"
+          outputs:
+            file: "{workdir}/results.json"
+    outcome: Valid
+    outputs:
+      language: rust
+      target_count: 1

@@ -6,12 +6,10 @@ project_root: .
 
 targets:
   test:
-    kind: command
     build: cargo build -p specgate-cli
     command: ./target/debug/specgate run {spec_path}
     outputs:
       stdout: json
   generate:
-    kind: api
     function: specgate_rust_backend::RustBackend::generate
     constructor: specgate_rust_backend::RustBackend::new

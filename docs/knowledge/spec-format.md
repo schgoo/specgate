@@ -10,8 +10,7 @@ logical group of operations.
 | Field | Required | Description |
 |-------|----------|-------------|
 | `name` | yes | Dotted component name, e.g. `core.validate` |
-| `binding` | no | Binding file identifier — resolves to `bindings/<binding>.yaml`. Optional for language-agnostic specs; can be specified at run time. |
-| `target` | yes | Named target within the binding file |
+| `binding` | no | Binding declaration(s) — `{ name, target }` object or list of objects. `name` resolves to `bindings/<name>.yaml`, `target` selects the execution target. |
 | `inputs` | cond | Named inputs with type/source/desc (single-operation specs) |
 | `types` | no | Named type definitions (oneof, causes, or record) |
 | `outcome` | cond | Outcome variants or single type (single-operation specs) |
@@ -20,6 +19,7 @@ logical group of operations.
 | `init` | no | Initial state values (required when `state` is present) |
 | `operations` | no | Named operations with inputs/outcomes (StateMachine specs) |
 | `invariants` | no | Approved invariants (proposed by `specgate propose-invariants`) |
+| `depends_on` | no | List of spec names this spec depends on for shared types |
 | `cases` | yes | Test cases (≥1) |
 
 A spec is either **single-operation** (has `inputs`/`outcome`/`outputs` at the top

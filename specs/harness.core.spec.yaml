@@ -12,7 +12,9 @@
 # Language-specific codegen is tested by harness.rust and harness.csharp.
 
 name: harness.core
-target: test
+binding:
+  name: rust
+  target: test
 
 # State variables — what SpecCapture getters expose
 state:

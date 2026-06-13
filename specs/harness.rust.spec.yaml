@@ -24,8 +24,9 @@
 #    with structured return types (e.g. harness.core testing itself).
 
 name: harness.rust
-binding: rust
-target: generate
+binding:
+  name: rust
+  target: generate
 
 inputs:
   spec:

@@ -6,8 +6,9 @@
 # role-kind matrix and completeness rules.
 
 name: core.validate
-binding: rust
-target: validate
+binding:
+  name: rust
+  target: validate
 
 inputs:
   annotations:

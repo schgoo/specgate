@@ -10,8 +10,9 @@
 # built binary and parse its stdout JSON output.
 
 name: harness.cli
-binding: rust
-target: test
+binding:
+  name: rust
+  target: test
 
 inputs:
   spec_path:

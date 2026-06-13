@@ -1,0 +1,502 @@
+# yaml-language-server: $schema=../spec-schema.json
+# SpecGate component: core.spec_document
+#
+# Defines the shape of a valid .spec.yaml file. This is SpecGate's spec
+# format, specified using SpecGate's own type system.
+#
+# This spec is the source of truth for the spec file format. The JSON
+# Schema (spec-schema.json) must be consistent with these type
+# definitions. Consumer specs (harness.core, harness.rust) depend on
+# these types — when they change, consumers must re-validate.
+#
+# Kind: Structural — no runtime operations, just type definitions and
+# validation rules.
+
+name: core.spec_document
+binding:
+  - name: rust
+    target: test
+
+types:
+
+  # === Top-level document ===
+
+  SpecDocument:
+    name: string
+    binding: BindingEntry or List<BindingEntry>  # optional
+    # Single-operation mode (mutually exclusive with operations)
+    inputs: Map<string, InputDeclaration>   # optional
+    outcome: Value                          # optional — oneof or string
+    outputs: Map<string, Value>             # optional
+    # State machine mode (mutually exclusive with inputs)
+    state: Map<string, string>              # optional
+    init: Map<string, Value>                # optional — required when state present
+    operations: Map<string, OperationDeclaration>  # optional
+    invariants: Map<string, string>         # optional
+    # Shared
+    types: Map<string, TypeDefinition>      # optional
+    cases: List<SpecCase>
+    depends_on: List<string>                # optional — spec dependency DAG
+
+  InputDeclaration:
+    type: string
+    source: string                          # optional
+    desc: string                            # optional
+
+  OperationDeclaration:
+    inputs: Map<string, Value>              # optional
+    outcome: Value                          # optional
+    outputs: Map<string, Value>             # optional
+
+  TypeDefinition:
+    oneof: Map<string, Value>               # optional — variant type
+    causes: Map<string, Value>              # optional — error type
+    fields: Map<string, string>             # optional — record type
+
+  BindingEntry:
+    name: string                            # binding file identifier
+    target: string                          # execution target in that binding
+
+  # === Test cases ===
+
+  SpecCase:
+    name: string
+    desc: string
+    # Single-operation mode
+    inputs: Map<string, Value>              # optional
+    expected: Map<string, Value>            # optional
+    # State machine mode (mutually exclusive with flat inputs/expected)
+    steps: List<TestStep>                   # optional
+
+  TestStep:
+    operation: string
+    inputs: Map<string, Value>              # optional
+    expected: Map<string, Value>            # optional
+    assert_state: Map<string, Value>        # optional
+
+# No inputs/outcome/outputs — this is a Structural spec.
+# Validation is via structural rules, not runtime operations.
+
+cases:
+
+  # === Single-operation format ===
+
+  - name: single_operation_minimal
+    desc: Minimal valid single-operation spec has name, binding, outcome, outputs, cases
+    inputs:
+      yaml: |
+        name: test.component
+        binding:
+          name: rust
+          target: test
+        outcome: Ok
+        outputs:
+          when Ok:
+            result: string
+        cases:
+          - name: basic
+            desc: Basic test
+            expected:
+              outcome: Ok
+              result: hello
+    expected:
+      valid: true
+
+  - name: single_operation_with_inputs_and_types
+    desc: Single-operation spec with inputs and named types
+    inputs:
+      yaml: |
+        name: test.component
+        binding:
+          name: rust
+          target: test
+        inputs:
+          shape:
+            type: Shape
+        types:
+          Shape:
+            oneof:
+              Circle: { radius: float }
+              Rectangle: { width: float, height: float }
+        outcome:
+          oneof: [Ok, Error]
+        outputs:
+          when Ok:
+            area: float
+          when Error:
+            message: string
+        cases:
+          - name: circle
+            desc: Circle area
+            inputs:
+              shape:
+                Circle: { radius: 5.0 }
+            expected:
+              outcome: Ok
+              area: 78.54
+    expected:
+      valid: true
+
+  # === State machine format ===
+
+  - name: state_machine_minimal
+    desc: Minimal valid state machine spec with state, init, operations
+    inputs:
+      yaml: |
+        name: test.machine
+        binding:
+          name: rust
+          target: test
+        state:
+          count: int
+        init:
+          count: 0
+        operations:
+          increment:
+            inputs:
+              amount:
+                type: int
+        cases:
+          - name: inc_once
+            desc: Increment once
+            steps:
+              - operation: increment
+                inputs: { amount: 1 }
+                assert_state: { count: 1 }
+    expected:
+      valid: true
+
+  - name: state_machine_with_invariants
+    desc: State machine spec with approved invariants
+    inputs:
+      yaml: |
+        name: test.machine
+        binding:
+          name: rust
+          target: test
+        state:
+          items: Set<string>
+        init:
+          items: []
+        operations:
+          add_item:
+            inputs:
+              name:
+                type: string
+        invariants:
+          never_empty_after_add: "items.size() >= 1"
+        cases:
+          - name: add_one
+            desc: Adding an item
+            steps:
+              - operation: add_item
+                inputs: { name: foo }
+                assert_state:
+                  items: [foo]
+    expected:
+      valid: true
+
+  # === Mutual exclusivity ===
+
+  - name: reject_inputs_and_operations
+    desc: Cannot have both top-level inputs and operations
+    inputs:
+      yaml: |
+        name: test.invalid
+        binding:
+          name: rust
+          target: test
+        inputs:
+          x:
+            type: int
+        operations:
+          foo:
+            inputs: { y: int }
+        outcome: Ok
+        outputs:
+          when Ok:
+            result: int
+        cases:
+          - name: bad
+            desc: Invalid
+            expected:
+              outcome: Ok
+              result: 1
+    expected:
+      valid: false
+      reason: "inputs and operations are mutually exclusive"
+
+  - name: reject_steps_without_operations
+    desc: Cases with steps require an operations section
+    inputs:
+      yaml: |
+        name: test.invalid
+        binding:
+          name: rust
+          target: test
+        outcome: Ok
+        outputs:
+          when Ok:
+            result: int
+        cases:
+          - name: bad
+            desc: Invalid
+            steps:
+              - operation: foo
+                inputs: { x: 1 }
+    expected:
+      valid: false
+      reason: "steps require operations section"
+
+  - name: reject_flat_inputs_in_state_machine_case
+    desc: State machine cases must use steps, not flat inputs/expected
+    inputs:
+      yaml: |
+        name: test.invalid
+        binding:
+          name: rust
+          target: test
+        state:
+          count: int
+        init:
+          count: 0
+        operations:
+          increment:
+            inputs: { amount: int }
+        cases:
+          - name: bad
+            desc: Invalid
+            inputs:
+              amount: 1
+            expected:
+              outcome: Ok
+    expected:
+      valid: false
+      reason: "state machine cases must use steps"
+
+  # === Depends on ===
+
+  - name: depends_on_list
+    desc: Spec can declare dependencies on other specs
+    inputs:
+      yaml: |
+        name: test.consumer
+        binding:
+          name: rust
+          target: test
+        depends_on:
+          - core.spec_document
+          - core.types
+        outcome: Ok
+        outputs:
+          when Ok:
+            result: string
+        cases:
+          - name: basic
+            desc: Basic
+            expected:
+              outcome: Ok
+              result: hello
+    expected:
+      valid: true
+
+  # === Required fields ===
+
+  - name: reject_missing_name
+    desc: Name is required
+    inputs:
+      yaml: |
+        binding:
+          name: rust
+          target: test
+        outcome: Ok
+        outputs:
+          when Ok:
+            result: string
+        cases:
+          - name: basic
+            desc: Basic
+            expected:
+              outcome: Ok
+              result: hello
+    expected:
+      valid: false
+      reason: "missing required field: name"
+
+  - name: reject_missing_cases
+    desc: Cases are required
+    inputs:
+      yaml: |
+        name: test.component
+        binding:
+          name: rust
+          target: test
+        outcome: Ok
+        outputs:
+          when Ok:
+            result: string
+    expected:
+      valid: false
+      reason: "missing required field: cases"
+
+  - name: reject_state_without_init
+    desc: State requires init
+    inputs:
+      yaml: |
+        name: test.machine
+        binding:
+          name: rust
+          target: test
+        state:
+          count: int
+        operations:
+          increment:
+            inputs: { amount: int }
+        cases:
+          - name: inc
+            desc: Increment
+            steps:
+              - operation: increment
+                inputs: { amount: 1 }
+    expected:
+      valid: false
+      reason: "state requires init"
+
+  # === Binding formats ===
+
+  - name: multi_binding_list
+    desc: Spec with multiple bindings for multi-language implementation
+    inputs:
+      yaml: |
+        name: core.shared_types
+        binding:
+          - name: rust
+            target: test
+          - name: csharp
+            target: test
+        outcome: Ok
+        outputs:
+          when Ok:
+            result: string
+        cases:
+          - name: basic
+            desc: Basic
+            expected:
+              outcome: Ok
+              result: hello
+    expected:
+      valid: true
+
+  - name: no_binding
+    desc: Spec without binding is valid (binding is optional)
+    inputs:
+      yaml: |
+        name: test.component
+        outcome: Ok
+        outputs:
+          when Ok:
+            result: string
+        cases:
+          - name: basic
+            desc: Basic
+            expected:
+              outcome: Ok
+              result: hello
+    expected:
+      valid: true
+
+  # === Type varieties ===
+
+  - name: types_with_causes
+    desc: Spec with error types using causes
+    inputs:
+      yaml: |
+        name: test.component
+        binding:
+          name: rust
+          target: test
+        types:
+          MyError:
+            causes:
+              NotFound: { id: string }
+              PermissionDenied: { user: string, resource: string }
+        inputs:
+          id:
+            type: string
+        outcome:
+          oneof: [Ok, Error]
+        outputs:
+          when Ok:
+            result: string
+          when Error:
+            error: MyError
+        cases:
+          - name: not_found
+            desc: Returns not found
+            inputs:
+              id: "missing"
+            expected:
+              outcome: Error
+    expected:
+      valid: true
+
+  - name: types_with_fields
+    desc: Spec with record types using fields
+    inputs:
+      yaml: |
+        name: test.component
+        binding:
+          name: rust
+          target: test
+        types:
+          Config:
+            fields:
+              timeout_ms: int
+              retries: int
+              endpoint: string
+        inputs:
+          config:
+            type: Config
+        outcome: Ok
+        outputs:
+          when Ok:
+            result: string
+        cases:
+          - name: with_config
+            desc: Accepts config
+            inputs:
+              config: { timeout_ms: 5000, retries: 3, endpoint: "http://localhost" }
+            expected:
+              outcome: Ok
+              result: ok
+    expected:
+      valid: true
+
+  # === Case-level mutual exclusivity ===
+
+  - name: reject_case_with_inputs_and_steps
+    desc: A single case cannot have both inputs and steps
+    inputs:
+      yaml: |
+        name: test.machine
+        binding:
+          name: rust
+          target: test
+        state:
+          count: int
+        init:
+          count: 0
+        operations:
+          increment:
+            inputs: { amount: int }
+        cases:
+          - name: bad
+            desc: Has both inputs and steps
+            inputs:
+              amount: 1
+            steps:
+              - operation: increment
+                inputs: { amount: 1 }
+    expected:
+      valid: false
+      reason: "case cannot have both inputs and steps"
