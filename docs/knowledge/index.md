@@ -9,6 +9,7 @@ Read this file first. Then read only the topics relevant to your current task.
 | Operation kinds | `kinds.md` | When the spec uses StateMachine, Sequence, ErrorMap, or Structural |
 | Construction & setup | `construction.md` | When the entry point is a method (needs `self`/`this`) |
 | Binding files | `bindings.md` | When creating or modifying a binding file |
+| Binding targets | `targets.md` | When configuring command, API, or build-only targets |
 | Validation rules | `validation.md` | When you need to understand what makes annotations valid or invalid |
 | Rust conventions | `rust.md` | When implementing in Rust |
 | C# conventions | `csharp.md` | When implementing in C# |

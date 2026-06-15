@@ -41,11 +41,10 @@ types:
 
 # Named error type with causes (error chain, not a discriminated union)
 types:
-  RunError:
+  GeometryError:
     causes:
-      SpecNotFound: { path: string }
-      SpecInvalid: { detail: string }
-      BindingNotFound: { binding: string }
+      NegativeDimension: { field: string }
+      UnsupportedShape: { name: string }
 
 # Named record type
 types:
@@ -134,7 +133,7 @@ outputs:
   when Complete:
     report: RunReport
   when Error:
-    error: RunError
+    error: GeometryError
   when Unrecoverable:
     message: string
 
@@ -181,27 +180,27 @@ They use `state`, `init`, `operations`, and optionally `invariants` instead of
 top-level `inputs`/`outcome`/`outputs`.
 
 ```yaml
-name: harness.core
-binding: rust
-target: test
+name: geometry.canvas
+binding:
+  name: rust
+  target: test-canvas
 
 state:
-  backends: Set<string>
+  shapes: List<Shape>
+  total_area: float
 
 init:
-  backends: [mock]
+  shapes: []
+  total_area: 0.0
 
 operations:
-  register_backend:
-    inputs: { name: string }
-  run_spec:
-    inputs: { spec_path: string }
-    outcome:
-      oneof: [Complete, Error]
+  add_shape:
+    inputs: { shape: Shape }
+  clear:
+    inputs: {}
 
 invariants:
-  mock_always_registered: "mock ∈ backends"
-  at_least_one_backend: "backends.size() >= 1"
+  area_non_negative: "total_area >= 0.0"
 ```
 
 - `state` declares state variable names and types. Types match what `SpecCapture`
@@ -219,18 +218,17 @@ For state machine specs, cases use `steps` instead of flat `inputs`/`expected`:
 
 ```yaml
 cases:
-  - name: register_then_run
-    desc: Register a backend then run a spec
+  - name: add_shapes_updates_area
+    desc: Adding shapes accumulates total area
     steps:
-      - operation: register_backend
-        inputs: { name: rust }
+      - operation: add_shape
+        inputs: { shape: { Circle: { radius: 5.0 } } }
         assert_state:
-          backends: [mock, rust]
-      - operation: run_spec
-        inputs: { spec_path: fixtures/simple_pass.spec.yaml }
-        expected:
-          outcome: Complete
-          report: { passed: 1, total: 1 }
+          total_area: 78.54
+      - operation: add_shape
+        inputs: { shape: { Rectangle: { width: 3.0, height: 4.0 } } }
+        assert_state:
+          total_area: 90.54
 ```
 
 Each step has:
@@ -255,8 +253,8 @@ the component is too coupled — refactor the code. If there are just too many t
 cases, split into case-only files:
 
 ```
-specs/harness.core.spec.yaml           # state, operations, types, invariants
-specs/harness.core.cases/
-  happy_path.yaml                      # cases only
+specs/geometry.canvas.spec.yaml           # state, operations, types, invariants
+specs/geometry.canvas.cases/
+  happy_path.yaml                         # cases only
   error_handling.yaml
 ```

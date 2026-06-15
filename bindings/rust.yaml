@@ -21,4 +21,4 @@ targets:
     constructor: specgate_rust_backend::RustBackend::new
   build-annotations:
     package_root: ../rust/crates/specgate-annotations
-    build: cargo build -p specgate-annotations
+    command: cargo run -p annotation-test-runner -- {source}

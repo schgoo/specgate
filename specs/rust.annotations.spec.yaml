@@ -1,11 +1,19 @@
 # yaml-language-server: $schema=../spec-schema.json
 # SpecGate component: rust.annotations
 #
-# Tests the specgate proc macro crate. Each case provides a Rust
-# source snippet compiled as a fixture crate with specgate-macros
-# as a dependency. The macros fire at compile time and write
-# annotation metadata to an output file. Cases assert the output
-# matches expected annotations.
+# Tests the specgate-annotations crate, which provides proc macro
+# attributes for annotating Rust implementation code with spec metadata.
+#
+# Users depend on `specgate-annotations` and import macros from it:
+#   use specgate_annotations::spec_operation;
+#
+# Each case provides a Rust source snippet compiled as a fixture crate
+# with specgate-annotations as a dependency. The macros fire at compile
+# time and write annotation metadata to target/specgate/annotations.json.
+# Cases assert the JSON output matches expected annotations.
+#
+# The output format is a JSON array of Annotation objects matching the
+# Annotation enum in specgate-rust-backend/src/annotations.rs.
 #
 # Symbols are fully qualified via module_path!() — the fixture
 # crate is named "fixture", so symbols resolve to e.g.
@@ -67,6 +75,53 @@ outputs:
 # Cases
 # -------------------------------------------------------------------
 cases:
+
+  # ===== Integration: output file and imports =====
+
+  - name: output_file_location
+    desc: Annotations are written to target/specgate/annotations.json after build
+    inputs:
+      source: |
+        #[spec_operation("op_a", kind = Stateless)]
+        fn handler() {}
+    expected:
+      outcome: Ok
+      output_file: target/specgate/annotations.json
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Stateless, symbol: "fixture::handler" }
+
+  - name: import_path
+    desc: All five attribute macros are importable from specgate_annotations
+    inputs:
+      source: |
+        use specgate_annotations::{
+            spec_operation,
+            spec_setup,
+            spec_capture,
+            spec_checkpoint,
+            spec_mock,
+        };
+    expected:
+      outcome: Ok
+      annotations: []
+
+  - name: passthrough_behavior
+    desc: Annotated items retain their original runtime behavior
+    inputs:
+      source: |
+        #[spec_operation("op_a", kind = Stateless)]
+        fn add(a: i32, b: i32) -> i32 { a + b }
+
+        #[cfg(test)]
+        mod tests {
+            use super::*;
+            #[test]
+            fn test_add() { assert_eq!(add(2, 3), 5); }
+        }
+    expected:
+      outcome: Ok
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Stateless, symbol: "fixture::add" }
 
   # ===== OK: single annotation per role =====
 

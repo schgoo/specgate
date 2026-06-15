@@ -5,14 +5,12 @@ needs to construct the owning type. This is where `spec_setup` comes in.
 
 ## Resolution algorithm
 
-The harness works backwards from the entry point:
-
 1. **Entry point** — what types does it need? (self type, parameter types)
 2. **For each type, try in order:**
-   - Auto-discover a single public constructor → use it, recurse on its params
    - Find a `spec_setup` that returns this type → use it
+   - Auto-discover a single public constructor → use it, recurse on its params
    - Primitive/leaf type → provided by test case inputs
-3. **If unresolvable** — validation error with actionable suggestion
+3. **If unresolvable** — validation error
 
 All resolved constructor/setup parameters bubble up as flat test case inputs.
 
@@ -21,70 +19,68 @@ All resolved constructor/setup parameters bubble up as flat test case inputs.
 Setup functions are test fixtures. They live in test code, not production code.
 
 ```rust
-#[spec_setup("find_user", name = "default")]
-fn setup_request(tenant: String, token: String) -> Request {
-    let mut r = Request::new(tenant, token);
-    r.set_endpoint("/users");
-    r
+// Rust
+#[spec_setup("canvas", name = "default")]
+fn make_canvas(width: f64, height: f64) -> Canvas {
+    Canvas::new(width, height)
 }
+```
+
+```csharp
+// C#
+[SpecSetup("canvas", Name = "default")]
+public static Canvas MakeCanvas(double width, double height)
+    => new Canvas(width, height);
 ```
 
 ### Rules
 
-- **No `self`** — setups are free functions or associated functions, never methods
-- **`name` is required** — it's the language-agnostic join key referenced from spec cases
-- **Names must be unique** per operation within a crate/project
-- **Return type matters** — the harness matches setups to types by return type
+- **No `self`/`this`** — setups are free functions, never methods
+- **`name` is required** — the language-agnostic join key referenced from spec cases
+- **Names must be unique** per operation
 - **Multiple setups allowed** — different setups can return different types for the same operation
 
 ### Environment setup
 
-A setup that returns `()` configures the environment rather than constructing a type:
+A setup that returns `()` / `void` configures environment rather than constructing a type:
 
 ```rust
-#[spec_setup("find_user", name = "runtime")]
-fn init_runtime(mode: String) {
-    std::env::set_var("RUNTIME_MODE", mode);
+#[spec_setup("canvas", name = "runtime")]
+fn init_renderer(backend: String) {
+    std::env::set_var("RENDER_BACKEND", backend);
 }
 ```
-
-### When no setup is needed
-
-- Entry point is a free function → no construction needed
-- Entry point takes only primitive parameters → provided directly by test case
 
 ### Ambiguous construction warning
 
 If the entry point is a method but no `spec_setup` exists, `core.validate`
-emits an `AmbiguousConstruction` warning. The implementation may still work
-(auto-discovered constructor), but explicit setup is preferred for clarity.
+emits an `AmbiguousConstruction` warning.
 
-## Full example: StateMachine with setup
+## Full example
 
 ```rust
-struct CircuitBreaker {
-    #[spec_capture("breaker")]
-    state: String,
-    #[spec_capture("breaker")]
-    failure_count: u32,
+struct Canvas {
+    #[spec_capture("canvas")]
+    shapes: Vec<Shape>,
+    #[spec_capture("canvas")]
+    total_area: f64,
 }
 
-impl CircuitBreaker {
-    fn new(threshold: u32) -> Self { ... }
+impl Canvas {
+    fn new(width: f64, height: f64) -> Self { ... }
 
-    #[spec_operation("breaker", kind = StateMachine)]
-    fn on_result(&mut self, success: bool) { ... }
+    #[spec_operation("canvas", kind = StateMachine)]
+    fn add_shape(&mut self, shape: Shape) { ... }
 
-    #[spec_mock("breaker", name = "backend")]
-    fn call_backend(&self) -> bool { ... }
+    #[spec_mock("canvas", name = "renderer")]
+    fn render(&self) -> Vec<u8> { ... }
 }
 
-#[spec_setup("breaker", name = "default")]
-fn setup_breaker(threshold: u32) -> CircuitBreaker {
-    CircuitBreaker::new(threshold)
+#[spec_setup("canvas", name = "default")]
+fn make_canvas(width: f64, height: f64) -> Canvas {
+    Canvas::new(width, height)
 }
 ```
 
-The harness resolves: `on_result` needs `CircuitBreaker` → found `setup_breaker`
-→ `setup_breaker` needs `threshold: u32` (primitive) → `threshold` becomes a
-test case input.
+The harness resolves: `add_shape` needs `Canvas` → found `make_canvas`
+→ needs `width: f64, height: f64` (primitives) → they become test case inputs.

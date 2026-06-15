@@ -58,28 +58,20 @@ Each test follows the component lifecycle:
 
 ```rust
 #[test]
-fn register_then_run() {
-    // Setup — SpecSetup creates the component
-    let mut harness = Harness::new(repo_root());
+fn add_shapes_updates_area() {
+    // Setup
+    let mut canvas = make_canvas(800.0, 600.0);
 
     // Verify init state
-    assert!(harness.backend_names().contains("mock"));
+    assert_eq!(canvas.total_area, 0.0);
 
-    // Step 1: register_backend
-    harness.register_backend("rust".into(), rust_backend());
-    // assert_state (if present in spec)
-    assert!(harness.backend_names().contains("rust"));
+    // Step 1: add a circle
+    canvas.add_shape(Shape::Circle { radius: 5.0 });
+    assert!((canvas.total_area - 78.54).abs() < 0.01);
 
-    // Step 2: run_spec
-    let result = harness.run_spec("fixtures/simple_pass.spec.yaml");
-    // expected (if present in spec)
-    match result {
-        RunOutcome::Complete { report } => {
-            assert_eq!(report.passed, 1);
-            assert_eq!(report.total, 1);
-        }
-        other => panic!("expected Complete, got {:?}", other),
-    }
+    // Step 2: add a rectangle
+    canvas.add_shape(Shape::Rectangle { width: 3.0, height: 4.0 });
+    assert!((canvas.total_area - 90.54).abs() < 0.01);
 }
 ```
 

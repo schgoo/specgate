@@ -24,7 +24,7 @@ for the shared reference sections (rules, checklist, harness validation).
 3. **Scaffold the project**
    - Create crate/project following `docs/knowledge/rust.md` or `csharp.md`
    - Add to the workspace if one exists
-   - Add dependencies (specgate-types, specgate-annotations if annotated mode)
+   - Add dependencies (specgate-annotations if annotated mode)
    - Create module structure matching the spec's component name
 
 4. **Write tests first (TDD)**

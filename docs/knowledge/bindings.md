@@ -1,7 +1,7 @@
 # Binding files
 
 Binding files connect a spec to a language-specific implementation. They tell
-the harness what language backend to use and where the project lives.
+the harness what language backend to use and where targets live.
 
 **File convention**: `bindings/<name>.yaml`
 **Schema**: `binding-schema.json`
@@ -10,40 +10,36 @@ the harness what language backend to use and where the project lives.
 
 ```yaml
 language: rust    # required: rust | csharp
-project_root: packages/my-component   # path to the implementation project
+
+targets:
+  test-geometry:
+    package_root: ../rust/crates/geometry
+    test_root: ../rust/crates/geometry/tests
+  test-renderer:
+    package_root: ../rust/crates/renderer
+    command: cargo run -p renderer -- {input}
 ```
+
+All paths are relative to the binding file location.
 
 ## How specs reference bindings
 
-The spec declares `binding: rust`. The harness resolves this to
-`bindings/rust.yaml`, reads the `language` field, and selects the
-corresponding codegen backend.
+The spec declares a binding name and target:
 
 ```yaml
-# specs/parser.spec.yaml
-name: parser
-binding: rust
-
-# bindings/rust.yaml
-language: rust
-project_root: packages/parser
+name: geometry.area
+binding:
+  name: rust
+  target: test-geometry
 ```
 
-## How the harness resolves spec names to code
+The harness resolves `rust` to `bindings/rust.yaml`, finds the `test-geometry`
+target, and uses it to determine how to build, generate tests, and run them.
 
-The binding does not declare which functions to call. Instead:
+## Target types
 
-1. **Annotations** in the source code register metadata into a compile-time
-   registry (spec name, kind, code path)
-2. **Build** — the harness builds the project with the `specgate` feature,
-   which causes proc macros to populate the registry
-3. **Discover** — the harness reads the registry to get a name → symbol map
-4. **Generate** — the harness produces test code using resolved symbols
-5. **Test** — `cargo test` runs the generated tests
-
-The spec references operations by name (e.g. `operation: cache_get`), and the
-annotation `#[spec_operation(name = "cache_get")]` on the actual function
-provides the mapping. No manual wiring is needed in the binding.
+See `docs/knowledge/targets.md` for details on command, API, and
+build-only targets.
 
 ## When to create a binding
 
@@ -57,5 +53,6 @@ Each language gets its own binding file. The spec stays language-agnostic.
 | What behavior to test | Spec |
 | What types/inputs/outputs | Spec |
 | What language to use | Binding |
-| Where the project lives | Binding |
+| Where the project lives | Binding (target `package_root`) |
+| How to run tests | Binding (target `command` or `function`) |
 | Which functions implement which spec names | Annotations (in source code) |

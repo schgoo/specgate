@@ -8,58 +8,48 @@ See `rust.md` or `csharp.md` for language-specific syntax.
 
 ## Annotation types
 
-| Annotation | Form | Placed on | Purpose |
-|------------|------|-----------|---------|
-| **Operation** | attribute | Entry point method | Marks the function the spec tests. Kind is required. |
-| **Setup** | attribute | Free function or constructor | Constructs objects or configures environment. Must not take `self`/`this`. Name is required. |
-| **Checkpoint** | attribute | Method | Every call to this method is recorded as an intermediate value. |
-| **Checkpoint** | inline | Any expression | Records this specific expression value at this point in execution. Works on third-party types. |
-| **Capture** | attribute | Struct or field | Marks fields for output capture. On a struct: captures all public fields. On a field: captures that field only. |
-| **Mock** | attribute | Method calling external service | Makes function mockable in test builds. Name is required. |
+| Annotation | Placed on | Purpose |
+|------------|-----------|---------|
+| **Operation** | Entry point method | Marks the function the spec tests. Kind is required. |
+| **Setup** | Free function or constructor | Constructs objects or configures environment. Must not take `self`/`this`. Name is required. |
+| **Checkpoint** (attribute) | Method | Every call to this method is recorded as an intermediate value. |
+| **Checkpoint** (inline) | Any expression | Records a specific expression value at a point in execution. |
+| **Capture** | Struct/class or field/property | Marks fields for output capture. On a struct: captures all public fields. On a field: captures that field only. |
+| **Mock** | Method calling external service | Makes function mockable in test builds. Name is required. |
 
 ## Rules
 
 - **Operation** requires both the operation name and `kind`
 - **Setup** and **Mock** require both the operation name and a `name`
-- **Setup** must NOT take `self`/`this` — it's a free function, static method, or associated function
+- **Setup** must NOT take `self`/`this`
 - **Capture** can be placed on a struct (all public fields) or on individual fields
-- **Checkpoint** attribute goes on a method definition; inline form wraps any expression
-- Only one **Operation** per operation name per project (duplicates fail validation)
-- **Setup** names must be unique per operation within a project
-- **Mock** names must be unique per operation within a project
-- Async and generic functions work normally with all annotations
+- Only one **Operation** per operation name per project
+- **Setup** and **Mock** names must be unique per operation
 
 ## How annotations compose
 
 All annotations sharing the same operation name are collected into one operation.
-The operation's `kind` (from the Operation annotation) determines which other
-annotations are valid — see `kinds.md` for the full matrix.
+The operation's `kind` determines which annotations are valid — see `kinds.md`.
 
 ```
-Operation("calc", kind=StateMachine)  ─┐
-Setup("calc", name="default")         ─┤  → one operation: "calc"
-Capture("calc") on struct fields       ─┤
-Checkpoint("calc") on methods          ─┤
-Mock("calc", name="backend")          ─┘
+Operation("canvas", kind=StateMachine)  ─┐
+Setup("canvas", name="default")         ─┤  → one operation: "canvas"
+Capture("canvas") on struct fields       ─┤
+Mock("canvas", name="renderer")         ─┘
 ```
 
 ## Output capture
 
-The harness needs to capture operation outputs as JSON for comparison against
-spec expectations. Two mechanisms are available:
+Two mechanisms capture operation outputs for comparison:
 
-1. **Capture (field-level):** place `spec_capture` on the struct or on
-   individual fields. The macro reads annotated fields and serializes them to
-   JSON automatically. No `Serialize` derive is needed on the user's types.
+1. **Capture (field-level):** `spec_capture` on a struct or individual fields.
    On a struct, all public fields are captured. On individual fields, only
    annotated fields are captured.
-2. **Checkpoint (expression-level):** use the inline `spec_checkpoint!()` form
-   to capture any expression, including calls to third-party types. The value
-   is recorded and returned so execution continues normally.
+2. **Checkpoint (expression-level):** inline `spec_checkpoint!()` captures any
+   expression, including calls to third-party types.
 
 For StateMachine operations, captured fields are recorded **before and after**
-the operation call, producing state transition data. For all other kinds,
-fields are captured **after** the call only.
+the operation call. For all other kinds, fields are captured **after** only.
 
 ## Zero-cost in production
 
@@ -72,13 +62,10 @@ checkpoint, and mock instrumentation is compiled out unless explicitly enabled.
 | `release` | Annotations are no-op — zero runtime overhead, zero binary size impact |
 | Feature flag off | Annotations are no-op regardless of build mode |
 
-This is controlled by a Cargo feature (Rust) or build configuration (C#):
-
-- **Rust:** the annotation crate exposes a `specgate` feature. When disabled,
-  all attribute macros expand to nothing and all inline macros evaluate to the
-  inner expression unchanged. Release builds disable the feature by default.
-- **C#:** the annotation package uses `[Conditional("SPECGATE")]` attributes.
-  The `SPECGATE` define is set in Debug builds and absent in Release builds.
+- **Rust:** feature flag controls activation. Disabled = macros expand to nothing.
+  `spec_checkpoint!(expr)` evaluates to just `expr`.
+- **C#:** `[Conditional("SPECGATE")]` attributes. Absent define = no-op.
+  `SpecCheckpoint.Capture()` compiles to a pass-through.
 
 Users can force annotations on in release builds (e.g. for integration testing
-in a staging environment) by explicitly enabling the feature/define.
+in staging) by explicitly enabling the feature/define.
