@@ -5,7 +5,7 @@ use std::process::Command;
 use std::sync::Mutex;
 
 use specgate_harness::{Backend, DiscoveredCase, Discovery, GeneratedArtifact};
-use specgate_types::{BindingFile, CaseResult, RunError, SpecDocument};
+use specgate_types::{BindingFile, BindingTarget, CaseResult, RunError, SpecDocument};
 
 use crate::annotations::Annotation;
 use crate::generator::generate_test_file;
@@ -21,13 +21,14 @@ impl Backend for RustBackend {
         binding: &BindingFile,
         spec: &SpecDocument,
     ) -> Result<Discovery, RunError> {
-        let project_root = project_root_path(binding);
-        let registry_path = annotation_registry_path(&project_root);
+        let target = binding_target(binding, spec)?;
+        let package_root = PathBuf::from(&target.package_root);
+        let registry_path = annotation_registry_path(&package_root);
 
         let annotations = if registry_path.is_file() {
             load_annotations(&registry_path)?
-        } else if project_root.join("Cargo.toml").is_file() {
-            run_build(&project_root)?;
+        } else if package_root.join("Cargo.toml").is_file() {
+            run_build(&package_root)?;
             if registry_path.is_file() {
                 load_annotations(&registry_path)?
             } else {
@@ -40,7 +41,7 @@ impl Backend for RustBackend {
         self.annotations_by_project
             .lock()
             .expect("annotation cache mutex should not be poisoned")
-            .insert(project_root, annotations);
+            .insert(package_root, annotations);
 
         Ok(Discovery {
             cases: spec
@@ -61,15 +62,21 @@ impl Backend for RustBackend {
         discovery: &Discovery,
         workdir: &Path,
     ) -> Result<GeneratedArtifact, RunError> {
-        let project_root = project_root_path(binding);
-        let generated_test_path = project_root.join("tests").join("specgate_generated.rs");
+        let target = binding_target(binding, spec)?;
+        let package_root = PathBuf::from(&target.package_root);
+        let generated_test_path = generated_test_path_for_target(target);
         let results_path = workdir.join("results.json");
-        let annotations = self.annotations_for_project(&project_root)?;
+        let annotations = self.annotations_for_project(&package_root)?;
+        let codegen_target = if target.is_command() || target.is_api() {
+            Some(target)
+        } else {
+            None
+        };
 
         let file = generate_test_file(
             spec,
             &annotations,
-            binding.targets.get(&spec.target().unwrap_or_default()),
+            codegen_target,
             &generated_test_path,
             &results_path,
         )
@@ -105,14 +112,16 @@ impl Backend for RustBackend {
         binding: &BindingFile,
         generated: &GeneratedArtifact,
     ) -> Result<(), RunError> {
-        let project_root = project_root_path(binding);
-        if !project_root.join("Cargo.toml").is_file() {
+        let target = binding_target_for_generated(binding, generated)?;
+        let package_root = PathBuf::from(&target.package_root);
+
+        if !package_root.join("Cargo.toml").is_file() {
             return Err(RunError::BuildFailed {
-                detail: format!("missing Cargo.toml under {}", project_root.display()),
+                detail: format!("missing Cargo.toml under {}", package_root.display()),
             });
         }
 
-        let status = run_test_command("cargo", &project_root, &generated.results_path)?;
+        let status = run_test_command("cargo", &package_root, &generated.results_path)?;
 
         if status.success() {
             Ok(())
@@ -120,7 +129,7 @@ impl Backend for RustBackend {
             Err(RunError::BuildFailed {
                 detail: format!(
                     "cargo test --test specgate_generated failed in {} with status {status}",
-                    project_root.display()
+                    package_root.display()
                 ),
             })
         }
@@ -160,8 +169,6 @@ fn run_test_command(
         .arg("test")
         .arg("--test")
         .arg("specgate_generated")
-        .arg("--features")
-        .arg("specgate")
         .arg("--")
         .arg("--test-threads=1")
         .arg("--nocapture")
@@ -196,8 +203,45 @@ impl RustBackend {
     }
 }
 
-fn project_root_path(binding: &BindingFile) -> PathBuf {
-    PathBuf::from(&binding.project_root)
+fn binding_target<'a>(
+    binding: &'a BindingFile,
+    spec: &SpecDocument,
+) -> Result<&'a BindingTarget, RunError> {
+    let target_name = spec.target().unwrap_or_default();
+    binding
+        .targets
+        .get(&target_name)
+        .ok_or_else(|| RunError::GenerateFailed {
+            detail: format!(
+                "missing binding target '{target_name}' for spec {}",
+                spec.name
+            ),
+        })
+}
+
+fn binding_target_for_generated<'a>(
+    binding: &'a BindingFile,
+    generated: &GeneratedArtifact,
+) -> Result<&'a BindingTarget, RunError> {
+    binding
+        .targets
+        .values()
+        .find(|target| generated_test_path_for_target(target) == generated.generated_test_path)
+        .ok_or_else(|| RunError::BuildFailed {
+            detail: format!(
+                "failed to resolve binding target for generated test {}",
+                generated.generated_test_path.display()
+            ),
+        })
+}
+
+fn generated_test_path_for_target(target: &BindingTarget) -> PathBuf {
+    match target.test_root.as_deref() {
+        Some(test_root) => PathBuf::from(test_root).join("specgate_generated.rs"),
+        None => PathBuf::from(&target.package_root)
+            .join("tests")
+            .join("specgate_generated.rs"),
+    }
 }
 
 fn annotation_registry_path(project_root: &Path) -> PathBuf {
@@ -230,7 +274,7 @@ fn run_build(project_root: &Path) -> Result<(), RunError> {
     } else {
         Err(RunError::BuildFailed {
             detail: format!(
-                "cargo test --no-run --features specgate failed in {} with status {status}",
+                "cargo test --no-run failed in {} with status {status}",
                 project_root.display()
             ),
         })
@@ -245,8 +289,6 @@ fn run_build_with_program(
         .current_dir(project_root)
         .arg("test")
         .arg("--no-run")
-        .arg("--features")
-        .arg("specgate")
         .status()
         .map_err(|error| RunError::BuildFailed {
             detail: format!(
@@ -264,7 +306,10 @@ mod tests {
     };
     use crate::annotations::{Annotation, OperationKind};
     use specgate_harness::{Backend, GeneratedArtifact};
-    use specgate_types::{BindingFile, CaseResult, CaseStatus, SpecCase, SpecDocument};
+    use specgate_types::{
+        BindingFile, BindingTarget, BindingTargetOutputs, CaseResult, CaseStatus, SpecCase,
+        SpecDocument,
+    };
     use std::collections::BTreeMap;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -429,6 +474,54 @@ mod tests {
             .expect("generated test file should be readable");
         assert!(contents.contains("calc::setup_calc"));
         assert_eq!(generated.results_path, workdir.join("results.json"));
+    }
+
+    #[test]
+    fn generate_uses_target_test_root_when_present() {
+        let project_root = create_project_root("generate_uses_target_test_root");
+        let custom_test_root = project_root.join("integration-tests");
+        write_annotation_registry(
+            &project_root,
+            &[
+                Annotation::SpecOperation {
+                    operation: "calc".to_string(),
+                    kind: OperationKind::Stateless,
+                    symbol: "calc::Calculator::add".to_string(),
+                },
+                Annotation::SpecSetup {
+                    operation: "calc".to_string(),
+                    name: "default".to_string(),
+                    symbol: "calc::setup_calc".to_string(),
+                    params: Vec::new(),
+                    returns: None,
+                },
+                Annotation::SpecCapture {
+                    operation: "calc".to_string(),
+                    symbol: "calc::Calculator::result".to_string(),
+                    capture_all: false,
+                },
+            ],
+        );
+        let backend = RustBackend::default();
+        let binding = binding_with_test_root(&project_root, &custom_test_root);
+        let spec = spec("calc");
+        let discovery = backend
+            .build_and_discover(&binding, &spec)
+            .expect("discovery should succeed");
+
+        let generated = backend
+            .generate(
+                &binding,
+                &spec,
+                &discovery,
+                &scratch_dir("generate_uses_target_test_root_workdir"),
+            )
+            .expect("generation should succeed");
+
+        assert_eq!(
+            generated.generated_test_path,
+            custom_test_root.join("specgate_generated.rs")
+        );
     }
 
     #[test]
@@ -758,14 +851,15 @@ mod tests {
         )
         .expect("cargo manifest should be written");
         fs::create_dir_all(project_root.join("src")).expect("src dir should exist");
-        fs::write(project_root.join("src").join("lib.rs"), "").expect("lib should be written");
+        fs::write(project_root.join("src").join("lib.rs"), "fn broken( {")
+            .expect("lib should be written");
 
         let error = super::run_build(&project_root).expect_err("build should fail");
 
         assert!(matches!(
             error,
             specgate_types::RunError::BuildFailed { detail }
-                if detail.contains("cargo test --no-run --features specgate failed")
+                if detail.contains("cargo test --no-run failed")
         ));
     }
 
@@ -877,8 +971,36 @@ mod tests {
     fn binding(project_root: &Path) -> BindingFile {
         BindingFile {
             language: "rust".to_string(),
-            project_root: project_root.display().to_string(),
-            targets: BTreeMap::new(),
+            targets: BTreeMap::from([(
+                "test".to_string(),
+                BindingTarget {
+                    package_root: project_root.display().to_string(),
+                    test_root: None,
+                    build: None,
+                    command: None,
+                    function: None,
+                    constructor: None,
+                    outputs: BindingTargetOutputs::default(),
+                },
+            )]),
+        }
+    }
+
+    fn binding_with_test_root(project_root: &Path, test_root: &Path) -> BindingFile {
+        BindingFile {
+            language: "rust".to_string(),
+            targets: BTreeMap::from([(
+                "test".to_string(),
+                BindingTarget {
+                    package_root: project_root.display().to_string(),
+                    test_root: Some(test_root.display().to_string()),
+                    build: None,
+                    command: None,
+                    function: None,
+                    constructor: None,
+                    outputs: BindingTargetOutputs::default(),
+                },
+            )]),
         }
     }
 

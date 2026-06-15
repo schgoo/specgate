@@ -241,7 +241,6 @@ fn collect_results_returns_error_for_invalid_json() {
 fn mock_binding() -> BindingFile {
     BindingFile {
         language: "mock".to_string(),
-        project_root: ".".to_string(),
         targets: BTreeMap::new(),
     }
 }

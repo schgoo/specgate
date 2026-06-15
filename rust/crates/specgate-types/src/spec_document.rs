@@ -54,30 +54,32 @@ impl<'de> Deserialize<'de> for SpecDocument {
     {
         #[derive(Deserialize)]
         struct RawSpecDocument {
-            name: String,
+            #[serde(default)]
+            name: Option<String>,
             #[serde(default)]
             binding: Option<RawBindingDecl>,
             #[serde(default)]
             target: Option<String>,
             #[serde(default)]
-            depends_on: Vec<String>,
+            depends_on: Option<Vec<String>>,
             #[serde(default)]
-            state: BTreeMap<String, String>,
+            state: Option<BTreeMap<String, String>>,
             #[serde(default)]
-            init: BTreeMap<String, Value>,
+            init: Option<BTreeMap<String, Value>>,
             #[serde(default)]
-            operations: BTreeMap<String, Value>,
+            operations: Option<BTreeMap<String, Value>>,
             #[serde(default)]
-            invariants: BTreeMap<String, String>,
+            invariants: Option<BTreeMap<String, String>>,
             #[serde(default)]
-            inputs: BTreeMap<String, Value>,
+            inputs: Option<BTreeMap<String, Value>>,
             #[serde(default)]
-            types: BTreeMap<String, Value>,
-            outcome: Value,
+            types: Option<BTreeMap<String, Value>>,
             #[serde(default)]
-            outputs: BTreeMap<String, Value>,
+            outcome: Option<Value>,
             #[serde(default)]
-            cases: Vec<SpecCase>,
+            outputs: Option<BTreeMap<String, Value>>,
+            #[serde(default)]
+            cases: Option<Vec<SpecCase>>,
         }
 
         #[derive(Deserialize)]
@@ -89,6 +91,39 @@ impl<'de> Deserialize<'de> for SpecDocument {
         }
 
         let raw = RawSpecDocument::deserialize(deserializer)?;
+        let name = raw
+            .name
+            .ok_or_else(|| de::Error::custom("missing required field: name"))?;
+        let cases = raw
+            .cases
+            .ok_or_else(|| de::Error::custom("missing required field: cases"))?;
+
+        if raw.inputs.is_some() && raw.operations.is_some() {
+            return Err(de::Error::custom(
+                "inputs and operations are mutually exclusive",
+            ));
+        }
+
+        if raw.state.is_some() && raw.init.is_none() {
+            return Err(de::Error::custom("state requires init"));
+        }
+
+        for case in &cases {
+            if !case.inputs.is_empty() && !case.steps.is_empty() {
+                return Err(de::Error::custom("case cannot have both inputs and steps"));
+            }
+        }
+
+        if raw.operations.is_some() {
+            for case in &cases {
+                if case.steps.is_empty() && (!case.inputs.is_empty() || !case.expected.is_empty()) {
+                    return Err(de::Error::custom("state machine cases must use steps"));
+                }
+            }
+        } else if cases.iter().any(|case| !case.steps.is_empty()) {
+            return Err(de::Error::custom("steps require operations section"));
+        }
+
         let binding = match raw.binding {
             Some(RawBindingDecl::Legacy(name)) => {
                 let target = raw
@@ -102,18 +137,18 @@ impl<'de> Deserialize<'de> for SpecDocument {
         };
 
         Ok(Self {
-            name: raw.name,
+            name,
             binding,
-            depends_on: raw.depends_on,
-            state: raw.state,
-            init: raw.init,
-            operations: raw.operations,
-            invariants: raw.invariants,
-            inputs: raw.inputs,
-            types: raw.types,
-            outcome: raw.outcome,
-            outputs: raw.outputs,
-            cases: raw.cases,
+            depends_on: raw.depends_on.unwrap_or_default(),
+            state: raw.state.unwrap_or_default(),
+            init: raw.init.unwrap_or_default(),
+            operations: raw.operations.unwrap_or_default(),
+            invariants: raw.invariants.unwrap_or_default(),
+            inputs: raw.inputs.unwrap_or_default(),
+            types: raw.types.unwrap_or_default(),
+            outcome: raw.outcome.unwrap_or(Value::Null),
+            outputs: raw.outputs.unwrap_or_default(),
+            cases,
         })
     }
 }
@@ -195,5 +230,29 @@ mod tests {
 
         assert_eq!(spec.binding_name().as_deref(), Some("rust"));
         assert_eq!(spec.target().as_deref(), Some("test"));
+    }
+
+    #[test]
+    fn rejects_state_machine_case_with_expected_but_no_steps() {
+        let error = serde_yaml::from_str::<SpecDocument>(
+            r#"
+name: test.machine
+state:
+  count: int
+init:
+  count: 0
+operations:
+  increment:
+    inputs: { amount: int }
+cases:
+  - name: bad
+    desc: Missing steps
+    expected:
+      outcome: Ok
+"#,
+        )
+        .expect_err("state machine case without steps should fail");
+
+        assert_eq!(error.to_string(), "state machine cases must use steps");
     }
 }

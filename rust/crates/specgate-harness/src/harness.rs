@@ -112,7 +112,6 @@ impl Harness {
         if binding_name == "mock" {
             return Ok(BindingFile {
                 language: "mock".to_string(),
-                project_root: ".".to_string(),
                 targets: HashMap::new().into_iter().collect(),
             });
         }
@@ -127,9 +126,27 @@ impl Harness {
                 binding: binding_name.to_string(),
             })?;
 
-        serde_yaml::from_str(&binding_contents).map_err(|error| RunError::SpecInvalid {
-            detail: format!("failed to parse binding {binding_name}: {error}"),
-        })
+        let mut binding: BindingFile =
+            serde_yaml::from_str(&binding_contents).map_err(|error| RunError::SpecInvalid {
+                detail: format!("failed to parse binding {binding_name}: {error}"),
+            })?;
+
+        // Resolve relative paths against the binding file's directory
+        let binding_dir = binding_path
+            .parent()
+            .expect("binding path should have a parent directory");
+        for target in binding.targets.values_mut() {
+            target.package_root = normalize_relative_path(
+                &binding_dir.join(&target.package_root),
+            );
+            if let Some(test_root) = &target.test_root {
+                target.test_root = Some(normalize_relative_path(
+                    &binding_dir.join(test_root),
+                ));
+            }
+        }
+
+        Ok(binding)
     }
 
     fn prepare_workdir(&self, spec_name: &str) -> Result<PathBuf, RunError> {

@@ -6,12 +6,14 @@ for the shared reference sections (rules, checklist, harness validation).
 
 ## Workflow
 
-1. **Diff the spec against existing tests**
+1. **Reconcile the spec against existing code**
+   - The parent workflow already identified this spec as changed (hash mismatch)
    - List all spec case names from the `.spec.yaml` file
    - List all test function names from the existing test file(s)
    - Identify: new cases (in spec, not in tests), removed cases (in tests,
      not in spec), and potentially changed cases (same name, different
      expected values)
+   - Skip anything already correctly implemented
 
 2. **Diff the spec types against existing types**
    - Compare the spec's `types:` and `outputs:` against existing Rust/C# types

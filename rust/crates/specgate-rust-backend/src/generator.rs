@@ -1594,6 +1594,8 @@ mod tests {
             ),
             &[],
             Some(&BindingTarget {
+                package_root: "specgate-cli".to_string(),
+                test_root: None,
                 build: None,
                 command: None,
                 function: None,
@@ -2087,6 +2089,8 @@ mod tests {
 
     fn api_binding_target(function: &str, constructor: Option<&str>) -> BindingTarget {
         BindingTarget {
+            package_root: "specgate-harness".to_string(),
+            test_root: None,
             build: None,
             command: None,
             function: if function.is_empty() {
@@ -2101,6 +2105,8 @@ mod tests {
 
     fn command_binding_target(command: &str, output_file: Option<&str>) -> BindingTarget {
         BindingTarget {
+            package_root: "specgate-cli".to_string(),
+            test_root: None,
             build: None,
             command: Some(command.to_string()),
             function: None,

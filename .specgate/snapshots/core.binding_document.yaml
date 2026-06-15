@@ -9,8 +9,6 @@
 # Schema (binding-schema.json) must be consistent with these type
 # definitions.
 #
-# All paths in a binding file are relative to the binding file location.
-#
 # Kind: Structural — type definitions and validation rules only.
 
 name: core.binding_document
@@ -24,15 +22,15 @@ types:
 
   BindingFile:
     language: string                        # e.g. "rust", "csharp"
+    project_root: string                    # path relative to binding file
     targets: map<string, BindingTarget>     # named execution targets
 
   # === Target definition ===
 
   BindingTarget:
-    package_root: string                    # required — path to package/project root
-    test_root: string                       # optional — path to write generated tests
+    package: string                         # required — package/crate name
     build: string                           # optional — build command
-    command: string                         # optional — shell command to run tests
+    command: string                         # optional — shell command
     function: string                        # optional — qualified function
     constructor: string                     # optional — qualified constructor
     outputs: BindingTargetOutputs           # optional
@@ -47,12 +45,12 @@ cases:
     desc: Binding with a command target parses correctly
     input:
       language: rust
+      project_root: "."
       targets:
         test:
-          package_root: ../rust/crates/my-app
-          test_root: ../rust/crates/my-app/tests
+          package: specgate-cli
           build: "cargo build"
-          command: "cargo test -p my-app --test specgate_generated"
+          command: "./target/debug/specgate run {spec_path}"
           outputs:
             stdout: json
     outcome: Valid
@@ -64,26 +62,30 @@ cases:
     desc: Binding with an api target parses correctly
     input:
       language: rust
+      project_root: "."
       targets:
         generate:
-          package_root: ../rust/crates/my-backend
-          function: "my_backend::RustBackend::generate"
-          constructor: "my_backend::RustBackend::new"
+          package: specgate-rust-backend
+          function: "specgate_rust_backend::RustBackend::generate"
+          constructor: "specgate_rust_backend::RustBackend::new"
     outcome: Valid
     outputs:
       language: rust
       target_count: 1
 
+
+
   - name: multiple_targets
     desc: Binding with multiple targets of different kinds
     input:
       language: rust
+      project_root: "."
       targets:
         test:
-          package_root: ../rust/crates/my-app
-          command: "cargo test -p my-app"
+          package: my-app
+          command: "./run-tests"
         generate:
-          package_root: ../rust/crates/my-backend
+          package: my-backend
           function: "backend::generate"
     outcome: Valid
     outputs:
@@ -93,15 +95,26 @@ cases:
   - name: missing_language
     desc: Binding without language field is invalid
     input:
+      project_root: "."
       targets: {}
     outcome: Invalid
     outputs:
       error: missing required field 'language'
 
+  - name: missing_project_root
+    desc: Binding without project_root is invalid
+    input:
+      language: rust
+      targets: {}
+    outcome: Invalid
+    outputs:
+      error: missing required field 'project_root'
+
   - name: empty_targets
     desc: Binding with no targets is valid (targets are optional)
     input:
       language: csharp
+      project_root: "../csharp"
     outcome: Valid
     outputs:
       language: csharp
@@ -111,36 +124,38 @@ cases:
     desc: Target with both command and function is ambiguous and invalid
     input:
       language: rust
+      project_root: "."
       targets:
         test:
-          package_root: ../rust/crates/my-app
-          command: "cargo test -p my-app"
+          package: my-app
+          command: "./run-tests"
           function: "backend::run"
     outcome: Invalid
     outputs:
       error: target cannot have both command and function
 
   - name: target_with_neither_command_nor_function
-    desc: Target with only build is valid (build-only target)
+    desc: Target with no execution mechanism is invalid
     input:
       language: rust
+      project_root: "."
       targets:
         test:
-          package_root: ../rust/crates/my-app
+          package: my-app
           build: "cargo build"
-    outcome: Valid
+    outcome: Invalid
     outputs:
-      language: rust
-      target_count: 1
+      error: target must have command or function
 
   - name: target_with_file_output
     desc: Target using file-based output
     input:
       language: rust
+      project_root: "."
       targets:
         test:
-          package_root: ../rust/crates/my-app
-          command: "cargo test -p my-app"
+          package: my-app
+          command: "./run-tests"
           outputs:
             file: "{workdir}/results.json"
     outcome: Valid
@@ -148,13 +163,14 @@ cases:
       language: rust
       target_count: 1
 
-  - name: target_missing_package_root
-    desc: Target without package_root field is invalid
+  - name: target_missing_package
+    desc: Target without package field is invalid
     input:
       language: rust
+      project_root: "."
       targets:
         test:
-          command: "cargo test"
+          command: "./run-tests"
     outcome: Invalid
     outputs:
-      error: missing required field 'package_root'
+      error: missing required field 'package'

@@ -1,15 +1,24 @@
 # yaml-language-server: $schema=../binding-schema.json
 # Binding: Rust implementation
+# All paths are relative to this file (bindings/rust.yaml)
 
 language: rust
-project_root: .
 
 targets:
-  test:
-    build: cargo build -p specgate-cli
-    command: ./target/debug/specgate run {spec_path}
-    outputs:
-      stdout: json
-  generate:
+  test-types:
+    package_root: ../rust/crates/specgate-types
+    test_root: ../rust/crates/specgate-types/tests
+  test-harness:
+    package_root: ../rust/crates/specgate-harness
+    test_root: ../rust/crates/specgate-harness/tests
+  test-cli:
+    package_root: ../rust/crates/specgate-cli
+    test_root: ../rust/crates/specgate-cli/tests
+  test-generate:
+    package_root: ../rust/crates/specgate-rust-backend
+    test_root: ../rust/crates/specgate-rust-backend/tests
     function: specgate_rust_backend::RustBackend::generate
     constructor: specgate_rust_backend::RustBackend::new
+  build-annotations:
+    package_root: ../rust/crates/specgate-annotations
+    build: cargo build -p specgate-annotations

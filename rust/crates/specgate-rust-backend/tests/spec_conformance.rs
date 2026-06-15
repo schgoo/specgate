@@ -482,6 +482,8 @@ fn api_target_simple() {
         )],
     );
     let target = BindingTarget {
+        package_root: "specgate-harness".into(),
+        test_root: None,
         build: None,
         command: None,
         function: Some("specgate_harness::Harness::run_spec".into()),
@@ -508,6 +510,8 @@ fn api_target_error_variant() {
         )],
     );
     let target = BindingTarget {
+        package_root: "specgate-harness".into(),
+        test_root: None,
         build: None,
         command: None,
         function: Some("specgate_harness::Harness::run_spec".into()),
@@ -551,6 +555,8 @@ fn api_target_multiple_cases() {
         ],
     );
     let target = BindingTarget {
+        package_root: "specgate-harness".into(),
+        test_root: None,
         build: None,
         command: None,
         function: Some("specgate_harness::Harness::run_spec".into()),
@@ -579,6 +585,8 @@ fn command_target_simple() {
         )],
     );
     let target = BindingTarget {
+        package_root: "specgate-cli".into(),
+        test_root: None,
         build: None,
         command: Some("./target/debug/specgate run {spec_path}".into()),
         function: None,
@@ -607,6 +615,8 @@ fn command_target_error_exit() {
         )],
     );
     let target = BindingTarget {
+        package_root: "specgate-cli".into(),
+        test_root: None,
         build: None,
         command: Some("./target/debug/specgate run {spec_path}".into()),
         function: None,
@@ -644,6 +654,8 @@ fn command_target_missing_command() {
         )],
     );
     let target = BindingTarget {
+        package_root: "specgate-cli".into(),
+        test_root: None,
         build: None,
         command: None,
         function: None,
@@ -671,6 +683,8 @@ fn api_target_missing_function() {
         )],
     );
     let target = BindingTarget {
+        package_root: "specgate-harness".into(),
+        test_root: None,
         build: None,
         command: None,
         function: None,

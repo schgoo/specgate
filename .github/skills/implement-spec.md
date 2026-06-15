@@ -2,8 +2,8 @@
 name: implement-spec
 description: >
   Implements SpecGate spec files — generates source code, tests, and build
-  infrastructure from .spec.yaml files. Diffs specs against the last
-  implementation commit to determine what changed and what needs updating.
+  infrastructure from .spec.yaml files. Uses content hashing and snapshots
+  to determine what changed and what needs updating.
   Use when asked to "implement specs", "run implementation", or when
   spec files have been modified.
 ---
@@ -13,36 +13,64 @@ description: >
 You are implementing SpecGate components from their spec files. Your job is to
 produce working source code with tests that verify each spec's cases.
 
-## Diff-based workflow
+## Snapshot-based workflow
 
-Implementation is driven by spec changes, not by manual file selection.
+Implementation is driven by spec changes detected through content hashing.
+No commit history is needed — the tool compares the current spec file against
+a snapshot from the last implementation run.
 
-1. **Read the marker file** `.specgate/last-implement.sha` — this contains the
-   commit SHA from the last successful implementation run
-2. **Diff all specs** from that SHA to HEAD:
+### Storage
+
+- `.specgate/snapshots/<spec-name>.yaml` — full copy of each spec after its
+  last successful implementation. E.g., `.specgate/snapshots/core.validate.yaml`
+
+### Detecting changes
+
+1. **Hash gate** — for each spec in `specs/`, compare its hash against the
+   snapshot's hash. Skip specs whose content hasn't changed.
+
+   ```powershell
+   $current = (Get-FileHash specs/core.validate.spec.yaml -Algorithm SHA256).Hash
+   $snapshot = (Get-FileHash .specgate/snapshots/core.validate.yaml -Algorithm SHA256).Hash
+   if ($current -eq $snapshot) { "unchanged" } else { "changed" }
    ```
-   git diff <sha> HEAD -- specs/**/*.spec.yaml
-   ```
-3. **Build the affected set** — specs that changed, plus any specs whose
-   `depends_on` list includes a changed spec (walk the DAG transitively)
-4. **Topological sort** — order the affected set from lowest dependency to
+
+   If no snapshot exists, the spec is new — treat as greenfield.
+
+2. **Build the affected set** — specs that changed (hash mismatch or no
+   snapshot), plus any specs whose `depends_on` list includes a changed spec
+   (walk the DAG transitively)
+
+3. **Topological sort** — order the affected set from lowest dependency to
    highest (roots first, leaves last). Specs with no `depends_on` come first.
    This ensures types and shared contracts are updated before consumers.
-5. **For each affected spec** (in dependency order), determine what changed and
-   apply the appropriate workflow (greenfield, incremental, or dependency-only —
-   see below)
-6. **Build and test** the full workspace to verify nothing is broken
-7. **Update the marker** — write the current HEAD SHA to `.specgate/last-implement.sha`
 
-### If no marker file exists
+4. **Reconcile each spec against existing code** — for each affected spec (in
+   dependency order), read the spec and the existing implementation, then
+   determine what work is actually needed:
 
-This is the first run. Treat all specs as greenfield.
+   - List all spec case names → compare against existing test functions
+   - Compare spec `types:` against existing language types
+   - Check for new, removed, or changed cases and types
+   - **Skip anything already implemented** — the snapshot may be stale,
+     so changes flagged by the hash gate might already be in the code
+
+   Apply the appropriate workflow (greenfield or incremental — see below).
+
+5. **Build and test** the full workspace to verify nothing is broken
+
+6. **Update snapshots** — copy each successfully implemented spec to its
+   snapshot location:
+
+   ```powershell
+   Copy-Item specs/core.validate.spec.yaml .specgate/snapshots/core.validate.yaml
+   ```
 
 ### Change categories
 
 For each affected spec, classify the changes:
 
-- **New spec** (file added) → greenfield workflow
+- **New spec** (no snapshot exists) → greenfield workflow
 - **Cases changed** (new cases, modified expected values) → incremental workflow
 - **Types/operations changed** (structural changes) → incremental workflow
 - **Dependency-only** (spec itself unchanged, but a `depends_on` dependency changed) →

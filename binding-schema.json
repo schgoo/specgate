@@ -3,17 +3,13 @@
   "title": "SpecGate Binding File",
   "description": "Schema for SpecGate binding files — connects a spec to a language-specific implementation project.",
   "type": "object",
-  "required": ["language", "project_root"],
+  "required": ["language"],
   "additionalProperties": false,
   "properties": {
     "language": {
       "type": "string",
       "description": "Target language identifier. Selects the codegen backend.",
       "enum": ["rust", "csharp"]
-    },
-    "project_root": {
-      "type": "string",
-      "description": "Path to the implementation project, relative to the binding file."
     },
     "targets": {
       "type": "object",
@@ -26,15 +22,24 @@
   "definitions": {
     "targetDefinition": {
       "type": "object",
-      "description": "An execution target. Provide 'command' for shell-based targets or 'function' for direct API calls.",
+      "description": "An execution target. All paths are relative to the binding file location.",
+      "required": ["package_root"],
       "properties": {
+        "package_root": {
+          "type": "string",
+          "description": "Path to the package/crate/project root, relative to the binding file. Commands run from here."
+        },
+        "test_root": {
+          "type": "string",
+          "description": "Path to the directory where generated test files are written, relative to the binding file."
+        },
         "build": {
           "type": "string",
-          "description": "Optional build command to run before execution (overrides the backend's default build). E.g. 'cargo build -p specgate-cli'."
+          "description": "Optional build command to run before execution."
         },
         "command": {
           "type": "string",
-          "description": "Shell command to execute. Supports {spec_path} and {workdir} templates."
+          "description": "Shell command to execute the generated tests. Supports {spec_path} and {workdir} templates."
         },
         "function": {
           "type": "string",
