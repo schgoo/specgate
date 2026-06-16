@@ -37,6 +37,10 @@ operations:
       backend:
         type: Backend
         desc: Backend implementation to register
+  # run_spec cleans up the generated test source file (specgate_generated.rs)
+  # after results are collected. This prevents implementation agents from reading
+  # the test code. Results files and trace outputs are preserved — they are
+  # the harness's output for upstream validators and reporters.
   run_spec:
     inputs:
       spec_path:
@@ -49,14 +53,6 @@ operations:
         report: RunReport
       when Error:
         error: RunError
-    postconditions:
-      - Generated test artifacts (specgate_generated.rs, results NDJSON, workdir)
-        are deleted after results are collected. Postconditions are enforced by
-        resolving each postcondition target through the active binding, rendering
-        its command template with the postcondition inputs plus harness context
-        values like {generated_test_path} and {workdir}, then running that
-        command and requiring exit code 0. This prevents validation artifacts
-        from leaking to implementation agents.
 
 types:
   Backend:
@@ -225,7 +221,7 @@ cases:
   # ===== Post-run cleanup =====
 
   - name: generated_artifacts_cleaned_up
-    desc: After run_spec completes, binding-backed postcondition targets verify the generated test file and workdir were removed using the active binding's native command syntax
+    desc: After run_spec completes, the generated test source file is removed but results and traces are preserved
     steps:
       - operation: run_spec
         inputs:
@@ -240,10 +236,6 @@ cases:
         inputs:
           path: "{generated_test_path}"
         desc: Generated test file does not exist after run
-      - target: assert-dir-absent
-        inputs:
-          path: "{workdir}"
-        desc: Working directory does not exist after run
 
   # ===== Setup errors =====
 

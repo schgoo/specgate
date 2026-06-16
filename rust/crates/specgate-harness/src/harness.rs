@@ -211,10 +211,8 @@ fn normalize_relative_path(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
-fn cleanup_generated_artifacts(generated: &GeneratedArtifact, workdir: &Path) {
+fn cleanup_generated_artifacts(generated: &GeneratedArtifact, _workdir: &Path) {
     let _ = fs::remove_file(&generated.generated_test_path);
-    let _ = fs::remove_file(&generated.results_path);
-    let _ = fs::remove_dir_all(workdir);
 }
 
 fn apply_postconditions(

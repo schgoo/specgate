@@ -19,7 +19,7 @@
 | ISS-011 | Spec dependency DAG and shared types spec | Open | 2026-06-13 |
 | ISS-012 | Generated test file quality | Open | 2026-06-15 |
 | ISS-013 | Annotation spec — deferred runtime test cases | Open | 2026-06-15 |
-| ISS-014 | Enforce trust boundary on validation artifacts | Open | 2026-06-15 |
+| ISS-014 | Enforce trust boundary on validation artifacts | Closed | 2026-06-15 |
 
 ---
 

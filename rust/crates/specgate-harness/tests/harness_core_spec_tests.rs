@@ -351,7 +351,7 @@ fn write_cleanup_fixture(repo_root: &Path) {
         .expect("spec directory should be created");
     fs::write(
         &spec_path,
-        "name: cleanup_case\nbinding: cleanup\ntarget: mock-target\noutcome: Complete\noutputs:\n  when Complete:\n    report: RunReport\ncases:\n  - name: basic_case\n    desc: Cleanup removes generated artifacts.\n    expected:\n      outcome: Complete\n    postconditions:\n      - target: assert-file-absent\n        inputs:\n          path: \"{generated_test_path}\"\n        desc: Generated test file does not exist after run\n      - target: assert-dir-absent\n        inputs:\n          path: \"{workdir}\"\n        desc: Working directory does not exist after run\n",
+        "name: cleanup_case\nbinding: cleanup\ntarget: mock-target\noutcome: Complete\noutputs:\n  when Complete:\n    report: RunReport\ncases:\n  - name: basic_case\n    desc: Cleanup removes generated test file.\n    expected:\n      outcome: Complete\n    postconditions:\n      - target: assert-file-absent\n        inputs:\n          path: \"{generated_test_path}\"\n        desc: Generated test file does not exist after run\n",
     )
     .expect("cleanup fixture should be written");
 
