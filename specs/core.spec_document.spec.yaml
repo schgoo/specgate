@@ -15,7 +15,20 @@
 name: core.spec_document
 binding:
   - name: rust
-    target: test-types
+    target: validate-spec
+
+inputs:
+  yaml:
+    type: string
+    desc: YAML content of a spec file to validate
+
+outcome:
+  oneof: [Valid, Invalid]
+
+outputs:
+  when Valid: {}
+  when Invalid:
+    reason: string
 
 types:
 
@@ -87,7 +100,88 @@ types:
 
 cases:
 
-  # === Single-operation format ===
+  # === Field validation ===
+
+  - name: case_input_matches_declared_input
+    desc: Case input keys must match declared inputs in the spec
+    inputs:
+      yaml: |
+        name: test.component
+        binding:
+          name: rust
+          target: test
+        inputs:
+          a: { type: int }
+          b: { type: int }
+        outcome: Ok
+        outputs:
+          when Ok:
+            result: int
+        cases:
+          - name: valid_case
+            desc: Uses declared inputs
+            inputs:
+              a: 1
+              b: 2
+            expected:
+              outcome: Ok
+              result: 3
+    expected:
+      outcome: Valid
+
+  - name: case_input_undeclared
+    desc: Case input key not declared in spec inputs is invalid
+    inputs:
+      yaml: |
+        name: test.component
+        binding:
+          name: rust
+          target: test
+        inputs:
+          a: { type: int }
+        outcome: Ok
+        outputs:
+          when Ok:
+            result: int
+        cases:
+          - name: bad_case
+            desc: Uses undeclared input
+            inputs:
+              a: 1
+              x: 99
+            expected:
+              outcome: Ok
+              result: 100
+    expected:
+      outcome: Invalid
+      reason: "case input 'x' is not declared in spec inputs"
+
+  - name: case_expected_undeclared
+    desc: Case expected key not declared in spec outputs is invalid
+    inputs:
+      yaml: |
+        name: test.component
+        binding:
+          name: rust
+          target: test
+        inputs:
+          a: { type: int }
+        outcome: Ok
+        outputs:
+          when Ok:
+            result: int
+        cases:
+          - name: bad_case
+            desc: Asserts on undeclared output
+            inputs:
+              a: 1
+            expected:
+              outcome: Ok
+              result: 1
+              extra_field: 42
+    expected:
+      outcome: Invalid
+      reason: "case expected field 'extra_field' is not declared in spec outputs"
 
   - name: single_operation_minimal
     desc: Minimal valid single-operation spec has name, binding, outcome, outputs, cases
@@ -108,7 +202,7 @@ cases:
               outcome: Ok
               result: hello
     expected:
-      valid: true
+      outcome: Valid
 
   - name: single_operation_with_inputs_and_types
     desc: Single-operation spec with inputs and named types
@@ -143,7 +237,7 @@ cases:
               outcome: Ok
               area: 78.54
     expected:
-      valid: true
+      outcome: Valid
 
   # === State machine format ===
 
@@ -172,7 +266,7 @@ cases:
                 inputs: { amount: 1 }
                 assert_state: { count: 1 }
     expected:
-      valid: true
+      outcome: Valid
 
   - name: state_machine_with_invariants
     desc: State machine spec with approved invariants
@@ -202,7 +296,7 @@ cases:
                 assert_state:
                   items: [foo]
     expected:
-      valid: true
+      outcome: Valid
 
   # === Mutual exclusivity ===
 
@@ -231,7 +325,7 @@ cases:
               outcome: Ok
               result: 1
     expected:
-      valid: false
+      outcome: Invalid
       reason: "inputs and operations are mutually exclusive"
 
   - name: reject_steps_without_operations
@@ -253,7 +347,7 @@ cases:
               - operation: foo
                 inputs: { x: 1 }
     expected:
-      valid: false
+      outcome: Invalid
       reason: "steps require operations section"
 
   - name: reject_flat_inputs_in_state_machine_case
@@ -279,7 +373,7 @@ cases:
             expected:
               outcome: Ok
     expected:
-      valid: false
+      outcome: Invalid
       reason: "state machine cases must use steps"
 
   # === Depends on ===
@@ -306,7 +400,7 @@ cases:
               outcome: Ok
               result: hello
     expected:
-      valid: true
+      outcome: Valid
 
   # === Required fields ===
 
@@ -328,7 +422,7 @@ cases:
               outcome: Ok
               result: hello
     expected:
-      valid: false
+      outcome: Invalid
       reason: "missing required field: name"
 
   - name: reject_missing_cases
@@ -344,7 +438,7 @@ cases:
           when Ok:
             result: string
     expected:
-      valid: false
+      outcome: Invalid
       reason: "missing required field: cases"
 
   - name: reject_state_without_init
@@ -367,7 +461,7 @@ cases:
               - operation: increment
                 inputs: { amount: 1 }
     expected:
-      valid: false
+      outcome: Invalid
       reason: "state requires init"
 
   # === Binding formats ===
@@ -393,7 +487,7 @@ cases:
               outcome: Ok
               result: hello
     expected:
-      valid: true
+      outcome: Valid
 
   - name: no_binding
     desc: Spec without binding is valid (binding is optional)
@@ -411,7 +505,7 @@ cases:
               outcome: Ok
               result: hello
     expected:
-      valid: true
+      outcome: Valid
 
   # === Type varieties ===
 
@@ -446,7 +540,7 @@ cases:
             expected:
               outcome: Error
     expected:
-      valid: true
+      outcome: Valid
 
   - name: types_with_fields
     desc: Spec with record types using fields
@@ -478,7 +572,7 @@ cases:
               outcome: Ok
               result: ok
     expected:
-      valid: true
+      outcome: Valid
 
   # === Case-level mutual exclusivity ===
 
@@ -506,5 +600,5 @@ cases:
               - operation: increment
                 inputs: { amount: 1 }
     expected:
-      valid: false
+      outcome: Invalid
       reason: "case cannot have both inputs and steps"

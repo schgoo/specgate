@@ -8,6 +8,9 @@ targets:
   test-types:
     package_root: ../rust/crates/specgate-types
     test_root: ../rust/crates/specgate-types/tests
+  validate-spec:
+    package_root: ../rust/crates/specgate-types
+    command: cargo run -p specgate-spec-validator -- {yaml}
   test-harness:
     package_root: ../rust/crates/specgate-harness
     test_root: ../rust/crates/specgate-harness/tests
