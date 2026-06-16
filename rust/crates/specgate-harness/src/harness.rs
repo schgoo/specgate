@@ -7,7 +7,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use crate::backend::Backend;
+use crate::backend::{Backend, GeneratedArtifact};
 use crate::mock_backend::MockBackend;
 use specgate_types::{
     BindingFile, CaseResult, CaseStatus, RunError, RunOutcome, RunReport, SpecDocument,
@@ -74,8 +74,12 @@ impl Harness {
             let workdir = self.prepare_workdir(&spec.name)?;
             let discovery = backend.build_and_discover(&binding, &spec)?;
             let generated = backend.generate(&binding, &spec, &discovery, &workdir)?;
-            backend.run_command(&binding, &generated)?;
-            let results = backend.collect_results(&generated)?;
+            let run_result = backend.run_command(&binding, &generated);
+            let results = backend.collect_results(&generated);
+            cleanup_generated_artifacts(&generated, &workdir);
+            run_result?;
+            let mut results = results?;
+            apply_postconditions(&binding, &spec, &generated, &workdir, &mut results);
 
             Ok(build_report(
                 spec.name,
@@ -136,13 +140,9 @@ impl Harness {
             .parent()
             .expect("binding path should have a parent directory");
         for target in binding.targets.values_mut() {
-            target.package_root = normalize_relative_path(
-                &binding_dir.join(&target.package_root),
-            );
+            target.package_root = normalize_relative_path(&binding_dir.join(&target.package_root));
             if let Some(test_root) = &target.test_root {
-                target.test_root = Some(normalize_relative_path(
-                    &binding_dir.join(test_root),
-                ));
+                target.test_root = Some(normalize_relative_path(&binding_dir.join(test_root)));
             }
         }
 
@@ -211,6 +211,87 @@ fn normalize_relative_path(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
+fn cleanup_generated_artifacts(generated: &GeneratedArtifact, workdir: &Path) {
+    let _ = fs::remove_file(&generated.generated_test_path);
+    let _ = fs::remove_file(&generated.results_path);
+    let _ = fs::remove_dir_all(workdir);
+}
+
+fn apply_postconditions(
+    binding: &BindingFile,
+    spec: &SpecDocument,
+    generated: &GeneratedArtifact,
+    workdir: &Path,
+    results: &mut [CaseResult],
+) {
+    let cases_by_name = spec
+        .cases
+        .iter()
+        .map(|case| (case.name.as_str(), case))
+        .collect::<HashMap<_, _>>();
+
+    for result in results
+        .iter_mut()
+        .filter(|result| result.status == CaseStatus::Pass)
+    {
+        let Some(case) = cases_by_name.get(result.name.as_str()) else {
+            continue;
+        };
+        let Some(postconditions) = case.postconditions.as_ref() else {
+            continue;
+        };
+
+        let passed = postconditions.iter().all(|postcondition| {
+            let substituted_inputs: std::collections::BTreeMap<String, String> = postcondition
+                .inputs
+                .iter()
+                .map(|(key, value)| {
+                    (
+                        key.clone(),
+                        substitute_template_vars(value, &generated.generated_test_path, workdir),
+                    )
+                })
+                .collect();
+            execute_postcondition_target(&postcondition.target, binding, &substituted_inputs)
+        });
+
+        if !passed {
+            result.status = CaseStatus::Fail;
+        }
+    }
+}
+
+fn execute_postcondition_target(
+    target_name: &str,
+    binding: &BindingFile,
+    inputs: &std::collections::BTreeMap<String, String>,
+) -> bool {
+    let Some(target) = binding.targets.get(target_name) else {
+        return false;
+    };
+    let Some(command_template) = &target.command else {
+        return false;
+    };
+    let mut command = command_template.clone();
+    for (key, value) in inputs {
+        command = command.replace(&format!("{{{key}}}"), value);
+    }
+    #[cfg(windows)]
+    let output = std::process::Command::new("cmd").args(["/C", &command]).output();
+    #[cfg(not(windows))]
+    let output = std::process::Command::new("sh").args(["-c", &command]).output();
+    output.map(|o| o.status.success()).unwrap_or(false)
+}
+
+fn substitute_template_vars(template: &str, generated_test_path: &Path, workdir: &Path) -> String {
+    template
+        .replace(
+            "{generated_test_path}",
+            generated_test_path.to_string_lossy().as_ref(),
+        )
+        .replace("{workdir}", workdir.to_string_lossy().as_ref())
+}
+
 fn unique_workdir_suffix() -> String {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -222,11 +303,15 @@ fn unique_workdir_suffix() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        Harness, build_report, normalize_relative_path, parse_spec_document, unique_workdir_suffix,
+        Harness, apply_postconditions, build_report, execute_postcondition_target,
+        normalize_relative_path, parse_spec_document, substitute_template_vars, unique_workdir_suffix,
     };
     use crate::backend::{Backend, Discovery, GeneratedArtifact};
-    use specgate_types::{BindingFile, CaseResult, CaseStatus, RunError, RunOutcome, SpecDocument};
-    use std::collections::HashMap;
+    use specgate_types::{
+        BindingFile, BindingTarget, CaseResult, CaseStatus, Postcondition, RunError, RunOutcome,
+        SpecDocument,
+    };
+    use std::collections::{BTreeMap, HashMap};
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
@@ -250,11 +335,15 @@ mod tests {
                     name: "first".to_string(),
                     status: CaseStatus::Pass,
                     duration_ms: 1,
+                    traces_file: None,
+                    traces_match: None,
                 },
                 CaseResult {
                     name: "second".to_string(),
                     status: CaseStatus::Fail,
                     duration_ms: 1,
+                    traces_file: None,
+                    traces_match: None,
                 },
             ],
             5,
@@ -332,6 +421,20 @@ mod tests {
     }
 
     #[test]
+    fn substitute_template_vars_replaces_known_variables() {
+        let result = substitute_template_vars(
+            r#"{generated_test_path} and {workdir}"#,
+            Path::new(r"generated\specgate_generated.rs"),
+            Path::new(r"workdir\run-1"),
+        );
+
+        assert!(result.contains(r#"generated\specgate_generated.rs"#));
+        assert!(result.contains(r#"workdir\run-1"#));
+        assert!(!result.contains("{generated_test_path}"));
+        assert!(!result.contains("{workdir}"));
+    }
+
+    #[test]
     fn run_spec_returns_build_failed_when_workdir_cannot_be_prepared() {
         let repo_root = scratch_path("run_spec_workdir_error");
         write_spec(&repo_root, "workdir_blocked");
@@ -386,6 +489,125 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn apply_postconditions_marks_passing_case_failed_when_target_fails() {
+        let repo_root = scratch_path("postcondition_failure");
+        fs::create_dir_all(&repo_root).expect("repo root should be created");
+        // Create a file that we will assert is absent — assertion fails because file exists
+        let existing_file = repo_root.join("present.txt");
+        fs::write(&existing_file, "still here").expect("existing file should be written");
+        let mut results = vec![CaseResult {
+            name: "basic_case".to_string(),
+            status: CaseStatus::Pass,
+            duration_ms: 1,
+            traces_file: None,
+            traces_match: None,
+        }];
+        let spec = SpecDocument {
+            name: "postcondition_failure".to_string(),
+            binding: None,
+            depends_on: Vec::new(),
+            state: BTreeMap::new(),
+            init: BTreeMap::new(),
+            operations: BTreeMap::new(),
+            invariants: BTreeMap::new(),
+            inputs: BTreeMap::new(),
+            types: BTreeMap::new(),
+            outcome: serde_yaml::Value::String("Complete".to_string()),
+            outputs: BTreeMap::new(),
+            cases: vec![spec_case_with_postconditions(
+                "basic_case",
+                vec![Postcondition {
+                    target: "assert-file-absent".to_string(),
+                    inputs: BTreeMap::from([(
+                        "path".to_string(),
+                        existing_file.to_string_lossy().to_string(),
+                    )]),
+                    desc: None,
+                }],
+            )],
+        };
+        let generated = GeneratedArtifact {
+            generated_test_path: repo_root.join("specgate_generated.rs"),
+            results_path: repo_root.join("results.json"),
+            cases: Vec::new(),
+            spec_name: spec.name.clone(),
+        };
+        let binding = file_absent_binding();
+
+        apply_postconditions(&binding, &spec, &generated, &repo_root.join("workdir"), &mut results);
+
+        assert_eq!(results[0].status, CaseStatus::Fail);
+    }
+
+    #[test]
+    fn execute_postcondition_target_passes_when_file_absent() {
+        let binding = file_absent_binding();
+        let absent_path = scratch_path("absent_file_check").join("definitely_absent.txt");
+        let inputs = BTreeMap::from([("path".to_string(), absent_path.to_string_lossy().to_string())]);
+
+        assert!(execute_postcondition_target("assert-file-absent", &binding, &inputs));
+    }
+
+    #[test]
+    fn execute_postcondition_target_returns_false_for_unknown_target() {
+        let binding = BindingFile {
+            language: "mock".to_string(),
+            targets: BTreeMap::new(),
+        };
+        let inputs = BTreeMap::new();
+
+        assert!(!execute_postcondition_target("assert-file-absent", &binding, &inputs));
+    }
+
+    #[test]
+    fn execute_postcondition_target_returns_false_for_target_without_command() {
+        let binding = BindingFile {
+            language: "mock".to_string(),
+            targets: BTreeMap::from([(
+                "assert-file-absent".to_string(),
+                BindingTarget {
+                    package_root: ".".to_string(),
+                    test_root: None,
+                    build: None,
+                    command: None,
+                    function: None,
+                    constructor: None,
+                    outputs: Default::default(),
+                },
+            )]),
+        };
+        let inputs = BTreeMap::new();
+
+        assert!(!execute_postcondition_target("assert-file-absent", &binding, &inputs));
+    }
+
+    /// Returns a `BindingFile` with an `assert-file-absent` target whose command
+    /// exits 1 if `{path}` exists and 0 if it is absent, using the shell that the
+    /// production `execute_postcondition_target` actually invokes on this platform.
+    fn file_absent_binding() -> BindingFile {
+        #[cfg(windows)]
+        let command = "IF EXIST {path} exit 1".to_string();
+        #[cfg(not(windows))]
+        let command = r#"[ ! -e '{path}' ]"#.to_string();
+
+        BindingFile {
+            language: "mock".to_string(),
+            targets: BTreeMap::from([(
+                "assert-file-absent".to_string(),
+                BindingTarget {
+                    package_root: ".".to_string(),
+                    test_root: None,
+                    build: None,
+                    command: Some(command),
+                    function: None,
+                    constructor: None,
+                    outputs: Default::default(),
+                },
+            )]),
+        }
+    }
+
     fn scratch_path(test_name: &str) -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("target")
@@ -406,6 +628,18 @@ mod tests {
             ),
         )
         .expect("spec fixture should be written");
+    }
+
+    fn spec_case_with_postconditions(name: &str, postconditions: Vec<Postcondition>) -> specgate_types::SpecCase {
+        specgate_types::SpecCase {
+            name: name.to_string(),
+            desc: format!("case {name}"),
+            binding: None,
+            inputs: BTreeMap::new(),
+            expected: BTreeMap::new(),
+            steps: Vec::new(),
+            postconditions: Some(postconditions),
+        }
     }
 
     fn harness_with_backend(repo_root: &Path, stage: Stage) -> Harness {

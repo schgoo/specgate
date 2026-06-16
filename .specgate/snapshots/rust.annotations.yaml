@@ -1,11 +1,30 @@
 # yaml-language-server: $schema=../spec-schema.json
 # SpecGate component: rust.annotations
 #
-# Tests the specgate proc macro crate. Each case provides a Rust
-# source snippet compiled as a fixture crate with specgate-macros
-# as a dependency. The macros fire at compile time and write
-# annotation metadata to an output file. Cases assert the output
-# matches expected annotations.
+# Tests the specgate-annotations crate, which provides proc macro
+# attributes for annotating Rust implementation code with spec metadata.
+#
+# Users depend on `specgate-annotations` and import macros from it:
+#   use specgate_annotations::spec_operation;
+#
+# Each case provides a Rust source snippet compiled as a fixture crate
+# with specgate-annotations as a dependency. The macros fire at compile
+# time and write annotation metadata to target/specgate/annotations.json.
+# Cases assert the JSON output matches expected annotations.
+#
+# Runtime trace cases (binding: run-annotations) compile AND execute the
+# code. The #[spec_operation] macro on StateMachine methods automatically
+# snapshots all #[spec_capture] fields at entry (CaptureBefore) and exit
+# (CaptureAfter) — boundary snapshots. For Stateless operations, only
+# CaptureAfter is emitted from the return value. For intermediate
+# observations, use spec_checkpoint!("op", expr) inline.
+#
+# The struct owning captured fields must derive SpecCapture so the
+# snapshot helper is generated. The #[spec_capture] field/struct
+# attribute marks which fields to include.
+#
+# The output format is a JSON array of Annotation objects matching the
+# Annotation enum in specgate-rust-backend/src/annotations.rs.
 #
 # Symbols are fully qualified via module_path!() — the fixture
 # crate is named "fixture", so symbols resolve to e.g.
@@ -22,6 +41,9 @@ inputs:
   source:
     type: string
     desc: Rust source code placed in the fixture crate's src/lib.rs
+  driver:
+    type: string
+    desc: Rust code that exercises the annotated functions (runtime cases only)
 
 types:
   Annotation:
@@ -50,6 +72,31 @@ types:
   CompileError:
     message: string
 
+  TraceEvent:
+    oneof:
+      OperationEnter:
+        operation: string
+        symbol: string
+      OperationExit:
+        operation: string
+        symbol: string
+      CaptureAfter:
+        operation: string
+        field: string
+        value: string
+      CaptureBefore:
+        operation: string
+        field: string
+        value: string
+      Checkpoint:
+        operation: string
+        symbol: string
+        value: string
+      MockCall:
+        operation: string
+        mock_name: string
+        returned: string
+
 outcome:
   oneof: [Ok, Error]
 
@@ -58,6 +105,9 @@ outputs:
     annotations:
       type: List<Annotation>
       source: annotations
+    traces:
+      type: List<TraceEvent>
+      source: traces
   when Error:
     errors:
       type: List<CompileError>
@@ -67,6 +117,53 @@ outputs:
 # Cases
 # -------------------------------------------------------------------
 cases:
+
+  # ===== Integration: output file and imports =====
+
+  - name: output_file_location
+    desc: Annotations are written to target/specgate/annotations.json after build
+    inputs:
+      source: |
+        #[spec_operation("op_a", kind = Stateless)]
+        fn handler() {}
+    expected:
+      outcome: Ok
+      output_file: target/specgate/annotations.json
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Stateless, symbol: "fixture::handler" }
+
+  - name: import_path
+    desc: All five attribute macros are importable from specgate_annotations
+    inputs:
+      source: |
+        use specgate_annotations::{
+            spec_operation,
+            spec_setup,
+            spec_capture,
+            spec_checkpoint,
+            spec_mock,
+        };
+    expected:
+      outcome: Ok
+      annotations: []
+
+  - name: passthrough_behavior
+    desc: Annotated items retain their original runtime behavior
+    inputs:
+      source: |
+        #[spec_operation("op_a", kind = Stateless)]
+        fn add(a: i32, b: i32) -> i32 { a + b }
+
+        #[cfg(test)]
+        mod tests {
+            use super::*;
+            #[test]
+            fn test_add() { assert_eq!(add(2, 3), 5); }
+        }
+    expected:
+      outcome: Ok
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Stateless, symbol: "fixture::add" }
 
   # ===== OK: single annotation per role =====
 
@@ -144,6 +241,7 @@ cases:
     desc: spec_capture on a struct field extracts a Capture annotation
     inputs:
       source: |
+        #[derive(SpecCapture)]
         struct Machine {
             #[spec_capture("op_a")]
             current: u32,
@@ -215,6 +313,7 @@ cases:
     desc: All annotation roles for a complete Sequence operation
     inputs:
       source: |
+        #[derive(SpecCapture)]
         struct Request {
             #[spec_capture("find_user")]
             retries: u32,
@@ -249,6 +348,7 @@ cases:
     desc: All annotation roles for a complete StateMachine operation
     inputs:
       source: |
+        #[derive(SpecCapture)]
         struct CircuitBreaker {
             #[spec_capture("breaker")]
             state: String,
@@ -363,6 +463,7 @@ cases:
         #[spec_operation("op_a", kind = Stateless)]
         fn stateless_op() {}
 
+        #[derive(SpecCapture)]
         struct Machine {
             #[spec_capture("op_b")]
             counter: u32,
@@ -452,7 +553,7 @@ cases:
     desc: Non-spec attributes do not interfere with extraction
     inputs:
       source: |
-        #[derive(Debug, Clone)]
+        #[derive(Debug, Clone, SpecCapture)]
         struct Request {
             #[spec_capture("op_a")]
             status: u32,
@@ -566,6 +667,7 @@ cases:
     desc: spec_capture on a struct captures all public fields
     inputs:
       source: |
+        #[derive(SpecCapture)]
         #[spec_capture("op_a")]
         struct Result {
             pub status: u16,
@@ -581,6 +683,7 @@ cases:
     desc: Struct-level capture only captures public fields — private fields are excluded
     inputs:
       source: |
+        #[derive(SpecCapture)]
         #[spec_capture("op_a")]
         struct Result {
             pub status: u16,
@@ -595,6 +698,7 @@ cases:
     desc: Both struct-level and field-level capture on the same type is an error
     inputs:
       source: |
+        #[derive(SpecCapture)]
         #[spec_capture("op_a")]
         struct Result {
             #[spec_capture("op_a")]
@@ -609,6 +713,7 @@ cases:
     desc: spec_capture on a return type for a Stateless operation — captured after only
     inputs:
       source: |
+        #[derive(SpecCapture)]
         #[spec_capture("op_a")]
         struct Output {
             pub value: f64,
@@ -679,3 +784,378 @@ cases:
         - SpecOperation: { operation: op_a, kind: Sequence, symbol: "fixture::Pipeline::process" }
         - SpecCheckpoint: { operation: op_a, symbol: "fixture::Pipeline::validate" }
         - SpecCheckpoint: { operation: op_a, symbol: "fixture::Pipeline::process::checkpoint_1" }
+
+  # ===== Runtime: capture traces =====
+
+  - name: runtime_capture_stateless
+    desc: Stateless operation with captured return type emits CaptureAfter only (boundary snapshot)
+    binding:
+      name: rust
+      target: run-annotations
+    inputs:
+      source: |
+        #[derive(SpecCapture)]
+        #[spec_capture("area")]
+        pub struct AreaResult {
+            pub area: f64,
+            pub perimeter: f64,
+        }
+
+        impl AreaResult {
+            #[spec_operation("area", kind = Stateless)]
+            pub fn compute(radius: f64) -> AreaResult {
+                let area = std::f64::consts::PI * radius * radius;
+                let perimeter = 2.0 * std::f64::consts::PI * radius;
+                AreaResult { area, perimeter }
+            }
+        }
+      driver: |
+        let result = AreaResult::compute(1.0);
+    expected:
+      outcome: Ok
+      traces:
+        - OperationEnter: { operation: area, symbol: "fixture::AreaResult::compute" }
+        - CaptureAfter: { operation: area, field: area, value: "3.141592653589793" }
+        - CaptureAfter: { operation: area, field: perimeter, value: "6.283185307179586" }
+        - OperationExit: { operation: area, symbol: "fixture::AreaResult::compute" }
+
+  - name: runtime_capture_statemachine
+    desc: StateMachine operation snapshots captured fields at entry and exit (boundary snapshot)
+    binding:
+      name: rust
+      target: run-annotations
+    inputs:
+      source: |
+        #[derive(SpecCapture)]
+        pub struct Counter {
+            #[spec_capture("counting")]
+            pub count: u32,
+        }
+
+        impl Counter {
+            pub fn new() -> Self { Counter { count: 0 } }
+
+            #[spec_operation("counting", kind = StateMachine)]
+            pub fn increment(&mut self) {
+                self.count += 1;
+            }
+        }
+
+        #[spec_setup("counting", name = "default")]
+        pub fn make_counter() -> Counter { Counter::new() }
+      driver: |
+        let mut c = make_counter();
+        c.increment();
+    expected:
+      outcome: Ok
+      traces:
+        - OperationEnter: { operation: counting, symbol: "fixture::Counter::increment" }
+        - CaptureBefore: { operation: counting, field: count, value: "0" }
+        - CaptureAfter: { operation: counting, field: count, value: "1" }
+        - OperationExit: { operation: counting, symbol: "fixture::Counter::increment" }
+
+  # ===== Runtime: checkpoint traces =====
+
+  - name: runtime_checkpoint_attribute
+    desc: Checkpoint attribute records the method return value each time it's called
+    binding:
+      name: rust
+      target: run-annotations
+    inputs:
+      source: |
+        pub struct Pipeline;
+
+        impl Pipeline {
+            pub fn new() -> Self { Pipeline }
+
+            #[spec_checkpoint("process")]
+            pub fn validate(&self, input: &str) -> bool {
+                !input.is_empty()
+            }
+
+            #[spec_operation("process", kind = Sequence)]
+            pub fn run(&self, input: &str) -> String {
+                let valid = self.validate(input);
+                if valid { input.to_uppercase() } else { String::new() }
+            }
+        }
+
+        #[spec_setup("process", name = "default")]
+        pub fn make_pipeline() -> Pipeline { Pipeline::new() }
+      driver: |
+        let p = make_pipeline();
+        let _result = p.run("hello");
+    expected:
+      outcome: Ok
+      traces:
+        - OperationEnter: { operation: process, symbol: "fixture::Pipeline::run" }
+        - Checkpoint: { operation: process, symbol: "fixture::Pipeline::validate", value: "true" }
+        - OperationExit: { operation: process, symbol: "fixture::Pipeline::run" }
+
+  - name: runtime_checkpoint_inline
+    desc: Inline spec_checkpoint! records the expression value and passes it through
+    binding:
+      name: rust
+      target: run-annotations
+    inputs:
+      source: |
+        pub fn double(x: i32) -> i32 { x * 2 }
+
+        #[spec_operation("calc", kind = Sequence)]
+        pub fn compute(x: i32) -> i32 {
+            let doubled = spec_checkpoint!("calc", double(x));
+            doubled + 1
+        }
+      driver: |
+        let result = compute(5);
+        assert_eq!(result, 11);
+    expected:
+      outcome: Ok
+      traces:
+        - OperationEnter: { operation: calc, symbol: "fixture::compute" }
+        - Checkpoint: { operation: calc, symbol: "fixture::compute::checkpoint_1", value: "10" }
+        - OperationExit: { operation: calc, symbol: "fixture::compute" }
+
+  # ===== Runtime: mock traces =====
+
+  - name: runtime_mock_injection
+    desc: Mock annotation allows injecting a return value in tests
+    binding:
+      name: rust
+      target: run-annotations
+    inputs:
+      source: |
+        pub struct Service;
+
+        impl Service {
+            pub fn new() -> Self { Service }
+
+            #[spec_mock("fetch", name = "backend")]
+            pub fn call_api(&self) -> String {
+                "real_response".to_string()
+            }
+
+            #[spec_operation("fetch", kind = Stateless)]
+            pub fn fetch(&self) -> String {
+                self.call_api()
+            }
+        }
+
+        #[spec_setup("fetch", name = "default")]
+        pub fn make_service() -> Service { Service::new() }
+      driver: |
+        specgate::runtime::install_mock("backend", "injected_response");
+        let svc = make_service();
+        let result = svc.fetch();
+        assert_eq!(result, "injected_response");
+    expected:
+      outcome: Ok
+      traces:
+        - OperationEnter: { operation: fetch, symbol: "fixture::Service::fetch" }
+        - MockCall: { operation: fetch, mock_name: backend, returned: "injected_response" }
+        - OperationExit: { operation: fetch, symbol: "fixture::Service::fetch" }
+
+  # ===== Runtime: nested operations =====
+
+  - name: runtime_nested_operations
+    desc: Nested operation calls produce correctly bracketed trace spans
+    binding:
+      name: rust
+      target: run-annotations
+    inputs:
+      source: |
+        #[derive(SpecCapture)]
+        pub struct Account {
+            #[spec_capture("banking")]
+            pub balance: i64,
+        }
+
+        impl Account {
+            pub fn new(balance: i64) -> Self { Account { balance } }
+
+            #[spec_operation("banking", kind = StateMachine)]
+            pub fn withdraw(&mut self, amount: i64) {
+                self.balance -= amount;
+            }
+
+            #[spec_operation("banking", kind = StateMachine)]
+            pub fn deposit(&mut self, amount: i64) {
+                self.balance += amount;
+            }
+
+            #[spec_operation("banking", kind = Sequence)]
+            pub fn transfer(&mut self, to: &mut Account, amount: i64) {
+                self.withdraw(amount);
+                to.deposit(amount);
+            }
+        }
+      driver: |
+        let mut alice = Account::new(1000);
+        let mut bob = Account::new(500);
+        alice.transfer(&mut bob, 200);
+    expected:
+      outcome: Ok
+      traces:
+        - OperationEnter: { operation: banking, symbol: "fixture::Account::transfer" }
+        - OperationEnter: { operation: banking, symbol: "fixture::Account::withdraw" }
+        - CaptureBefore: { operation: banking, field: balance, value: "1000" }
+        - CaptureAfter: { operation: banking, field: balance, value: "800" }
+        - OperationExit: { operation: banking, symbol: "fixture::Account::withdraw" }
+        - OperationEnter: { operation: banking, symbol: "fixture::Account::deposit" }
+        - CaptureBefore: { operation: banking, field: balance, value: "500" }
+        - CaptureAfter: { operation: banking, field: balance, value: "700" }
+        - OperationExit: { operation: banking, symbol: "fixture::Account::deposit" }
+        - OperationExit: { operation: banking, symbol: "fixture::Account::transfer" }
+
+  # ===== Runtime: noop without feature =====
+
+  - name: runtime_noop_without_feature
+    desc: Annotations produce no traces when specgate feature is disabled
+    binding:
+      name: rust
+      target: run-annotations
+    inputs:
+      source: |
+        #[derive(SpecCapture)]
+        pub struct Counter {
+            #[spec_capture("counting")]
+            pub count: u32,
+        }
+
+        impl Counter {
+            pub fn new() -> Self { Counter { count: 0 } }
+
+            #[spec_operation("counting", kind = StateMachine)]
+            pub fn increment(&mut self) {
+                self.count += 1;
+            }
+        }
+
+        #[spec_setup("counting", name = "default")]
+        pub fn make_counter() -> Counter { Counter::new() }
+      driver: |
+        let mut c = make_counter();
+        c.increment();
+        assert_eq!(c.count, 1);
+    expected:
+      outcome: Ok
+      traces: []
+
+  # ===== Runtime: multiple calls accumulate =====
+
+  - name: runtime_multiple_calls
+    desc: Calling the same operation twice produces two complete spans
+    binding:
+      name: rust
+      target: run-annotations
+    inputs:
+      source: |
+        #[derive(SpecCapture)]
+        pub struct Counter {
+            #[spec_capture("counting")]
+            pub count: u32,
+        }
+
+        impl Counter {
+            pub fn new() -> Self { Counter { count: 0 } }
+
+            #[spec_operation("counting", kind = StateMachine)]
+            pub fn increment(&mut self) {
+                self.count += 1;
+            }
+        }
+
+        #[spec_setup("counting", name = "default")]
+        pub fn make_counter() -> Counter { Counter::new() }
+      driver: |
+        let mut c = make_counter();
+        c.increment();
+        c.increment();
+    expected:
+      outcome: Ok
+      traces:
+        - OperationEnter: { operation: counting, symbol: "fixture::Counter::increment" }
+        - CaptureBefore: { operation: counting, field: count, value: "0" }
+        - CaptureAfter: { operation: counting, field: count, value: "1" }
+        - OperationExit: { operation: counting, symbol: "fixture::Counter::increment" }
+        - OperationEnter: { operation: counting, symbol: "fixture::Counter::increment" }
+        - CaptureBefore: { operation: counting, field: count, value: "1" }
+        - CaptureAfter: { operation: counting, field: count, value: "2" }
+        - OperationExit: { operation: counting, symbol: "fixture::Counter::increment" }
+
+  # ===== Runtime: capture + checkpoint combined =====
+
+  - name: runtime_capture_and_checkpoint
+    desc: Operation with both boundary captures and an explicit inline checkpoint
+    binding:
+      name: rust
+      target: run-annotations
+    inputs:
+      source: |
+        #[derive(SpecCapture)]
+        pub struct Accumulator {
+            #[spec_capture("accumulate")]
+            pub total: i64,
+        }
+
+        impl Accumulator {
+            pub fn new() -> Self { Accumulator { total: 0 } }
+
+            #[spec_operation("accumulate", kind = StateMachine)]
+            pub fn add_doubled(&mut self, x: i64) {
+                let doubled = spec_checkpoint!("accumulate", x * 2);
+                self.total += doubled;
+            }
+        }
+
+        #[spec_setup("accumulate", name = "default")]
+        pub fn make_acc() -> Accumulator { Accumulator::new() }
+      driver: |
+        let mut acc = make_acc();
+        acc.add_doubled(5);
+    expected:
+      outcome: Ok
+      traces:
+        - OperationEnter: { operation: accumulate, symbol: "fixture::Accumulator::add_doubled" }
+        - CaptureBefore: { operation: accumulate, field: total, value: "0" }
+        - Checkpoint: { operation: accumulate, symbol: "fixture::Accumulator::add_doubled::checkpoint_1", value: "10" }
+        - CaptureAfter: { operation: accumulate, field: total, value: "10" }
+        - OperationExit: { operation: accumulate, symbol: "fixture::Accumulator::add_doubled" }
+
+  # ===== Runtime: field-level capture =====
+
+  - name: runtime_field_level_capture
+    desc: Field-level spec_capture selectively captures only annotated fields
+    binding:
+      name: rust
+      target: run-annotations
+    inputs:
+      source: |
+        #[derive(SpecCapture)]
+        pub struct Pair {
+            #[spec_capture("swap")]
+            pub left: i32,
+            pub right: i32,
+        }
+
+        impl Pair {
+            pub fn new(l: i32, r: i32) -> Self { Pair { left: l, right: r } }
+
+            #[spec_operation("swap", kind = StateMachine)]
+            pub fn swap(&mut self) {
+                std::mem::swap(&mut self.left, &mut self.right);
+            }
+        }
+
+        #[spec_setup("swap", name = "default")]
+        pub fn make_pair() -> Pair { Pair::new(1, 2) }
+      driver: |
+        let mut p = make_pair();
+        p.swap();
+    expected:
+      outcome: Ok
+      traces:
+        - OperationEnter: { operation: swap, symbol: "fixture::Pair::swap" }
+        - CaptureBefore: { operation: swap, field: left, value: "1" }
+        - CaptureAfter: { operation: swap, field: left, value: "2" }
+        - OperationExit: { operation: swap, symbol: "fixture::Pair::swap" }

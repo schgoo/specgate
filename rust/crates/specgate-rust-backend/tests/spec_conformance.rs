@@ -54,9 +54,11 @@ fn make_case(
     SpecCase {
         name: name.to_string(),
         desc: desc.to_string(),
+        binding: None,
         inputs: inputs_map,
         expected: expected_map,
         steps: Vec::new(),
+        postconditions: None,
     }
 }
 

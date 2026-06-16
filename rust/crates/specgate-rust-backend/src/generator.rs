@@ -3,11 +3,13 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_yaml::{Mapping, Value};
+use specgate_annotations::*;
 use specgate_types::{BindingTarget, SpecCase, SpecDocument};
 
 use crate::annotations::{Annotation, OperationKind};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, SpecCapture)]
+#[spec_capture("harness.rust")]
 pub struct GeneratedFile {
     pub path: PathBuf,
     pub content: String,
@@ -20,6 +22,7 @@ pub enum GenerateError {
     UnsupportedType { type_name: String, detail: String },
 }
 
+#[spec_operation("harness.rust", kind = Sequence)]
 pub fn generate_test_file(
     spec: &SpecDocument,
     annotations: &[Annotation],
@@ -61,6 +64,7 @@ struct CommandTarget {
     output_file: Option<String>,
 }
 
+#[spec_setup("harness.rust", name = "default")]
 fn resolve_codegen_target(
     spec: &SpecDocument,
     annotations: &[Annotation],
@@ -287,6 +291,7 @@ fn mock_annotations(spec: &SpecDocument, annotations: &[Annotation]) -> Vec<Mock
         .collect()
 }
 
+#[spec_checkpoint("harness.rust")]
 fn render_generated_file(
     spec: &SpecDocument,
     target: &CodegenTarget,
@@ -309,14 +314,48 @@ fn render_generated_file(
         string_literal(&results_path.display().to_string())
     ));
     file.push_str("}\n\n");
-    file.push_str("fn specgate_write_result(name: &str, status: &str, duration_ms: i64) {\n");
+    file.push_str("fn specgate_traces_path(name: &str) -> PathBuf {\n");
+    file.push_str(
+        "    PathBuf::from(\"target\").join(\"specgate-harness\").join(\"traces\").join(format!(\"{name}.json\"))\n",
+    );
+    file.push_str("}\n\n");
+    file.push_str(
+        "fn specgate_write_traces(name: &str) -> (Vec<specgate::TraceEvent>, Option<String>) {\n",
+    );
+    file.push_str("    let traces = specgate::runtime::drain_traces();\n");
+    file.push_str("    if traces.is_empty() {\n");
+    file.push_str("        return (traces, None);\n");
+    file.push_str("    }\n");
+    file.push_str("    let traces_path = specgate_traces_path(name);\n");
+    file.push_str(
+        "    if let Some(parent) = traces_path.parent() {\n        fs::create_dir_all(parent).expect(\"specgate traces directory should be creatable\");\n    }\n",
+    );
+    file.push_str(
+        "    fs::write(\n        &traces_path,\n        serde_json::to_string_pretty(&traces).expect(\"specgate traces should serialize\"),\n    )\n    .expect(\"specgate traces file should be writable\");\n",
+    );
+    file.push_str("    (traces, Some(traces_path.display().to_string().replace('\\\\', \"/\")))\n");
+    file.push_str("}\n\n");
+    file.push_str(
+        "fn specgate_write_result(name: &str, status: &str, duration_ms: i64, traces_file: Option<String>, traces_match: Option<bool>) {\n",
+    );
     file.push_str("    let mut file = OpenOptions::new()\n");
     file.push_str("        .create(true)\n");
     file.push_str("        .append(true)\n");
     file.push_str("        .open(specgate_results_path())\n");
     file.push_str("        .expect(\"specgate results file should be writable\");\n");
+    file.push_str("    let mut result = json!({\n");
+    file.push_str("        \"name\": name,\n");
+    file.push_str("        \"status\": status,\n");
+    file.push_str("        \"duration_ms\": duration_ms,\n");
+    file.push_str("    });\n");
     file.push_str(
-        "    writeln!(file, \"{\\\"name\\\":\\\"{}\\\",\\\"status\\\":\\\"{}\\\",\\\"duration_ms\\\":{}}\", name, status, duration_ms)\n",
+        "    if let Some(traces_file) = traces_file {\n        result[\"traces_file\"] = serde_json::Value::String(traces_file);\n    }\n",
+    );
+    file.push_str(
+        "    if let Some(traces_match) = traces_match {\n        result[\"traces_match\"] = serde_json::Value::Bool(traces_match);\n    }\n",
+    );
+    file.push_str(
+        "    writeln!(file, \"{}\", serde_json::to_string(&result).expect(\"specgate result line should serialize\"))\n",
     );
     file.push_str("        .expect(\"specgate result line should be written\");\n");
     file.push_str("}\n\n");
@@ -395,6 +434,7 @@ fn render_annotation_case(
     let mut body = String::new();
     body.push_str("#[test]\n");
     body.push_str(&format!("fn {}() {{\n", sanitize_test_name(&case.name)));
+    body.push_str("    specgate::runtime::reset();\n");
     body.push_str("    let specgate_started = Instant::now();\n");
     body.push_str(&format!(
         "    // setup {} via {}\n",
@@ -428,10 +468,21 @@ fn render_annotation_case(
     render_mock_block(&mut body, case, mocks)?;
     render_capture_block(&mut body, case, &operation.kind, captures, capture_source)?;
     render_checkpoint_block(&mut body, case, &checkpoint_symbols)?;
+    body.push_str(&format!(
+        "    let (specgate_traces, specgate_traces_file) = specgate_write_traces({});\n",
+        string_literal(&case.name)
+    ));
+    render_traces_match_block(
+        &mut body,
+        case,
+        "serde_json::to_value(&specgate_traces)\n        .expect(\"specgate traces should serialize\")",
+    )?;
     body.push_str("    specgate_write_result(\n");
     body.push_str(&format!("        {},\n", string_literal(&case.name)));
-    body.push_str("        \"pass\",\n");
+    body.push_str("        specgate_status,\n");
     body.push_str("        specgate_started.elapsed().as_millis() as i64,\n");
+    body.push_str("        specgate_traces_file,\n");
+    body.push_str("        specgate_traces_match,\n");
     body.push_str("    );\n");
     body.push_str("}\n");
     Ok(body)
@@ -442,6 +493,7 @@ fn render_api_case(case: &SpecCase, target: &ApiTarget) -> Result<String, Genera
     let mut body = String::new();
     body.push_str("#[test]\n");
     body.push_str(&format!("fn {}() {{\n", sanitize_test_name(&case.name)));
+    body.push_str("    specgate::runtime::reset();\n");
     body.push_str("    let specgate_started = Instant::now();\n");
 
     if let Some(constructor) = &target.constructor {
@@ -467,32 +519,78 @@ fn render_api_case(case: &SpecCase, target: &ApiTarget) -> Result<String, Genera
         "    let actual_json: serde_json::Value = serde_json::to_value(&actual)\n        .expect(\"api target output should serialize to JSON\");\n",
     );
     render_json_expectations(&mut body, "actual_json", &case.expected)?;
+    body.push_str(&format!(
+        "    let (specgate_traces, specgate_traces_file) = specgate_write_traces({});\n",
+        string_literal(&case.name)
+    ));
+    render_traces_match_block(&mut body, case, "actual_json[\"traces\"].clone()")?;
     body.push_str("    specgate_write_result(\n");
     body.push_str(&format!("        {},\n", string_literal(&case.name)));
-    body.push_str("        \"pass\",\n");
+    body.push_str("        specgate_status,\n");
     body.push_str("        specgate_started.elapsed().as_millis() as i64,\n");
+    body.push_str("        specgate_traces_file,\n");
+    body.push_str("        specgate_traces_match,\n");
     body.push_str("    );\n");
     body.push_str("}\n");
     Ok(body)
 }
 
 fn render_command_case(case: &SpecCase, target: &CommandTarget) -> Result<String, GenerateError> {
-    let command_template = apply_case_template(&target.command, case)?;
-    let output_template = target
-        .output_file
-        .as_deref()
-        .map(|template| apply_case_template(template, case))
-        .transpose()?;
     let mut body = String::new();
     body.push_str("#[test]\n");
     body.push_str(&format!("fn {}() {{\n", sanitize_test_name(&case.name)));
+    body.push_str("    specgate::runtime::reset();\n");
     body.push_str("    let specgate_started = Instant::now();\n");
     body.push_str(
         "    let workdir = specgate_results_path()\n        .parent()\n        .expect(\"results path should have a parent\")\n        .to_path_buf();\n",
     );
     body.push_str(&format!(
-        "    let command_line = specgate_apply_template({}, &[(\"workdir\", workdir.display().to_string())]);\n",
-        string_literal(&command_template)
+        "    let case_dir = workdir.join({});\n",
+        string_literal(&case.name)
+    ));
+    body.push_str(
+        "    fs::create_dir_all(&case_dir).expect(\"case workdir should be created\");\n",
+    );
+    body.push_str(&format!(
+        "    let mut replacements: Vec<(&str, String)> = vec![(\"workdir\", workdir.display().to_string()), (\"case_name\", {}.to_string())];\n",
+        string_literal(&case.name)
+    ));
+    for (name, value) in &case.inputs {
+        if name.starts_with("mock_") {
+            continue;
+        }
+        match value {
+            Value::String(string) => {
+                let extension = if name == "source" || name == "driver" {
+                    "rs"
+                } else {
+                    "txt"
+                };
+                body.push_str(&format!(
+                    "    let {name}_path = case_dir.join({});\n",
+                    string_literal(&format!("{name}.{extension}"))
+                ));
+                body.push_str(&format!(
+                    "    fs::write(&{name}_path, {}).expect(\"case input should be written\");\n",
+                    string_literal(string)
+                ));
+                body.push_str(&format!(
+                    "    replacements.push(({:?}, {name}_path.display().to_string()));\n",
+                    name
+                ));
+            }
+            _ => {
+                body.push_str(&format!(
+                    "    replacements.push(({:?}, {}.to_string()));\n",
+                    name,
+                    scalar_template_value(value)?
+                ));
+            }
+        }
+    }
+    body.push_str(&format!(
+        "    let command_line = specgate_apply_template({}, &replacements);\n",
+        string_literal(&target.command)
     ));
     body.push_str(
         "    let output = specgate_spawn_shell_command(&command_line)\n        .output()\n        .expect(\"command target should run\");\n",
@@ -501,9 +599,9 @@ fn render_command_case(case: &SpecCase, target: &CommandTarget) -> Result<String
         "    assert!(output.status.success(), \"command target failed: {}\", output.status);\n",
     );
 
-    if let Some(output_template) = output_template {
+    if let Some(output_template) = &target.output_file {
         body.push_str(&format!(
-            "    let output_path = specgate_apply_template({}, &[(\"workdir\", workdir.display().to_string())]);\n",
+            "    let output_path = specgate_apply_template({}, &replacements);\n",
             string_literal(&output_template)
         ));
         body.push_str(
@@ -519,10 +617,17 @@ fn render_command_case(case: &SpecCase, target: &CommandTarget) -> Result<String
         "    let actual_json: serde_json::Value = serde_json::from_str(&stdout)\n        .expect(\"command target output should be valid JSON\");\n",
     );
     render_json_expectations(&mut body, "actual_json", &case.expected)?;
+    body.push_str(&format!(
+        "    let (specgate_traces, specgate_traces_file) = specgate_write_traces({});\n",
+        string_literal(&case.name)
+    ));
+    render_traces_match_block(&mut body, case, "actual_json[\"traces\"].clone()")?;
     body.push_str("    specgate_write_result(\n");
     body.push_str(&format!("        {},\n", string_literal(&case.name)));
-    body.push_str("        \"pass\",\n");
+    body.push_str("        specgate_status,\n");
     body.push_str("        specgate_started.elapsed().as_millis() as i64,\n");
+    body.push_str("        specgate_traces_file,\n");
+    body.push_str("        specgate_traces_match,\n");
     body.push_str("    );\n");
     body.push_str("}\n");
     Ok(body)
@@ -647,6 +752,27 @@ fn render_checkpoint_block(
     Ok(())
 }
 
+fn render_traces_match_block(
+    body: &mut String,
+    case: &SpecCase,
+    actual_traces_expr: &str,
+) -> Result<(), GenerateError> {
+    if let Some(expected_traces) = case.expected.get("traces") {
+        body.push_str(&format!(
+            "    let specgate_traces_match = Some({actual_traces_expr} == {});\n",
+            render_json_value(expected_traces)?
+        ));
+        body.push_str(
+            "    let specgate_status = if specgate_traces_match == Some(false) { \"fail\" } else { \"pass\" };\n",
+        );
+    } else {
+        body.push_str("    let specgate_traces_match = None;\n");
+        body.push_str("    let specgate_status = \"pass\";\n");
+    }
+
+    Ok(())
+}
+
 fn render_case_arguments(case: &SpecCase) -> Result<String, GenerateError> {
     let mut arguments = Vec::new();
     for (name, value) in &case.inputs {
@@ -672,6 +798,20 @@ fn render_json_expectations(
     expected: &BTreeMap<String, Value>,
 ) -> Result<(), GenerateError> {
     for (field_name, value) in expected {
+        if field_name == "annotations" {
+            body.push_str(&format!(
+                "    let mut actual_annotations = {}[\"annotations\"].as_array().expect(\"annotations should be an array\").clone();\n",
+                actual_json
+            ));
+            body.push_str(&format!(
+                "    let mut expected_annotations = {}.as_array().expect(\"expected annotations should be an array\").clone();\n",
+                render_json_value(value)?
+            ));
+            body.push_str("    actual_annotations.sort_by_key(|value| value.to_string());\n");
+            body.push_str("    expected_annotations.sort_by_key(|value| value.to_string());\n");
+            body.push_str("    assert_eq!(actual_annotations, expected_annotations);\n");
+            continue;
+        }
         render_json_assertion(body, actual_json, &[field_name.as_str()], value)?;
     }
 
@@ -769,6 +909,8 @@ fn render_json_literal(value: &Value) -> Result<String, GenerateError> {
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
+#[spec_mock("harness.rust", name = "case-template")]
 fn apply_case_template(template: &str, case: &SpecCase) -> Result<String, GenerateError> {
     let mut rendered = template.to_string();
     for (name, value) in &case.inputs {
@@ -1258,9 +1400,116 @@ mod tests {
 
         assert!(file.content.contains("SPECGATE_RESULTS_PATH"));
         assert!(file.content.contains("fn specgate_write_result"));
+        assert!(file.content.contains("fn specgate_write_traces"));
         assert!(file.content.contains("specgate_write_result("));
+        assert!(file.content.contains(
+            "let (specgate_traces, specgate_traces_file) = specgate_write_traces(\"basic\");"
+        ));
+        assert!(file.content.contains("let specgate_traces_match = None;"));
         assert!(file.content.contains("let _setup = calc::setup(1, 2);"));
         assert!(file.content.contains("let actual = calc::add(1, 2);"));
+    }
+
+    #[test]
+    fn writes_traces_file_when_runtime_traces_exist() {
+        let file = generate_test_file(
+            &spec_with_cases(
+                "counting",
+                vec![spec_case(
+                    "increment_once",
+                    BTreeMap::new(),
+                    expected([("outcome", string("Ok")), ("count", number(1))]),
+                )],
+            ),
+            &[
+                operation(
+                    "counting",
+                    OperationKind::StateMachine,
+                    "counter::Counter::increment",
+                ),
+                setup("counting", "default", "counter::make_counter"),
+                capture("counting", "counter::Counter::count"),
+            ],
+            None,
+            Path::new("tests").join("specgate_generated.rs").as_path(),
+            Path::new("target").join("results.json").as_path(),
+        )
+        .expect("generation should succeed");
+
+        assert!(
+            file.content
+                .contains("PathBuf::from(\"target\").join(\"specgate-harness\").join(\"traces\")")
+        );
+        assert!(
+            file.content
+                .contains("result[\"traces_file\"] = serde_json::Value::String(traces_file);")
+        );
+        assert!(
+            file.content
+                .contains("result[\"traces_match\"] = serde_json::Value::Bool(traces_match);")
+        );
+        assert!(file.content.contains("let specgate_status = \"pass\";"));
+    }
+
+    #[test]
+    fn writes_trace_match_when_expected_traces_exist() {
+        let file = generate_test_file(
+            &spec_with_cases(
+                "counting",
+                vec![spec_case(
+                    "increment_once",
+                    BTreeMap::new(),
+                    expected([
+                        ("outcome", string("Ok")),
+                        ("count", number(1)),
+                        (
+                            "traces",
+                            Value::Sequence(vec![
+                                json_mapping([(
+                                    "OperationEnter",
+                                    json_mapping([
+                                        ("operation", string("counting")),
+                                        ("symbol", string("counter::Counter::increment")),
+                                    ]),
+                                )]),
+                                json_mapping([(
+                                    "CaptureBefore",
+                                    json_mapping([
+                                        ("operation", string("counting")),
+                                        ("field", string("count")),
+                                        ("value", string("0")),
+                                    ]),
+                                )]),
+                            ]),
+                        ),
+                    ]),
+                )],
+            ),
+            &[
+                operation(
+                    "counting",
+                    OperationKind::StateMachine,
+                    "counter::Counter::increment",
+                ),
+                setup("counting", "default", "counter::make_counter"),
+                capture("counting", "counter::Counter::count"),
+            ],
+            None,
+            Path::new("tests").join("specgate_generated.rs").as_path(),
+            Path::new("target").join("results.json").as_path(),
+        )
+        .expect("generation should succeed");
+
+        assert!(file.content.contains("let specgate_traces_match = Some("));
+        assert!(
+            file.content
+                .contains("serde_json::to_value(&specgate_traces)")
+        );
+        assert!(
+            file.content.contains(
+                "let specgate_status = if specgate_traces_match == Some(false) { \"fail\" } else { \"pass\" };"
+            )
+        );
     }
 
     #[test]
@@ -1541,11 +1790,20 @@ mod tests {
                 .contains("specgate_spawn_shell_command(&command_line)")
         );
         assert!(file.content.contains(
-            "let command_line = specgate_apply_template(\"cargo test -p specgate-harness fixtures/simple_pass.spec.yaml\", &[(\"workdir\", workdir.display().to_string())]);"
+            "let command_line = specgate_apply_template(\"cargo test -p specgate-harness {spec_path}\", &replacements);"
         ));
         assert!(file.content.contains(
-            "let output_path = specgate_apply_template(\"{workdir}/results.json\", &[(\"workdir\", workdir.display().to_string())]);"
+            "let output_path = specgate_apply_template(\"{workdir}/results.json\", &replacements);"
         ));
+        assert!(
+            file.content
+                .contains("let spec_path_path = case_dir.join(\"spec_path.txt\");")
+        );
+        assert!(
+            file.content.contains(
+                "replacements.push((\"spec_path\", spec_path_path.display().to_string()));"
+            )
+        );
         assert!(
             file.content
                 .contains("let actual_json: serde_json::Value = serde_json::from_str(&stdout)")
@@ -2032,9 +2290,11 @@ mod tests {
         SpecCase {
             name: name.to_string(),
             desc: format!("case {name}"),
+            binding: None,
             inputs,
             expected,
             steps: Vec::new(),
+            postconditions: None,
         }
     }
 

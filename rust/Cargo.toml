@@ -1,5 +1,5 @@
 [workspace]
-members = [
+members = ["crates/annotation-test-runner", "crates/annotation-trace-runner","crates/specgate", "crates/specgate-annotations",
     "crates/specgate-harness",
     "crates/specgate-rust-backend",
     "crates/specgate-types",

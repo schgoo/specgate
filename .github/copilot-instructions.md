@@ -2,7 +2,14 @@
 
 ## Implementation Rule
 
-**All implementation changes must go through the spec implementation skill, run as a subagent.**
+**All implementation changes must go through the spec implementation skill.**
+
+The skill is at `.github/skills/implement-spec.md`. When asked to "implement
+a spec", "implement the spec", "build from spec", or similar, always follow
+that skill's workflow.
+
+When delegating to a subagent, always include this reference in the prompt:
+> Follow the implementation skill at `.github/skills/implement-spec.md`
 
 Do not manually edit Rust or C# source files to add features, fix bugs, or change behavior.
 The correct workflow is:

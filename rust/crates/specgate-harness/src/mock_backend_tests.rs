@@ -285,9 +285,11 @@ fn spec_case(name: &str, mock_result: Option<&str>) -> SpecCase {
     SpecCase {
         name: name.to_string(),
         desc: format!("case {name}"),
+        binding: None,
         inputs,
         expected: BTreeMap::new(),
         steps: Vec::new(),
+        postconditions: None,
     }
 }
 

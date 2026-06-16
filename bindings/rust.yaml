@@ -21,4 +21,15 @@ targets:
     constructor: specgate_rust_backend::RustBackend::new
   build-annotations:
     package_root: ../rust/crates/specgate-annotations
-    command: cargo run -p annotation-test-runner -- {source}
+    command: cargo run -p annotation-test-runner -- {case_name} {source} {driver}
+  run-annotations:
+    package_root: ../rust/crates/specgate-annotations
+    command: cargo run -p annotation-trace-runner -- {case_name} {source} {driver}
+
+  # Postcondition targets — used by spec cases to assert side effects
+  assert-file-absent:
+    package_root: ../rust
+    command: IF EXIST {path} exit 1
+  assert-dir-absent:
+    package_root: ../rust
+    command: IF EXIST {path}\* exit 1

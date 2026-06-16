@@ -49,6 +49,14 @@ operations:
         report: RunReport
       when Error:
         error: RunError
+    postconditions:
+      - Generated test artifacts (specgate_generated.rs, results NDJSON, workdir)
+        are deleted after results are collected. Postconditions are enforced by
+        resolving each postcondition target through the active binding, rendering
+        its command template with the postcondition inputs plus harness context
+        values like {generated_test_path} and {workdir}, then running that
+        command and requiring exit code 0. This prevents validation artifacts
+        from leaking to implementation agents.
 
 types:
   Backend:
@@ -59,6 +67,8 @@ types:
     name: string
     status: string
     duration_ms: int
+    traces_file: string                    # optional — path to traces JSON if annotations emitted traces
+    traces_match: bool                     # optional — true if actual traces match spec's expected traces
 
   RunReport:
     spec_name: string
@@ -175,6 +185,65 @@ cases:
             passed: 3
             failed: 0
             total: 3
+
+  # ===== Trace output =====
+
+  - name: annotated_spec_produces_traces_file
+    desc: Running a spec with annotated operations produces a traces file and validates trace contents match expected
+    steps:
+      - operation: run_spec
+        inputs:
+          spec_path: fixtures/annotated_with_traces.spec.yaml
+        expected:
+          outcome: Complete
+          report:
+            passed: 1
+            total: 1
+            results:
+              - name: increment_once
+                status: pass
+                traces_file: target/specgate-harness/traces/increment_once.json
+                traces_match: true
+
+  - name: traces_mismatch_reported
+    desc: When actual traces differ from expected, traces_match is false and the case fails
+    steps:
+      - operation: run_spec
+        inputs:
+          spec_path: fixtures/annotated_with_wrong_traces.spec.yaml
+        expected:
+          outcome: Complete
+          report:
+            passed: 0
+            failed: 1
+            total: 1
+            results:
+              - name: increment_once
+                status: fail
+                traces_match: false
+
+  # ===== Post-run cleanup =====
+
+  - name: generated_artifacts_cleaned_up
+    desc: After run_spec completes, binding-backed postcondition targets verify the generated test file and workdir were removed using the active binding's native command syntax
+    steps:
+      - operation: run_spec
+        inputs:
+          spec_path: fixtures/single_pass.spec.yaml
+        expected:
+          outcome: Complete
+          report:
+            passed: 1
+            total: 1
+    postconditions:
+      - target: assert-file-absent
+        inputs:
+          path: "{generated_test_path}"
+        desc: Generated test file does not exist after run
+      - target: assert-dir-absent
+        inputs:
+          path: "{workdir}"
+        desc: Working directory does not exist after run
 
   # ===== Setup errors =====
 

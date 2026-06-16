@@ -141,11 +141,35 @@ See the language-specific knowledge files for test code examples.
 
 ## Rules
 
+### Mode selection
+- **Annotated mode** (default): Use when `specgate-annotations` is available as a
+  workspace dependency. Add `#[spec_operation]`, `#[spec_capture]`, `#[spec_setup]`,
+  `#[spec_checkpoint]`, and `#[spec_mock]` annotations to the implementation code.
+  The annotations mark which functions implement which spec operations, enabling
+  the harness to discover and validate them automatically.
+- **Bootstrap mode**: Use only when the annotations crate does not exist yet
+  (early project bootstrap). Write conventional tests without annotations.
+
 ### Annotated mode only
 - **Every `spec_operation` needs a `kind`** — infer from the spec's structure
 - **Every `spec_setup` needs a `name`** — use the setup's purpose as the name
 - **Every `spec_mock` needs a `name`** — use the dependency's logical name
 - **Setup functions must not take `self`** — they are free functions
+
+### Trust boundary — validation artifacts are off-limits
+
+The spec-driven workflow depends on a strict separation: you implement from
+the **spec**, not from the validation output. You MUST NOT:
+
+- Read, inspect, or reference any files under `target/specgate-harness/`
+- Read harness-generated test files (e.g., `specgate_generated.rs`)
+- Use trace output files (`traces/*.json`) to reverse-engineer expected values
+- Copy generated test code into hand-written test files
+
+These artifacts are produced by the harness to validate your implementation.
+If you use them as input, the validation becomes circular and loses its value.
+Your only sources of truth are: the spec file, the binding file, and your own
+source code.
 
 ### Both modes
 - **Types are suggestions, not prescriptions** — the spec says what fields must be

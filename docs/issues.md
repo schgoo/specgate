@@ -17,6 +17,9 @@
 | ISS-009 | ohno migration for error types | Open | 2026-06-12 |
 | ISS-010 | Spec YAML schema validation in Rust | Open | 2026-06-12 |
 | ISS-011 | Spec dependency DAG and shared types spec | Open | 2026-06-13 |
+| ISS-012 | Generated test file quality | Open | 2026-06-15 |
+| ISS-013 | Annotation spec — deferred runtime test cases | Open | 2026-06-15 |
+| ISS-014 | Enforce trust boundary on validation artifacts | Open | 2026-06-15 |
 
 ---
 
@@ -212,5 +215,63 @@ The user never writes property assertions manually. Invariants are inferred from
 
 ---
 
-**Version**: 1.0
-**Last Updated**: 2026-06-13
+## ISS-012: Generated Test File Quality
+
+**Context**: The harness generates `specgate_generated.rs` test files from specs. Currently these files have several issues that prevent them from being checked into source control.
+
+**Status**: Open.
+
+**Problems**:
+1. **Absolute paths** — results path is hardcoded to the developer's filesystem (e.g., `C:\Users\schgoo\repos\...`). Breaks on any other machine.
+2. **No header comment** — nothing indicates the file is auto-generated, which spec it came from, or how to regenerate it.
+3. **Template leaks** — `{driver}` appears literally in the command for non-runtime cases where no driver input exists.
+4. **Hardcoded run ID** — results path contains a timestamp-based run ID that's meaningless when checked in.
+5. **Verbose boilerplate** — each test function repeats the same setup code (could emit shared helpers once).
+
+**To support checked-in generated tests, the generator needs**:
+- Header: spec name, spec content hash, generation timestamp, "do not edit — regenerate with `specgate generate`"
+- Relative paths: results path relative to `CARGO_MANIFEST_DIR`
+- Deterministic output: same spec → same file content (no timestamps or absolute paths in the body)
+- Clean handling of optional template variables (don't substitute `{driver}` if there's no driver input)
+
+**Impact**: Checking in generated tests lets CI run them without the harness, gives developers quick feedback, and creates a visible diff when specs change. Without these fixes, the files only work transiently on the machine that generated them.
+
+---
+
+## ISS-013: Annotation Spec — Deferred Runtime Test Cases
+
+**Context**: Two runtime trace test cases were deferred during annotation spec development.
+
+**Status**: Open.
+
+**Missing cases**:
+1. **`Result<T, E>` operations** — what traces are emitted when an operation returns `Err`? Are `OperationEnter`/`Exit` and captures still emitted? Need coverage for both `Ok` and `Err` paths.
+2. **Async operation runtime traces** — extraction case exists (`async_function`) but no runtime trace case. Need to verify spans and captures work correctly with `async fn` and `.await`.
+
+**Impact**: Without these cases, the spec doesn't assert behavior for error paths or async operations at runtime. Implementations could silently break in those scenarios.
+
+---
+
+## ISS-014: Enforce Trust Boundary on Validation Artifacts
+
+**Context**: The implementation agent (human or LLM) should implement from the spec, not from the validation output. Currently, nothing prevents an agent from reading harness-generated test files (`target/specgate-harness/`, `specgate_generated.rs`, trace JSON files) and reverse-engineering its implementation from them. This makes validation circular — the agent learns what the tests expect and codes to that, rather than implementing the spec's intent.
+
+**Status**: Open.
+
+**Current mitigations** (soft):
+1. Skill file (`implement-spec.md`) now has an explicit "Trust boundary" section prohibiting access to validation artifacts
+2. Design doc (`design.md`) requirement 11 establishes this as an architectural principle
+3. Harness cleanup removes generated files after validation (but agent runs before cleanup)
+
+**Needed** (hard enforcement):
+1. **Harness cleans artifacts BEFORE agent runs** — delete `target/specgate-harness/` at the start of the pipeline, not just the end
+2. **Negative test cases** — for any boolean assertion (like `traces_match`), include both positive and negative cases so the agent can't hardcode a single value
+3. **Agent sandboxing** — restrict file system access so the agent cannot read `target/` directories. Could be enforced via a wrapper that filters file access, or by running the agent in a restricted working directory
+4. **Audit trail** — log which files the agent reads during implementation. Flag any reads from `target/specgate-harness/` as violations
+
+**Impact**: Without enforcement, the spec-driven development model has a fundamental integrity gap. An agent that reads validation output can always produce passing tests without genuinely implementing the spec.
+
+---
+
+**Version**: 1.2
+**Last Updated**: 2026-06-15

@@ -62,11 +62,19 @@ types:
   SpecCase:
     name: string
     desc: string
+    binding: BindingEntry                    # optional — overrides spec-level target
     # Single-operation mode
     inputs: Map<string, Value>              # optional
     expected: Map<string, Value>            # optional
     # State machine mode (mutually exclusive with flat inputs/expected)
     steps: List<TestStep>                   # optional
+    # Postconditions — commands run after the case, must exit 0
+    postconditions: List<Postcondition>     # optional
+
+  Postcondition:
+    target: string                          # binding target name — must exit 0
+    inputs: Map<string, string>             # optional — template vars substituted
+    desc: string                            # optional — what this asserts
 
   TestStep:
     operation: string

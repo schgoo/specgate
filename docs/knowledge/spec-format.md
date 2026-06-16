@@ -165,6 +165,39 @@ cases:
 - `desc` is required
 - `inputs` is optional (if the component takes no inputs)
 - `expected.outcome` is required, must match an outcome variant
+- `binding` is optional — overrides the spec-level binding target for this case
+
+### Per-case binding target
+
+Cases inherit the spec-level binding target by default. To use a different
+target for specific cases, add a `binding` field:
+
+```yaml
+binding:
+  name: rust
+  target: extract-annotations  # default
+
+cases:
+  - name: stateless_extraction
+    desc: Extracts annotation metadata from source
+    inputs:
+      source: "#[spec_operation(\"op_a\", kind = Stateless)]\nfn handler() {}"
+    expected:
+      outcome: Ok
+      annotations:
+        - SpecOperation: { operation: op_a, kind: Stateless }
+
+  - name: capture_runtime
+    desc: Capture annotation records field values at runtime
+    binding:
+      target: run-annotations  # different target for runtime tests
+    inputs:
+      source: "..."
+    expected:
+      outcome: Ok
+      traces:
+        - Capture: { operation: op_a, field: total_area, value: 78.54 }
+```
 
 ## YAML quirks
 
@@ -238,6 +271,32 @@ Each step has:
 - `assert_state` (optional) — expected state after this step (partial match)
 
 Partial matching: omitted fields in `expected` or `assert_state` are not checked.
+
+### Postconditions
+
+Cases can include a `postconditions` field — a list of binding target invocations
+to run after all steps complete. The harness resolves each postcondition's
+`target` through the active binding, substitutes template variables from the
+harness context (e.g., `{generated_test_path}`, `{workdir}`) into the
+postcondition `inputs`, renders the binding target's `command`, and requires
+the command to exit 0 for the case to pass.
+
+```yaml
+cases:
+  - name: cleanup_verified
+    steps:
+      - operation: run_spec
+        inputs: { spec_path: fixtures/example.spec.yaml }
+        expected: { outcome: Complete }
+    postconditions:
+      - target: assert-file-absent
+        inputs:
+          path: "{generated_test_path}"
+        desc: Generated test file removed after run
+```
+
+Postconditions are useful for asserting side effects (file absence, process
+state, environment changes) that aren't captured in the operation's return value.
 
 Cases without `steps` use flat `inputs`/`expected` — backward compatible for
 single-operation specs.

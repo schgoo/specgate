@@ -25,7 +25,9 @@ impl Backend for RustBackend {
         let package_root = PathBuf::from(&target.package_root);
         let registry_path = annotation_registry_path(&package_root);
 
-        let annotations = if registry_path.is_file() {
+        let annotations = if target.is_command() || target.is_api() {
+            Vec::new()
+        } else if registry_path.is_file() {
             load_annotations(&registry_path)?
         } else if package_root.join("Cargo.toml").is_file() {
             run_build(&package_root)?;
@@ -164,22 +166,23 @@ fn run_test_command(
     project_root: &Path,
     results_path: &Path,
 ) -> Result<std::process::ExitStatus, RunError> {
-    Command::new(cargo_program)
-        .current_dir(project_root)
-        .arg("test")
-        .arg("--test")
-        .arg("specgate_generated")
+    let mut command = Command::new(cargo_program);
+    command.current_dir(project_root);
+    command.arg("test").arg("--test").arg("specgate_generated");
+    if manifest_supports_specgate_feature(project_root) {
+        command.arg("--features").arg("specgate");
+    }
+    command
         .arg("--")
         .arg("--test-threads=1")
         .arg("--nocapture")
-        .env("SPECGATE_RESULTS_PATH", results_path)
-        .status()
-        .map_err(|error| RunError::BuildFailed {
-            detail: format!(
-                "failed to run cargo test in {}: {error}",
-                project_root.display()
-            ),
-        })
+        .env("SPECGATE_RESULTS_PATH", results_path);
+    command.status().map_err(|error| RunError::BuildFailed {
+        detail: format!(
+            "failed to run cargo test in {}: {error}",
+            project_root.display()
+        ),
+    })
 }
 
 impl RustBackend {
@@ -244,6 +247,24 @@ fn generated_test_path_for_target(target: &BindingTarget) -> PathBuf {
     }
 }
 
+fn manifest_supports_specgate_feature(project_root: &Path) -> bool {
+    let Ok(manifest) = fs::read_to_string(project_root.join("Cargo.toml")) else {
+        return false;
+    };
+    let mut in_features = false;
+    for line in manifest.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            in_features = trimmed == "[features]";
+            continue;
+        }
+        if in_features && trimmed.starts_with("specgate") {
+            return true;
+        }
+    }
+    false
+}
+
 fn annotation_registry_path(project_root: &Path) -> PathBuf {
     project_root
         .join("target")
@@ -301,8 +322,8 @@ fn run_build_with_program(
 #[cfg(test)]
 mod tests {
     use super::{
-        RustBackend, annotation_registry_path, load_annotations, run_build_with_program,
-        run_test_command,
+        RustBackend, annotation_registry_path, load_annotations,
+        manifest_supports_specgate_feature, run_build_with_program, run_test_command,
     };
     use crate::annotations::{Annotation, OperationKind};
     use specgate_harness::{Backend, GeneratedArtifact};
@@ -820,6 +841,30 @@ mod tests {
     }
 
     #[test]
+    fn manifest_supports_specgate_feature_detects_feature_flag() {
+        let project_root = create_project_root("manifest_supports_specgate_feature");
+        fs::write(
+            project_root.join("Cargo.toml"),
+            "[package]\nname = \"fixture_feature\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[features]\nspecgate = []\nother = []\n\n[workspace]\n",
+        )
+        .expect("cargo manifest should be written");
+
+        assert!(manifest_supports_specgate_feature(&project_root));
+    }
+
+    #[test]
+    fn manifest_supports_specgate_feature_returns_false_when_feature_missing() {
+        let project_root = create_project_root("manifest_without_specgate_feature");
+        fs::write(
+            project_root.join("Cargo.toml"),
+            "[package]\nname = \"fixture_no_feature\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[features]\nother = []\n\n[workspace]\n",
+        )
+        .expect("cargo manifest should be written");
+
+        assert!(!manifest_supports_specgate_feature(&project_root));
+    }
+
+    #[test]
     fn load_annotations_returns_error_when_registry_is_missing() {
         let path = scratch_dir("load_annotations_missing").join("missing.json");
         let error = load_annotations(&path).expect_err("load should fail");
@@ -875,7 +920,7 @@ mod tests {
         };
         fs::write(
             &generated.results_path,
-            "{\"name\":\"alpha\",\"status\":\"pass\",\"duration_ms\":1}\n{\"name\":\"beta\",\"status\":\"fail\",\"duration_ms\":2}\n",
+            "{\"name\":\"alpha\",\"status\":\"pass\",\"duration_ms\":1,\"traces_file\":\"target/specgate-harness/traces/alpha.json\",\"traces_match\":true}\n{\"name\":\"beta\",\"status\":\"fail\",\"duration_ms\":2}\n",
         )
         .expect("results should be written");
 
@@ -890,11 +935,15 @@ mod tests {
                     name: "alpha".to_string(),
                     status: CaseStatus::Pass,
                     duration_ms: 1,
+                    traces_file: Some("target/specgate-harness/traces/alpha.json".to_string()),
+                    traces_match: Some(true),
                 },
                 CaseResult {
                     name: "beta".to_string(),
                     status: CaseStatus::Fail,
                     duration_ms: 2,
+                    traces_file: None,
+                    traces_match: None,
                 },
             ]
         );
@@ -1025,6 +1074,7 @@ mod tests {
             cases: vec![SpecCase {
                 name: "basic".to_string(),
                 desc: "basic case".to_string(),
+                binding: None,
                 inputs: BTreeMap::from([
                     (
                         "a".to_string(),
@@ -1046,6 +1096,7 @@ mod tests {
                     ),
                 ]),
                 steps: Vec::new(),
+                postconditions: None,
             }],
         }
     }

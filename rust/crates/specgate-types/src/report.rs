@@ -13,6 +13,10 @@ pub struct CaseResult {
     pub name: String,
     pub status: CaseStatus,
     pub duration_ms: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub traces_file: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub traces_match: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

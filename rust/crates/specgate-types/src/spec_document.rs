@@ -181,11 +181,24 @@ pub struct SpecCase {
     pub name: String,
     pub desc: String,
     #[serde(default)]
+    pub binding: Option<BindingEntry>,
+    #[serde(default)]
     pub inputs: BTreeMap<String, Value>,
     #[serde(default)]
     pub expected: BTreeMap<String, Value>,
     #[serde(default)]
     pub steps: Vec<TestStep>,
+    #[serde(default)]
+    pub postconditions: Option<Vec<Postcondition>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Postcondition {
+    pub target: String,
+    #[serde(default)]
+    pub inputs: BTreeMap<String, String>,
+    #[serde(default)]
+    pub desc: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -254,5 +267,51 @@ cases:
         .expect_err("state machine case without steps should fail");
 
         assert_eq!(error.to_string(), "state machine cases must use steps");
+    }
+
+    #[test]
+    fn deserializes_case_postconditions() {
+        let spec: SpecDocument = serde_yaml::from_str(
+            r#"
+name: test.machine
+state:
+  count: int
+init:
+  count: 0
+operations:
+  increment:
+    inputs:
+      amount:
+        type: int
+cases:
+  - name: cleanup_verified
+    desc: Verifies cleanup after the run
+    steps:
+      - operation: increment
+        inputs: { amount: 1 }
+        assert_state: { count: 1 }
+    postconditions:
+      - target: assert-file-absent
+        inputs:
+          path: "{generated_test_path}"
+        desc: generated file removed
+"#,
+        )
+        .expect("spec with postconditions should deserialize");
+
+        let postconditions = spec.cases[0]
+            .postconditions
+            .as_ref()
+            .expect("case should include postconditions");
+        assert_eq!(postconditions.len(), 1);
+        assert_eq!(postconditions[0].target, "assert-file-absent");
+        assert_eq!(
+            postconditions[0].inputs.get("path").map(String::as_str),
+            Some("{generated_test_path}")
+        );
+        assert_eq!(
+            postconditions[0].desc.as_deref(),
+            Some("generated file removed")
+        );
     }
 }

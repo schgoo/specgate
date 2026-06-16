@@ -471,6 +471,49 @@ cases:
 }
 
 #[test]
+fn state_machine_case_postconditions() {
+    let spec = expect_valid(
+        r#"
+name: test.machine
+binding:
+  name: rust
+  target: test
+state:
+  count: int
+init:
+  count: 0
+operations:
+  increment:
+    inputs: { amount: int }
+cases:
+  - name: cleanup_verified
+    desc: Cleanup verified after run
+    steps:
+      - operation: increment
+        inputs: { amount: 1 }
+        assert_state: { count: 1 }
+    postconditions:
+      - target: assert-file-absent
+        inputs:
+          path: "{generated_test_path}"
+        desc: generated file removed
+"#,
+    );
+
+    let postconditions = spec.cases[0]
+        .postconditions
+        .as_ref()
+        .expect("postconditions should deserialize");
+    assert_eq!(postconditions.len(), 1);
+    assert_eq!(postconditions[0].target, "assert-file-absent");
+    assert_eq!(
+        postconditions[0].inputs.get("path").map(String::as_str),
+        Some("{generated_test_path}")
+    );
+    assert_eq!(postconditions[0].desc.as_deref(), Some("generated file removed"));
+}
+
+#[test]
 fn reject_legacy_binding_without_target() {
     expect_invalid(
         r#"

@@ -273,6 +273,10 @@
           "type": "string",
           "description": "Human-readable description of what this case tests and why."
         },
+        "binding": {
+          "description": "Optional binding target override for this case. Overrides the spec-level binding target.",
+          "$ref": "#/definitions/bindingEntry"
+        },
         "inputs": {
           "type": "object",
           "description": "Input values for single-operation cases. Mutually exclusive with 'steps'."
@@ -293,6 +297,31 @@
           "description": "Ordered operation sequence for StateMachine specs. Mutually exclusive with top-level 'inputs'/'expected'.",
           "items": {
             "$ref": "#/definitions/testStep"
+          },
+          "minItems": 1
+        },
+        "postconditions": {
+          "type": "array",
+          "description": "Assertions to run after the case completes. Each references a binding target that must exit 0. Template variables from the harness context (e.g., {generated_test_path}, {workdir}) are substituted into inputs before execution.",
+          "items": {
+            "type": "object",
+            "required": ["target"],
+            "additionalProperties": false,
+            "properties": {
+              "target": {
+                "type": "string",
+                "description": "Name of a binding target to invoke. Must exit 0 to pass."
+              },
+              "inputs": {
+                "type": "object",
+                "description": "Input values passed to the target. Template variables like {generated_test_path} and {workdir} are substituted.",
+                "additionalProperties": { "type": "string" }
+              },
+              "desc": {
+                "type": "string",
+                "description": "Human-readable description of what this postcondition asserts."
+              }
+            }
           },
           "minItems": 1
         }

@@ -84,6 +84,8 @@ impl Backend for MockBackend {
                 name: case.raw_name.clone(),
                 status: case_status(case),
                 duration_ms: 1,
+                traces_file: None,
+                traces_match: None,
             })
             .collect::<Vec<_>>();
 

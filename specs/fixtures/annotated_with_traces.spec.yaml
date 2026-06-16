@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=../../spec-schema.json
+name: annotated.traces
+binding:
+  name: rust
+  target: test-harness
+outcome: Complete
+outputs:
+  when Complete:
+    count: int
+cases:
+  - name: increment_once
+    desc: Incrementing an annotated counter emits traces and updates the captured count.
+    expected:
+      outcome: Complete
+      count: 1
+      traces:
+        - OperationEnter: { operation: annotated.traces, symbol: "specgate_harness::traced_counter::TracedCounter::increment" }
+        - CaptureBefore: { operation: annotated.traces, field: count, value: "0" }
+        - CaptureAfter: { operation: annotated.traces, field: count, value: "1" }
+        - OperationExit: { operation: annotated.traces, symbol: "specgate_harness::traced_counter::TracedCounter::increment" }

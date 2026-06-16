@@ -43,7 +43,9 @@ This system closes that gap.
 
 10. **The spec models the environment.** Fault model (what a dependency *can* do), required response (what the system *must* do), enforcement (inject faults, assert responses).
 
-11. **Varying formality is explicit.** Precise claims are machine-checked. Fuzzy claims are flagged as narrative — never silently ignored.
+11. **Validation artifacts are not implementation inputs.** The harness produces test code and trace files to verify the implementation. These artifacts must never be used as inputs to the implementation process — doing so makes validation circular. The implementation agent's only sources of truth are: the spec, the binding, and the source code. This applies to both human and LLM implementers.
+
+12. **Varying formality is explicit.** Precise claims are machine-checked. Fuzzy claims are flagged as narrative — never silently ignored.
 
 ---
 

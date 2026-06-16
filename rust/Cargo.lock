@@ -3,6 +3,31 @@
 version = 4
 
 [[package]]
+name = "annotation-test-runner"
+version = "0.1.0"
+dependencies = [
+ "annotation-trace-runner",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "specgate",
+ "specgate-harness",
+ "specgate-rust-backend",
+ "specgate-types",
+]
+
+[[package]]
+name = "annotation-trace-runner"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "specgate",
+ "specgate-types",
+]
+
+[[package]]
 name = "deranged"
 version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -138,11 +163,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "specgate"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde",
+ "serde_json",
+ "syn",
+]
+
+[[package]]
+name = "specgate-annotations"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde_json",
+ "specgate",
+ "syn",
+]
+
+[[package]]
 name = "specgate-harness"
 version = "0.1.0"
 dependencies = [
  "serde_json",
  "serde_yaml",
+ "specgate",
+ "specgate-annotations",
  "specgate-rust-backend",
  "specgate-types",
  "time",
@@ -155,6 +204,8 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "specgate",
+ "specgate-annotations",
  "specgate-harness",
  "specgate-types",
 ]
