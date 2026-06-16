@@ -212,6 +212,9 @@ fn normalize_relative_path(path: &Path) -> String {
 }
 
 fn cleanup_generated_artifacts(generated: &GeneratedArtifact, _workdir: &Path) {
+    if std::env::var("SPECGATE_KEEP_ARTIFACTS").is_ok() {
+        return;
+    }
     let _ = fs::remove_file(&generated.generated_test_path);
 }
 

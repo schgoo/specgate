@@ -20,6 +20,7 @@
 | ISS-012 | Generated test file quality | Open | 2026-06-15 |
 | ISS-013 | Annotation spec — deferred runtime test cases | Open | 2026-06-15 |
 | ISS-014 | Enforce trust boundary on validation artifacts | Closed | 2026-06-15 |
+| ISS-015 | Generator scope leak — out-of-spec functionality | Open | 2026-06-16 |
 
 ---
 
@@ -256,9 +257,9 @@ The user never writes property assertions manually. Invariants are inferred from
 
 **Context**: The implementation agent (human or LLM) should implement from the spec, not from the validation output. Currently, nothing prevents an agent from reading harness-generated test files (`target/specgate-harness/`, `specgate_generated.rs`, trace JSON files) and reverse-engineering its implementation from them. This makes validation circular — the agent learns what the tests expect and codes to that, rather than implementing the spec's intent.
 
-**Status**: Open.
+**Status**: Closed — practical mitigations in place (post-run cleanup, negative test cases, skill file rules).
 
-**Current mitigations** (soft):
+**Resolved mitigations**:
 1. Skill file (`implement-spec.md`) now has an explicit "Trust boundary" section prohibiting access to validation artifacts
 2. Design doc (`design.md`) requirement 11 establishes this as an architectural principle
 3. Harness cleanup removes generated files after validation (but agent runs before cleanup)
@@ -273,5 +274,29 @@ The user never writes property assertions manually. Invariants are inferred from
 
 ---
 
-**Version**: 1.2
-**Last Updated**: 2026-06-15
+## ISS-015: Generator Scope Leak — Out-of-Spec Functionality
+
+**Context**: The Rust backend generator emits helper code (`specgate_write_traces`) that calls `specgate::runtime::drain_traces()` — a function from the annotations crate that is not declared in the harness spec. The generator is implementing trace collection logic that belongs to the annotations system, not the harness.
+
+This is an instance of a broader problem: **the spec defines a lower bound (must implement at least this), but there's no upper bound (must implement at most this).** An LLM implementation agent can freely add functionality beyond what the spec declares, and nothing catches it.
+
+**Status**: Open — design direction established, implementation pending.
+
+**Root cause**: The generator was treating traces as a special case alongside direct field assertions (e.g., `assert_eq!(subject.count, 1)`). This required the generator to have domain knowledge — how to access fields, what types they are, etc.
+
+**Design decision (2026-06-16)**: **Traces are the sole source of truth for conformance.** The generated test does not access fields, return values, or state directly. It drains the trace stream and compares the entire stream against the spec's expected traces via JSON equality. The generator is completely generic — zero domain knowledge. If the spec wants to assert a value, the annotation must capture it as a trace event.
+
+This is now design requirement 12 in `docs/design.md`.
+
+**Remaining work**:
+1. Refactor the generator to remove field-level assertion logic — the generated test should only: call setup, call operation, drain traces, compare JSON
+2. Remove `count: 1` shorthand from fixture specs (done)
+3. Ensure annotations capture inputs and return values as trace events (currently only state fields are captured)
+4. Static analysis for upper-bound enforcement (deferred)
+
+**Impact**: Without an upper bound, the spec-driven model can't guarantee that implementations don't contain undeclared functionality. The traces-as-source-of-truth design eliminates the generator's need for domain knowledge, which is the primary scope leak vector.
+
+---
+
+**Version**: 1.3
+**Last Updated**: 2026-06-16

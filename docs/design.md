@@ -45,7 +45,9 @@ This system closes that gap.
 
 11. **Validation artifacts are not implementation inputs.** The harness produces test code and trace files to verify the implementation. These artifacts must never be used as inputs to the implementation process — doing so makes validation circular. The implementation agent's only sources of truth are: the spec, the binding, and the source code. This applies to both human and LLM implementers.
 
-12. **Varying formality is explicit.** Precise claims are machine-checked. Fuzzy claims are flagged as narrative — never silently ignored.
+12. **Traces are the source of truth for conformance.** Runtime traces (emitted by annotation instrumentation) are the **only** source of actual values for test comparison. The generated test does not access fields, return values, or state directly — it drains the trace stream and compares it against the spec's expected traces. This keeps the generator completely generic: it has zero domain knowledge. If the spec wants to assert a value, the annotation must capture it as a trace event.
+
+13. **Varying formality is explicit.** Precise claims are machine-checked. Fuzzy claims are flagged as narrative — never silently ignored.
 
 ---
 

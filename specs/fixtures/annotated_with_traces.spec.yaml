@@ -4,15 +4,37 @@ binding:
   name: rust
   target: test-harness
 outcome: Complete
+
+# Traces are the sole source of truth for conformance. The generated test
+# drains the annotation trace stream and compares against expected. No direct
+# field access or return value assertions — everything is observed via traces.
 outputs:
   when Complete:
-    count: int
+    traces: List<TraceEvent>
+
+types:
+  TraceEvent:
+    oneof:
+      OperationEnter:
+        operation: string
+        symbol: string
+      OperationExit:
+        operation: string
+        symbol: string
+      CaptureBefore:
+        operation: string
+        field: string
+        value: string
+      CaptureAfter:
+        operation: string
+        field: string
+        value: string
+
 cases:
   - name: increment_once
-    desc: Incrementing an annotated counter emits traces and updates the captured count.
+    desc: Incrementing an annotated counter emits traces proving count went from 0 to 1.
     expected:
       outcome: Complete
-      count: 1
       traces:
         - OperationEnter: { operation: annotated.traces, symbol: "specgate_harness::traced_counter::TracedCounter::increment" }
         - CaptureBefore: { operation: annotated.traces, field: count, value: "0" }
