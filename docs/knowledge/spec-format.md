@@ -272,6 +272,26 @@ Each step has:
 
 Partial matching: omitted fields in `expected` or `assert_state` are not checked.
 
+### File references
+
+Any input or expected value can be a file reference instead of a literal:
+
+```yaml
+cases:
+  - name: large_payload
+    inputs:
+      payload:
+        file: fixtures/large_payload.json
+    expected:
+      outcome: Complete
+      result:
+        file: fixtures/expected_output.json
+```
+
+When the value is an object with a single `file` key, the harness reads the file
+content and uses it as the value. Paths are relative to the spec file. This is
+useful for large inputs, golden-file testing, or sharing test data across cases.
+
 ### Postconditions
 
 Cases can include a `postconditions` field — a list of binding target invocations

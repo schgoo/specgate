@@ -240,18 +240,17 @@
         },
         "inputs": {
           "type": "object",
-          "description": "Input values for this step."
+          "description": "Input values for this step. Values can be literals or file references: { file: 'path/to/file.json' }."
         },
         "expected": {
           "type": "object",
-          "description": "Expected return value (partial match — omitted fields not checked).",
+          "description": "Expected return value (partial match — omitted fields not checked). Values can be literals or file references: { file: 'path/to/file.json' }. Keys (except 'outcome') must match declared outputs.",
           "properties": {
             "outcome": {
               "type": "string",
               "description": "Expected outcome variant."
             }
-          },
-          "additionalProperties": true
+          }
         },
         "assert_state": {
           "type": "object",
@@ -279,18 +278,17 @@
         },
         "inputs": {
           "type": "object",
-          "description": "Input values for single-operation cases. Mutually exclusive with 'steps'."
+          "description": "Input values for single-operation cases. Mutually exclusive with 'steps'. Values can be literals or file references: { file: 'path/to/file.json' } reads the file content as the value. Paths are relative to the spec file. Keys must match declared inputs in the spec."
         },
         "expected": {
           "type": "object",
-          "description": "Expected outputs for single-operation cases. Must include 'outcome'. Mutually exclusive with 'steps'.",
+          "description": "Expected outputs for single-operation cases. Must include 'outcome'. Mutually exclusive with 'steps'. Values can be literals or file references: { file: 'path/to/file.json' } reads the file content as the expected value. Paths are relative to the spec file. Keys (except 'outcome') must match declared outputs in the spec.",
           "properties": {
             "outcome": {
               "type": "string",
               "description": "Expected outcome variant, e.g. 'Valid' or 'Invalid'."
             }
-          },
-          "additionalProperties": true
+          }
         },
         "steps": {
           "type": "array",

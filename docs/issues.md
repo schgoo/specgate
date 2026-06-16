@@ -9,7 +9,7 @@
 | ISS-001 | Per-case build configurations | Open | 2026-06-11 |
 | ISS-002 | fundle crate for construction resolution | Open | 2026-06-11 |
 | ISS-003 | Perf counters and code coverage in bindings | Open | 2026-06-11 |
-| ISS-004 | External test case files | Open | 2026-06-11 |
+| ISS-004 | External test case files | Closed | 2026-06-11 |
 | ISS-005 | Claims syntax (non-functional and narrative) | Open | 2026-06-11 |
 | ISS-006 | Report renderer (report.render) | Open | 2026-06-11 |
 | ISS-007 | Property-based testing in specs | Open | 2026-06-12 |
