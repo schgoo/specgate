@@ -5,17 +5,21 @@
 # a Rust integration test file (tests/specgate_generated.rs) that:
 # - Calls spec_setup functions with case input values
 # - Invokes spec_operation entry points
-# - Reads spec_capture fields for output comparison
-# - Drains spec_checkpoint thread-local logs for intermediates
-# - Injects spec_mock return values
-# - Asserts expected vs actual values
+# - Drains the annotation trace stream (specgate::runtime::drain_traces)
+# - Compares the actual trace stream against the spec's expected traces
+#   via JSON equality — the generator has zero domain knowledge
 # - Writes structured JSON output for cross-language tooling
+#
+# Traces are the sole source of truth for conformance in annotation-based
+# mode. The generated test never accesses fields, return values, or state
+# directly. All actual values come from the trace stream, which captures
+# OperationEnter/Exit, CaptureBefore/After, Checkpoint, and MockCall events.
 #
 # Two target modes are supported:
 # 1. Annotation-based (function target): spec references annotated code
 #    via SpecOperation/SpecSetup/SpecCapture/SpecCheckpoint/SpecMock.
 #    The generator resolves symbols from annotations.json and emits
-#    direct function calls.
+#    direct function calls. Assertions compare trace streams only.
 # 2. Command/API target: spec declares an API entry point directly
 #    (e.g. a public function with typed input/output). No annotations
 #    needed — the generator emits code that calls the function,

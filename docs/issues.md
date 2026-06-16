@@ -284,17 +284,22 @@ This is an instance of a broader problem: **the spec defines a lower bound (must
 
 **Root cause**: The generator was treating traces as a special case alongside direct field assertions (e.g., `assert_eq!(subject.count, 1)`). This required the generator to have domain knowledge — how to access fields, what types they are, etc.
 
-**Design decision (2026-06-16)**: **Traces are the sole source of truth for conformance.** The generated test does not access fields, return values, or state directly. It drains the trace stream and compares the entire stream against the spec's expected traces via JSON equality. The generator is completely generic — zero domain knowledge. If the spec wants to assert a value, the annotation must capture it as a trace event.
+**Design decisions (2026-06-16)**:
 
-This is now design requirement 12 in `docs/design.md`.
+1. **Traces are the sole source of truth for conformance.** The generated test does not access fields, return values, or state directly. It drains the trace stream and compares the entire stream against the spec's expected traces via JSON equality. The generator is completely generic — zero domain knowledge. If the spec wants to assert a value, the annotation must capture it as a trace event. This is now design requirement 12 in `docs/design.md`.
+
+2. **Spec-as-code library for Rust.** Instead of YAML test cases for annotation-based specs, build a `specgate-spec` Rust library with a `CaseBuilder` API for defining expectations fluently. For Rust targets, tests run in-process with no code generation. For cross-language targets, the library generates minimal stubs (call setup, call operations, dump traces) and evaluates assertions Rust-side. YAML remains for command/API targets where it works well. See session file `spec-as-code-proposal.md` for full design.
+
+**Approach**: Build bottom-up — get the Rust spec library working for real cases first, discover what the API needs, then generalize.
 
 **Remaining work**:
-1. Refactor the generator to remove field-level assertion logic — the generated test should only: call setup, call operation, drain traces, compare JSON
-2. Remove `count: 1` shorthand from fixture specs (done)
-3. Ensure annotations capture inputs and return values as trace events (currently only state fields are captured)
-4. Static analysis for upper-bound enforcement (deferred)
+1. Build `specgate-spec` library with `CaseBuilder` and trace assertions
+2. Port `annotated_with_traces` fixture to a Rust spec test (no YAML)
+3. Refactor generator to remove field-level assertion logic for annotation-based specs
+4. Ensure annotations capture inputs and return values as trace events
+5. Keep YAML for command/API targets, deprecate for annotation-based specs
 
-**Impact**: Without an upper bound, the spec-driven model can't guarantee that implementations don't contain undeclared functionality. The traces-as-source-of-truth design eliminates the generator's need for domain knowledge, which is the primary scope leak vector.
+**Impact**: Without an upper bound, the spec-driven model can't guarantee that implementations don't contain undeclared functionality. The traces-as-source-of-truth design + spec library eliminates the generator's need for domain knowledge, which is the primary scope leak vector.
 
 ---
 
