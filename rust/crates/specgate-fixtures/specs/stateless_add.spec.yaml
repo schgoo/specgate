@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=../../spec-schema.json
 # Fixture spec for: stateless operation captures return value
 name: fixture.stateless_add
-binding: fixtures/binding.yaml
+binding: binding.yaml
 outcome: Complete
 outputs:
   when Complete:

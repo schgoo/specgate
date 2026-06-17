@@ -1,7 +1,6 @@
 # yaml-language-server: $schema=../../spec-schema.json
-# Fixture with WRONG expected traces — used to test mismatch detection
-name: fixture.statemachine_counter_wrong
-binding: fixtures/binding.yaml
+name: fixture.multi_mutation
+binding: binding.yaml
 outcome: Complete
 outputs:
   when Complete:
@@ -12,13 +11,14 @@ types:
       Event: { name: string, value: string }
       Run: { operation: string }
 cases:
-  - name: increment_once
-    desc: Expected traces are deliberately wrong (999 instead of 1)
+  - name: double_increment
+    desc: Two mutations in one operation both captured
     setup: make_counter
-    operation: increment
+    operation: increment_twice
     expected:
       outcome: Complete
       traces:
         - Event: { name: count, value: "0" }
-        - Run: { operation: increment }
-        - Event: { name: count, value: "999" }
+        - Run: { operation: increment_twice }
+        - Event: { name: count, value: "1" }
+        - Event: { name: count, value: "2" }

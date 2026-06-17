@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=../../spec-schema.json
 # Fixture spec for: state machine with before/after field capture
 name: fixture.statemachine_counter
-binding: fixtures/binding.yaml
+binding: binding.yaml
 outcome: Complete
 outputs:
   when Complete:

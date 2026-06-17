@@ -51,7 +51,7 @@ cases:
   - name: stateless_return_value
     desc: Stateless function captures return value as trace event
     inputs:
-      spec: specs/fixtures/stateless_add.spec.yaml
+      spec: rust/crates/specgate-fixtures/specs/stateless_add.spec.yaml
     expected:
       outcome: Complete
       results:
@@ -73,7 +73,7 @@ cases:
   - name: statemachine_before_after
     desc: StateMachine captures field state before and after the operation
     inputs:
-      spec: specs/fixtures/statemachine_counter.spec.yaml
+      spec: rust/crates/specgate-fixtures/specs/statemachine_counter.spec.yaml
     expected:
       outcome: Complete
       results:
@@ -93,7 +93,7 @@ cases:
   - name: multi_field_capture
     desc: Multiple annotated fields are all captured before/after
     inputs:
-      spec: specs/fixtures/multi_field_capture.spec.yaml
+      spec: rust/crates/specgate-fixtures/specs/multi_field_capture.spec.yaml
     expected:
       outcome: Complete
       results:
@@ -119,7 +119,7 @@ cases:
   - name: event_order_between_runs
     desc: Events between Run markers match as a set — field order doesn't matter
     inputs:
-      spec: specs/fixtures/multi_field_capture_reordered.spec.yaml
+      spec: rust/crates/specgate-fixtures/specs/multi_field_capture_reordered.spec.yaml
     expected:
       outcome: Complete
       results:
@@ -145,7 +145,7 @@ cases:
   - name: inline_checkpoint
     desc: spec_event!() emits an event at the point of invocation
     inputs:
-      spec: specs/fixtures/checkpoint_inline.spec.yaml
+      spec: rust/crates/specgate-fixtures/specs/checkpoint_inline.spec.yaml
     expected:
       outcome: Complete
       results:
@@ -167,7 +167,7 @@ cases:
   - name: multi_mutation
     desc: Every mutation of an annotated field is captured, not just boundaries
     inputs:
-      spec: specs/fixtures/multi_mutation.spec.yaml
+      spec: rust/crates/specgate-fixtures/specs/multi_mutation.spec.yaml
     expected:
       outcome: Complete
       results:
@@ -189,7 +189,7 @@ cases:
   - name: nested_operations
     desc: Nested operation calls produce sequential Run events with state between
     inputs:
-      spec: specs/fixtures/nested_operations.spec.yaml
+      spec: rust/crates/specgate-fixtures/specs/nested_operations.spec.yaml
     expected:
       outcome: Complete
       results:
@@ -221,7 +221,7 @@ cases:
   - name: mismatch_wrong_value
     desc: When actual traces differ from expected, status is fail
     inputs:
-      spec: specs/fixtures/statemachine_counter_wrong.spec.yaml
+      spec: rust/crates/specgate-fixtures/specs/statemachine_counter_wrong.spec.yaml
     expected:
       outcome: Complete
       results:
@@ -241,7 +241,7 @@ cases:
   - name: error_bad_yaml
     desc: Invalid YAML produces an error
     inputs:
-      spec: specs/fixtures/bad_yaml.spec.yaml
+      spec: rust/crates/specgate-fixtures/specs/bad_yaml.spec.yaml
     expected:
       outcome: Error
 
@@ -250,6 +250,6 @@ cases:
   - name: error_bad_binding
     desc: Spec referencing nonexistent binding produces an error
     inputs:
-      spec: specs/fixtures/bad_binding.spec.yaml
+      spec: rust/crates/specgate-fixtures/specs/bad_binding.spec.yaml
     expected:
       outcome: Error

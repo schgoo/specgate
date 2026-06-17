@@ -1,0 +1,7 @@
+[package]
+name = "specgate-fixtures"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# specgate-annotations will be added when the annotation crate is rebuilt

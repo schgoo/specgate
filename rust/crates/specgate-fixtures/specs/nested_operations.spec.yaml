@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=../../spec-schema.json
 name: fixture.nested_operations
-binding: fixtures/binding.yaml
+binding: binding.yaml
 outcome: Complete
 outputs:
   when Complete:

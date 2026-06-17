@@ -2,4 +2,4 @@
 language: rust
 targets:
   default:
-    package_root: ../../rust/crates/specgate-fixtures
+    package_root: ..

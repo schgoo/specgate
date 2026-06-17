@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=../../spec-schema.json
 name: fixture.checkpoint_inline
-binding: fixtures/binding.yaml
+binding: binding.yaml
 outcome: Complete
 outputs:
   when Complete:
