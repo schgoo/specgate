@@ -1,0 +1,5 @@
+# Binding for fixture specs — points to the fixture crate
+language: rust
+targets:
+  default:
+    package_root: ../../rust/crates/specgate-fixtures

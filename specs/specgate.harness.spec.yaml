@@ -1,0 +1,255 @@
+# yaml-language-server: $schema=../spec-schema.json
+# SpecGate component: specgate.harness
+#
+# The unified harness. Takes one input: a path to a spec file.
+# The spec file declares its binding (which points to the crate under test).
+# The harness resolves the binding, generates tests, runs them, and
+# produces per-case results with expected and actual traces.
+#
+# Trace comparison rules:
+#   - Run events are strictly ordered (they define the sequence of operations)
+#   - Event entries between two Run markers are compared as a SET (order
+#     does not matter). This accommodates non-deterministic field iteration.
+#   - Events before the first Run and after the last Run are also sets.
+#
+# Downstream consumers (comparison engine, reporter, diff tool) read
+# the harness output to produce human-readable reports.
+
+name: specgate.harness
+binding: bindings/rust.yaml
+
+inputs:
+  spec:
+    type: string
+    desc: Path to the spec YAML file (relative to repo root)
+
+outcome:
+  oneof: [Complete, Error]
+
+outputs:
+  when Complete:
+    results: List<CaseResult>
+  when Error:
+    reason: string
+
+types:
+  TraceEvent:
+    oneof:
+      Event: { name: string, value: string }
+      Run: { operation: string }
+
+  CaseResult:
+    name: string
+    status: string
+    expected_traces: List<TraceEvent>
+    actual_traces: List<TraceEvent>
+
+cases:
+
+  # ===== Stateless operation =====
+
+  - name: stateless_return_value
+    desc: Stateless function captures return value as trace event
+    inputs:
+      spec: specs/fixtures/stateless_add.spec.yaml
+    expected:
+      outcome: Complete
+      results:
+        - name: add_2_3
+          status: pass
+          expected_traces:
+            - Run: { operation: add }
+            - Event: { name: add.a, value: "2" }
+            - Event: { name: add.b, value: "3" }
+            - Event: { name: add.result, value: "5" }
+          actual_traces:
+            - Run: { operation: add }
+            - Event: { name: add.a, value: "2" }
+            - Event: { name: add.b, value: "3" }
+            - Event: { name: add.result, value: "5" }
+
+  # ===== StateMachine — before/after capture =====
+
+  - name: statemachine_before_after
+    desc: StateMachine captures field state before and after the operation
+    inputs:
+      spec: specs/fixtures/statemachine_counter.spec.yaml
+    expected:
+      outcome: Complete
+      results:
+        - name: increment_once
+          status: pass
+          expected_traces:
+            - Event: { name: count, value: "0" }
+            - Run: { operation: increment }
+            - Event: { name: count, value: "1" }
+          actual_traces:
+            - Event: { name: count, value: "0" }
+            - Run: { operation: increment }
+            - Event: { name: count, value: "1" }
+
+  # ===== Multiple field capture =====
+
+  - name: multi_field_capture
+    desc: Multiple annotated fields are all captured before/after
+    inputs:
+      spec: specs/fixtures/multi_field_capture.spec.yaml
+    expected:
+      outcome: Complete
+      results:
+        - name: withdraw_50
+          status: pass
+          expected_traces:
+            - Event: { name: balance, value: "100" }
+            - Event: { name: transaction_count, value: "0" }
+            - Run: { operation: withdraw }
+            - Event: { name: withdraw.amount, value: "50" }
+            - Event: { name: balance, value: "50" }
+            - Event: { name: transaction_count, value: "1" }
+          actual_traces:
+            - Event: { name: balance, value: "100" }
+            - Event: { name: transaction_count, value: "0" }
+            - Run: { operation: withdraw }
+            - Event: { name: withdraw.amount, value: "50" }
+            - Event: { name: balance, value: "50" }
+            - Event: { name: transaction_count, value: "1" }
+
+  # ===== Event order between Runs is unordered =====
+
+  - name: event_order_between_runs
+    desc: Events between Run markers match as a set — field order doesn't matter
+    inputs:
+      spec: specs/fixtures/multi_field_capture_reordered.spec.yaml
+    expected:
+      outcome: Complete
+      results:
+        - name: withdraw_50
+          status: pass
+          expected_traces:
+            - Event: { name: transaction_count, value: "0" }
+            - Event: { name: balance, value: "100" }
+            - Run: { operation: withdraw }
+            - Event: { name: withdraw.amount, value: "50" }
+            - Event: { name: transaction_count, value: "1" }
+            - Event: { name: balance, value: "50" }
+          actual_traces:
+            - Event: { name: balance, value: "100" }
+            - Event: { name: transaction_count, value: "0" }
+            - Run: { operation: withdraw }
+            - Event: { name: withdraw.amount, value: "50" }
+            - Event: { name: balance, value: "50" }
+            - Event: { name: transaction_count, value: "1" }
+
+  # ===== Inline checkpoint =====
+
+  - name: inline_checkpoint
+    desc: spec_event!() emits an event at the point of invocation
+    inputs:
+      spec: specs/fixtures/checkpoint_inline.spec.yaml
+    expected:
+      outcome: Complete
+      results:
+        - name: process_hello
+          status: pass
+          expected_traces:
+            - Run: { operation: process }
+            - Event: { name: process.data, value: " hello " }
+            - Event: { name: after_upper, value: " HELLO " }
+            - Event: { name: process.result, value: "HELLO" }
+          actual_traces:
+            - Run: { operation: process }
+            - Event: { name: process.data, value: " hello " }
+            - Event: { name: after_upper, value: " HELLO " }
+            - Event: { name: process.result, value: "HELLO" }
+
+  # ===== Multiple mutations in one operation =====
+
+  - name: multi_mutation
+    desc: Every mutation of an annotated field is captured, not just boundaries
+    inputs:
+      spec: specs/fixtures/multi_mutation.spec.yaml
+    expected:
+      outcome: Complete
+      results:
+        - name: double_increment
+          status: pass
+          expected_traces:
+            - Event: { name: count, value: "0" }
+            - Run: { operation: increment_twice }
+            - Event: { name: count, value: "1" }
+            - Event: { name: count, value: "2" }
+          actual_traces:
+            - Event: { name: count, value: "0" }
+            - Run: { operation: increment_twice }
+            - Event: { name: count, value: "1" }
+            - Event: { name: count, value: "2" }
+
+  # ===== Nested operations =====
+
+  - name: nested_operations
+    desc: Nested operation calls produce sequential Run events with state between
+    inputs:
+      spec: specs/fixtures/nested_operations.spec.yaml
+    expected:
+      outcome: Complete
+      results:
+        - name: transfer_50
+          status: pass
+          expected_traces:
+            - Event: { name: balance, value: "100" }
+            - Run: { operation: transfer }
+            - Event: { name: transfer.amount, value: "50" }
+            - Run: { operation: withdraw }
+            - Event: { name: withdraw.amount, value: "50" }
+            - Event: { name: balance, value: "50" }
+            - Run: { operation: deposit }
+            - Event: { name: deposit.amount, value: "50" }
+            - Event: { name: balance, value: "100" }
+          actual_traces:
+            - Event: { name: balance, value: "100" }
+            - Run: { operation: transfer }
+            - Event: { name: transfer.amount, value: "50" }
+            - Run: { operation: withdraw }
+            - Event: { name: withdraw.amount, value: "50" }
+            - Event: { name: balance, value: "50" }
+            - Run: { operation: deposit }
+            - Event: { name: deposit.amount, value: "50" }
+            - Event: { name: balance, value: "100" }
+
+  # ===== Trace mismatch — failure detection =====
+
+  - name: mismatch_wrong_value
+    desc: When actual traces differ from expected, status is fail
+    inputs:
+      spec: specs/fixtures/statemachine_counter_wrong.spec.yaml
+    expected:
+      outcome: Complete
+      results:
+        - name: increment_once
+          status: fail
+          expected_traces:
+            - Event: { name: count, value: "0" }
+            - Run: { operation: increment }
+            - Event: { name: count, value: "999" }
+          actual_traces:
+            - Event: { name: count, value: "0" }
+            - Run: { operation: increment }
+            - Event: { name: count, value: "1" }
+
+  # ===== Error: bad spec =====
+
+  - name: error_bad_yaml
+    desc: Invalid YAML produces an error
+    inputs:
+      spec: specs/fixtures/bad_yaml.spec.yaml
+    expected:
+      outcome: Error
+
+  # ===== Error: bad binding =====
+
+  - name: error_bad_binding
+    desc: Spec referencing nonexistent binding produces an error
+    inputs:
+      spec: specs/fixtures/bad_binding.spec.yaml
+    expected:
+      outcome: Error

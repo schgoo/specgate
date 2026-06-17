@@ -1,6 +1,5 @@
 # yaml-language-server: $schema=../../spec-schema.json
-# Fixture spec for: state machine with before/after field capture
-name: fixture.statemachine_counter
+name: fixture.multi_mutation
 binding: fixtures/binding.yaml
 outcome: Complete
 outputs:
@@ -12,13 +11,14 @@ types:
       Event: { name: string, value: string }
       Run: { operation: string }
 cases:
-  - name: increment_once
-    desc: Incrementing counter from 0 produces count=0 before, count=1 after
+  - name: double_increment
+    desc: Two mutations in one operation both captured
     setup: make_counter
-    operation: increment
+    operation: increment_twice
     expected:
       outcome: Complete
       traces:
         - Event: { name: count, value: "0" }
-        - Run: { operation: increment }
+        - Run: { operation: increment_twice }
         - Event: { name: count, value: "1" }
+        - Event: { name: count, value: "2" }

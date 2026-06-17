@@ -1,0 +1,30 @@
+# yaml-language-server: $schema=../../spec-schema.json
+# Same as multi_field_capture but fields listed in reversed order.
+# Tests that event order between Run markers doesn't matter.
+name: fixture.multi_field_capture_reordered
+binding: fixtures/binding.yaml
+outcome: Complete
+outputs:
+  when Complete:
+    traces: List<TraceEvent>
+types:
+  TraceEvent:
+    oneof:
+      Event: { name: string, value: string }
+      Run: { operation: string }
+cases:
+  - name: withdraw_50
+    desc: Same test as multi_field_capture but fields in reverse order
+    setup: make_account
+    operation: withdraw
+    inputs:
+      amount: 50
+    expected:
+      outcome: Complete
+      traces:
+        - Event: { name: transaction_count, value: "0" }
+        - Event: { name: balance, value: "100" }
+        - Run: { operation: withdraw }
+        - Event: { name: withdraw.amount, value: "50" }
+        - Event: { name: transaction_count, value: "1" }
+        - Event: { name: balance, value: "50" }
