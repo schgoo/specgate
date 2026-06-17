@@ -1,27 +1,9 @@
-# yaml-language-server: $schema=../../spec-schema.json
-# Fixture spec for: stateless operation captures return value
 name: fixture.stateless_add
 binding: binding.yaml
-outcome: Complete
-outputs:
-  when Complete:
-    traces: List<TraceEvent>
-types:
-  TraceEvent:
-    oneof:
-      Event: { name: string, value: string }
-      Run: { operation: string }
 cases:
   - name: add_2_3
-    desc: Adding 2 + 3 produces return value trace of 5
+    desc: Adding 2 + 3 returns 5
     operation: add
-    inputs:
-      a: 2
-      b: 3
+    inputs: { a: 2, b: 3 }
     expected:
-      outcome: Complete
-      traces:
-        - Run: { operation: add }
-        - Event: { name: add.a, value: "2" }
-        - Event: { name: add.b, value: "3" }
-        - Event: { name: add.result, value: "5" }
+      add.result: "5"

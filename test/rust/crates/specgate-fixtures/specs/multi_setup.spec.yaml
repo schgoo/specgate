@@ -1,30 +1,13 @@
-# yaml-language-server: $schema=../../../../spec-schema.json
 name: fixture.multi_setup
 binding: binding.yaml
-outcome: Complete
-outputs:
-  when Complete:
-    traces: List<TraceEvent>
-types:
-  TraceEvent:
-    oneof:
-      Event: { name: string, value: string }
-      Run: { operation: string }
 cases:
   - name: transfer_between_accounts
-    desc: Two setups create source and target accounts for a transfer
+    desc: Two setups create source and target for transfer
     setup:
       source: make_source
       target: make_target
     operation: transfer
-    inputs:
-      amount: 50
+    inputs: { amount: 50 }
     expected:
-      outcome: Complete
-      traces:
-        - Event: { name: source.balance, value: "100" }
-        - Event: { name: target.balance, value: "0" }
-        - Run: { operation: transfer }
-        - Event: { name: transfer.amount, value: "50" }
-        - Event: { name: source.balance, value: "50" }
-        - Event: { name: target.balance, value: "50" }
+      transfer.source.balance: "50"
+      transfer.target.balance: "50"

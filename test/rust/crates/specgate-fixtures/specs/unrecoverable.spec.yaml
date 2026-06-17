@@ -1,25 +1,10 @@
-# yaml-language-server: $schema=../../../../spec-schema.json
 name: fixture.unrecoverable
 binding: binding.yaml
-outcome: Complete
-outputs:
-  when Complete:
-    traces: List<TraceEvent>
-types:
-  TraceEvent:
-    oneof:
-      Event: { name: string, value: string }
-      Run: { operation: string }
 cases:
   - name: divide_by_zero_panics
-    desc: Division by zero causes unrecoverable panic
+    desc: Division by zero panics
     operation: divide
     inputs: { a: 10, b: 0 }
     expected:
-      outcome: Complete
-      traces:
-        - Run: { operation: divide }
-        - Event: { name: divide.a, value: "10" }
-        - Event: { name: divide.b, value: "0" }
-        - Event: { name: divide.outcome, value: "Unrecoverable" }
-        - Event: { name: divide.error, value: "attempted to divide by zero" }
+      divide.outcome: "Unrecoverable"
+      divide.error: "attempted to divide by zero"

@@ -1,25 +1,10 @@
-# yaml-language-server: $schema=../../../../spec-schema.json
 name: fixture.result_ok
 binding: binding.yaml
-outcome: Complete
-outputs:
-  when Complete:
-    traces: List<TraceEvent>
-types:
-  TraceEvent:
-    oneof:
-      Event: { name: string, value: string }
-      Run: { operation: string }
 cases:
   - name: divide_10_by_2
-    desc: Successful division returns Ok with result
+    desc: Successful division
     operation: divide
     inputs: { a: 10, b: 2 }
     expected:
-      outcome: Complete
-      traces:
-        - Run: { operation: divide }
-        - Event: { name: divide.a, value: "10" }
-        - Event: { name: divide.b, value: "2" }
-        - Event: { name: divide.outcome, value: "Ok" }
-        - Event: { name: divide.result, value: "5" }
+      divide.outcome: "Ok"
+      divide.result: "5"

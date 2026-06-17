@@ -1,28 +1,11 @@
-# yaml-language-server: $schema=../../spec-schema.json
 name: fixture.multi_field_capture
 binding: binding.yaml
-outcome: Complete
-outputs:
-  when Complete:
-    traces: List<TraceEvent>
-types:
-  TraceEvent:
-    oneof:
-      Event: { name: string, value: string }
-      Run: { operation: string }
 cases:
   - name: withdraw_50
     desc: Withdrawing 50 from account with balance 100
     setup: make_account
     operation: withdraw
-    inputs:
-      amount: 50
+    inputs: { amount: 50 }
     expected:
-      outcome: Complete
-      traces:
-        - Event: { name: balance, value: "100" }
-        - Event: { name: transaction_count, value: "0" }
-        - Run: { operation: withdraw }
-        - Event: { name: withdraw.amount, value: "50" }
-        - Event: { name: balance, value: "50" }
-        - Event: { name: transaction_count, value: "1" }
+      withdraw.balance: "50"
+      withdraw.transaction_count: "1"

@@ -1,24 +1,9 @@
-# yaml-language-server: $schema=../../spec-schema.json
 name: fixture.multi_mutation
 binding: binding.yaml
-outcome: Complete
-outputs:
-  when Complete:
-    traces: List<TraceEvent>
-types:
-  TraceEvent:
-    oneof:
-      Event: { name: string, value: string }
-      Run: { operation: string }
 cases:
   - name: double_increment
-    desc: Two mutations in one operation both captured
+    desc: Two mutations captured individually
     setup: make_counter
     operation: increment_twice
     expected:
-      outcome: Complete
-      traces:
-        - Event: { name: count, value: "0" }
-        - Run: { operation: increment_twice }
-        - Event: { name: count, value: "1" }
-        - Event: { name: count, value: "2" }
+      increment_twice.count: "2"

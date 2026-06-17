@@ -1,24 +1,9 @@
-# yaml-language-server: $schema=../../spec-schema.json
-# Fixture with WRONG expected traces — used to test mismatch detection
 name: fixture.statemachine_counter_wrong
 binding: binding.yaml
-outcome: Complete
-outputs:
-  when Complete:
-    traces: List<TraceEvent>
-types:
-  TraceEvent:
-    oneof:
-      Event: { name: string, value: string }
-      Run: { operation: string }
 cases:
   - name: increment_once
-    desc: Expected traces are deliberately wrong (999 instead of 1)
+    desc: Expected value is wrong (999 instead of 1)
     setup: make_counter
     operation: increment
     expected:
-      outcome: Complete
-      traces:
-        - Event: { name: count, value: "0" }
-        - Run: { operation: increment }
-        - Event: { name: count, value: "999" }
+      increment.count: "999"

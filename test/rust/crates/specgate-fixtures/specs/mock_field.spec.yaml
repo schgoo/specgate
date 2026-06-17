@@ -1,28 +1,15 @@
-# yaml-language-server: $schema=../../../../spec-schema.json
 name: fixture.mock_field
 binding: binding.yaml
-outcome: Complete
-outputs:
-  when Complete:
-    traces: List<TraceEvent>
-types:
-  TraceEvent:
-    oneof:
-      Event: { name: string, value: string }
-      Run: { operation: string }
 cases:
   - name: find_user_1
-    desc: Mock db field returns Alice when queried for user_1
+    desc: Mock db returns Alice when queried for user_1
     setup: make_service
     operation: get_user
     inputs:
       id: "user_1"
-      db.response: "Alice"
+      db:
+        "user_1": "Alice"
     expected:
-      outcome: Complete
-      traces:
-        - Run: { operation: get_user }
-        - Event: { name: get_user.id, value: "user_1" }
-        - Event: { name: db.request, value: "user_1" }
-        - Event: { name: db.response, value: "Alice" }
-        - Event: { name: get_user.result, value: "Alice" }
+      get_user.result: "Alice"
+      db.request: "user_1"
+      db.response: "Alice"

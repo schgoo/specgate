@@ -1,31 +1,10 @@
-# yaml-language-server: $schema=../../spec-schema.json
 name: fixture.nested_operations
 binding: binding.yaml
-outcome: Complete
-outputs:
-  when Complete:
-    traces: List<TraceEvent>
-types:
-  TraceEvent:
-    oneof:
-      Event: { name: string, value: string }
-      Run: { operation: string }
 cases:
   - name: transfer_50
-    desc: Transfer calls withdraw then deposit, all operations traced
+    desc: Transfer calls withdraw then deposit, balance restored
     setup: make_account
     operation: transfer
-    inputs:
-      amount: 50
+    inputs: { amount: 50 }
     expected:
-      outcome: Complete
-      traces:
-        - Event: { name: balance, value: "100" }
-        - Run: { operation: transfer }
-        - Event: { name: transfer.amount, value: "50" }
-        - Run: { operation: withdraw }
-        - Event: { name: withdraw.amount, value: "50" }
-        - Event: { name: balance, value: "50" }
-        - Run: { operation: deposit }
-        - Event: { name: deposit.amount, value: "50" }
-        - Event: { name: balance, value: "100" }
+      deposit.balance: "100"

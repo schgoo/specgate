@@ -1,25 +1,10 @@
-# yaml-language-server: $schema=../../spec-schema.json
 name: fixture.checkpoint_inline
 binding: binding.yaml
-outcome: Complete
-outputs:
-  when Complete:
-    traces: List<TraceEvent>
-types:
-  TraceEvent:
-    oneof:
-      Event: { name: string, value: string }
-      Run: { operation: string }
 cases:
   - name: process_hello
-    desc: Processing " hello " uppercases and trims, checkpoint captures intermediate
+    desc: Processing hello uppercases and trims
     operation: process
-    inputs:
-      data: " hello "
+    inputs: { data: " hello " }
     expected:
-      outcome: Complete
-      traces:
-        - Run: { operation: process }
-        - Event: { name: process.data, value: " hello " }
-        - Event: { name: after_upper, value: " HELLO " }
-        - Event: { name: process.result, value: "HELLO" }
+      after_upper: " HELLO "
+      process.result: "HELLO"
