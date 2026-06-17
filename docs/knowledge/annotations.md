@@ -1,41 +1,46 @@
 # Annotations
 
-Annotations link source code symbols to spec operation names. Each annotation
-contributes a piece to an operation — the harness collects all annotations
-sharing the same operation name.
+Annotations link source code symbols to spec operation names. They serve two
+purposes: discovery (the harness finds what to call) and instrumentation (the
+runtime emits trace events during execution).
 
-See `rust.md` or `csharp.md` for language-specific syntax.
+## Trace model
+
+All traces use two event types:
+- `Event { name, value }` — any observation (state snapshot, return value, checkpoint, mock interaction)
+- `Run { operation }` — marks when an operation executes
+
+Position in the sequence determines before/after semantics. Events before a
+`Run` are pre-state; events after are post-state.
 
 ## Annotation types
 
-| Annotation | Placed on | Purpose |
-|------------|-----------|---------|
-| **Operation** | Entry point method | Marks the function the spec tests. Kind is required. |
-| **Setup** | Free function or constructor | Constructs objects or configures environment. Must not take `self`/`this`. Name is required. |
-| **Checkpoint** (attribute) | Method | Every call to this method is recorded as an intermediate value. |
-| **Checkpoint** (inline) | Any expression | Records a specific expression value at a point in execution. |
-| **Capture** | Struct/class or field/property | Marks fields for output capture. On a struct: captures all public fields. On a field: captures that field only. |
-| **Mock** | Method calling external service | Makes function mockable in test builds. Name is required. |
+| Annotation | Placed on | Purpose | Trace emitted |
+|------------|-----------|---------|---------------|
+| **`#[spec_operation]`** | Entry point method | Marks the function the spec tests. Kind required. | `Run { operation }` |
+| **`#[spec_setup]`** | Free function or constructor | Constructs objects. Must not take `self`. | `Event { name, value }` for each argument |
+| **`#[spec_event]`** | Struct field or method | On a field: emits `Event` on every mutation and at operation boundaries. On a method: captures return value. | `Event { name, value }` |
+| **`spec_event!()`** | Inline expression | Records a value at a specific point in execution. | `Event { name, value }` |
+| **`#[spec_mock]`** | Method calling external service | Makes function mockable. Records call input/output. | `Event { name: "mock.input/output", value }` |
 
 ## Rules
 
 - **Operation** requires both the operation name and `kind`
-- **Setup** and **Mock** require both the operation name and a `name`
 - **Setup** must NOT take `self`/`this`
-- **Capture** can be placed on a struct (all public fields) or on individual fields
+- **`spec_event`** on a field emits a trace on every mutation and at operation boundaries
+- **`spec_event`** on a method captures the return value after the operation
 - Only one **Operation** per operation name per project
-- **Setup** and **Mock** names must be unique per operation
+- **Mock** names must be unique per operation
 
 ## How annotations compose
 
 All annotations sharing the same operation name are collected into one operation.
-The operation's `kind` determines which annotations are valid — see `kinds.md`.
 
 ```
-Operation("canvas", kind=StateMachine)  ─┐
-Setup("canvas", name="default")         ─┤  → one operation: "canvas"
-Capture("canvas") on struct fields       ─┤
-Mock("canvas", name="renderer")         ─┘
+#[spec_operation("canvas", kind=StateMachine)] ─┐
+#[spec_setup("canvas")]                        ─┤  → one operation: "canvas"
+#[spec_event] on struct fields                 ─┤
+#[spec_mock("canvas", name="renderer")]        ─┘
 ```
 
 ## Output capture

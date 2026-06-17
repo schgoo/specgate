@@ -45,9 +45,11 @@ This system closes that gap.
 
 11. **Validation artifacts are not implementation inputs.** The harness produces test code and trace files to verify the implementation. These artifacts must never be used as inputs to the implementation process — doing so makes validation circular. The implementation agent's only sources of truth are: the spec, the binding, and the source code. This applies to both human and LLM implementers.
 
-12. **Traces are the source of truth for conformance.** Runtime traces (emitted by annotation instrumentation) are the **only** source of actual values for test comparison. The generated test does not access fields, return values, or state directly — it drains the trace stream and compares it against the spec's expected traces. This keeps the generator completely generic: it has zero domain knowledge. If the spec wants to assert a value, the annotation must capture it as a trace event.
+12. **Traces are the source of truth for conformance.** Runtime traces are the **only** source of actual values for test comparison. The generated test does not access fields, return values, or state directly — it drains the trace stream and compares it against the spec's expected traces. This keeps the generator completely generic: it has zero domain knowledge. If the spec wants to assert a value, the annotation must capture it as a trace event. Traces use a simplified two-variant model: `Event { name, value }` for all observations (captures, checkpoints, mock interactions, return values) and `Run { operation }` for operation execution. Position in the sequence determines before/after semantics.
 
-13. **Varying formality is explicit.** Precise claims are machine-checked. Fuzzy claims are flagged as narrative — never silently ignored.
+13. **The harness is a single contract.** The harness takes two inputs: a spec (with test cases and expected traces) and annotated source code. It produces one output: test results showing expected vs actual traces for each case. How it works internally — annotation extraction, code generation, compilation — is an implementation detail, not a separate spec. One spec, two inputs, results out.
+
+14. **Varying formality is explicit.** Precise claims are machine-checked. Fuzzy claims are flagged as narrative — never silently ignored.
 
 ---
 
@@ -432,11 +434,11 @@ making trace collection possible for the two-wave architecture.
 
 | Annotation | Role in State Machines |
 |------------|------------------------|
-| `SpecOperation` | Links each method to its operation name. Multiple per component. |
-| `SpecSetup` | Creates the component instance before step sequences. |
-| `SpecCapture` | **State observation.** Read before/after each step to build traces. Required for StateMachine kind. Can annotate a method (lens) or field (direct). |
-| `SpecCheckpoint` | Within-step observation (intermediate state during a single operation). |
-| `SpecMock` | Mock injection. Semantics unchanged for state machines. |
+| `#[spec_operation]` | Links each method to its operation name. Emits `Run { operation }` trace. |
+| `#[spec_setup]` | Creates the component instance before step sequences. Emits `Event` for each argument. |
+| `#[spec_event]` | **State observation.** Emits `Event { name, value }` on every mutation of the annotated field, and before/after operation boundaries. On methods: captures return value. |
+| `spec_event!()` | Inline observation at arbitrary point. Emits `Event { name, value }`. |
+| `#[spec_mock]` | Mock injection. Records `Event { name: "mock.input", value }` and `Event { name: "mock.output", value }`. |
 
 ### Roles
 
