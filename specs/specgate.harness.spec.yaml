@@ -54,7 +54,7 @@ cases:
   - name: stateless_return_value
     desc: Stateless function captures return value as trace event
     inputs:
-      spec: rust/crates/specgate-fixtures/specs/stateless_add.spec.yaml
+      spec: test/rust/crates/specgate-fixtures/specs/stateless_add.spec.yaml
     expected:
       outcome: Complete
       results:
@@ -76,7 +76,7 @@ cases:
   - name: statemachine_before_after
     desc: StateMachine captures field state before and after the operation
     inputs:
-      spec: rust/crates/specgate-fixtures/specs/statemachine_counter.spec.yaml
+      spec: test/rust/crates/specgate-fixtures/specs/statemachine_counter.spec.yaml
     expected:
       outcome: Complete
       results:
@@ -96,7 +96,7 @@ cases:
   - name: multi_field_capture
     desc: Multiple annotated fields are all captured before/after
     inputs:
-      spec: rust/crates/specgate-fixtures/specs/multi_field_capture.spec.yaml
+      spec: test/rust/crates/specgate-fixtures/specs/multi_field_capture.spec.yaml
     expected:
       outcome: Complete
       results:
@@ -122,7 +122,7 @@ cases:
   - name: event_order_between_runs
     desc: Events between Run markers match as a set — field order doesn't matter
     inputs:
-      spec: rust/crates/specgate-fixtures/specs/multi_field_capture_reordered.spec.yaml
+      spec: test/rust/crates/specgate-fixtures/specs/multi_field_capture_reordered.spec.yaml
     expected:
       outcome: Complete
       results:
@@ -148,7 +148,7 @@ cases:
   - name: inline_checkpoint
     desc: spec_event!() emits an event at the point of invocation
     inputs:
-      spec: rust/crates/specgate-fixtures/specs/checkpoint_inline.spec.yaml
+      spec: test/rust/crates/specgate-fixtures/specs/checkpoint_inline.spec.yaml
     expected:
       outcome: Complete
       results:
@@ -170,7 +170,7 @@ cases:
   - name: multi_mutation
     desc: Every mutation of an annotated field is captured, not just boundaries
     inputs:
-      spec: rust/crates/specgate-fixtures/specs/multi_mutation.spec.yaml
+      spec: test/rust/crates/specgate-fixtures/specs/multi_mutation.spec.yaml
     expected:
       outcome: Complete
       results:
@@ -192,7 +192,7 @@ cases:
   - name: nested_operations
     desc: Nested operation calls produce sequential Run events with state between
     inputs:
-      spec: rust/crates/specgate-fixtures/specs/nested_operations.spec.yaml
+      spec: test/rust/crates/specgate-fixtures/specs/nested_operations.spec.yaml
     expected:
       outcome: Complete
       results:
@@ -224,7 +224,7 @@ cases:
   - name: mismatch_wrong_value
     desc: When actual traces differ from expected, status is fail
     inputs:
-      spec: rust/crates/specgate-fixtures/specs/statemachine_counter_wrong.spec.yaml
+      spec: test/rust/crates/specgate-fixtures/specs/statemachine_counter_wrong.spec.yaml
     expected:
       outcome: Complete
       results:
@@ -244,7 +244,7 @@ cases:
   - name: error_bad_yaml
     desc: Invalid YAML produces an error
     inputs:
-      spec: rust/crates/specgate-fixtures/specs/bad_yaml.spec.yaml
+      spec: test/rust/crates/specgate-fixtures/specs/bad_yaml.spec.yaml
     expected:
       outcome: Error
       reason: "spec file is not valid YAML"
@@ -254,7 +254,7 @@ cases:
   - name: error_bad_binding
     desc: Spec referencing nonexistent binding produces an error
     inputs:
-      spec: rust/crates/specgate-fixtures/specs/bad_binding.spec.yaml
+      spec: test/rust/crates/specgate-fixtures/specs/bad_binding.spec.yaml
     expected:
       outcome: Error
       reason: "binding 'nonexistent' not found"
@@ -264,7 +264,7 @@ cases:
   - name: multiple_cases_one_spec
     desc: Two test cases in one spec both produce results
     inputs:
-      spec: rust/crates/specgate-fixtures/specs/multi_case.spec.yaml
+      spec: test/rust/crates/specgate-fixtures/specs/multi_case.spec.yaml
     expected:
       outcome: Complete
       results:
@@ -298,7 +298,7 @@ cases:
   - name: setup_with_input_params
     desc: Setup function parameters are traced
     inputs:
-      spec: rust/crates/specgate-fixtures/specs/setup_with_params.spec.yaml
+      spec: test/rust/crates/specgate-fixtures/specs/setup_with_params.spec.yaml
     expected:
       outcome: Complete
       results:
@@ -320,7 +320,7 @@ cases:
   - name: multiple_setups
     desc: Two setup functions create two objects for one operation
     inputs:
-      spec: rust/crates/specgate-fixtures/specs/multi_setup.spec.yaml
+      spec: test/rust/crates/specgate-fixtures/specs/multi_setup.spec.yaml
     expected:
       outcome: Complete
       results:
@@ -346,7 +346,7 @@ cases:
   - name: multi_step_sequence
     desc: Two operations in sequence with state tracked between
     inputs:
-      spec: rust/crates/specgate-fixtures/specs/multi_step.spec.yaml
+      spec: test/rust/crates/specgate-fixtures/specs/multi_step.spec.yaml
     expected:
       outcome: Complete
       results:
@@ -370,7 +370,7 @@ cases:
   - name: mock_records_interaction
     desc: Mock captures request/response as trace events
     inputs:
-      spec: rust/crates/specgate-fixtures/specs/mock_field.spec.yaml
+      spec: test/rust/crates/specgate-fixtures/specs/mock_field.spec.yaml
     expected:
       outcome: Complete
       results:
@@ -394,7 +394,7 @@ cases:
   - name: mismatch_missing_event
     desc: Spec expects an event the implementation doesn't produce
     inputs:
-      spec: rust/crates/specgate-fixtures/specs/mismatch_missing_event.spec.yaml
+      spec: test/rust/crates/specgate-fixtures/specs/mismatch_missing_event.spec.yaml
     expected:
       outcome: Complete
       results:
@@ -406,7 +406,7 @@ cases:
   - name: mismatch_wrong_order
     desc: Event placed in wrong Run group
     inputs:
-      spec: rust/crates/specgate-fixtures/specs/mismatch_wrong_order.spec.yaml
+      spec: test/rust/crates/specgate-fixtures/specs/mismatch_wrong_order.spec.yaml
     expected:
       outcome: Complete
       results:
@@ -418,7 +418,7 @@ cases:
   - name: mismatch_wrong_operation
     desc: Spec expects different operation name than actual
     inputs:
-      spec: rust/crates/specgate-fixtures/specs/mismatch_wrong_op.spec.yaml
+      spec: test/rust/crates/specgate-fixtures/specs/mismatch_wrong_op.spec.yaml
     expected:
       outcome: Complete
       results:
@@ -430,7 +430,7 @@ cases:
   - name: mismatch_wrong_field
     desc: Spec expects different field name than actual
     inputs:
-      spec: rust/crates/specgate-fixtures/specs/mismatch_wrong_field.spec.yaml
+      spec: test/rust/crates/specgate-fixtures/specs/mismatch_wrong_field.spec.yaml
     expected:
       outcome: Complete
       results:
@@ -442,7 +442,7 @@ cases:
   - name: mismatch_second_step
     desc: First step passes but second step has wrong expected value
     inputs:
-      spec: rust/crates/specgate-fixtures/specs/mismatch_second_step.spec.yaml
+      spec: test/rust/crates/specgate-fixtures/specs/mismatch_second_step.spec.yaml
     expected:
       outcome: Complete
       results:
@@ -454,7 +454,7 @@ cases:
   - name: error_missing_setup
     desc: Spec references a setup not annotated in source
     inputs:
-      spec: rust/crates/specgate-fixtures/specs/missing_setup.spec.yaml
+      spec: test/rust/crates/specgate-fixtures/specs/missing_setup.spec.yaml
     expected:
       outcome: Error
       reason: "setup 'make_counter' not found in source annotations"
@@ -464,7 +464,7 @@ cases:
   - name: error_missing_operation
     desc: Spec references an operation not annotated in source
     inputs:
-      spec: rust/crates/specgate-fixtures/specs/missing_operation.spec.yaml
+      spec: test/rust/crates/specgate-fixtures/specs/missing_operation.spec.yaml
     expected:
       outcome: Error
       reason: "operation 'increment' not found in source annotations"
@@ -474,7 +474,7 @@ cases:
   - name: error_compile_failure
     desc: Source has a syntax error
     inputs:
-      spec: rust/crates/specgate-fixtures/specs/compile_error.spec.yaml
+      spec: test/rust/crates/specgate-fixtures/specs/compile_error.spec.yaml
     expected:
       outcome: Error
       reason: "source failed to compile"
@@ -484,7 +484,7 @@ cases:
   - name: error_no_cases
     desc: Spec with no test cases
     inputs:
-      spec: rust/crates/specgate-fixtures/specs/no_cases.spec.yaml
+      spec: test/rust/crates/specgate-fixtures/specs/no_cases.spec.yaml
     expected:
       outcome: Error
       reason: "spec has no test cases"
@@ -494,7 +494,7 @@ cases:
   - name: result_ok_path
     desc: Operation returning Result::Ok produces outcome Ok and result value
     inputs:
-      spec: rust/crates/specgate-fixtures/specs/result_ok.spec.yaml
+      spec: test/rust/crates/specgate-fixtures/specs/result_ok.spec.yaml
     expected:
       outcome: Complete
       results:
@@ -518,7 +518,7 @@ cases:
   - name: result_err_path
     desc: Operation returning Result::Err produces outcome Error and error message
     inputs:
-      spec: rust/crates/specgate-fixtures/specs/result_err.spec.yaml
+      spec: test/rust/crates/specgate-fixtures/specs/result_err.spec.yaml
     expected:
       outcome: Complete
       results:
@@ -542,7 +542,7 @@ cases:
   - name: unrecoverable_panic
     desc: Operation that panics produces Unrecoverable outcome
     inputs:
-      spec: rust/crates/specgate-fixtures/specs/unrecoverable.spec.yaml
+      spec: test/rust/crates/specgate-fixtures/specs/unrecoverable.spec.yaml
     expected:
       outcome: Complete
       results:
@@ -566,7 +566,7 @@ cases:
   - name: void_operation
     desc: Operation returning unit has no result event, only state changes
     inputs:
-      spec: rust/crates/specgate-fixtures/specs/void_operation.spec.yaml
+      spec: test/rust/crates/specgate-fixtures/specs/void_operation.spec.yaml
     expected:
       outcome: Complete
       results:
@@ -588,7 +588,7 @@ cases:
   - name: readonly_operation
     desc: Read-only operation captures state unchanged
     inputs:
-      spec: rust/crates/specgate-fixtures/specs/readonly_operation.spec.yaml
+      spec: test/rust/crates/specgate-fixtures/specs/readonly_operation.spec.yaml
     expected:
       outcome: Complete
       results:
@@ -610,7 +610,7 @@ cases:
   - name: mock_input_not_in_table
     desc: Mock called with input not in table produces error event
     inputs:
-      spec: rust/crates/specgate-fixtures/specs/mock_not_found.spec.yaml
+      spec: test/rust/crates/specgate-fixtures/specs/mock_not_found.spec.yaml
     expected:
       outcome: Complete
       results:
@@ -627,7 +627,7 @@ cases:
   - name: mock_multi_response
     desc: Mock returns different values for different inputs
     inputs:
-      spec: rust/crates/specgate-fixtures/specs/mock_multi_response.spec.yaml
+      spec: test/rust/crates/specgate-fixtures/specs/mock_multi_response.spec.yaml
     expected:
       outcome: Complete
       results:
