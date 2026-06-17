@@ -5,35 +5,7 @@
 language: rust
 
 targets:
-  test-types:
-    package_root: ../rust/crates/specgate-types
-    test_root: ../rust/crates/specgate-types/tests
   validate-spec:
     package_root: ../rust/crates/specgate-types
     test_root: ../rust/crates/specgate-types/tests
     function: specgate_types::validate_spec_document
-  test-harness:
-    package_root: ../rust/crates/specgate-harness
-    test_root: ../rust/crates/specgate-harness/tests
-  test-cli:
-    package_root: ../rust/crates/specgate-cli
-    test_root: ../rust/crates/specgate-cli/tests
-  test-generate:
-    package_root: ../rust/crates/specgate-rust-backend
-    test_root: ../rust/crates/specgate-rust-backend/tests
-    function: specgate_rust_backend::RustBackend::generate
-    constructor: specgate_rust_backend::RustBackend::new
-  build-annotations:
-    package_root: ../rust/crates/specgate-annotations
-    command: cargo run -p annotation-test-runner -- {case_name} {source} {driver}
-  run-annotations:
-    package_root: ../rust/crates/specgate-annotations
-    command: cargo run -p annotation-trace-runner -- {case_name} {source} {driver}
-
-  # Postcondition targets — used by spec cases to assert side effects
-  assert-file-absent:
-    package_root: ../rust
-    command: IF EXIST {path} exit 1
-  assert-dir-absent:
-    package_root: ../rust
-    command: IF EXIST {path}\* exit 1

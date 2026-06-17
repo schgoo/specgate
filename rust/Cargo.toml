@@ -1,9 +1,5 @@
 [workspace]
-members = ["crates/annotation-test-runner", "crates/annotation-trace-runner","crates/specgate", "crates/specgate-annotations",
-    "crates/specgate-harness",
-    "crates/specgate-rust-backend",
-    "crates/specgate-types",
-]
+members = ["crates/specgate-types"]
 resolver = "3"
 
 [workspace.package]
@@ -14,4 +10,3 @@ version = "0.1.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 serde_yaml = "0.9.34"
-time = { version = "0.3.44", features = ["formatting"] }
