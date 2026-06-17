@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=../../spec-schema.json
+# Fixture spec for: stateless operation captures return value
+name: fixture.stateless_add
+binding:
+  name: rust
+  target: test-harness
+outcome: Complete
+outputs:
+  when Complete:
+    traces: List<TraceEvent>
+types:
+  TraceEvent:
+    oneof:
+      Event: { name: string, value: string }
+      Run: { operation: string }
+cases:
+  - name: add_2_3
+    desc: Adding 2 + 3 produces return value trace of 5
+    operation: add
+    inputs:
+      a: 2
+      b: 3
+    expected:
+      outcome: Complete
+      traces:
+        - Run: { operation: add }
+        - Event: { name: return, value: "5" }

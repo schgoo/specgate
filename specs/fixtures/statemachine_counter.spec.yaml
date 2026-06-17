@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=../../spec-schema.json
+# Fixture spec for: state machine with before/after field capture
+name: fixture.statemachine_counter
+binding:
+  name: rust
+  target: test-harness
+outcome: Complete
+outputs:
+  when Complete:
+    traces: List<TraceEvent>
+types:
+  TraceEvent:
+    oneof:
+      Event: { name: string, value: string }
+      Run: { operation: string }
+cases:
+  - name: increment_once
+    desc: Incrementing counter from 0 produces count=0 before, count=1 after
+    setup: make_counter
+    operation: increment
+    expected:
+      outcome: Complete
+      traces:
+        - Event: { name: count, value: "0" }
+        - Run: { operation: increment }
+        - Event: { name: count, value: "1" }
