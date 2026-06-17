@@ -212,9 +212,108 @@ pub struct TestStep {
     pub assert_state: BTreeMap<String, Value>,
 }
 
+/// Validates a YAML string as a spec document. Returns `Ok(())` if valid,
+/// `Err(reason)` if invalid.
+pub fn validate_spec_document(yaml: &str) -> Result<SpecDocument, String> {
+    let doc: SpecDocument =
+        serde_yaml::from_str(yaml).map_err(|e| format!("parse error: {e}"))?;
+
+    validate_case_fields(&doc)?;
+
+    Ok(doc)
+}
+
+fn validate_case_fields(doc: &SpecDocument) -> Result<(), String> {
+    if doc.inputs.is_empty() && doc.outputs.is_empty() {
+        return Ok(());
+    }
+
+    for case in &doc.cases {
+        if !doc.inputs.is_empty() {
+            for key in case.inputs.keys() {
+                if key.starts_with("mock_") {
+                    continue;
+                }
+                if !doc.inputs.contains_key(key) {
+                    return Err(format!(
+                        "case input '{key}' is not declared in spec inputs"
+                    ));
+                }
+            }
+        }
+
+        if !doc.outputs.is_empty() {
+            let declared_outputs = resolve_outcome_outputs(doc, case);
+            for key in case.expected.keys() {
+                if key == "outcome" {
+                    continue;
+                }
+                if !declared_outputs.contains(&key.to_string()) {
+                    return Err(format!(
+                        "case expected field '{key}' is not declared in spec outputs"
+                    ));
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn resolve_outcome_outputs(doc: &SpecDocument, case: &SpecCase) -> Vec<String> {
+    let outcome = case
+        .expected
+        .get("outcome")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    let when_key = format!("when {outcome}");
+    if let Some(block) = doc.outputs.get(&when_key) {
+        if let Some(map) = block.as_mapping() {
+            return map
+                .keys()
+                .filter_map(|k| k.as_str().map(String::from))
+                .collect();
+        }
+    }
+
+    doc.outputs
+        .values()
+        .filter_map(|v| v.as_mapping())
+        .flat_map(|m| m.keys())
+        .filter_map(|k| k.as_str().map(String::from))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{BindingDecl, BindingEntry, SpecDocument};
+    use super::{BindingDecl, BindingEntry, SpecDocument, validate_spec_document};
+
+    #[test]
+    fn validate_accepts_valid_spec() {
+        let yaml = "name: test.x\nbinding:\n  name: rust\n  target: test\ninputs:\n  a: { type: int }\noutcome: Ok\noutputs:\n  when Ok:\n    result: int\ncases:\n  - name: c1\n    desc: d\n    inputs:\n      a: 1\n    expected:\n      outcome: Ok\n      result: 5\n";
+        assert!(validate_spec_document(yaml).is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_undeclared_input() {
+        let yaml = "name: test.x\nbinding:\n  name: rust\n  target: test\ninputs:\n  a: { type: int }\noutcome: Ok\noutputs:\n  when Ok:\n    result: int\ncases:\n  - name: c1\n    desc: d\n    inputs:\n      a: 1\n      x: 99\n    expected:\n      outcome: Ok\n      result: 5\n";
+        let err = validate_spec_document(yaml).unwrap_err();
+        assert!(err.contains("case input 'x' is not declared"), "{err}");
+    }
+
+    #[test]
+    fn validate_rejects_undeclared_expected() {
+        let yaml = "name: test.x\nbinding:\n  name: rust\n  target: test\ninputs:\n  a: { type: int }\noutcome: Ok\noutputs:\n  when Ok:\n    result: int\ncases:\n  - name: c1\n    desc: d\n    inputs:\n      a: 1\n    expected:\n      outcome: Ok\n      result: 5\n      extra: 42\n";
+        let err = validate_spec_document(yaml).unwrap_err();
+        assert!(err.contains("case expected field 'extra' is not declared"), "{err}");
+    }
+
+    #[test]
+    fn validate_skips_when_no_inputs_declared() {
+        let yaml = "name: test.x\noutcome: Ok\ncases:\n  - name: c1\n    desc: d\n    inputs:\n      anything: 1\n    expected:\n      outcome: Ok\n";
+        assert!(validate_spec_document(yaml).is_ok());
+    }
 
     #[test]
     fn deserializes_legacy_binding_format() {
