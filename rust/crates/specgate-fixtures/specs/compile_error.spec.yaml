@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=../../../../spec-schema.json
+name: fixture.compile_error
+binding: binding.yaml
+outcome: Complete
+outputs:
+  when Complete:
+    traces: List<TraceEvent>
+types:
+  TraceEvent:
+    oneof:
+      Event: { name: string, value: string }
+      Run: { operation: string }
+cases:
+  - name: broken_fn
+    desc: Source has a syntax error
+    operation: broken
+    expected:
+      outcome: Complete
+      traces:
+        - Run: { operation: broken }

@@ -253,3 +253,239 @@ cases:
       spec: rust/crates/specgate-fixtures/specs/bad_binding.spec.yaml
     expected:
       outcome: Error
+
+  # ===== Multiple cases in one spec =====
+
+  - name: multiple_cases_one_spec
+    desc: Two test cases in one spec both produce results
+    inputs:
+      spec: rust/crates/specgate-fixtures/specs/multi_case.spec.yaml
+    expected:
+      outcome: Complete
+      results:
+        - name: add_2_3
+          status: pass
+          expected_traces:
+            - Run: { operation: add }
+            - Event: { name: add.a, value: "2" }
+            - Event: { name: add.b, value: "3" }
+            - Event: { name: add.result, value: "5" }
+          actual_traces:
+            - Run: { operation: add }
+            - Event: { name: add.a, value: "2" }
+            - Event: { name: add.b, value: "3" }
+            - Event: { name: add.result, value: "5" }
+        - name: add_10_20
+          status: pass
+          expected_traces:
+            - Run: { operation: add }
+            - Event: { name: add.a, value: "10" }
+            - Event: { name: add.b, value: "20" }
+            - Event: { name: add.result, value: "30" }
+          actual_traces:
+            - Run: { operation: add }
+            - Event: { name: add.a, value: "10" }
+            - Event: { name: add.b, value: "20" }
+            - Event: { name: add.result, value: "30" }
+
+  # ===== Setup with parameters =====
+
+  - name: setup_with_input_params
+    desc: Setup function parameters are traced
+    inputs:
+      spec: rust/crates/specgate-fixtures/specs/setup_with_params.spec.yaml
+    expected:
+      outcome: Complete
+      results:
+        - name: start_at_10
+          status: pass
+          expected_traces:
+            - Event: { name: make_counter.initial, value: "10" }
+            - Event: { name: count, value: "10" }
+            - Run: { operation: increment }
+            - Event: { name: count, value: "11" }
+          actual_traces:
+            - Event: { name: make_counter.initial, value: "10" }
+            - Event: { name: count, value: "10" }
+            - Run: { operation: increment }
+            - Event: { name: count, value: "11" }
+
+  # ===== Multiple setup functions =====
+
+  - name: multiple_setups
+    desc: Two setup functions create two objects for one operation
+    inputs:
+      spec: rust/crates/specgate-fixtures/specs/multi_setup.spec.yaml
+    expected:
+      outcome: Complete
+      results:
+        - name: transfer_between_accounts
+          status: pass
+          expected_traces:
+            - Event: { name: source.balance, value: "100" }
+            - Event: { name: target.balance, value: "0" }
+            - Run: { operation: transfer }
+            - Event: { name: transfer.amount, value: "50" }
+            - Event: { name: source.balance, value: "50" }
+            - Event: { name: target.balance, value: "50" }
+          actual_traces:
+            - Event: { name: source.balance, value: "100" }
+            - Event: { name: target.balance, value: "0" }
+            - Run: { operation: transfer }
+            - Event: { name: transfer.amount, value: "50" }
+            - Event: { name: source.balance, value: "50" }
+            - Event: { name: target.balance, value: "50" }
+
+  # ===== Multi-step state machine =====
+
+  - name: multi_step_sequence
+    desc: Two operations in sequence with state tracked between
+    inputs:
+      spec: rust/crates/specgate-fixtures/specs/multi_step.spec.yaml
+    expected:
+      outcome: Complete
+      results:
+        - name: increment_then_decrement
+          status: pass
+          expected_traces:
+            - Event: { name: count, value: "0" }
+            - Run: { operation: increment }
+            - Event: { name: count, value: "1" }
+            - Run: { operation: decrement }
+            - Event: { name: count, value: "0" }
+          actual_traces:
+            - Event: { name: count, value: "0" }
+            - Run: { operation: increment }
+            - Event: { name: count, value: "1" }
+            - Run: { operation: decrement }
+            - Event: { name: count, value: "0" }
+
+  # ===== Mock dependency =====
+
+  - name: mock_records_interaction
+    desc: Mock captures request/response as trace events
+    inputs:
+      spec: rust/crates/specgate-fixtures/specs/mock_field.spec.yaml
+    expected:
+      outcome: Complete
+      results:
+        - name: fetch_returns_alice
+          status: pass
+          expected_traces:
+            - Run: { operation: fetch_user }
+            - Event: { name: db.request, value: "user_1" }
+            - Event: { name: db.response, value: "Alice" }
+            - Event: { name: fetch_user.result, value: "Alice" }
+          actual_traces:
+            - Run: { operation: fetch_user }
+            - Event: { name: db.request, value: "user_1" }
+            - Event: { name: db.response, value: "Alice" }
+            - Event: { name: fetch_user.result, value: "Alice" }
+
+  # ===== Mismatch: missing event =====
+
+  - name: mismatch_missing_event
+    desc: Spec expects an event the implementation doesn't produce
+    inputs:
+      spec: rust/crates/specgate-fixtures/specs/mismatch_missing_event.spec.yaml
+    expected:
+      outcome: Complete
+      results:
+        - name: add_2_3
+          status: fail
+
+  # ===== Mismatch: extra event =====
+
+  - name: mismatch_extra_event
+    desc: Spec expects fewer events than implementation produces
+    inputs:
+      spec: rust/crates/specgate-fixtures/specs/mismatch_extra_event.spec.yaml
+    expected:
+      outcome: Complete
+      results:
+        - name: add_2_3
+          status: fail
+
+  # ===== Mismatch: wrong order across Run boundary =====
+
+  - name: mismatch_wrong_order
+    desc: Event placed in wrong Run group
+    inputs:
+      spec: rust/crates/specgate-fixtures/specs/mismatch_wrong_order.spec.yaml
+    expected:
+      outcome: Complete
+      results:
+        - name: increment_once
+          status: fail
+
+  # ===== Mismatch: wrong operation name =====
+
+  - name: mismatch_wrong_operation
+    desc: Spec expects different operation name than actual
+    inputs:
+      spec: rust/crates/specgate-fixtures/specs/mismatch_wrong_op.spec.yaml
+    expected:
+      outcome: Complete
+      results:
+        - name: increment_once
+          status: fail
+
+  # ===== Mismatch: wrong field name =====
+
+  - name: mismatch_wrong_field
+    desc: Spec expects different field name than actual
+    inputs:
+      spec: rust/crates/specgate-fixtures/specs/mismatch_wrong_field.spec.yaml
+    expected:
+      outcome: Complete
+      results:
+        - name: increment_once
+          status: fail
+
+  # ===== Mismatch: wrong value on second step =====
+
+  - name: mismatch_second_step
+    desc: First step passes but second step has wrong expected value
+    inputs:
+      spec: rust/crates/specgate-fixtures/specs/mismatch_second_step.spec.yaml
+    expected:
+      outcome: Complete
+      results:
+        - name: increment_then_decrement
+          status: fail
+
+  # ===== Error: missing setup annotation =====
+
+  - name: error_missing_setup
+    desc: Spec references a setup not annotated in source
+    inputs:
+      spec: rust/crates/specgate-fixtures/specs/missing_setup.spec.yaml
+    expected:
+      outcome: Error
+
+  # ===== Error: missing operation annotation =====
+
+  - name: error_missing_operation
+    desc: Spec references an operation not annotated in source
+    inputs:
+      spec: rust/crates/specgate-fixtures/specs/missing_operation.spec.yaml
+    expected:
+      outcome: Error
+
+  # ===== Error: source doesn't compile =====
+
+  - name: error_compile_failure
+    desc: Source has a syntax error
+    inputs:
+      spec: rust/crates/specgate-fixtures/specs/compile_error.spec.yaml
+    expected:
+      outcome: Error
+
+  # ===== Error: no cases in spec =====
+
+  - name: error_no_cases
+    desc: Spec with no test cases
+    inputs:
+      spec: rust/crates/specgate-fixtures/specs/no_cases.spec.yaml
+    expected:
+      outcome: Error

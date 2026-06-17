@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=../../../../spec-schema.json
+# Mismatch: wrong field name in expected
+name: fixture.mismatch_wrong_field
+binding: binding.yaml
+outcome: Complete
+outputs:
+  when Complete:
+    traces: List<TraceEvent>
+types:
+  TraceEvent:
+    oneof:
+      Event: { name: string, value: string }
+      Run: { operation: string }
+cases:
+  - name: increment_once
+    desc: Spec expects "total" but source emits "count"
+    setup: make_counter
+    operation: increment
+    expected:
+      outcome: Complete
+      traces:
+        - Event: { name: total, value: "0" }
+        - Run: { operation: increment }
+        - Event: { name: total, value: "1" }

@@ -98,6 +98,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "specgate-fixtures"
+version = "0.1.0"
+
+[[package]]
 name = "specgate-types"
 version = "0.1.0"
 dependencies = [

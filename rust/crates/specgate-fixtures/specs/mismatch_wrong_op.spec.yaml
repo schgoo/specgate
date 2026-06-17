@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=../../../../spec-schema.json
+# Mismatch: wrong operation name
+name: fixture.mismatch_wrong_op
+binding: binding.yaml
+outcome: Complete
+outputs:
+  when Complete:
+    traces: List<TraceEvent>
+types:
+  TraceEvent:
+    oneof:
+      Event: { name: string, value: string }
+      Run: { operation: string }
+cases:
+  - name: increment_once
+    desc: Spec expects "decrement" but source runs "increment"
+    setup: make_counter
+    operation: increment
+    expected:
+      outcome: Complete
+      traces:
+        - Event: { name: count, value: "0" }
+        - Run: { operation: decrement }
+        - Event: { name: count, value: "1" }

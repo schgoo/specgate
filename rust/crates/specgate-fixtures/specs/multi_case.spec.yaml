@@ -1,0 +1,35 @@
+# yaml-language-server: $schema=../../../../spec-schema.json
+name: fixture.multi_case
+binding: binding.yaml
+outcome: Complete
+outputs:
+  when Complete:
+    traces: List<TraceEvent>
+types:
+  TraceEvent:
+    oneof:
+      Event: { name: string, value: string }
+      Run: { operation: string }
+cases:
+  - name: add_2_3
+    desc: Adding 2 + 3
+    operation: add
+    inputs: { a: 2, b: 3 }
+    expected:
+      outcome: Complete
+      traces:
+        - Run: { operation: add }
+        - Event: { name: add.a, value: "2" }
+        - Event: { name: add.b, value: "3" }
+        - Event: { name: add.result, value: "5" }
+  - name: add_10_20
+    desc: Adding 10 + 20
+    operation: add
+    inputs: { a: 10, b: 20 }
+    expected:
+      outcome: Complete
+      traces:
+        - Run: { operation: add }
+        - Event: { name: add.a, value: "10" }
+        - Event: { name: add.b, value: "20" }
+        - Event: { name: add.result, value: "30" }

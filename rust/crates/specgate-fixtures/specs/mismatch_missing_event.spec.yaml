@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=../../../../spec-schema.json
+# Mismatch: expected 3 events but actual has 2 (missing the result)
+name: fixture.mismatch_missing_event
+binding: binding.yaml
+outcome: Complete
+outputs:
+  when Complete:
+    traces: List<TraceEvent>
+types:
+  TraceEvent:
+    oneof:
+      Event: { name: string, value: string }
+      Run: { operation: string }
+cases:
+  - name: add_2_3
+    desc: Expects an extra event that the implementation doesn't produce
+    operation: add
+    inputs: { a: 2, b: 3 }
+    expected:
+      outcome: Complete
+      traces:
+        - Run: { operation: add }
+        - Event: { name: add.a, value: "2" }
+        - Event: { name: add.b, value: "3" }
+        - Event: { name: add.result, value: "5" }
+        - Event: { name: add.extra, value: "bonus" }

@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../../../../spec-schema.json
+name: fixture.missing_setup
+binding: binding.yaml
+outcome: Complete
+outputs:
+  when Complete:
+    traces: List<TraceEvent>
+types:
+  TraceEvent:
+    oneof:
+      Event: { name: string, value: string }
+      Run: { operation: string }
+cases:
+  - name: increment_once
+    desc: References a setup that doesn't exist in the source
+    setup: make_counter
+    operation: increment
+    expected:
+      outcome: Complete
+      traces:
+        - Event: { name: count, value: "0" }
+        - Run: { operation: increment }
+        - Event: { name: count, value: "1" }

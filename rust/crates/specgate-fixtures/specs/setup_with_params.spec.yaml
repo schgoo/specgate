@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=../../../../spec-schema.json
+name: fixture.setup_with_params
+binding: binding.yaml
+outcome: Complete
+outputs:
+  when Complete:
+    traces: List<TraceEvent>
+types:
+  TraceEvent:
+    oneof:
+      Event: { name: string, value: string }
+      Run: { operation: string }
+cases:
+  - name: start_at_10
+    desc: Counter starts at 10, increments to 11
+    setup: make_counter
+    operation: increment
+    inputs:
+      initial: 10
+    expected:
+      outcome: Complete
+      traces:
+        - Event: { name: make_counter.initial, value: "10" }
+        - Event: { name: count, value: "10" }
+        - Run: { operation: increment }
+        - Event: { name: count, value: "11" }

@@ -1,0 +1,28 @@
+# yaml-language-server: $schema=../../../../spec-schema.json
+# Mismatch: wrong value on second step
+name: fixture.mismatch_second_step
+binding: binding.yaml
+outcome: Complete
+outputs:
+  when Complete:
+    traces: List<TraceEvent>
+types:
+  TraceEvent:
+    oneof:
+      Event: { name: string, value: string }
+      Run: { operation: string }
+cases:
+  - name: increment_then_decrement
+    desc: Second step expects wrong value (999 instead of 0)
+    setup: make_counter
+    steps:
+      - operation: increment
+      - operation: decrement
+    expected:
+      outcome: Complete
+      traces:
+        - Event: { name: count, value: "0" }
+        - Run: { operation: increment }
+        - Event: { name: count, value: "1" }
+        - Run: { operation: decrement }
+        - Event: { name: count, value: "999" }

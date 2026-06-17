@@ -4,3 +4,11 @@ pub mod multi_field_capture;
 pub mod checkpoint_inline;
 pub mod multi_mutation;
 pub mod nested_operations;
+pub mod multi_case;
+pub mod setup_with_params;
+pub mod multi_setup;
+pub mod multi_step;
+pub mod mock_field;
+pub mod missing_setup;
+pub mod missing_operation;
+// pub mod compile_error;  // intentionally broken — syntax error
