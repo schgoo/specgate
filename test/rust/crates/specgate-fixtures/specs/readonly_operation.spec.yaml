@@ -2,8 +2,8 @@ name: fixture.readonly_operation
 binding: binding.yaml
 cases:
   - name: read_count
-    desc: Read-only operation returns value without changing state
+    desc: Read-only returns value without changing state
     setup: make_counter
     operation: get_count
     expected:
-      get_count.result: "42"
+      - get_count.result: "42"

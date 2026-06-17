@@ -2,7 +2,7 @@ name: fixture.mock_field
 binding: binding.yaml
 cases:
   - name: find_user_1
-    desc: Mock db returns Alice when queried for user_1
+    desc: Mock db returns Alice
     setup: make_service
     operation: get_user
     inputs:
@@ -10,6 +10,7 @@ cases:
       db:
         "user_1": "Alice"
     expected:
-      get_user.result: "Alice"
-      db.request: "user_1"
-      db.response: "Alice"
+      - run: get_user
+      - db.request: "user_1"
+      - db.response: "Alice"
+      - get_user.result: "Alice"

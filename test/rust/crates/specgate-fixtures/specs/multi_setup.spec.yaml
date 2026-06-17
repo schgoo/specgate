@@ -2,12 +2,15 @@ name: fixture.multi_setup
 binding: binding.yaml
 cases:
   - name: transfer_between_accounts
-    desc: Two setups create source and target for transfer
+    desc: Two setups create source and target
     setup:
       source: make_source
       target: make_target
     operation: transfer
     inputs: { amount: 50 }
     expected:
-      transfer.source.balance: "50"
-      transfer.target.balance: "50"
+      - source.balance: "100"
+      - target.balance: "0"
+      - run: transfer
+      - source.balance: "50"
+      - target.balance: "50"

@@ -6,5 +6,5 @@ cases:
     operation: divide
     inputs: { a: 10, b: 0 }
     expected:
-      divide.outcome: "Error"
-      divide.error: "division by zero"
+      - divide.outcome: "Error"
+      - divide.error: "division by zero"

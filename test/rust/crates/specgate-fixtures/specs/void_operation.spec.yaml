@@ -7,4 +7,6 @@ cases:
     operation: log
     inputs: { msg: "hello" }
     expected:
-      log.count: "1"
+      - count: "0"
+      - run: log
+      - count: "1"

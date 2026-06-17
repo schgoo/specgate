@@ -6,4 +6,4 @@ cases:
     operation: add
     inputs: { a: 2, b: 3 }
     expected:
-      add.result: "5"
+      - add.result: "5"

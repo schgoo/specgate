@@ -2,8 +2,8 @@ name: fixture.statemachine_counter_wrong
 binding: binding.yaml
 cases:
   - name: increment_once
-    desc: Expected value is wrong (999 instead of 1)
+    desc: Wrong expected — 999 instead of 1
     setup: make_counter
     operation: increment
     expected:
-      increment.count: "999"
+      - count: "999"

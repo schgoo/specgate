@@ -12,4 +12,9 @@ cases:
         "user_1": "Alice"
         "user_2": "Bob"
     expected:
-      get_users.result: "Alice and Bob"
+      - run: get_users
+      - db.request: "user_1"
+      - db.response: "Alice"
+      - db.request: "user_2"
+      - db.response: "Bob"
+      - get_users.result: "Alice and Bob"

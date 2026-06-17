@@ -6,10 +6,10 @@ cases:
     operation: add
     inputs: { a: 2, b: 3 }
     expected:
-      add.result: "5"
+      - add.result: "5"
   - name: add_10_20
     desc: Adding 10 + 20
     operation: add
     inputs: { a: 10, b: 20 }
     expected:
-      add.result: "30"
+      - add.result: "30"

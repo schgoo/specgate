@@ -2,9 +2,11 @@ name: fixture.setup_with_params
 binding: binding.yaml
 cases:
   - name: start_at_10
-    desc: Counter starts at 10, increments to 11
+    desc: Counter starts at 10
     setup: make_counter
     operation: increment
     inputs: { initial: 10 }
     expected:
-      increment.count: "11"
+      - count: "10"
+      - run: increment
+      - count: "11"

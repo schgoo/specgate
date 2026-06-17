@@ -6,4 +6,6 @@ cases:
     setup: make_counter
     operation: increment
     expected:
-      increment.count: "1"
+      - count: "0"
+      - run: increment
+      - count: "1"

@@ -2,10 +2,10 @@ name: fixture.multi_field_capture_reordered
 binding: binding.yaml
 cases:
   - name: withdraw_50
-    desc: Same test — field order doesn't matter
+    desc: Just assert final values
     setup: make_account
     operation: withdraw
     inputs: { amount: 50 }
     expected:
-      withdraw.transaction_count: "1"
-      withdraw.balance: "50"
+      - balance: "50"
+      - transaction_count: "1"

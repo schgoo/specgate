@@ -2,9 +2,9 @@ name: fixture.mismatch_missing_event
 binding: binding.yaml
 cases:
   - name: add_2_3
-    desc: Expects a field the implementation doesn't produce
+    desc: Expects a field that doesn't exist
     operation: add
     inputs: { a: 2, b: 3 }
     expected:
-      add.result: "5"
-      add.extra: "bonus"
+      - add.result: "5"
+      - add.extra: "bonus"

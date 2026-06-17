@@ -7,5 +7,7 @@ cases:
     operation: withdraw
     inputs: { amount: 50 }
     expected:
-      withdraw.balance: "50"
-      withdraw.transaction_count: "1"
+      - balance: "100"
+      - run: withdraw
+      - balance: "50"
+      - transaction_count: "1"

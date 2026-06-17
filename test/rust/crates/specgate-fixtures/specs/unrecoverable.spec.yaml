@@ -6,5 +6,5 @@ cases:
     operation: divide
     inputs: { a: 10, b: 0 }
     expected:
-      divide.outcome: "Unrecoverable"
-      divide.error: "attempted to divide by zero"
+      - divide.outcome: "Unrecoverable"
+      - divide.error: "attempted to divide by zero"

@@ -2,7 +2,7 @@ name: fixture.mock_not_found
 binding: binding.yaml
 cases:
   - name: query_unknown_user
-    desc: Mock table has no entry for input value
+    desc: Mock table has no entry for input
     setup: make_service
     operation: get_user
     inputs:
@@ -10,4 +10,5 @@ cases:
       db:
         "user_1": "Alice"
     expected:
-      db.error: "no mock response for input 'user_99'"
+      - db.request: "user_99"
+      - db.error: "no mock response for input 'user_99'"

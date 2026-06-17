@@ -2,8 +2,11 @@ name: fixture.multi_mutation
 binding: binding.yaml
 cases:
   - name: double_increment
-    desc: Two mutations captured individually
+    desc: Two mutations both captured in order
     setup: make_counter
     operation: increment_twice
     expected:
-      increment_twice.count: "2"
+      - count: "0"
+      - run: increment_twice
+      - count: "1"
+      - count: "2"

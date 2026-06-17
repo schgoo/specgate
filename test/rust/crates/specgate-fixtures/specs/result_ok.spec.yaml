@@ -6,5 +6,5 @@ cases:
     operation: divide
     inputs: { a: 10, b: 2 }
     expected:
-      divide.outcome: "Ok"
-      divide.result: "5"
+      - divide.outcome: "Ok"
+      - divide.result: "5"

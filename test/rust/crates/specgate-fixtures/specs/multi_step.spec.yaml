@@ -2,10 +2,14 @@ name: fixture.multi_step
 binding: binding.yaml
 cases:
   - name: increment_then_decrement
-    desc: Increment then decrement — count back to 0
+    desc: Count goes 0 to 1 to 0
     setup: make_counter
     steps:
       - operation: increment
       - operation: decrement
     expected:
-      decrement.count: "0"
+      - count: "0"
+      - run: increment
+      - count: "1"
+      - run: decrement
+      - count: "0"

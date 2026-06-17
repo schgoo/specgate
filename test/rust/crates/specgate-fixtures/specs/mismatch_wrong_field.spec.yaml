@@ -2,8 +2,8 @@ name: fixture.mismatch_wrong_field
 binding: binding.yaml
 cases:
   - name: increment_once
-    desc: Expects field 'total' but source produces 'count'
+    desc: Expects 'total' but source produces 'count'
     setup: make_counter
     operation: increment
     expected:
-      increment.total: "1"
+      - total: "1"
