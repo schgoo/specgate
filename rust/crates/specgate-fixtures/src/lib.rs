@@ -9,6 +9,11 @@ pub mod setup_with_params;
 pub mod multi_setup;
 pub mod multi_step;
 pub mod mock_field;
+pub mod mock_multi_response;
 pub mod missing_setup;
 pub mod missing_operation;
+pub mod result_ok;
+pub mod void_operation;
+pub mod readonly_operation;
+pub mod unrecoverable;
 // pub mod compile_error;  // intentionally broken — syntax error

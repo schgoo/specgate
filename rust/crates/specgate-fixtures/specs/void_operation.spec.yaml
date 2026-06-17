@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=../../../../spec-schema.json
+name: fixture.void_operation
+binding: binding.yaml
+outcome: Complete
+outputs:
+  when Complete:
+    traces: List<TraceEvent>
+types:
+  TraceEvent:
+    oneof:
+      Event: { name: string, value: string }
+      Run: { operation: string }
+cases:
+  - name: log_a_message
+    desc: Void operation produces no result event, only state changes
+    setup: make_logger
+    operation: log
+    inputs:
+      msg: "hello"
+    expected:
+      outcome: Complete
+      traces:
+        - Event: { name: count, value: "0" }
+        - Run: { operation: log }
+        - Event: { name: log.msg, value: "hello" }
+        - Event: { name: count, value: "1" }

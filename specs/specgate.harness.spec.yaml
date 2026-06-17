@@ -11,6 +11,9 @@
 #   - Event entries between two Run markers are compared as a SET (order
 #     does not matter). This accommodates non-deterministic field iteration.
 #   - Events before the first Run and after the last Run are also sets.
+#   - Comparison is SUBSET: all expected events must appear in actual, but
+#     extra events in actual are allowed. Annotations are opt-in — extra
+#     annotated fields don't break existing specs.
 #
 # Downstream consumers (comparison engine, reporter, diff tool) read
 # the harness output to produce human-readable reports.
@@ -244,6 +247,7 @@ cases:
       spec: rust/crates/specgate-fixtures/specs/bad_yaml.spec.yaml
     expected:
       outcome: Error
+      reason: "spec file is not valid YAML"
 
   # ===== Error: bad binding =====
 
@@ -253,6 +257,7 @@ cases:
       spec: rust/crates/specgate-fixtures/specs/bad_binding.spec.yaml
     expected:
       outcome: Error
+      reason: "binding 'nonexistent' not found"
 
   # ===== Multiple cases in one spec =====
 
@@ -369,18 +374,20 @@ cases:
     expected:
       outcome: Complete
       results:
-        - name: fetch_returns_alice
+        - name: find_user_1
           status: pass
           expected_traces:
-            - Run: { operation: fetch_user }
+            - Run: { operation: get_user }
+            - Event: { name: get_user.id, value: "user_1" }
             - Event: { name: db.request, value: "user_1" }
             - Event: { name: db.response, value: "Alice" }
-            - Event: { name: fetch_user.result, value: "Alice" }
+            - Event: { name: get_user.result, value: "Alice" }
           actual_traces:
-            - Run: { operation: fetch_user }
+            - Run: { operation: get_user }
+            - Event: { name: get_user.id, value: "user_1" }
             - Event: { name: db.request, value: "user_1" }
             - Event: { name: db.response, value: "Alice" }
-            - Event: { name: fetch_user.result, value: "Alice" }
+            - Event: { name: get_user.result, value: "Alice" }
 
   # ===== Mismatch: missing event =====
 
@@ -388,18 +395,6 @@ cases:
     desc: Spec expects an event the implementation doesn't produce
     inputs:
       spec: rust/crates/specgate-fixtures/specs/mismatch_missing_event.spec.yaml
-    expected:
-      outcome: Complete
-      results:
-        - name: add_2_3
-          status: fail
-
-  # ===== Mismatch: extra event =====
-
-  - name: mismatch_extra_event
-    desc: Spec expects fewer events than implementation produces
-    inputs:
-      spec: rust/crates/specgate-fixtures/specs/mismatch_extra_event.spec.yaml
     expected:
       outcome: Complete
       results:
@@ -462,6 +457,7 @@ cases:
       spec: rust/crates/specgate-fixtures/specs/missing_setup.spec.yaml
     expected:
       outcome: Error
+      reason: "setup 'make_counter' not found in source annotations"
 
   # ===== Error: missing operation annotation =====
 
@@ -471,6 +467,7 @@ cases:
       spec: rust/crates/specgate-fixtures/specs/missing_operation.spec.yaml
     expected:
       outcome: Error
+      reason: "operation 'increment' not found in source annotations"
 
   # ===== Error: source doesn't compile =====
 
@@ -480,6 +477,7 @@ cases:
       spec: rust/crates/specgate-fixtures/specs/compile_error.spec.yaml
     expected:
       outcome: Error
+      reason: "source failed to compile"
 
   # ===== Error: no cases in spec =====
 
@@ -489,3 +487,167 @@ cases:
       spec: rust/crates/specgate-fixtures/specs/no_cases.spec.yaml
     expected:
       outcome: Error
+      reason: "spec has no test cases"
+
+  # ===== Result — Ok path =====
+
+  - name: result_ok_path
+    desc: Operation returning Result::Ok produces outcome Ok and result value
+    inputs:
+      spec: rust/crates/specgate-fixtures/specs/result_ok.spec.yaml
+    expected:
+      outcome: Complete
+      results:
+        - name: divide_10_by_2
+          status: pass
+          expected_traces:
+            - Run: { operation: divide }
+            - Event: { name: divide.a, value: "10" }
+            - Event: { name: divide.b, value: "2" }
+            - Event: { name: divide.outcome, value: "Ok" }
+            - Event: { name: divide.result, value: "5" }
+          actual_traces:
+            - Run: { operation: divide }
+            - Event: { name: divide.a, value: "10" }
+            - Event: { name: divide.b, value: "2" }
+            - Event: { name: divide.outcome, value: "Ok" }
+            - Event: { name: divide.result, value: "5" }
+
+  # ===== Result — Err path =====
+
+  - name: result_err_path
+    desc: Operation returning Result::Err produces outcome Error and error message
+    inputs:
+      spec: rust/crates/specgate-fixtures/specs/result_err.spec.yaml
+    expected:
+      outcome: Complete
+      results:
+        - name: divide_by_zero
+          status: pass
+          expected_traces:
+            - Run: { operation: divide }
+            - Event: { name: divide.a, value: "10" }
+            - Event: { name: divide.b, value: "0" }
+            - Event: { name: divide.outcome, value: "Error" }
+            - Event: { name: divide.error, value: "division by zero" }
+          actual_traces:
+            - Run: { operation: divide }
+            - Event: { name: divide.a, value: "10" }
+            - Event: { name: divide.b, value: "0" }
+            - Event: { name: divide.outcome, value: "Error" }
+            - Event: { name: divide.error, value: "division by zero" }
+
+  # ===== Unrecoverable (panic) =====
+
+  - name: unrecoverable_panic
+    desc: Operation that panics produces Unrecoverable outcome
+    inputs:
+      spec: rust/crates/specgate-fixtures/specs/unrecoverable.spec.yaml
+    expected:
+      outcome: Complete
+      results:
+        - name: divide_by_zero_panics
+          status: pass
+          expected_traces:
+            - Run: { operation: divide }
+            - Event: { name: divide.a, value: "10" }
+            - Event: { name: divide.b, value: "0" }
+            - Event: { name: divide.outcome, value: "Unrecoverable" }
+            - Event: { name: divide.error, value: "attempted to divide by zero" }
+          actual_traces:
+            - Run: { operation: divide }
+            - Event: { name: divide.a, value: "10" }
+            - Event: { name: divide.b, value: "0" }
+            - Event: { name: divide.outcome, value: "Unrecoverable" }
+            - Event: { name: divide.error, value: "attempted to divide by zero" }
+
+  # ===== Void operation =====
+
+  - name: void_operation
+    desc: Operation returning unit has no result event, only state changes
+    inputs:
+      spec: rust/crates/specgate-fixtures/specs/void_operation.spec.yaml
+    expected:
+      outcome: Complete
+      results:
+        - name: log_a_message
+          status: pass
+          expected_traces:
+            - Event: { name: count, value: "0" }
+            - Run: { operation: log }
+            - Event: { name: log.msg, value: "hello" }
+            - Event: { name: count, value: "1" }
+          actual_traces:
+            - Event: { name: count, value: "0" }
+            - Run: { operation: log }
+            - Event: { name: log.msg, value: "hello" }
+            - Event: { name: count, value: "1" }
+
+  # ===== Readonly operation =====
+
+  - name: readonly_operation
+    desc: Read-only operation captures state unchanged
+    inputs:
+      spec: rust/crates/specgate-fixtures/specs/readonly_operation.spec.yaml
+    expected:
+      outcome: Complete
+      results:
+        - name: read_count
+          status: pass
+          expected_traces:
+            - Event: { name: count, value: "42" }
+            - Run: { operation: get_count }
+            - Event: { name: get_count.result, value: "42" }
+            - Event: { name: count, value: "42" }
+          actual_traces:
+            - Event: { name: count, value: "42" }
+            - Run: { operation: get_count }
+            - Event: { name: get_count.result, value: "42" }
+            - Event: { name: count, value: "42" }
+
+  # ===== Mock not found =====
+
+  - name: mock_input_not_in_table
+    desc: Mock called with input not in table produces error event
+    inputs:
+      spec: rust/crates/specgate-fixtures/specs/mock_not_found.spec.yaml
+    expected:
+      outcome: Complete
+      results:
+        - name: query_unknown_user
+          status: pass
+          expected_traces:
+            - Run: { operation: get_user }
+            - Event: { name: get_user.id, value: "user_99" }
+            - Event: { name: db.request, value: "user_99" }
+            - Event: { name: db.error, value: "no mock response for input 'user_99'" }
+
+  # ===== Mock multi-response =====
+
+  - name: mock_multi_response
+    desc: Mock returns different values for different inputs
+    inputs:
+      spec: rust/crates/specgate-fixtures/specs/mock_multi_response.spec.yaml
+    expected:
+      outcome: Complete
+      results:
+        - name: get_two_different_users
+          status: pass
+          expected_traces:
+            - Run: { operation: get_users }
+            - Event: { name: get_users.id_a, value: "user_1" }
+            - Event: { name: get_users.id_b, value: "user_2" }
+            - Event: { name: db.request, value: "user_1" }
+            - Event: { name: db.response, value: "Alice" }
+            - Event: { name: db.request, value: "user_2" }
+            - Event: { name: db.response, value: "Bob" }
+            - Event: { name: get_users.result, value: "Alice and Bob" }
+          actual_traces:
+            - Run: { operation: get_users }
+            - Event: { name: get_users.id_a, value: "user_1" }
+            - Event: { name: get_users.id_b, value: "user_2" }
+            - Event: { name: db.request, value: "user_1" }
+            - Event: { name: db.response, value: "Alice" }
+            - Event: { name: db.request, value: "user_2" }
+            - Event: { name: db.response, value: "Bob" }
+            - Event: { name: get_users.result, value: "Alice and Bob" }

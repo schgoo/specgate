@@ -1,0 +1,29 @@
+# yaml-language-server: $schema=../../../../spec-schema.json
+# Mock called with value not in mock table — should error
+name: fixture.mock_not_found
+binding: binding.yaml
+outcome: Complete
+outputs:
+  when Complete:
+    traces: List<TraceEvent>
+types:
+  TraceEvent:
+    oneof:
+      Event: { name: string, value: string }
+      Run: { operation: string }
+cases:
+  - name: query_unknown_user
+    desc: Mock table doesn't have an entry for the input value
+    setup: make_service
+    operation: get_user
+    inputs:
+      id: "user_99"
+      db:
+        "user_1": "Alice"
+    expected:
+      outcome: Complete
+      traces:
+        - Run: { operation: get_user }
+        - Event: { name: get_user.id, value: "user_99" }
+        - Event: { name: db.request, value: "user_99" }
+        - Event: { name: db.error, value: "no mock response for input 'user_99'" }

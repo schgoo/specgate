@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=../../../../spec-schema.json
+name: fixture.readonly_operation
+binding: binding.yaml
+outcome: Complete
+outputs:
+  when Complete:
+    traces: List<TraceEvent>
+types:
+  TraceEvent:
+    oneof:
+      Event: { name: string, value: string }
+      Run: { operation: string }
+cases:
+  - name: read_count
+    desc: Read-only operation captures state but values unchanged
+    setup: make_counter
+    operation: get_count
+    expected:
+      outcome: Complete
+      traces:
+        - Event: { name: count, value: "42" }
+        - Run: { operation: get_count }
+        - Event: { name: get_count.result, value: "42" }
+        - Event: { name: count, value: "42" }

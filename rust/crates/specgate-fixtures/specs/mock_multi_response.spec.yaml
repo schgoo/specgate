@@ -1,0 +1,34 @@
+# yaml-language-server: $schema=../../../../spec-schema.json
+name: fixture.mock_multi_response
+binding: binding.yaml
+outcome: Complete
+outputs:
+  when Complete:
+    traces: List<TraceEvent>
+types:
+  TraceEvent:
+    oneof:
+      Event: { name: string, value: string }
+      Run: { operation: string }
+cases:
+  - name: get_two_different_users
+    desc: Mock returns different values for different inputs
+    setup: make_service
+    operation: get_users
+    inputs:
+      id_a: "user_1"
+      id_b: "user_2"
+      db:
+        "user_1": "Alice"
+        "user_2": "Bob"
+    expected:
+      outcome: Complete
+      traces:
+        - Run: { operation: get_users }
+        - Event: { name: get_users.id_a, value: "user_1" }
+        - Event: { name: get_users.id_b, value: "user_2" }
+        - Event: { name: db.request, value: "user_1" }
+        - Event: { name: db.response, value: "Alice" }
+        - Event: { name: db.request, value: "user_2" }
+        - Event: { name: db.response, value: "Bob" }
+        - Event: { name: get_users.result, value: "Alice and Bob" }

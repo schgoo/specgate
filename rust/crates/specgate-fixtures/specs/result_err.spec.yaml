@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=../../../../spec-schema.json
+name: fixture.result_err
+binding: binding.yaml
+outcome: Complete
+outputs:
+  when Complete:
+    traces: List<TraceEvent>
+types:
+  TraceEvent:
+    oneof:
+      Event: { name: string, value: string }
+      Run: { operation: string }
+cases:
+  - name: divide_by_zero
+    desc: Division by zero returns Err
+    operation: divide
+    inputs: { a: 10, b: 0 }
+    expected:
+      outcome: Complete
+      traces:
+        - Run: { operation: divide }
+        - Event: { name: divide.a, value: "10" }
+        - Event: { name: divide.b, value: "0" }
+        - Event: { name: divide.outcome, value: "Error" }
+        - Event: { name: divide.error, value: "division by zero" }
