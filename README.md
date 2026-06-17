@@ -33,14 +33,26 @@ cases:
     operation: add
     inputs: { a: 2, b: 3 }
     expected:
-      add.result: "5"
+      - add.result: "5"
 
   - name: increment_counter
     setup: make_counter
     operation: increment
     expected:
-      count: "1"
+      - count: "0"
+      - run: increment
+      - count: "1"
+
+  - name: just_final_value
+    setup: make_counter
+    operation: increment
+    expected:
+      - count: "1"
 ```
+
+Expected is a list of assertions checked as a **subsequence** of the trace
+stream. Include as much or as little as you care about — from a single value
+to the full sequence of events.
 
 ## Annotations
 
