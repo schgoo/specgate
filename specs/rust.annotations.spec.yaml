@@ -108,6 +108,9 @@ outputs:
     traces:
       type: List<TraceEvent>
       source: traces
+    output_file:
+      type: string
+      desc: Path to the annotations JSON output file
   when Error:
     errors:
       type: List<CompileError>
