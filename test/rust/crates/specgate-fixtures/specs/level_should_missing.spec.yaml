@@ -1,0 +1,16 @@
+spec_version: "0.4.0"
+name: fixture.level_should_missing
+binding: binding.yaml
+
+operations:
+  recommended_feature:
+    outputs: [recommended_feature.result]
+
+cases:
+  - name: recommended_not_implemented
+    level: should
+    desc: SHOULD operation not annotated — should warn, not error
+    operation: recommended_feature
+    inputs: {}
+    expected:
+      - recommended_feature.result: "done"

@@ -30,7 +30,8 @@ types:
 
   CaseResult:
     name: string
-    status: string
+    status:
+      oneof: [pass, fail, skip, warn]
     expected: List<Assertion>
     traces: List<TraceEvent>
 
@@ -838,6 +839,38 @@ cases:
                 - Run: { operation: run }
                 - Event: { name: run.input, value: "test" }
                 - Event: { name: run.result, value: "executed: test" }
+
+  # ================================================================
+  # Normative strength — level: must/should/may
+  # ================================================================
+
+  - name: level_may_missing_skips
+    desc: MAY operation not implemented — case is skipped, not an error
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/level_may_missing.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: optional_not_implemented
+              status: skip
+              expected: []
+              traces: []
+
+  - name: level_should_missing_warns
+    desc: SHOULD operation not implemented — case produces warning status
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/level_should_missing.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: recommended_not_implemented
+              status: warn
+              expected: []
+              traces: []
 
   # ================================================================
   # Error cases

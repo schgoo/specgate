@@ -1,0 +1,16 @@
+spec_version: "0.4.0"
+name: fixture.level_may_missing
+binding: binding.yaml
+
+operations:
+  optional_feature:
+    outputs: [optional_feature.result]
+
+cases:
+  - name: optional_not_implemented
+    level: may
+    desc: MAY operation not annotated — should skip, not error
+    operation: optional_feature
+    inputs: {}
+    expected:
+      - optional_feature.result: "done"
