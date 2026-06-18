@@ -74,7 +74,8 @@ for the full example.
 | `#[spec_mock]` | `mock_field.rs`, `mock_multi_response.rs` |
 | Setup with parameters | `setup_with_params.rs` |
 | Multiple setups | `multi_setup.rs` |
-| `Result` return | `result_ok.rs` (Ok and Err paths share this file) |
+| `Result` return | `result_ok.rs`, `result_err.rs` |
+| `Option` return | `option_some.rs` |
 | Panic / unrecoverable | `unrecoverable.rs` |
 | Void operation | `void_operation.rs` |
 | Nested operation calls | `nested_operations.rs` |

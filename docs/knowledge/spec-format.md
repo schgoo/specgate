@@ -51,19 +51,42 @@ location, and how to resolve operations. See `docs/knowledge/bindings.md`.
 
 ## `operations`
 
-Each operation declares its own contract — inputs, outcome variants,
-and outputs. Operations are keyed by name:
+Each operation declares its inputs and outputs. Operations are keyed
+by name:
 
 ```yaml
 operations:
   add:
-    inputs: { a: { type: i32 }, b: { type: i32 } }
-    outcome:
-      oneof: [Complete]
-    outputs:
-      when Complete:
-        result: i32
+    inputs: { a: i32, b: i32 }
+    outputs: [add.result]
 ```
+
+### Outputs
+
+Outputs is a list of event names the operation can produce. Each item
+is either a bare string (simple event) or a map with type/enum info:
+
+```yaml
+# Simple — just event names
+outputs: [count, balance]
+
+# With types
+outputs:
+  - add.result: i32
+  - count: i32
+
+# With enum variants and associated data
+outputs:
+  - outcome:
+      oneof:
+        Complete:
+          results: List<CaseResult>
+        Error:
+          reason: string
+```
+
+The harness validates that `expected` in a case only asserts on events
+declared in the operation's outputs.
 
 ### Operation kinds
 
@@ -77,12 +100,16 @@ operations:
 operations:
   make_counter:
     kind: setup
-    outputs:
-      when Complete:
-        returns: Counter
+  increment:
+    outputs: [count]
   mechanism_proof:
     kind: command
     desc: Runs cargo test --test mechanism_proof.
+    outputs:
+      - outcome:
+          oneof:
+            Complete: {}
+            Error: {}
 ```
 
 ## `cases`
@@ -191,6 +218,10 @@ Every entry is one of:
 - `{<name>: <value>}` — matches an `Event` with that name and stringified value.
 - `{run: <operation>}` — matches a `Run` for that operation.
 
+The harness validates that every event name asserted in `expected` is
+declared in the operation's `outputs` list. Asserting on an undeclared
+event name produces an error.
+
 Matching rules:
 - Every expected entry must appear in the actual trace stream, **in order**.
 - **Gaps are allowed** — extra events may appear between matches.
@@ -237,7 +268,7 @@ steps:
 Case-level `expected:` covers the whole sequence. If both per-step and
 case-level expected are provided, both are validated.
 
-### Results, errors, and panics
+### Results, errors, panics, and optionals
 
 Operations returning `Result<T, E>` use trace names by convention:
 
@@ -256,6 +287,19 @@ expected:
 expected:
   - divide.outcome: "Unrecoverable"
   - divide.error: "attempt to divide by zero"
+```
+
+Operations returning `Option<T>`:
+
+```yaml
+# Some path
+expected:
+  - find.outcome: "Some"
+  - find.value: "1"
+
+# None path
+expected:
+  - find.outcome: "None"
 ```
 
 ## Spec boundary rule

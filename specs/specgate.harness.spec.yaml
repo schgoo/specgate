@@ -453,6 +453,40 @@ cases:
                 - divide.outcome: "Unrecoverable"
                 - divide.error: "attempt to divide by zero"
 
+  - name: option_some_path
+    desc: Operation returning Some produces outcome Some with value
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/option_some.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: find_existing
+              status: pass
+              expected:
+                - find.outcome: "Some"
+                - find.value: "1"
+              traces:
+                - Event: { name: find.outcome, value: "Some" }
+                - Event: { name: find.value, value: "1" }
+
+  - name: option_none_path
+    desc: Operation returning None produces outcome None
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/option_none.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: find_missing
+              status: pass
+              expected:
+                - find.outcome: "None"
+              traces:
+                - Event: { name: find.outcome, value: "None" }
+
   - name: void_operation
     desc: Void operation produces no result event
     operation: run_spec

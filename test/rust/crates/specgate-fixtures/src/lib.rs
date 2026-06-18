@@ -17,4 +17,5 @@ pub mod result_err;
 pub mod void_operation;
 pub mod readonly_operation;
 pub mod unrecoverable;
+pub mod option_some;
 // pub mod compile_error;  // intentionally broken — syntax error

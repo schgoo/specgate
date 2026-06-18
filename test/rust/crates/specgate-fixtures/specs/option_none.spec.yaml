@@ -1,0 +1,16 @@
+spec_version: "0.3.0"
+name: fixture.option_none
+binding: binding.yaml
+
+operations:
+  find:
+    inputs: { items: "List<i32>", target: i32 }
+    outputs: [find.outcome]
+
+cases:
+  - name: find_missing
+    desc: Finding a missing element returns None
+    operation: find
+    inputs: { items: [10, 20, 30], target: 99 }
+    expected:
+      - find.outcome: "None"
