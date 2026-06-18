@@ -1,6 +1,16 @@
-# Subsequence with gaps — asserts first and last value, skipping middle
+spec_version: "0.3.0"
 name: fixture.subsequence_with_gaps
 binding: binding.yaml
+
+operations:
+  make_counter:
+    kind: setup
+    outputs:
+      when Complete:
+        returns: Counter
+  increment_twice:
+    desc: Increments the counter twice in one operation.
+
 cases:
   - name: double_increment
     desc: Assert count=0 then count=2, skipping the intermediate count=1

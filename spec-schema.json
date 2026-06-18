@@ -1,53 +1,42 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "SpecGate Component Spec",
-  "description": "Schema for SpecGate .spec.yaml files. Specs declare test cases with expected trace assertions. The harness resolves the binding, runs annotated code, and compares actual traces against expected.",
+  "description": "Schema for SpecGate .spec.yaml files. Specs declare operations (each with their own inputs/outputs) and test cases that exercise them. The harness resolves the binding, compiles annotated code, runs operations, and compares actual traces against expected.",
   "type": "object",
-  "required": ["name", "cases"],
+  "required": ["name", "spec_version", "operations", "cases"],
   "properties": {
+    "spec_version": {
+      "type": "string",
+      "description": "Schema version. Current version is '0.3.0'.",
+      "enum": ["0.3.0"]
+    },
     "name": {
       "type": "string",
-      "description": "Dotted component name, e.g. fixture.stateless_add"
+      "description": "Dotted component name, e.g. specgate.harness"
     },
     "binding": {
-      "description": "Path to the binding YAML file (relative to this spec file).",
-      "type": "string"
+      "description": "Binding(s) for this spec. A string for a single binding, or a list for multiple implementations.",
+      "oneOf": [
+        { "type": "string" },
+        {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      ]
     },
     "depends_on": {
       "type": "array",
       "description": "List of spec names this spec depends on.",
       "items": { "type": "string" }
     },
-    "inputs": {
-      "type": "object",
-      "description": "Named input declarations for the component."
-    },
     "types": {
       "type": "object",
-      "description": "Named type definitions."
-    },
-    "outcome": {
-      "description": "Outcome variants for the component."
-    },
-    "outputs": {
-      "type": "object",
-      "description": "Output declarations keyed by 'when <Outcome>'."
-    },
-    "state": {
-      "type": "object",
-      "description": "State variables for state machine specs."
-    },
-    "init": {
-      "type": "object",
-      "description": "Initial state values."
+      "description": "Named type definitions shared across operations."
     },
     "operations": {
       "type": "object",
-      "description": "Named operations for state machine specs."
-    },
-    "invariants": {
-      "type": "object",
-      "description": "Named invariants."
+      "description": "Named operations, each declaring its own inputs, outputs, and outcome.",
+      "additionalProperties": { "$ref": "#/definitions/operation" }
     },
     "cases": {
       "type": "array",
@@ -56,7 +45,63 @@
     }
   },
   "definitions": {
+    "operation": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "description": "Operation kind. 'setup' creates state objects. 'command' runs a shell command. Default is a regular annotated operation.",
+          "enum": ["setup", "command"]
+        },
+        "desc": {
+          "type": "string",
+          "description": "Human-readable description of this operation."
+        },
+        "inputs": {
+          "type": "object",
+          "description": "Named input declarations for this operation."
+        },
+        "outcome": {
+          "description": "Outcome variants for this operation."
+        },
+        "outputs": {
+          "type": "object",
+          "description": "Output declarations keyed by 'when <Outcome>'."
+        }
+      }
+    },
     "testCase": {
+      "oneOf": [
+        { "$ref": "#/definitions/narrativeCase" },
+        { "$ref": "#/definitions/runnableCase" }
+      ]
+    },
+    "narrativeCase": {
+      "type": "object",
+      "required": ["name", "kind", "desc"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique snake_case name.",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["narrative"]
+        },
+        "desc": {
+          "type": "string",
+          "description": "Implementation constraint or design intent in plain language."
+        },
+        "verify": {
+          "type": "array",
+          "description": "Steps to manually verify this constraint is met.",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "runnableCase": {
       "type": "object",
       "required": ["name", "desc"],
       "properties": {
@@ -71,10 +116,10 @@
         },
         "operation": {
           "type": "string",
-          "description": "Operation to invoke."
+          "description": "Operation to invoke (must match a key in the operations block)."
         },
         "setup": {
-          "description": "Setup function name (string) or map of named setups.",
+          "description": "Setup operation name (string) or map of named setups with inputs.",
           "oneOf": [
             { "type": "string" },
             { "type": "object" }
@@ -82,33 +127,17 @@
         },
         "inputs": {
           "type": "object",
-          "description": "Input values for this case. Values can be literals or file references: { file: 'path' }."
+          "description": "Input values for this case (validated against the operation's declared inputs)."
         },
         "expected": {
-          "type": "array",
-          "description": "List of expected trace assertions. Each item is a map with one key: either a field name (value assertion) or 'run' (operation assertion). Matched as a subsequence of the actual trace stream.",
-          "items": {
-            "type": "object"
-          }
+          "description": "Expected outcome and outputs. For trace-based operations, includes a list of trace assertions matched as a subsequence.",
+          "type": "object"
         },
         "steps": {
           "type": "array",
-          "description": "Ordered operation sequence for multi-step cases.",
+          "description": "Ordered operation sequence for multi-step cases. Each step references an operation.",
           "items": { "$ref": "#/definitions/testStep" },
           "minItems": 1
-        },
-        "postconditions": {
-          "type": "array",
-          "description": "Binding targets to invoke after the case. Each must exit 0.",
-          "items": {
-            "type": "object",
-            "required": ["target"],
-            "properties": {
-              "target": { "type": "string" },
-              "inputs": { "type": "object" },
-              "desc": { "type": "string" }
-            }
-          }
         }
       }
     },
@@ -118,11 +147,16 @@
       "properties": {
         "operation": {
           "type": "string",
-          "description": "Operation name."
+          "description": "Operation name (must match a key in the operations block)."
         },
         "inputs": {
           "type": "object",
           "description": "Input values for this step."
+        },
+        "expected": {
+          "description": "Per-step expected trace assertions. Optional — if omitted, the case-level expected covers the whole sequence.",
+          "type": "array",
+          "items": { "type": "object" }
         }
       }
     }

@@ -1,9 +1,9 @@
-# yaml-language-server: $schema=../../spec-schema.json
-name: no_cases
-binding: mock
-target: test
-outcome: Complete
-outputs:
-  when Complete:
-    report: RunReport
+spec_version: "0.3.0"
+name: fixture.no_cases
+binding: binding.yaml
+
+operations:
+  something:
+    desc: Placeholder operation.
+
 cases: []

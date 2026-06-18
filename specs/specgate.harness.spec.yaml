@@ -1,38 +1,19 @@
 # yaml-language-server: $schema=../spec-schema.json
 # SpecGate component: specgate.harness
 #
-# The unified harness. Takes one input: a path to a spec file.
-# The spec file declares its binding (which points to the crate under test).
-# The harness resolves the binding, generates tests, runs them, and
-# produces per-case results with expected assertions and full trace stream.
+# The unified harness. Compiles annotated code, runs operations, collects
+# traces, and compares against expected assertions.
 #
-# User specs express expectations as a list of name:value assertions.
-# The harness checks these as a SUBSEQUENCE of the actual trace stream:
+# Trace matching rules (subsequence):
 #   - Each expected assertion must appear in the traces in order
 #   - Gaps between matches are allowed (subsequence, not exact)
 #   - Extra events in the trace stream are allowed (subset)
 #   - "run: operation" matches a Run event
 #   - "name: value" matches an Event with that name and value
-#
-# The harness outputs the full trace stream for downstream consumers
-# (diff tools, reporters, model generators).
 
+spec_version: "0.3.0"
 name: specgate.harness
 binding: bindings/rust.yaml
-
-inputs:
-  spec:
-    type: string
-    desc: Path to the spec YAML file (relative to repo root)
-
-outcome:
-  oneof: [Complete, Error]
-
-outputs:
-  when Complete:
-    results: List<CaseResult>
-  when Error:
-    reason: string
 
 types:
   TraceEvent:
@@ -46,7 +27,67 @@ types:
     expected: List<Map<string, string>>
     traces: List<TraceEvent>
 
+operations:
+  run_spec:
+    desc: Run all test cases in a spec file and return results with traces.
+    inputs:
+      spec:
+        type: string
+        desc: Path to the spec YAML file (relative to repo root)
+    outcome:
+      oneof: [Complete, Error]
+    outputs:
+      when Complete:
+        results: List<CaseResult>
+      when Error:
+        reason: string
+
+  mechanism_proof:
+    kind: command
+    desc: >
+      Compile fixtures and verify annotations emit real traces.
+      Runs cargo test --test mechanism_proof.
+
+  check_fixtures:
+    kind: command
+    desc: >
+      Verify that the specgate-fixtures crate compiles with current annotations.
+      Runs cargo check on the fixtures crate.
+
 cases:
+
+  # ================================================================
+  # Mechanism constraints
+  # ================================================================
+
+  - name: harness_compiles_and_emits_traces
+    operation: mechanism_proof
+    desc: >
+      Annotations expand into real trace-emitting code at compile time.
+      Calling annotated functions and checking traces proves compilation
+      happened and macros are not no-ops.
+    expected:
+      outcome: Complete
+
+  - name: fixtures_compile
+    operation: check_fixtures
+    desc: >
+      The specgate-fixtures crate must compile with the current annotations.
+      This forces the annotations crate to handle #[derive(SpecEvent)],
+      #[spec_operation], #[spec_setup], #[spec_mock], and spec_event_record!.
+    expected:
+      outcome: Complete
+
+  - name: no_source_interpretation
+    kind: narrative
+    desc: >
+      The harness must not interpret Rust source with syn. It must shell out
+      to cargo to compile and run annotated code. An earlier implementation
+      used source interpretation as a shortcut — it passed all spec-driven
+      tests but could not handle real-world code.
+    verify:
+      - Confirm no syn-based expression evaluation in harness source
+      - The harness should invoke cargo build/test, not evaluate Rust in-process
 
   # ================================================================
   # Happy path — basic operations
@@ -54,6 +95,7 @@ cases:
 
   - name: stateless_return_value
     desc: Stateless function captures return value
+    operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/stateless_add.spec.yaml
     expected:
@@ -71,6 +113,7 @@ cases:
 
   - name: statemachine_before_after
     desc: StateMachine captures field state before and after
+    operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/statemachine_counter.spec.yaml
     expected:
@@ -89,6 +132,7 @@ cases:
 
   - name: multi_field_capture
     desc: Multiple annotated fields all captured
+    operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/multi_field_capture.spec.yaml
     expected:
@@ -110,6 +154,7 @@ cases:
 
   - name: inline_checkpoint
     desc: spec_event!() emits an event at invocation point
+    operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/checkpoint_inline.spec.yaml
     expected:
@@ -128,6 +173,7 @@ cases:
 
   - name: multi_mutation
     desc: Every mutation of an annotated field is captured
+    operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/multi_mutation.spec.yaml
     expected:
@@ -148,6 +194,7 @@ cases:
 
   - name: nested_operations
     desc: Nested calls produce sequential Run events
+    operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/nested_operations.spec.yaml
     expected:
@@ -176,6 +223,7 @@ cases:
 
   - name: setup_with_input_params
     desc: Setup function parameters are traced
+    operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/setup_with_params.spec.yaml
     expected:
@@ -196,6 +244,7 @@ cases:
 
   - name: multiple_setups
     desc: Two setup functions create two objects for one operation
+    operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/multi_setup.spec.yaml
     expected:
@@ -222,6 +271,7 @@ cases:
 
   - name: multiple_cases_one_spec
     desc: Two test cases in one spec both produce results
+    operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/multi_case.spec.yaml
     expected:
@@ -238,6 +288,7 @@ cases:
 
   - name: multi_step_sequence
     desc: Two operations in sequence with state tracked
+    operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/multi_step.spec.yaml
     expected:
@@ -264,6 +315,7 @@ cases:
 
   - name: mock_call_site
     desc: Mock intercepts call and returns configured value
+    operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/mock_field.spec.yaml
     expected:
@@ -284,6 +336,7 @@ cases:
 
   - name: mock_multi_response
     desc: Mock returns different values for different inputs
+    operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/mock_multi_response.spec.yaml
     expected:
@@ -308,6 +361,7 @@ cases:
 
   - name: mock_input_not_in_table
     desc: Mock called with unknown input produces error event
+    operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/mock_not_found.spec.yaml
     expected:
@@ -325,6 +379,7 @@ cases:
 
   - name: result_ok_path
     desc: Operation returning Ok produces outcome Ok
+    operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/result_ok.spec.yaml
     expected:
@@ -341,6 +396,7 @@ cases:
 
   - name: result_err_path
     desc: Operation returning Err produces outcome Error
+    operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/result_err.spec.yaml
     expected:
@@ -357,6 +413,7 @@ cases:
 
   - name: unrecoverable_panic
     desc: Operation that panics produces Unrecoverable outcome
+    operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/unrecoverable.spec.yaml
     expected:
@@ -370,6 +427,7 @@ cases:
 
   - name: void_operation
     desc: Void operation produces no result event
+    operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/void_operation.spec.yaml
     expected:
@@ -388,6 +446,7 @@ cases:
 
   - name: readonly_operation
     desc: Read-only operation returns value without state change
+    operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/readonly_operation.spec.yaml
     expected:
@@ -404,6 +463,7 @@ cases:
 
   - name: event_order_between_runs
     desc: Asserting on final values works regardless of field iteration order
+    operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/multi_field_capture_reordered.spec.yaml
     expected:
@@ -421,6 +481,7 @@ cases:
 
   - name: mismatch_wrong_value
     desc: Wrong expected value produces fail
+    operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/statemachine_counter_wrong.spec.yaml
     expected:
@@ -437,6 +498,7 @@ cases:
 
   - name: mismatch_missing_field
     desc: Expected field not in traces produces fail
+    operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/mismatch_missing_event.spec.yaml
     expected:
@@ -455,6 +517,7 @@ cases:
 
   - name: mismatch_wrong_field_name
     desc: Expected field name differs from actual
+    operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/mismatch_wrong_field.spec.yaml
     expected:
@@ -471,6 +534,7 @@ cases:
 
   - name: mismatch_second_step
     desc: First step OK but second step has wrong value
+    operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/mismatch_second_step.spec.yaml
     expected:
@@ -494,6 +558,7 @@ cases:
 
   - name: subsequence_wrong_order
     desc: Expected events in wrong order produces fail
+    operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/subsequence_wrong_order.spec.yaml
     expected:
@@ -511,6 +576,7 @@ cases:
 
   - name: subsequence_with_gaps
     desc: Matching with gaps between expected events
+    operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/subsequence_with_gaps.spec.yaml
     expected:
@@ -533,6 +599,7 @@ cases:
 
   - name: error_bad_yaml
     desc: Invalid YAML produces an error
+    operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/bad_yaml.spec.yaml
     expected:
@@ -541,6 +608,7 @@ cases:
 
   - name: error_bad_binding
     desc: Nonexistent binding produces an error
+    operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/bad_binding.spec.yaml
     expected:
@@ -549,6 +617,7 @@ cases:
 
   - name: error_missing_setup
     desc: Setup not found in source annotations
+    operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/missing_setup.spec.yaml
     expected:
@@ -557,6 +626,7 @@ cases:
 
   - name: error_missing_operation
     desc: Operation not found in source annotations
+    operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/missing_operation.spec.yaml
     expected:
@@ -565,6 +635,7 @@ cases:
 
   - name: error_compile_failure
     desc: Source has a syntax error
+    operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/compile_error.spec.yaml
     expected:
@@ -573,6 +644,7 @@ cases:
 
   - name: error_no_cases
     desc: Spec with no test cases
+    operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/no_cases.spec.yaml
     expected:

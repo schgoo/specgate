@@ -1,8 +1,19 @@
+spec_version: "0.3.0"
 name: fixture.multi_mutation
 binding: binding.yaml
+
+operations:
+  make_counter:
+    kind: setup
+    outputs:
+      when Complete:
+        returns: Counter
+  increment_twice:
+    desc: Increments the counter twice in one operation.
+
 cases:
   - name: double_increment
-    desc: Two mutations both captured in order
+    desc: Count goes from 0 to 2 via two mutations
     setup: make_counter
     operation: increment_twice
     expected:

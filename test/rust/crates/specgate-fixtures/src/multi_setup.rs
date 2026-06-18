@@ -2,22 +2,23 @@
 use specgate_annotations::*;
 
 #[spec_setup("make_source")]
-fn make_source() -> Account {
+pub fn make_source() -> Account {
     Account { balance: 100 }
 }
 
 #[spec_setup("make_target")]
-fn make_target() -> Account {
+pub fn make_target() -> Account {
     Account { balance: 0 }
 }
 
-struct Account {
+#[derive(SpecEvent)]
+pub struct Account {
     #[spec_event]
-    balance: i32,
+    pub balance: i32,
 }
 
 #[spec_operation("transfer")]
-fn transfer(source: &mut Account, target: &mut Account, amount: i32) {
+pub fn transfer(source: &mut Account, target: &mut Account, amount: i32) {
     source.balance -= amount;
     target.balance += amount;
 }

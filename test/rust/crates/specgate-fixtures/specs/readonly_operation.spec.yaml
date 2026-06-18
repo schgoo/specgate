@@ -1,8 +1,23 @@
+spec_version: "0.3.0"
 name: fixture.readonly_operation
 binding: binding.yaml
+
+operations:
+  make_counter:
+    kind: setup
+    outputs:
+      when Complete:
+        returns: Counter
+  get_count:
+    outcome:
+      oneof: [Complete]
+    outputs:
+      when Complete:
+        result: i32
+
 cases:
   - name: read_count
-    desc: Read-only returns value without changing state
+    desc: Read-only operation returns value without state change
     setup: make_counter
     operation: get_count
     expected:

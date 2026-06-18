@@ -1,5 +1,16 @@
+spec_version: "0.3.0"
 name: fixture.multi_field_capture
 binding: binding.yaml
+
+operations:
+  make_account:
+    kind: setup
+    outputs:
+      when Complete:
+        returns: Account
+  withdraw:
+    inputs: { amount: { type: i32 } }
+
 cases:
   - name: withdraw_50
     desc: Withdrawing 50 from account with balance 100

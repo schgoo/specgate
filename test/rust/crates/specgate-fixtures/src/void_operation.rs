@@ -2,18 +2,19 @@
 use specgate_annotations::*;
 
 #[spec_setup("make_logger")]
-fn make_logger() -> Logger {
+pub fn make_logger() -> Logger {
     Logger { count: 0 }
 }
 
-struct Logger {
+#[derive(SpecEvent)]
+pub struct Logger {
     #[spec_event]
-    count: i32,
+    pub count: i32,
 }
 
 impl Logger {
     #[spec_operation("log")]
-    fn log(&mut self, msg: &str) {
+    pub fn log(&mut self, msg: &str) {
         self.count += 1;
     }
 }

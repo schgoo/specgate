@@ -1,13 +1,14 @@
-# yaml-language-server: $schema=../../spec-schema.json
-name: bad_binding
+spec_version: "0.3.0"
+name: fixture.bad_binding
 binding: nonexistent
-target: test
-outcome: Complete
-outputs:
-  when Complete:
-    report: RunReport
+
+operations:
+  something:
+    desc: Placeholder operation.
+
 cases:
   - name: binding_case
     desc: The binding cannot be resolved.
+    operation: something
     expected:
       outcome: Complete

@@ -2,18 +2,19 @@
 use specgate_annotations::*;
 
 #[spec_setup("make_counter")]
-fn make_counter() -> Counter {
+pub fn make_counter() -> Counter {
     Counter { count: 42 }
 }
 
-struct Counter {
+#[derive(SpecEvent)]
+pub struct Counter {
     #[spec_event]
-    count: i32,
+    pub count: i32,
 }
 
 impl Counter {
     #[spec_operation("get_count")]
-    fn get_count(&self) -> i32 {
+    pub fn get_count(&self) -> i32 {
         self.count
     }
 }

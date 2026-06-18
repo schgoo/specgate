@@ -25,8 +25,8 @@ order they care about.
 |------------|-----------|---------|---------------|
 | `#[spec_operation("name")]` | Free function or method | Marks the operation a case invokes by `operation:`/`steps[].operation:`. | `Run { operation: name }` at the entry point, plus per-parameter `Event { "<name>.<param>", value }` and `Event { "<name>.result", value }` for the return value (or `<name>.outcome` + `<name>.error` for `Result`). |
 | `#[spec_setup("name")]` | Free function (no `self`) | Names a factory a case invokes by `setup:`. | `Event { "<name>.<param>", value }` per parameter. |
-| `#[spec_event]` | Struct field | Every write to the field emits an event. | `Event { name: "<field>", value: new_value }` on each mutation. Multi-setup cases prefix with the alias (`source.balance`). |
-| `spec_event!("name", expr)` | Inline expression | Records the value of `expr` at this point in execution. | `Event { name, value: format!("{}", expr) }`. |
+| `#[spec_event]` | Struct field (with `#[derive(SpecEvent)]` on the struct) | Every write to the field emits an event. | `Event { name: "<field>", value: new_value }` on each mutation. Multi-setup cases prefix with the alias (`source.balance`). |
+| `spec_event_record!("name", expr)` | Inline expression | Records the value of `expr` at this point in execution. | `Event { name, value: format!("{}", expr) }`. |
 | `#[spec_mock("name")]` | Local binding around a method call | Intercepts the call and returns the case-supplied response. | `Event { "<name>.request", input }` then `Event { "<name>.response", mocked_response }`. |
 
 **No `kind` parameter.** Every `#[spec_operation("…")]` in the fixtures
@@ -34,8 +34,8 @@ is name-only. The shape of the operation is expressed entirely by the
 contents of the spec's `expected:` list.
 
 **No `spec_capture` or `spec_checkpoint!()` annotations.** Field capture
-is `#[spec_event]`; inline capture is `spec_event!()`. Those two cover
-every observation pattern in the fixtures.
+is `#[derive(SpecEvent)]` + `#[spec_event]` on fields; inline capture is
+`spec_event_record!()`. Those two cover every observation pattern.
 
 ## Rules
 
@@ -54,9 +54,10 @@ A single operation typically uses several annotations across one source
 file. They are joined at runtime by name and source-file scope.
 
 ```
-#[spec_setup("make_counter")]                    ─┐
-#[spec_event] on Counter.count                   ─┼─► one operation, "increment"
-#[spec_operation("increment")] on Counter::incr  ─┘
+#[spec_setup("make_counter")]                      ─┐
+#[derive(SpecEvent)] on Counter                     │
+  #[spec_event] on Counter.count                   ─┼─► one operation, "increment"
+#[spec_operation("increment")] on Counter::incr    ─┘
 ```
 
 See `test/rust/crates/specgate-fixtures/src/statemachine_counter.rs`

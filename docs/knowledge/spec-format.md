@@ -14,67 +14,128 @@ disagree, the fixture is the source of truth.
 
 | Field | Required | Description |
 |-------|----------|-------------|
+| `spec_version` | yes | Schema version string, currently `"0.3.0"` |
 | `name` | yes | Dotted component name, e.g. `fixture.stateless_add` |
-| `binding` | no | **Path** (string) to a binding YAML file, relative to this spec file |
-| `cases` | yes | List of test cases (≥1; some fixtures intentionally have `cases: []` to test loader behaviour) |
-| `depends_on` | no | List of other spec names this spec depends on for shared types |
+| `binding` | no | Path (string) or list of paths to binding YAML files |
+| `operations` | yes | Named operations, each declaring its own inputs/outputs/outcome |
+| `cases` | yes | List of test cases |
+| `types` | no | Named type definitions shared across operations |
+| `depends_on` | no | List of other spec names this spec depends on |
 
-There are **no** top-level `inputs` / `outcome` / `outputs` /
-`state` / `init` / `operations` / `invariants` fields in the current
-fixture format. Outcomes are asserted through `expected:` entries on
-each case (e.g. `divide.outcome: "Ok"`), not through a top-level
-declaration. (The `core.*` self-specs and the harness spec retain some
-of these top-level fields for legacy reasons; they are scheduled for
-removal.)
+## `spec_version`
+
+Required. The harness checks this to determine which spec format to
+parse. Current version is `"0.3.0"`.
+
+```yaml
+spec_version: "0.3.0"
+```
 
 ## `binding`
 
-A string path. The harness reads the file at that path to learn the
-language and where the package under test lives.
+A string path (single implementation) or a list of paths
+(multi-implementation conformance testing):
 
 ```yaml
-# fixture.stateless_add.spec.yaml
-name: fixture.stateless_add
-binding: binding.yaml   # sibling of this spec file
+# Single binding
+binding: binding.yaml
+
+# Multiple bindings
+binding:
+  - bindings/rust.yaml
+  - bindings/csharp.yaml
 ```
+
+The harness reads the binding file to learn the language, package
+location, and how to resolve operations. See `docs/knowledge/bindings.md`.
+
+## `operations`
+
+Each operation declares its own contract — inputs, outcome variants,
+and outputs. Operations are keyed by name:
 
 ```yaml
-# binding.yaml
-language: rust
-targets:
-  default:
-    package_root: ..
+operations:
+  add:
+    inputs: { a: { type: i32 }, b: { type: i32 } }
+    outcome:
+      oneof: [Complete]
+    outputs:
+      when Complete:
+        result: i32
 ```
 
-See `docs/knowledge/bindings.md` for binding file shape.
+### Operation kinds
+
+| Kind | Description |
+|------|-------------|
+| *(default)* | Regular annotated operation (discovered via `#[spec_operation]`) |
+| `setup` | Factory function that creates state objects |
+| `command` | Shell command — exit 0 = pass |
+
+```yaml
+operations:
+  make_counter:
+    kind: setup
+    outputs:
+      when Complete:
+        returns: Counter
+  mechanism_proof:
+    kind: command
+    desc: Runs cargo test --test mechanism_proof.
+```
 
 ## `cases`
+
+### Runnable cases
 
 ```yaml
 cases:
   - name: add_2_3              # snake_case, unique within the file
     desc: Adding 2 + 3 returns 5
-    operation: add             # name from a #[spec_operation("add")] in source
-    inputs: { a: 2, b: 3 }     # passed to the operation by name
+    operation: add             # must match a key in operations block
+    inputs: { a: 2, b: 3 }
     expected:
-      - add.result: "5"        # one Event match
+      - add.result: "5"
 ```
 
 | Case field | Required | Description |
 |------------|----------|-------------|
 | `name` | yes | Snake_case identifier, unique within the file |
 | `desc` | yes | Human-readable description |
-| `operation` | for single-step cases | Operation name (from a `#[spec_operation(…)]`) |
-| `steps` | for multi-step cases | Ordered list of `{operation: <name>}` entries |
-| `setup` | no | Setup function name (string) or `{alias: setup_fn}` map for multi-setup cases |
-| `inputs` | no | Values bound to setup and operation parameters by name |
-| `expected` | yes | List of single-entry maps, matched as a subsequence of the trace stream |
+| `operation` | for single-step | Operation name (must match operations block) |
+| `steps` | for multi-step | Ordered list of `{operation, inputs?, expected?}` |
+| `setup` | no | Setup operation name (string) or `{alias: setup_name}` map |
+| `inputs` | no | Values bound to operation parameters by name |
+| `expected` | yes | Expected trace assertions (see below) |
 
 `operation` and `steps` are mutually exclusive on a single case.
 
+### Narrative cases
+
+Narrative cases express implementation constraints — they are read by
+agents but not executed by the harness:
+
+```yaml
+  - name: no_source_interpretation
+    kind: narrative
+    desc: >
+      The harness must not interpret Rust source with syn.
+    verify:
+      - Confirm no syn-based expression evaluation in harness source
+      - The harness should invoke cargo build/test, not evaluate in-process
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | yes | Snake_case identifier |
+| `kind` | yes | Must be `"narrative"` |
+| `desc` | yes | Constraint in plain language |
+| `verify` | no | Steps to manually verify the constraint |
+
 ### `setup`
 
-A case can name a `#[spec_setup("…")]` function:
+A case can name a setup operation:
 
 ```yaml
 - name: increment_once
@@ -86,9 +147,7 @@ A case can name a `#[spec_setup("…")]` function:
     - count: "1"
 ```
 
-Multi-setup form — aliases map to setup function names, and the aliases
-become the operation's parameter names and the prefixes used in
-`#[spec_event]` trace names:
+Multi-setup form — aliases map to setup names:
 
 ```yaml
 - name: transfer_between_accounts
@@ -105,13 +164,10 @@ become the operation's parameter names and the prefixes used in
     - target.balance: "50"
 ```
 
-See `test/rust/crates/specgate-fixtures/specs/multi_setup.spec.yaml`.
-
 ### `inputs`
 
-A flat map of parameter values. The harness binds each entry to the
-matching parameter on the setup or operation. Mock response tables go in
-`inputs` too, keyed by the mock's name:
+A flat map of parameter values. Mock response tables go in `inputs`
+keyed by the mock's name:
 
 ```yaml
 - name: find_user_1
@@ -119,8 +175,8 @@ matching parameter on the setup or operation. Mock response tables go in
   operation: get_user
   inputs:
     id: "user_1"
-    db:                      # name of a #[spec_mock("db")]
-      "user_1": "Alice"      # input → mocked response
+    db:
+      "user_1": "Alice"
   expected:
     - run: get_user
     - db.request: "user_1"
@@ -128,18 +184,18 @@ matching parameter on the setup or operation. Mock response tables go in
     - get_user.result: "Alice"
 ```
 
-See `mock_field.spec.yaml`, `mock_multi_response.spec.yaml`,
-`mock_not_found.spec.yaml`.
-
-### `expected` — list of single-entry maps
+### `expected` — subsequence matching
 
 Every entry is one of:
 
-- `{<name>: <value>}` — matches an `Event` with that `name` and stringified `value`.
+- `{<name>: <value>}` — matches an `Event` with that name and stringified value.
 - `{run: <operation>}` — matches a `Run` for that operation.
 
-Values are compared as strings; quoting them in YAML avoids surprises
-with bare numbers and booleans (`"0"`, `"true"`).
+Matching rules:
+- Every expected entry must appear in the actual trace stream, **in order**.
+- **Gaps are allowed** — extra events may appear between matches.
+- **Trailing events are allowed** — the actual stream can be longer.
+- Out-of-order expectations fail.
 
 ```yaml
 expected:
@@ -148,39 +204,9 @@ expected:
   - count: "1"
 ```
 
-#### Subsequence matching semantics
-
-The `expected:` list is matched as an **in-order subsequence** of the
-actual trace stream:
-
-- Every expected entry must appear in the actual trace.
-- Order is preserved.
-- **Gaps are allowed** — extra events may appear between matches.
-- **Trailing events are allowed** — the actual stream can be longer.
-
-So a spec can assert as much or as little as it cares about. The
-fixture `subsequence_with_gaps.spec.yaml` only asserts the first and
-last value of a counter that increments twice, skipping the intermediate
-value:
-
-```yaml
-- name: double_increment
-  setup: make_counter
-  operation: increment_twice
-  expected:
-    - count: "0"
-    - count: "2"          # the intermediate count: "1" is intentionally skipped
-```
-
-Out-of-order expectations fail
-(`subsequence_wrong_order.spec.yaml`); missing expectations fail
-(`mismatch_missing_event.spec.yaml`); extra events in the actual stream
-do not.
-
 ### Multi-step cases
 
-Use `steps:` instead of `operation:` when a single case invokes more
-than one operation against the same setup:
+Use `steps:` when a case invokes multiple operations against the same setup:
 
 ```yaml
 - name: increment_then_decrement
@@ -196,50 +222,44 @@ than one operation against the same setup:
     - count: "0"
 ```
 
-`expected:` is still one flat subsequence covering the whole case — there
-is no per-step `expected:` and no `assert_state` field. See
-`multi_step.spec.yaml`, `mismatch_second_step.spec.yaml`.
+Per-step `expected:` is optional — allows precise per-step assertions:
+
+```yaml
+steps:
+  - operation: increment
+    expected:
+      - count: "1"
+  - operation: decrement
+    expected:
+      - count: "0"
+```
+
+Case-level `expected:` covers the whole sequence. If both per-step and
+case-level expected are provided, both are validated.
 
 ### Results, errors, and panics
 
-Operations returning `Result<T, E>` use trace names by convention
-(`<operation>.outcome`, `<operation>.result`, `<operation>.error`):
+Operations returning `Result<T, E>` use trace names by convention:
 
 ```yaml
-# result_ok.spec.yaml
-- name: divide_10_by_2
-  operation: divide
-  inputs: { a: 10, b: 2 }
-  expected:
-    - divide.outcome: "Ok"
-    - divide.result: "5"
+# Ok path
+expected:
+  - divide.outcome: "Ok"
+  - divide.result: "5"
+
+# Error path
+expected:
+  - divide.outcome: "Error"
+  - divide.error: "division by zero"
+
+# Panic
+expected:
+  - divide.outcome: "Unrecoverable"
+  - divide.error: "attempt to divide by zero"
 ```
-
-```yaml
-# result_err.spec.yaml
-- name: divide_by_zero
-  operation: divide
-  inputs: { a: 10, b: 0 }
-  expected:
-    - divide.outcome: "Error"
-    - divide.error: "division by zero"
-```
-
-Panics are asserted via a `<operation>.error` event whose value is the
-panic message (`unrecoverable.spec.yaml`).
-
-## YAML tips
-
-- Bare numbers / booleans are stringified by the matcher; quoting them
-  explicitly (`"0"`, `"true"`) keeps the YAML and the trace equal.
-- `# yaml-language-server: $schema=…/spec-schema.json` enables editor
-  validation (VS Code Red Hat YAML, JetBrains IDEs).
-- `[ ]` inline-flow sequences and `{ }` inline-flow mappings are
-  equivalent to indented block form.
 
 ## Spec boundary rule
 
 **One spec = one state boundary.** Operations that share state belong
 in the same spec; operations with independent state belong in separate
-specs. No spec composition or include mechanism exists. Specs share
-**types** (not state) via `depends_on:`.
+specs. Specs share **types** (not state) via `depends_on:`.

@@ -1,5 +1,20 @@
+spec_version: "0.3.0"
 name: fixture.nested_operations
 binding: binding.yaml
+
+operations:
+  make_account:
+    kind: setup
+    outputs:
+      when Complete:
+        returns: Account
+  transfer:
+    inputs: { amount: { type: i32 } }
+  withdraw:
+    inputs: { amount: { type: i32 } }
+  deposit:
+    inputs: { amount: { type: i32 } }
+
 cases:
   - name: transfer_50
     desc: Transfer calls withdraw then deposit

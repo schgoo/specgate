@@ -1,5 +1,18 @@
+spec_version: "0.3.0"
 name: fixture.result_ok
 binding: binding.yaml
+
+operations:
+  divide:
+    inputs: { a: { type: i32 }, b: { type: i32 } }
+    outcome:
+      oneof: [Ok, Error]
+    outputs:
+      when Ok:
+        result: i32
+      when Error:
+        error: string
+
 cases:
   - name: divide_10_by_2
     desc: Successful division

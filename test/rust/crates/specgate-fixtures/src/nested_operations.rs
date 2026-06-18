@@ -2,29 +2,30 @@
 use specgate_annotations::*;
 
 #[spec_setup("make_account")]
-fn make_account() -> Account {
+pub fn make_account() -> Account {
     Account { balance: 100 }
 }
 
-struct Account {
+#[derive(SpecEvent)]
+pub struct Account {
     #[spec_event]
-    balance: i32,
+    pub balance: i32,
 }
 
 impl Account {
     #[spec_operation("transfer")]
-    fn transfer(&mut self, amount: i32) {
+    pub fn transfer(&mut self, amount: i32) {
         self.withdraw(amount);
         self.deposit(amount);
     }
 
     #[spec_operation("withdraw")]
-    fn withdraw(&mut self, amount: i32) {
+    pub fn withdraw(&mut self, amount: i32) {
         self.balance -= amount;
     }
 
     #[spec_operation("deposit")]
-    fn deposit(&mut self, amount: i32) {
+    pub fn deposit(&mut self, amount: i32) {
         self.balance += amount;
     }
 }

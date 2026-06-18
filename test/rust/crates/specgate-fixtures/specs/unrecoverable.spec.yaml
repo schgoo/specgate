@@ -1,5 +1,18 @@
+spec_version: "0.3.0"
 name: fixture.unrecoverable
 binding: binding.yaml
+
+operations:
+  divide:
+    inputs: { a: { type: i32 }, b: { type: i32 } }
+    outcome:
+      oneof: [Ok, Unrecoverable]
+    outputs:
+      when Ok:
+        result: i32
+      when Unrecoverable:
+        error: string
+
 cases:
   - name: divide_by_zero_panics
     desc: Division by zero panics

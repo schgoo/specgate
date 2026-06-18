@@ -1,5 +1,18 @@
+spec_version: "0.3.0"
 name: fixture.multi_step
 binding: binding.yaml
+
+operations:
+  make_counter:
+    kind: setup
+    outputs:
+      when Complete:
+        returns: Counter
+  increment:
+    desc: Increments the counter by 1.
+  decrement:
+    desc: Decrements the counter by 1.
+
 cases:
   - name: increment_then_decrement
     desc: Count goes 0 to 1 to 0

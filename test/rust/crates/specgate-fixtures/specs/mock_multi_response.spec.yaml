@@ -1,5 +1,21 @@
+spec_version: "0.3.0"
 name: fixture.mock_multi_response
 binding: binding.yaml
+
+operations:
+  make_service:
+    kind: setup
+    outputs:
+      when Complete:
+        returns: UserService
+  get_users:
+    inputs: { id_a: { type: string }, id_b: { type: string } }
+    outcome:
+      oneof: [Complete]
+    outputs:
+      when Complete:
+        result: string
+
 cases:
   - name: get_two_different_users
     desc: Mock returns different values for different inputs

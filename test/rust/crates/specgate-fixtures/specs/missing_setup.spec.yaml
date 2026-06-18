@@ -1,8 +1,19 @@
+spec_version: "0.3.0"
 name: fixture.missing_setup
 binding: binding.yaml
+
+operations:
+  make_counter:
+    kind: setup
+    outputs:
+      when Complete:
+        returns: Counter
+  increment:
+    desc: Increments the counter by 1.
+
 cases:
   - name: increment_once
-    desc: References a setup that doesn't exist
+    desc: References a setup that doesn't exist in source
     setup: make_counter
     operation: increment
     expected:

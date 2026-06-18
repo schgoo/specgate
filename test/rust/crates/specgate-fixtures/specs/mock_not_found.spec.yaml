@@ -1,14 +1,29 @@
+spec_version: "0.3.0"
 name: fixture.mock_not_found
 binding: binding.yaml
+
+operations:
+  make_service:
+    kind: setup
+    outputs:
+      when Complete:
+        returns: UserService
+  get_user:
+    inputs: { id: { type: string } }
+    outcome:
+      oneof: [Complete]
+    outputs:
+      when Complete:
+        result: string
+
 cases:
   - name: query_unknown_user
-    desc: Mock table has no entry for input
+    desc: Mock called with input not in table
     setup: make_service
     operation: get_user
     inputs:
       id: "user_99"
-      db:
-        "user_1": "Alice"
+      db: {}
     expected:
       - db.request: "user_99"
       - db.error: "no mock response for input 'user_99'"

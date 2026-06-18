@@ -1,11 +1,23 @@
+spec_version: "0.3.0"
 name: fixture.setup_with_params
 binding: binding.yaml
+
+operations:
+  make_counter:
+    kind: setup
+    inputs: { initial: { type: i32 } }
+    outputs:
+      when Complete:
+        returns: Counter
+  increment:
+    desc: Increments the counter by 1.
+
 cases:
   - name: start_at_10
-    desc: Counter starts at 10
-    setup: make_counter
+    desc: Counter starting at 10 becomes 11 after increment
+    setup:
+      make_counter: { initial: 10 }
     operation: increment
-    inputs: { initial: 10 }
     expected:
       - make_counter.initial: "10"
       - count: "10"

@@ -1,6 +1,16 @@
-# Subsequence wrong order — expects count=1 before count=0
+spec_version: "0.3.0"
 name: fixture.subsequence_wrong_order
 binding: binding.yaml
+
+operations:
+  make_counter:
+    kind: setup
+    outputs:
+      when Complete:
+        returns: Counter
+  increment:
+    desc: Increments the counter by 1.
+
 cases:
   - name: increment_once
     desc: Expected events in reverse order

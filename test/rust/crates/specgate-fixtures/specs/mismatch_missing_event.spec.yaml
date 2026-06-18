@@ -1,5 +1,16 @@
+spec_version: "0.3.0"
 name: fixture.mismatch_missing_event
 binding: binding.yaml
+
+operations:
+  add:
+    inputs: { a: { type: i32 }, b: { type: i32 } }
+    outcome:
+      oneof: [Complete]
+    outputs:
+      when Complete:
+        result: i32
+
 cases:
   - name: add_2_3
     desc: Expects a field that doesn't exist

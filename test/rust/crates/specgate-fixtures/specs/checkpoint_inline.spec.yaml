@@ -1,10 +1,21 @@
+spec_version: "0.3.0"
 name: fixture.checkpoint_inline
 binding: binding.yaml
+
+operations:
+  process:
+    inputs: { data: { type: string } }
+    outcome:
+      oneof: [Complete]
+    outputs:
+      when Complete:
+        result: string
+
 cases:
   - name: process_hello
-    desc: Checkpoint captures intermediate value
+    desc: Processing trims and uppercases with checkpoint
     operation: process
-    inputs: { data: " hello " }
+    inputs: { data: "  hello  " }
     expected:
       - run: process
       - after_upper: " HELLO "

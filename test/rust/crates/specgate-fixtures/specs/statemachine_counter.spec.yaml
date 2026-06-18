@@ -1,5 +1,16 @@
+spec_version: "0.3.0"
 name: fixture.statemachine_counter
 binding: binding.yaml
+
+operations:
+  make_counter:
+    kind: setup
+    outputs:
+      when Complete:
+        returns: Counter
+  increment:
+    desc: Increments the counter by 1.
+
 cases:
   - name: increment_once
     desc: Incrementing counter from 0 produces count 1

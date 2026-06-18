@@ -96,12 +96,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "specgate-fixtures"
+version = "0.1.0"
+dependencies = [
+ "specgate-annotations",
+]
+
+[[package]]
 name = "specgate-harness"
 version = "0.1.0"
 dependencies = [
  "proc-macro2",
  "serde",
  "serde_yaml",
+ "specgate-fixtures",
  "syn",
 ]
 
