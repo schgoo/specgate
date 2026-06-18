@@ -10,15 +10,15 @@
 | ISS-002 | fundle crate for construction resolution | Open | 2026-06-11 |
 | ISS-003 | Perf counters and code coverage in bindings | Open | 2026-06-11 |
 | ISS-004 | External test case files | Closed | 2026-06-11 |
-| ISS-005 | Claims syntax (non-functional and narrative) | Open | 2026-06-11 |
+| ISS-005 | Claims syntax (non-functional and narrative) | Closed (superseded) | 2026-06-18 |
 | ISS-006 | Report renderer (report.render) | Open | 2026-06-11 |
-| ISS-007 | Property-based testing in specs | Open | 2026-06-12 |
-| ISS-008 | Command target exit code bug | Open | 2026-06-12 |
-| ISS-009 | ohno migration for error types | Open | 2026-06-12 |
-| ISS-010 | Spec YAML schema validation in Rust | Open | 2026-06-12 |
-| ISS-011 | Spec dependency DAG and shared types spec | Open | 2026-06-13 |
-| ISS-012 | Generated test file quality | Open | 2026-06-15 |
-| ISS-013 | Annotation spec — deferred runtime test cases | Open | 2026-06-15 |
+| ISS-007 | Property-based testing in specs | Closed (superseded) | 2026-06-18 |
+| ISS-008 | Command target exit code bug | Closed (obsolete) | 2026-06-18 |
+| ISS-009 | ohno migration for error types | Closed (obsolete) | 2026-06-18 |
+| ISS-010 | Spec YAML schema validation in Rust | Closed (partial) | 2026-06-18 |
+| ISS-011 | Spec dependency DAG and shared types spec | Closed (partial) | 2026-06-18 |
+| ISS-012 | Generated test file quality | Closed (obsolete) | 2026-06-18 |
+| ISS-013 | Annotation spec — deferred runtime test cases | Closed | 2026-06-18 |
 | ISS-014 | Enforce trust boundary on validation artifacts | Closed | 2026-06-15 |
 | ISS-015 | Generator scope leak — out-of-spec functionality | Open | 2026-06-16 |
 
@@ -96,7 +96,7 @@
 
 **Context**: The design doc distinguishes measurable claims (statistical, with trials and threshold) from narrative claims (human-reviewed only). No spec syntax exists for either yet.
 
-**Status**: Open — design separately since it's cross-cutting across all specs.
+**Status**: Closed (superseded) — 2026-06-18. The "claim" abstraction was part of the legacy Kind / scorecard model that the simplified Event/Run trace model has replaced. The current spec format expresses assertions as a single subsequence of trace events per case (`expected:`); there is no separate "claim" concept to give syntax to. Non-functional measurements (latency, throughput) and narrative notes can be re-proposed as a new issue if and when the trace model needs to express them.
 
 **Needs**:
 - **Non-functional claims**: timing budgets, memory limits, throughput requirements. Each has `(trials, threshold)` config.
@@ -123,7 +123,7 @@
 
 **Context**: Spec cases are concrete examples (`{a: 2, b: 3} → 5`) that an implementation could hardcode. Property-based tests define universal assertions over value ranges — randomized inputs that can't be gamed.
 
-**Status**: Reframed — subsumed by the two-wave architecture (see design.md § Workflows).
+**Status**: Closed (superseded) — 2026-06-18. The previous resolution ("subsumed by the two-wave architecture") referenced an architecture that has itself been removed from the design (Quint generation, ITF traces, invariant proposers, and the two-wave pipeline are all gone). The current model is purely concrete cases with subsequence trace matching; property-based testing is no longer in scope. If randomized exploration becomes desirable, open a fresh issue.
 
 **Original approach**: A `properties` section with explicit `for_all`/`assert` syntax:
 ```yaml
@@ -154,7 +154,7 @@ The user never writes property assertions manually. Invariants are inferred from
 
 **Context**: `render_command_case` in `generator.rs` (~line 495) always emits `assert!(output.status.success())`. This fails for spec cases where the expected outcome is `Error` and the command exits non-zero.
 
-**Status**: Open — known bug. Spec cases `command_target_error_exit` and `command_target_mixed_outcomes` expose this.
+**Status**: Closed (obsolete) — 2026-06-18. Neither `generator.rs` nor `render_command_case` exists in the current `rust/crates/specgate-types/` tree — the legacy generator that emitted Rust source files for command targets has been removed in favour of the trace-driven harness model (design requirement 12). Command targets in the new model assert via trace events, not exit codes; the bug as written no longer reproduces. If a command-target exit-code rule is needed for the new harness, open a fresh issue with current line references.
 
 **Fix**: Skip the success assertion when `expected.outcome == Error`. Parse stdout/stderr for error JSON regardless of exit code.
 
@@ -166,7 +166,7 @@ The user never writes property assertions manually. Invariants are inferred from
 
 **Context**: `RunError` and `GenerateError` are still plain Rust enums. Per the error model redesign (checkpoint 020), they should migrate to `#[ohno::error]` structs. The `causes` spec keyword maps to individual ohno structs composed with `#[from]` and inspected with `find_source::<T>()`.
 
-**Status**: Open — deferred until harness runs end-to-end.
+**Status**: Closed (obsolete) — 2026-06-18. Neither `RunError`, `GenerateError`, nor the `specgate-rust-backend` crate this issue references exists in the current `rust/crates/` tree (only `specgate-types` is present). The simplified harness model does not generate per-case Rust source files, so the `GenerateError` path is gone. Project-wide use of `ohno` for any new error types remains the convention (see `docs/knowledge/rust.md`).
 
 **Impact**: Affects `specgate-types` (RunError), `specgate-rust-backend` (GenerateError), and all code that matches on these types. Non-breaking for external consumers if done correctly (struct-based errors are additive).
 
@@ -185,7 +185,9 @@ The user never writes property assertions manually. Invariants are inferred from
 
 **Scope**: Add a `validate_spec_schema(yaml_str) -> Result<(), Vec<SchemaError>>` to `specgate-types` or `specgate-harness`. Call it during `run_spec` before parsing into `SpecDocument`. Also usable as a standalone `specgate validate` CLI command.
 
-**Impact**: Catches spec authoring errors early with actionable messages. Especially important now that specs have two modes (single-operation vs state machine) with mutual exclusivity constraints.
+**Impact**: Catches spec authoring errors early with actionable messages.
+
+**Status update (2026-06-18)**: Closed (partial). `validate_spec_document` exists in `rust/crates/specgate-types/src/spec_document.rs` and exercises the simplified schema (string `binding`, list-based `expected`, case-level `operation`/`setup`). Remaining work — running every spec through both the JSON Schema and the Rust parser in CI — is captured by ISS-016.
 
 ---
 
@@ -214,13 +216,15 @@ The user never writes property assertions manually. Invariants are inferred from
 
 **Why not merge specs instead**: Following the type-sharing chain merges everything — `harness.rust` shares `SpecDocument` with `harness.core` AND shares `Annotation` with `rust.annotations`. Merging on types collapses all specs into one. The DAG preserves modularity while making contracts explicit.
 
+**Status update (2026-06-18)**: Closed (partial). `depends_on` is defined in both `spec-schema.json` and the Rust `SpecDocument` struct. `core.spec_document.spec.yaml` and `core.binding_document.spec.yaml` exist as the shared-types specs. Remaining work — wiring `depends_on` into a `specgate validate` DAG re-check — is tracked by ISS-016.
+
 ---
 
 ## ISS-012: Generated Test File Quality
 
 **Context**: The harness generates `specgate_generated.rs` test files from specs. Currently these files have several issues that prevent them from being checked into source control.
 
-**Status**: Open.
+**Status**: Closed (obsolete) — 2026-06-18. The trace-driven harness model (design requirement 12, ISS-015) replaces the per-case generated Rust test file with in-process subsequence matching against drained traces. There is no `specgate_generated.rs` to check in. If a future cross-language target reintroduces generated files, file a fresh issue with the new design's specifics.
 
 **Problems**:
 1. **Absolute paths** — results path is hardcoded to the developer's filesystem (e.g., `C:\Users\schgoo\repos\...`). Breaks on any other machine.
@@ -243,13 +247,16 @@ The user never writes property assertions manually. Invariants are inferred from
 
 **Context**: Two runtime trace test cases were deferred during annotation spec development.
 
-**Status**: Open.
+**Status**: Closed — 2026-06-18.
 
-**Missing cases**:
-1. **`Result<T, E>` operations** — what traces are emitted when an operation returns `Err`? Are `OperationEnter`/`Exit` and captures still emitted? Need coverage for both `Ok` and `Err` paths.
-2. **Async operation runtime traces** — extraction case exists (`async_function`) but no runtime trace case. Need to verify spans and captures work correctly with `async fn` and `.await`.
-
-**Impact**: Without these cases, the spec doesn't assert behavior for error paths or async operations at runtime. Implementations could silently break in those scenarios.
+**Resolution**:
+1. **`Result<T, E>` operations** — covered by the `result_ok.spec.yaml` /
+   `result_err.spec.yaml` fixtures, both of which assert
+   `<op>.outcome` and `<op>.result` / `<op>.error` events.
+2. **Async operation runtime traces** — async support is out of scope
+   for the simplified trace model and the current fixture suite. If
+   `async fn` instrumentation becomes desirable, open a fresh issue
+   with the new design's specifics.
 
 ---
 
@@ -303,5 +310,24 @@ This is an instance of a broader problem: **the spec defines a lower bound (must
 
 ---
 
-**Version**: 1.3
-**Last Updated**: 2026-06-16
+## ISS-016: Docs and JSON Schema Drift — Re-align with Simplified Event/Run Model
+
+**Context**: The repository migrated from a richer "Kind taxonomy / state-machine / outcome+outputs" spec model to a simpler **Event/Run trace + subsequence matching** model. The README and the fixtures (under `test/rust/crates/specgate-fixtures/`) use the new model, but `docs/design.md`, `docs/knowledge/*`, `spec-schema.json`, `specs/core.spec_document.spec.yaml`, and `specs/core.binding_document.spec.yaml` were still describing or encoding the old model. The review at `docs/review.md` catalogues every divergence.
+
+**Status**: Open — partial fixes landed 2026-06-18.
+
+**Done (2026-06-18)**:
+- `docs/design.md` rewritten around the Event/Run + subsequence model.
+- `docs/knowledge/*.md` rewritten / brought current.
+- `docs/issues.md` re-triaged (this entry).
+- `specs/core.spec_document.spec.yaml` updated to current format.
+- `specs/core.binding_document.spec.yaml` updated to reference valid targets and the current case shape.
+
+**Remaining**:
+- A CI step that runs every `.spec.yaml` (in `specs/` and `test/rust/crates/specgate-fixtures/specs/`) through both the JSON Schema and the Rust `validate_spec_document` parser to catch future drift early.
+- Continue tightening `spec-schema.json` as the harness matures.
+
+---
+
+**Version**: 1.4
+**Last Updated**: 2026-06-18
