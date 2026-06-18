@@ -6,4 +6,4 @@ cases:
     setup: make_counter
     operation: increment
     expected:
-      count: "1"
+      - count: "1"

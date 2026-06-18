@@ -13,6 +13,7 @@ pub mod mock_multi_response;
 pub mod missing_setup;
 pub mod missing_operation;
 pub mod result_ok;
+pub mod result_err;
 pub mod void_operation;
 pub mod readonly_operation;
 pub mod unrecoverable;

@@ -1,267 +1,64 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "SpecGate Component Spec",
-  "description": "Schema for SpecGate .spec.yaml files — declares inputs, types, outputs, and test cases for a single component. Supports single-operation specs (inputs/outcome/outputs at top level) and state machine specs (state/operations).",
+  "description": "Schema for SpecGate .spec.yaml files. Specs declare test cases with expected trace assertions. The harness resolves the binding, runs annotated code, and compares actual traces against expected.",
   "type": "object",
   "required": ["name", "cases"],
-  "additionalProperties": false,
   "properties": {
     "name": {
       "type": "string",
-      "description": "Dotted component name, e.g. core.validate",
-      "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9_]*)+$"
+      "description": "Dotted component name, e.g. fixture.stateless_add"
     },
     "binding": {
-      "description": "Binding declaration(s). Each entry maps a binding file to an execution target. Use a single object for single-language specs, or a list for multi-language specs.",
-      "oneOf": [
-        { "$ref": "#/definitions/bindingEntry" },
-        {
-          "type": "array",
-          "items": { "$ref": "#/definitions/bindingEntry" },
-          "minItems": 1
-        }
-      ]
-    },
-    "inputs": {
-      "type": "object",
-      "description": "Named inputs to the component (single-operation specs). Mutually exclusive with 'operations'.",
-      "additionalProperties": {
-        "$ref": "#/definitions/inputDeclaration"
-      },
-      "minProperties": 1
-    },
-    "types": {
-      "type": "object",
-      "description": "Named type definitions. Each key is a type name referenced by inputs or outputs.",
-      "additionalProperties": {
-        "$ref": "#/definitions/typeDefinition"
-      }
-    },
-    "outcome": {
-      "description": "Outcome declaration for single-operation specs. Use oneof for variant outcomes, or a string for a single outcome type. Mutually exclusive with 'operations'.",
-      "oneOf": [
-        {
-          "type": "object",
-          "required": ["oneof"],
-          "properties": {
-            "oneof": {
-              "type": "array",
-              "items": { "type": "string" },
-              "minItems": 2,
-              "description": "Outcome variant names, e.g. [Valid, Invalid]"
-            }
-          },
-          "additionalProperties": false
-        },
-        {
-          "type": "string",
-          "description": "Single outcome type, e.g. 'Ok'"
-        }
-      ]
-    },
-    "outputs": {
-      "type": "object",
-      "description": "Output declarations keyed by outcome branch, e.g. 'when Valid'. For single-operation specs.",
-      "additionalProperties": {
-        "type": "object",
-        "description": "Named outputs for this outcome branch.",
-        "additionalProperties": {
-          "oneOf": [
-            { "type": "string" },
-            {
-              "type": "object",
-              "properties": {
-                "type": { "type": "string" },
-                "source": { "type": "string", "description": "Where to observe this output. E.g. 'build-artifact', 'compiler-output'." }
-              },
-              "required": ["type"]
-            }
-          ]
-        }
-      }
-    },
-    "state": {
-      "type": "object",
-      "description": "State variables and their types for StateMachine specs. Types match what SpecCapture getters return.",
-      "additionalProperties": {
-        "type": "string"
-      },
-      "minProperties": 1
-    },
-    "init": {
-      "type": "object",
-      "description": "Initial state values. Required when 'state' is present. Matches what SpecSetup constructor produces."
-    },
-    "operations": {
-      "type": "object",
-      "description": "Named operations for StateMachine specs. Each key is an operation name. Mutually exclusive with top-level 'inputs'.",
-      "additionalProperties": {
-        "$ref": "#/definitions/operationDeclaration"
-      },
-      "minProperties": 1
-    },
-    "invariants": {
-      "type": "object",
-      "description": "Approved invariants. Keys are invariant names, values are Quint-compatible expressions. Proposed by specgate propose-invariants, approved by user.",
-      "additionalProperties": {
-        "type": "string"
-      }
+      "description": "Path to the binding YAML file (relative to this spec file).",
+      "type": "string"
     },
     "depends_on": {
       "type": "array",
-      "description": "Spec dependency DAG. Lists spec names this spec depends on for shared types. When a dependency changes, this spec is re-validated.",
-      "items": {
-        "type": "string"
-      }
+      "description": "List of spec names this spec depends on.",
+      "items": { "type": "string" }
+    },
+    "inputs": {
+      "type": "object",
+      "description": "Named input declarations for the component."
+    },
+    "types": {
+      "type": "object",
+      "description": "Named type definitions."
+    },
+    "outcome": {
+      "description": "Outcome variants for the component."
+    },
+    "outputs": {
+      "type": "object",
+      "description": "Output declarations keyed by 'when <Outcome>'."
+    },
+    "state": {
+      "type": "object",
+      "description": "State variables for state machine specs."
+    },
+    "init": {
+      "type": "object",
+      "description": "Initial state values."
+    },
+    "operations": {
+      "type": "object",
+      "description": "Named operations for state machine specs."
+    },
+    "invariants": {
+      "type": "object",
+      "description": "Named invariants."
     },
     "cases": {
       "type": "array",
-      "description": "Test cases exercising the component.",
-      "items": {
-        "$ref": "#/definitions/testCase"
-      },
-      "minItems": 1
+      "description": "Test cases.",
+      "items": { "$ref": "#/definitions/testCase" }
     }
   },
   "definitions": {
-    "bindingEntry": {
-      "type": "object",
-      "description": "A binding-to-target mapping. 'name' resolves to bindings/<name>.yaml, 'target' selects the execution target within that binding.",
-      "required": ["name", "target"],
-      "additionalProperties": false,
-      "properties": {
-        "name": {
-          "type": "string",
-          "description": "Binding file identifier. Resolves to bindings/<name>.yaml.",
-          "pattern": "^[a-z][a-z0-9_]*$"
-        },
-        "target": {
-          "type": "string",
-          "description": "Execution target defined in the binding file (e.g. 'test', 'build', 'generate')."
-        }
-      }
-    },
-    "inputDeclaration": {
-      "type": "object",
-      "description": "An input declaration with type, optional source annotation, and optional description.",
-      "properties": {
-        "type": {
-          "type": "string",
-          "description": "Type expression, e.g. 'List<Annotation>' or 'string'."
-        },
-        "source": {
-          "type": "string",
-          "description": "Where this input comes from if not a function argument. E.g. 'fixture-file', 'env-var'."
-        },
-        "desc": {
-          "type": "string",
-          "description": "Human-readable description of this input."
-        }
-      },
-      "required": ["type"]
-    },
-    "typeDefinition": {
-      "type": "object",
-      "description": "A named type. Use 'oneof' for variant types, 'causes' for error types, or bare keys / 'fields' for records.",
-      "properties": {
-        "oneof": {
-          "type": "object",
-          "description": "Variant type (discriminated union) — each key is a variant name, value is an object describing its fields.",
-          "additionalProperties": true
-        },
-        "causes": {
-          "type": "object",
-          "description": "Error type — each key is a possible cause name, value is an object describing its fields. Maps to error chains (Rust/ohno) or OneOf (C#), not discriminated unions.",
-          "additionalProperties": true
-        },
-        "fields": {
-          "type": "object",
-          "description": "Record type — each key is a field name, value is a type expression string.",
-          "additionalProperties": {
-            "type": "string"
-          }
-        }
-      },
-      "additionalProperties": {
-        "type": "string"
-      }
-    },
-    "operationDeclaration": {
-      "type": "object",
-      "description": "A named operation in a state machine spec.",
-      "properties": {
-        "inputs": {
-          "type": "object",
-          "description": "Named inputs for this operation.",
-          "additionalProperties": {
-            "oneOf": [
-              { "type": "string" },
-              { "$ref": "#/definitions/inputDeclaration" }
-            ]
-          }
-        },
-        "outcome": {
-          "description": "Outcome declaration for this operation.",
-          "oneOf": [
-            {
-              "type": "object",
-              "required": ["oneof"],
-              "properties": {
-                "oneof": {
-                  "type": "array",
-                  "items": { "type": "string" },
-                  "minItems": 2
-                }
-              },
-              "additionalProperties": false
-            },
-            {
-              "type": "string"
-            }
-          ]
-        },
-        "outputs": {
-          "type": "object",
-          "description": "Per-outcome output fields for this operation.",
-          "additionalProperties": true
-        }
-      },
-      "additionalProperties": false
-    },
-    "testStep": {
-      "type": "object",
-      "description": "A single step in a multi-step test case.",
-      "required": ["operation"],
-      "additionalProperties": false,
-      "properties": {
-        "operation": {
-          "type": "string",
-          "description": "Operation name from the operations section."
-        },
-        "inputs": {
-          "type": "object",
-          "description": "Input values for this step. Values can be literals or file references: { file: 'path/to/file.json' }."
-        },
-        "expected": {
-          "type": "object",
-          "description": "Expected return value (partial match — omitted fields not checked). Values can be literals or file references: { file: 'path/to/file.json' }. Keys (except 'outcome') must match declared outputs.",
-          "properties": {
-            "outcome": {
-              "type": "string",
-              "description": "Expected outcome variant."
-            }
-          }
-        },
-        "assert_state": {
-          "type": "object",
-          "description": "Expected state after this step (partial match — omitted fields not checked)."
-        }
-      }
-    },
     "testCase": {
       "type": "object",
       "required": ["name", "desc"],
-      "additionalProperties": false,
       "properties": {
         "name": {
           "type": "string",
@@ -270,58 +67,62 @@
         },
         "desc": {
           "type": "string",
-          "description": "Human-readable description of what this case tests and why."
+          "description": "Human-readable description."
         },
-        "binding": {
-          "description": "Optional binding target override for this case. Overrides the spec-level binding target.",
-          "$ref": "#/definitions/bindingEntry"
+        "operation": {
+          "type": "string",
+          "description": "Operation to invoke."
+        },
+        "setup": {
+          "description": "Setup function name (string) or map of named setups.",
+          "oneOf": [
+            { "type": "string" },
+            { "type": "object" }
+          ]
         },
         "inputs": {
           "type": "object",
-          "description": "Input values for single-operation cases. Mutually exclusive with 'steps'. Values can be literals or file references: { file: 'path/to/file.json' } reads the file content as the value. Paths are relative to the spec file. Keys must match declared inputs in the spec."
+          "description": "Input values for this case. Values can be literals or file references: { file: 'path' }."
         },
         "expected": {
-          "type": "object",
-          "description": "Expected outputs for single-operation cases. Must include 'outcome'. Mutually exclusive with 'steps'. Values can be literals or file references: { file: 'path/to/file.json' } reads the file content as the expected value. Paths are relative to the spec file. Keys (except 'outcome') must match declared outputs in the spec.",
-          "properties": {
-            "outcome": {
-              "type": "string",
-              "description": "Expected outcome variant, e.g. 'Valid' or 'Invalid'."
-            }
+          "type": "array",
+          "description": "List of expected trace assertions. Each item is a map with one key: either a field name (value assertion) or 'run' (operation assertion). Matched as a subsequence of the actual trace stream.",
+          "items": {
+            "type": "object"
           }
         },
         "steps": {
           "type": "array",
-          "description": "Ordered operation sequence for StateMachine specs. Mutually exclusive with top-level 'inputs'/'expected'.",
-          "items": {
-            "$ref": "#/definitions/testStep"
-          },
+          "description": "Ordered operation sequence for multi-step cases.",
+          "items": { "$ref": "#/definitions/testStep" },
           "minItems": 1
         },
         "postconditions": {
           "type": "array",
-          "description": "Assertions to run after the case completes. Each references a binding target that must exit 0. Template variables from the harness context (e.g., {generated_test_path}, {workdir}) are substituted into inputs before execution.",
+          "description": "Binding targets to invoke after the case. Each must exit 0.",
           "items": {
             "type": "object",
             "required": ["target"],
-            "additionalProperties": false,
             "properties": {
-              "target": {
-                "type": "string",
-                "description": "Name of a binding target to invoke. Must exit 0 to pass."
-              },
-              "inputs": {
-                "type": "object",
-                "description": "Input values passed to the target. Template variables like {generated_test_path} and {workdir} are substituted.",
-                "additionalProperties": { "type": "string" }
-              },
-              "desc": {
-                "type": "string",
-                "description": "Human-readable description of what this postcondition asserts."
-              }
+              "target": { "type": "string" },
+              "inputs": { "type": "object" },
+              "desc": { "type": "string" }
             }
-          },
-          "minItems": 1
+          }
+        }
+      }
+    },
+    "testStep": {
+      "type": "object",
+      "required": ["operation"],
+      "properties": {
+        "operation": {
+          "type": "string",
+          "description": "Operation name."
+        },
+        "inputs": {
+          "type": "object",
+          "description": "Input values for this step."
         }
       }
     }

@@ -5,4 +5,4 @@ cases:
     desc: Source has a syntax error
     operation: broken
     expected:
-      broken.result: "42"
+      - broken.result: "42"
