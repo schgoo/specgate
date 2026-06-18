@@ -101,6 +101,18 @@ cases:
       - Confirm no syn-based expression evaluation in harness source
       - The harness should invoke cargo build/test, not evaluate Rust in-process
 
+  - name: paths_resolve_relative_to_spec
+    kind: narrative
+    desc: >
+      All paths in a spec (binding, fixture source) must resolve relative to
+      the spec file's location, not the working directory of the test runner.
+      Generated Cargo.toml paths must use forward slashes or properly escape
+      backslashes to avoid TOML unicode escape interpretation on Windows.
+    verify:
+      - Run `cargo test -p specgate-harness --test specgate_harness_spec` from the workspace root
+      - All Complete-outcome cases must find their fixture source and binding
+      - Generated Cargo.toml must not contain raw backslash paths
+
   # ================================================================
   # Happy path — basic operations
   # ================================================================

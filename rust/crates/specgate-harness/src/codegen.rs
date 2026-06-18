@@ -50,7 +50,7 @@ serde = {{ git = "https://github.com/serde-rs/serde", tag = "v1.0.228" }}
 serde_core = {{ git = "https://github.com/serde-rs/serde", tag = "v1.0.228" }}
 serde_derive = {{ git = "https://github.com/serde-rs/serde", tag = "v1.0.228" }}
 "#,
-        ann = annotations_path.display(),
+        ann = annotations_path.display().to_string().replace('\\', "/"),
     );
     let _ = runtime_path;
     let _ = macros_path;

@@ -101,9 +101,9 @@ pub fn run_spec(spec_path: &str) -> RunOutcome {
     };
     let src_text = match std::fs::read_to_string(&fixture_src) {
         Ok(t) => t,
-        Err(_) => {
+        Err(e) => {
             return RunOutcome::Error {
-                reason: "source failed to compile".into(),
+                reason: format!("source file unreadable: {} ({})", fixture_src.display(), e),
             };
         }
     };
@@ -176,7 +176,6 @@ pub fn run_spec(spec_path: &str) -> RunOutcome {
     let mut cmd = Command::new(cargo_bin());
     cmd.arg("run")
         .arg("--quiet")
-        .arg("--offline")
         .arg("--manifest-path")
         .arg(proj.crate_dir.join("Cargo.toml"))
         .arg("--")
