@@ -1,4 +1,4 @@
-spec_version: "0.3.0"
+spec_version: "0.4.0"
 name: fixture.setup_with_params
 binding: binding.yaml
 
@@ -18,5 +18,5 @@ cases:
     expected:
       - make_counter.initial: "10"
       - count: "10"
-      - run: increment
+      - $run: increment
       - count: "11"

@@ -1,4 +1,4 @@
-spec_version: "0.3.0"
+spec_version: "0.4.0"
 name: fixture.nested_operations
 binding: binding.yaml
 
@@ -23,8 +23,8 @@ cases:
     inputs: { amount: 50 }
     expected:
       - balance: "100"
-      - run: transfer
-      - run: withdraw
+      - $run: transfer
+      - $run: withdraw
       - balance: "50"
-      - run: deposit
+      - $run: deposit
       - balance: "100"

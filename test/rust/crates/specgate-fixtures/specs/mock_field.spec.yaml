@@ -1,4 +1,4 @@
-spec_version: "0.3.0"
+spec_version: "0.4.0"
 name: fixture.mock_field
 binding: binding.yaml
 
@@ -19,7 +19,7 @@ cases:
       db:
         "user_1": "Alice"
     expected:
-      - run: get_user
+      - $run: get_user
       - db.request: "user_1"
       - db.response: "Alice"
       - get_user.result: "Alice"

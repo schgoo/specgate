@@ -1,4 +1,4 @@
-spec_version: "0.3.0"
+spec_version: "0.4.0"
 name: fixture.mismatch_second_step
 binding: binding.yaml
 
@@ -18,5 +18,5 @@ cases:
       - operation: increment
       - operation: decrement
     expected:
-      - run: decrement
+      - $run: decrement
       - count: "999"

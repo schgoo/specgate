@@ -1,4 +1,4 @@
-spec_version: "0.3.0"
+spec_version: "0.4.0"
 name: fixture.mock_multi_response
 binding: binding.yaml
 
@@ -21,7 +21,7 @@ cases:
         "user_1": "Alice"
         "user_2": "Bob"
     expected:
-      - run: get_users
+      - $run: get_users
       - db.request: "user_1"
       - db.response: "Alice"
       - db.request: "user_2"

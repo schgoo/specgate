@@ -1,4 +1,4 @@
-spec_version: "0.3.0"
+spec_version: "0.4.0"
 name: fixture.multi_setup
 binding: binding.yaml
 
@@ -22,6 +22,6 @@ cases:
     expected:
       - source.balance: "100"
       - target.balance: "0"
-      - run: transfer
+      - $run: transfer
       - source.balance: "50"
       - target.balance: "50"

@@ -1,4 +1,4 @@
-spec_version: "0.3.0"
+spec_version: "0.4.0"
 name: fixture.checkpoint_inline
 binding: binding.yaml
 
@@ -13,6 +13,6 @@ cases:
     operation: process
     inputs: { data: " hello " }
     expected:
-      - run: process
+      - $run: process
       - after_upper: " HELLO "
       - process.result: "HELLO"

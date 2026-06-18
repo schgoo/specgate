@@ -1,0 +1,58 @@
+spec_version: "0.4.0"
+name: fixture.anywhere_event
+binding: binding.yaml
+
+operations:
+  make_counter:
+    kind: setup
+  increment_twice:
+    outputs: [count]
+
+cases:
+  - name: anywhere_matches_early_event
+    desc: Assert on count=0 (which appears before the Run) via $anywhere
+    setup: make_counter
+    operation: increment_twice
+    expected:
+      - $run: increment_twice
+      - count: "2"
+      - $anywhere:
+        - count: "0"
+
+  - name: anywhere_matches_late_event
+    desc: Assert on count=2 (which appears after the Run) via $anywhere
+    setup: make_counter
+    operation: increment_twice
+    expected:
+      - count: "0"
+      - $run: increment_twice
+      - $anywhere:
+        - count: "2"
+
+  - name: anywhere_matches_middle_event
+    desc: Assert on count=1 (intermediate) via $anywhere regardless of position in expected list
+    setup: make_counter
+    operation: increment_twice
+    expected:
+      - $anywhere:
+        - count: "1"
+      - $run: increment_twice
+      - count: "2"
+
+  - name: anywhere_multiple_items
+    desc: Multiple items in $anywhere — all must be present somewhere
+    setup: make_counter
+    operation: increment_twice
+    expected:
+      - $anywhere:
+        - count: "0"
+        - count: "1"
+        - count: "2"
+
+  - name: anywhere_missing_fails
+    desc: $anywhere item not in trace produces failure
+    setup: make_counter
+    operation: increment_twice
+    expected:
+      - $anywhere:
+        - count: "999"

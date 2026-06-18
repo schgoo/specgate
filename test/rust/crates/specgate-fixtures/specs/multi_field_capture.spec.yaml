@@ -1,4 +1,4 @@
-spec_version: "0.3.0"
+spec_version: "0.4.0"
 name: fixture.multi_field_capture
 binding: binding.yaml
 
@@ -17,6 +17,6 @@ cases:
     inputs: { amount: 50 }
     expected:
       - balance: "100"
-      - run: withdraw
+      - $run: withdraw
       - balance: "50"
       - transaction_count: "1"
