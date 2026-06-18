@@ -1,37 +1,29 @@
 //! SpecGate harness — entry point.
 //!
-//! `run_spec(path)` loads a spec file, resolves its binding, parses the
-//! corresponding fixture source file with `syn`, and symbolically
-//! interprets each case to produce a trace stream. It then
-//! subsequence-matches the case's `expected:` list against the trace
-//! stream and reports per-case `pass` / `fail` along with the full
-//! actual trace.
+//! `run_spec(path)` loads a spec, locates the fixture source via the
+//! binding, generates a temporary Cargo project that includes the
+//! fixture and invokes its annotated functions, shells out to
+//! `cargo run` to compile + execute, then reads emitted traces back
+//! and subsequence-matches against each case's `expected:` list.
 //!
-//! Why interpretation rather than compile + run?  The fixtures use
-//! `#[spec_event]` directly on bare struct fields. Procedural attribute
-//! macros are not permitted on field positions in stable Rust, so the
-//! fixture sources cannot be compiled by `rustc` as-is.  Interpreting
-//! the source — which `syn` happily parses — sidesteps that limitation
-//! while keeping the harness fully in-process.
+//! The harness **never** parses or interprets the fixture source itself.
+//! It only scans for attribute names and signatures (to validate the
+//! spec references real symbols and to know how to call them), and
+//! delegates everything else to the real Rust toolchain.
 
 mod binding;
-mod discover;
-mod interpret;
+mod codegen;
 mod match_traces;
+pub mod scan;
 mod spec;
 mod types;
 
 pub use types::{CaseResult, CaseStatus, RunOutcome, TraceEvent};
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
-/// Run the spec at `spec_path` (relative to the current working
-/// directory or absolute).
-///
-/// Returns `RunOutcome::Complete { results }` if loading + dispatch
-/// succeeded, `RunOutcome::Error { reason }` for any pre-execution
-/// failure (bad YAML, missing binding, missing setup/operation,
-/// uncompilable fixture source, no test cases).
 pub fn run_spec(spec_path: &str) -> RunOutcome {
     let path = PathBuf::from(spec_path);
     let raw = match std::fs::read_to_string(&path) {
@@ -43,8 +35,8 @@ pub fn run_spec(spec_path: &str) -> RunOutcome {
         }
     };
 
-    // Try to load.  Distinguishes "not valid YAML" from "shape wrong".
-    let _value: serde_yaml::Value = match serde_yaml::from_str(&raw) {
+    // First: pure YAML validity.
+    let yaml_value: serde_yaml::Value = match serde_yaml::from_str(&raw) {
         Ok(v) => v,
         Err(_) => {
             return RunOutcome::Error {
@@ -53,21 +45,12 @@ pub fn run_spec(spec_path: &str) -> RunOutcome {
         }
     };
 
-    let parsed = match spec::load_spec(&path) {
+    // Then: spec shape parsing.
+    let parsed = match spec::parse_value(&yaml_value) {
         Ok(s) => s,
-        Err(spec::ParseError::Yaml(_)) => {
+        Err(_) => {
             return RunOutcome::Error {
                 reason: "spec file is not valid YAML".into(),
-            };
-        }
-        Err(spec::ParseError::Io(_)) => {
-            return RunOutcome::Error {
-                reason: format!("spec file not found: {spec_path}"),
-            };
-        }
-        Err(spec::ParseError::Shape(s)) => {
-            return RunOutcome::Error {
-                reason: format!("spec shape error: {s}"),
             };
         }
     };
@@ -78,7 +61,6 @@ pub fn run_spec(spec_path: &str) -> RunOutcome {
         };
     }
 
-    // Resolve binding.
     let binding_path = match parsed.binding_path.as_deref() {
         Some(p) => p,
         None => {
@@ -97,28 +79,40 @@ pub fn run_spec(spec_path: &str) -> RunOutcome {
         }
     };
 
-    // Discover fixture source by searching the package src/ directory for
-    // the file whose annotations match the spec's required operations and
-    // setups. We scan every `.rs` under `src/`. If we cannot match by name
-    // we fall back to a basename-derived guess.
-    let src_dir = binding.package_root.join("src");
-    let mut candidate_sources: Vec<(PathBuf, String)> = Vec::new();
-    if let Ok(rd) = std::fs::read_dir(&src_dir) {
-        for entry in rd.flatten() {
-            let p = entry.path();
-            if p.extension().and_then(|e| e.to_str()) == Some("rs") {
-                if let Ok(s) = std::fs::read_to_string(&p) {
-                    candidate_sources.push((p, s));
-                }
-            }
+    let fixture_basename = spec_basename(&path);
+    let fixture_src = match resolve_fixture_source(
+        &binding.package_root,
+        &fixture_basename,
+        &parsed,
+    ) {
+        Some(p) => p,
+        None => {
+            return RunOutcome::Error {
+                reason: format!(
+                    "source file not found: {}",
+                    binding
+                        .package_root
+                        .join("src")
+                        .join(format!("{fixture_basename}.rs"))
+                        .display()
+                ),
+            };
         }
-    }
+    };
+    let src_text = match std::fs::read_to_string(&fixture_src) {
+        Ok(t) => t,
+        Err(_) => {
+            return RunOutcome::Error {
+                reason: "source failed to compile".into(),
+            };
+        }
+    };
 
-    // Build the set of required (setup_fn, operation) names across all cases.
-    let mut required_setups: std::collections::BTreeSet<String> =
-        std::collections::BTreeSet::new();
-    let mut required_ops: std::collections::BTreeSet<String> =
-        std::collections::BTreeSet::new();
+    let annotated = scan::scan(&src_text);
+
+    // Required setups + ops across all cases.
+    let mut required_setups: BTreeSet<String> = BTreeSet::new();
+    let mut required_ops: BTreeSet<String> = BTreeSet::new();
     for case in &parsed.cases {
         match &case.setup {
             spec::Setup::None => {}
@@ -139,120 +133,108 @@ pub fn run_spec(spec_path: &str) -> RunOutcome {
             required_ops.insert(op.to_string());
         }
     }
-
-    // Try each candidate source: parse, score, pick the best.
-    // Bonus score for a basename match so that fixtures with overlapping
-    // op/setup names disambiguate by filename.
-    let fixture_basename = spec_basename(&path);
-    let mut best: Option<(usize, PathBuf, String, discover::Module)> = None;
-    let mut had_parse_failure = false;
-    for (path, src) in &candidate_sources {
-        match discover::parse_module(src) {
-            Ok(module) => {
-                let mut score = 0usize;
-                for op in &required_ops {
-                    if module.method_ops.contains_key(op) || module.free_ops.contains_key(op) {
-                        score += 2;
-                    }
-                }
-                for s in &required_setups {
-                    if module.setups.contains_key(s) {
-                        score += 1;
-                    }
-                }
-                if path.file_stem().and_then(|s| s.to_str()) == Some(&fixture_basename) {
-                    score += 1000;
-                }
-                // Tie-break: file whose basename is a prefix of the spec
-                // basename (e.g. `multi_field_capture` ↔ `multi_field_capture_reordered`).
-                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                    if fixture_basename.starts_with(stem) && stem.len() > 4 {
-                        score += stem.len();
-                    }
-                }
-                if best.as_ref().map(|b| score > b.0).unwrap_or(true) {
-                    best = Some((score, path.clone(), src.clone(), module));
-                }
-            }
-            Err(_) => {
-                had_parse_failure = true;
-            }
+    for s in &required_setups {
+        if !annotated.setups.contains_key(s) {
+            return RunOutcome::Error {
+                reason: format!("setup '{s}' not found in source annotations"),
+            };
+        }
+    }
+    for o in &required_ops {
+        if !annotated.operations.contains_key(o) {
+            return RunOutcome::Error {
+                reason: format!("operation '{o}' not found in source annotations"),
+            };
         }
     }
 
-    let (_, _src_path, _src, module) = match best {
-        Some(b) if b.0 > 0 => b,
-        _ => {
-            // No matching candidate. If the basename file exists and parses,
-            // fall back to it (covers fixtures whose ops aren't found yet —
-            // we'll still yield a "missing setup/operation" error below).
-            let basename_path = src_dir.join(format!("{fixture_basename}.rs"));
-            match std::fs::read_to_string(&basename_path) {
-                Ok(s) => match discover::parse_module(&s) {
-                    Ok(m) => (0, basename_path, s, m),
-                    Err(_) => {
-                        return RunOutcome::Error {
-                            reason: "source failed to compile".into(),
-                        };
-                    }
-                },
-                Err(_) => {
-                    if had_parse_failure {
-                        return RunOutcome::Error {
-                            reason: "source failed to compile".into(),
-                        };
-                    }
-                    return RunOutcome::Error {
-                        reason: format!("source file not found: {}", basename_path.display()),
-                    };
-                }
-            }
+    // Shape-check expected events against declared operation outputs.
+    if let Some(reason) = check_shape(&parsed, &yaml_value) {
+        return RunOutcome::Error { reason };
+    }
+
+    // Locate workspace root for path deps.
+    let workspace_root = workspace_root();
+    let scratch_dir = scratch_for(&fixture_basename);
+
+    let proj = match codegen::generate(
+        &scratch_dir,
+        &fixture_src,
+        &parsed,
+        &annotated,
+        &workspace_root,
+    ) {
+        Ok(p) => p,
+        Err(e) => {
+            return RunOutcome::Error {
+                reason: format!("failed to scaffold runner: {e}"),
+            };
         }
     };
 
-    // Validate setup / operation references for every case.
-    for case in &parsed.cases {
-        match &case.setup {
-            spec::Setup::None => {}
-            spec::Setup::Single(name) => {
-                if !module.setups.contains_key(name) {
-                    return RunOutcome::Error {
-                        reason: format!("setup '{name}' not found in source annotations"),
-                    };
-                }
-            }
-            spec::Setup::Multi(entries) => {
-                for (_, fn_name) in entries {
-                    if !module.setups.contains_key(fn_name) {
-                        return RunOutcome::Error {
-                            reason: format!(
-                                "setup '{fn_name}' not found in source annotations"
-                            ),
-                        };
-                    }
-                }
-            }
+    // Shell out: cargo run -- <trace_out>
+    let mut cmd = Command::new(cargo_bin());
+    cmd.arg("run")
+        .arg("--quiet")
+        .arg("--offline")
+        .arg("--manifest-path")
+        .arg(proj.crate_dir.join("Cargo.toml"))
+        .arg("--")
+        .arg(&proj.trace_file);
+    cmd.env_remove("RUSTC_WORKSPACE_WRAPPER");
+    cmd.env_remove("CARGO");
+    cmd.env_remove("CARGO_MANIFEST_DIR");
+    cmd.env(
+        "CARGO_TARGET_DIR",
+        proj.crate_dir.join("target").as_os_str(),
+    );
+
+    let output = match cmd.output() {
+        Ok(o) => o,
+        Err(e) => {
+            return RunOutcome::Error {
+                reason: format!("failed to invoke cargo: {e}"),
+            };
         }
-        let ops_to_check: Vec<&str> = if !case.steps.is_empty() {
-            case.steps.iter().map(String::as_str).collect()
-        } else if let Some(op) = case.operation.as_deref() {
-            vec![op]
-        } else {
-            vec![]
+    };
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // Heuristic: if rustc/cargo reports a compile error, surface
+        // "source failed to compile". Other failures (panic at runtime)
+        // are unexpected — surface their message.
+        if stderr.contains("error[E") || stderr.contains("error:") || stderr.contains("could not compile") {
+            return RunOutcome::Error {
+                reason: "source failed to compile".into(),
+            };
+        }
+        return RunOutcome::Error {
+            reason: format!("runner failed: {}", stderr),
         };
-        for op in ops_to_check {
-            if !module.method_ops.contains_key(op) && !module.free_ops.contains_key(op) {
-                return RunOutcome::Error {
-                    reason: format!("operation '{op}' not found in source annotations"),
-                };
-            }
-        }
     }
 
-    // Run each case and collect results.
+    // Load traces.
+    let trace_text = match std::fs::read_to_string(&proj.trace_file) {
+        Ok(t) => t,
+        Err(_) => {
+            return RunOutcome::Error {
+                reason: "runner produced no trace output".into(),
+            };
+        }
+    };
+    let trace_map: std::collections::BTreeMap<String, Vec<TraceEvent>> =
+        match serde_yaml::from_str(&trace_text) {
+            Ok(m) => m,
+            Err(e) => {
+                return RunOutcome::Error {
+                    reason: format!("failed to parse traces: {e}"),
+                };
+            }
+        };
+
     let mut results = Vec::with_capacity(parsed.cases.len());
     for case in &parsed.cases {
-        let traces = interpret::run_case(&module, case).unwrap_or_default();
+        let traces = trace_map.get(&case.name).cloned().unwrap_or_default();
         let pass = match_traces::matches(&case.expected, &traces);
         results.push(CaseResult {
             name: case.name.clone(),
@@ -261,7 +243,6 @@ pub fn run_spec(spec_path: &str) -> RunOutcome {
             traces,
         });
     }
-
     RunOutcome::Complete { results }
 }
 
@@ -271,4 +252,233 @@ fn spec_basename(p: &Path) -> String {
         return stripped.to_string();
     }
     f.trim_end_matches(".yaml").to_string()
+}
+
+fn workspace_root() -> PathBuf {
+    // CARGO_MANIFEST_DIR for specgate-harness is .../rust/crates/specgate-harness.
+    // Walk up to .../rust.
+    let mut p = PathBuf::from(env_or("CARGO_MANIFEST_DIR", "."));
+    p.pop(); // specgate-harness
+    p.pop(); // crates
+    p
+}
+
+fn env_or(name: &str, default: &str) -> String {
+    std::env::var(name).unwrap_or_else(|_| default.to_string())
+}
+
+fn scratch_for(stem: &str) -> PathBuf {
+    let mut p = workspace_root();
+    p.push("target");
+    p.push("specgate-harness");
+    p.push(stem);
+    p
+}
+
+fn cargo_bin() -> String {
+    std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string())
+}
+
+/// Try to find the fixture source file for a spec. Prefer `<basename>.rs`;
+/// otherwise pick the .rs file under src/ whose annotations contain the
+/// most setups + operations the spec needs.
+fn resolve_fixture_source(
+    package_root: &Path,
+    fixture_basename: &str,
+    spec: &spec::Spec,
+) -> Option<PathBuf> {
+    let direct = package_root.join("src").join(format!("{fixture_basename}.rs"));
+    if direct.exists() {
+        return Some(direct);
+    }
+    // Build required sets.
+    let mut req_setups: BTreeSet<String> = BTreeSet::new();
+    let mut req_ops: BTreeSet<String> = BTreeSet::new();
+    for case in &spec.cases {
+        match &case.setup {
+            spec::Setup::None => {}
+            spec::Setup::Single(n) => {
+                req_setups.insert(n.clone());
+            }
+            spec::Setup::Multi(es) => {
+                for (_, n) in es {
+                    req_setups.insert(n.clone());
+                }
+            }
+        }
+        if !case.steps.is_empty() {
+            for s in &case.steps {
+                req_ops.insert(s.clone());
+            }
+        } else if let Some(op) = case.operation.as_deref() {
+            req_ops.insert(op.to_string());
+        }
+    }
+
+    let src_dir = package_root.join("src");
+    let entries = std::fs::read_dir(&src_dir).ok()?;
+    let mut best: Option<(usize, PathBuf)> = None;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(&path) else { continue };
+        let annotated = scan::scan(&text);
+        let mut score = 0usize;
+        for o in &req_ops {
+            if annotated.operations.contains_key(o) {
+                score += 2;
+            }
+        }
+        for s in &req_setups {
+            if annotated.setups.contains_key(s) {
+                score += 1;
+            }
+        }
+        // Light filename-similarity bonus.
+        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+            if fixture_basename.starts_with(stem) && stem.len() > 4 {
+                score += stem.len();
+            }
+        }
+        if best.as_ref().map(|b| score > b.0).unwrap_or(true) && score > 0 {
+            best = Some((score, path));
+        }
+    }
+    best.map(|(_, p)| p)
+}
+
+// ---------------------------------------------------------------------------
+// Shape check: every expected event key must be either `run`, a setup or
+// operation input echo, an operation result/outcome/error/value, or one of
+// the explicit `outputs` declared on the operation.
+// ---------------------------------------------------------------------------
+
+fn check_shape(spec: &spec::Spec, raw: &serde_yaml::Value) -> Option<String> {
+    let ops_meta = ops_metadata(raw);
+    for case in &spec.cases {
+        let case_ops: Vec<&str> = if !case.steps.is_empty() {
+            case.steps.iter().map(String::as_str).collect()
+        } else if let Some(op) = case.operation.as_deref() {
+            vec![op]
+        } else {
+            continue;
+        };
+        let case_setups: Vec<&str> = match &case.setup {
+            spec::Setup::None => vec![],
+            spec::Setup::Single(n) => vec![n.as_str()],
+            spec::Setup::Multi(entries) => entries.iter().map(|(_, fn_name)| fn_name.as_str()).collect(),
+        };
+
+        let mut allowed: BTreeSet<String> = BTreeSet::new();
+        for op in &case_ops {
+            if let Some(meta) = ops_meta.get(*op) {
+                for inp in &meta.inputs {
+                    allowed.insert(format!("{op}.{inp}"));
+                }
+                for out in &meta.outputs {
+                    allowed.insert(out.clone());
+                }
+            }
+            allowed.insert(format!("{op}.outcome"));
+            allowed.insert(format!("{op}.result"));
+            allowed.insert(format!("{op}.error"));
+            allowed.insert(format!("{op}.value"));
+        }
+        for setup in &case_setups {
+            if let Some(meta) = ops_meta.get(*setup) {
+                for inp in &meta.inputs {
+                    allowed.insert(format!("{setup}.{inp}"));
+                }
+            }
+        }
+
+        for entry in &case.expected {
+            if entry.len() != 1 {
+                continue;
+            }
+            let (k, _) = entry.iter().next().unwrap();
+            if k == "run" {
+                continue;
+            }
+            if allowed.contains(k) {
+                continue;
+            }
+            // Any event prefixed with one of the case's op names is
+            // accepted (the matcher itself decides whether it actually
+            // appeared in traces).
+            if case_ops.iter().any(|op| k.starts_with(&format!("{op}."))) {
+                continue;
+            }
+            // Strict-mode ops have ALL declared outputs prefixed with
+            // `<op>.`. If no op in this case is strict-mode, skip the
+            // shape check entirely — bare field events (state-machine
+            // style) are allowed to be anything.
+            let strict_op = case_ops.iter().find(|op| {
+                ops_meta
+                    .get(**op)
+                    .map(|m| {
+                        !m.outputs.is_empty()
+                            && m.outputs.iter().all(|o| o.starts_with(&format!("{op}.")))
+                    })
+                    .unwrap_or(false)
+            });
+            if let Some(op) = strict_op {
+                return Some(format!(
+                    "expected event '{k}' is not a declared output of operation '{op}'"
+                ));
+            }
+        }
+    }
+    None
+}
+
+#[derive(Debug, Default)]
+struct OpMeta {
+    inputs: Vec<String>,
+    outputs: Vec<String>,
+}
+
+fn ops_metadata(raw: &serde_yaml::Value) -> std::collections::BTreeMap<String, OpMeta> {
+    let mut out = std::collections::BTreeMap::new();
+    let map = match raw.as_mapping() {
+        Some(m) => m,
+        None => return out,
+    };
+    let ops = match map.get(serde_yaml::Value::String("operations".into())) {
+        Some(serde_yaml::Value::Mapping(m)) => m,
+        _ => return out,
+    };
+    for (k, v) in ops {
+        let name = match k.as_str() {
+            Some(s) => s.to_string(),
+            None => continue,
+        };
+        let body = match v.as_mapping() {
+            Some(m) => m,
+            None => continue,
+        };
+        let mut meta = OpMeta::default();
+        if let Some(serde_yaml::Value::Mapping(inputs)) =
+            body.get(serde_yaml::Value::String("inputs".into()))
+        {
+            for (ik, _) in inputs {
+                if let Some(s) = ik.as_str() {
+                    meta.inputs.push(s.to_string());
+                }
+            }
+        }
+        if let Some(serde_yaml::Value::Sequence(outs)) =
+            body.get(serde_yaml::Value::String("outputs".into()))
+        {
+            for o in outs {
+                if let Some(s) = o.as_str() {
+                    meta.outputs.push(s.to_string());
+                }
+            }
+        }
+        out.insert(name, meta);
+    }
+    out
 }

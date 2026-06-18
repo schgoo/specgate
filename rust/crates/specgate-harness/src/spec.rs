@@ -41,10 +41,15 @@ pub enum ParseError {
     Shape(String),
 }
 
+#[allow(dead_code)]
 pub fn load_spec(path: &Path) -> Result<Spec, ParseError> {
     let text = std::fs::read_to_string(path).map_err(|e| ParseError::Io(e.to_string()))?;
     let v: Value = serde_yaml::from_str(&text).map_err(|e| ParseError::Yaml(e.to_string()))?;
     parse_spec_value(&v)
+}
+
+pub fn parse_value(v: &Value) -> Result<Spec, ParseError> {
+    parse_spec_value(v)
 }
 
 fn parse_spec_value(v: &Value) -> Result<Spec, ParseError> {
@@ -81,23 +86,47 @@ fn parse_case(v: &Value) -> Result<Case, ParseError> {
         .ok_or_else(|| ParseError::Shape("case missing name".into()))?
         .to_string();
 
+    let mut extra_inputs: BTreeMap<String, Value> = BTreeMap::new();
     let setup = match m.get(Value::String("setup".into())) {
         None => Setup::None,
         Some(Value::String(s)) => Setup::Single(s.clone()),
         Some(Value::Mapping(mp)) => {
-            let mut entries = Vec::new();
-            for (k, val) in mp {
-                let alias = k
+            // Either:
+            //   - multi-setup with aliases: `source: make_source, target: make_target`
+            //     (all values are strings)
+            //   - single-setup with params: `make_counter: { initial: 10 }`
+            //     (one entry, value is a mapping)
+            let all_strings = mp.iter().all(|(_, v)| v.as_str().is_some());
+            if all_strings {
+                let mut entries = Vec::new();
+                for (k, val) in mp {
+                    let alias = k
+                        .as_str()
+                        .ok_or_else(|| ParseError::Shape("setup alias not str".into()))?
+                        .to_string();
+                    let fn_name = val.as_str().unwrap().to_string();
+                    entries.push((alias, fn_name));
+                }
+                Setup::Multi(entries)
+            } else {
+                // Each entry: key = setup fn name, value = mapping of params.
+                // Currently the harness only handles a single such entry.
+                let (k, v) = mp.iter().next().ok_or_else(|| {
+                    ParseError::Shape("empty setup mapping".into())
+                })?;
+                let fn_name = k
                     .as_str()
-                    .ok_or_else(|| ParseError::Shape("setup alias not str".into()))?
+                    .ok_or_else(|| ParseError::Shape("setup name not str".into()))?
                     .to_string();
-                let fn_name = val
-                    .as_str()
-                    .ok_or_else(|| ParseError::Shape("setup fn not str".into()))?
-                    .to_string();
-                entries.push((alias, fn_name));
+                if let Value::Mapping(pm) = v {
+                    for (pk, pv) in pm {
+                        if let Some(pks) = pk.as_str() {
+                            extra_inputs.insert(pks.to_string(), pv.clone());
+                        }
+                    }
+                }
+                Setup::Single(fn_name)
             }
-            Setup::Multi(entries)
         }
         Some(_) => return Err(ParseError::Shape("setup has invalid shape".into())),
     };
@@ -142,6 +171,12 @@ fn parse_case(v: &Value) -> Result<Case, ParseError> {
         }
         Some(_) => return Err(ParseError::Shape("inputs has invalid shape".into())),
     };
+    // Merge per-setup params (from `setup: { make_X: { p: v } }` form) into
+    // the case inputs so downstream code can resolve them uniformly.
+    let mut inputs = inputs;
+    for (k, v) in extra_inputs {
+        inputs.entry(k).or_insert(v);
+    }
 
     let expected = match m.get(Value::String("expected".into())) {
         None => Vec::new(),

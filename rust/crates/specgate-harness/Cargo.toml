@@ -4,10 +4,9 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-serde = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
 serde_yaml = { workspace = true }
-syn = { workspace = true }
-proc-macro2 = { workspace = true }
 
 [dev-dependencies]
+specgate-annotations = { path = "../specgate-annotations" }
 specgate-fixtures = { path = "../../../test/rust/crates/specgate-fixtures" }

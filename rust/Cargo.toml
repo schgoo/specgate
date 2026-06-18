@@ -1,6 +1,8 @@
 [workspace]
 members = [
     "crates/specgate-types",
+    "crates/specgate-runtime",
+    "crates/specgate-annotations-macros",
     "crates/specgate-annotations",
     "crates/specgate-harness",
 ]

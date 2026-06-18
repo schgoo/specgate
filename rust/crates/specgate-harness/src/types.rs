@@ -2,7 +2,10 @@
 //!
 //! These mirror the `types:` block of `specs/specgate.harness.spec.yaml`.
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind")]
 pub enum TraceEvent {
     Event { name: String, value: String },
     Run { operation: String },
