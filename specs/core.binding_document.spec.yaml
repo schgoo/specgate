@@ -1,160 +1,190 @@
 # yaml-language-server: $schema=../spec-schema.json
 # SpecGate component: core.binding_document
 #
-# Defines the shape of a valid binding file (bindings/<name>.yaml).
-# Binding files connect specs to language-specific implementations by
-# declaring targets (command, api, or types).
+# Defines the shape of a valid binding YAML file. Binding files connect
+# a spec to a language-specific package by declaring a language and one
+# or more named targets.
 #
-# This spec is the source of truth for the binding file format. The JSON
-# Schema (binding-schema.json) must be consistent with these type
-# definitions.
+# The Rust BindingFile struct (rust/crates/specgate-types/src/binding_file.rs)
+# and the JSON Schema (binding-schema.json) must be consistent with the
+# type definitions in this file.
 #
-# All paths in a binding file are relative to the binding file location.
-#
-# Kind: Structural — type definitions and validation rules only.
+# All paths in a binding file are relative to the binding file's own
+# location.
 
 name: core.binding_document
-binding:
-  - name: rust
-    target: test-types
+binding: ../bindings/rust.yaml
 
 types:
 
   # === Top-level document ===
 
   BindingFile:
-    language: string                        # e.g. "rust", "csharp"
-    targets: map<string, BindingTarget>     # named execution targets
+    language: string                         # required — "rust" or "csharp"
+    targets: Map<string, BindingTarget>      # optional — named execution targets
 
   # === Target definition ===
 
   BindingTarget:
-    package_root: string                    # required — path to package/project root
-    test_root: string                       # optional — path to write generated tests
-    build: string                           # optional — build command
-    command: string                         # optional — shell command to run tests
-    function: string                        # optional — qualified function
-    constructor: string                     # optional — qualified constructor
-    outputs: BindingTargetOutputs           # optional
+    package_root: string                     # required — relative path to crate/project root
+    test_root: string                        # optional — where to write generated tests
+    build: string                            # optional — build command
+    command: string                          # optional — shell command (mutually exclusive with `function`)
+    function: string                         # optional — fully qualified function name (mutually exclusive with `command`)
+    constructor: string                      # optional — fully qualified constructor for API targets
+    outputs: BindingTargetOutputs            # optional
 
   BindingTargetOutputs:
-    file: string                            # optional — output file path
-    stdout: string                          # optional — parse stdout format
+    file: string                             # optional — path to output file (supports {workdir})
+    stdout: string                           # optional — stdout format, e.g. "json"
 
 cases:
 
+  # === Valid bindings ===
+
+  - name: minimal_default_target
+    desc: The minimal binding form used by every fixture — language + one default target with package_root
+    operation: validate
+    inputs:
+      yaml: |
+        language: rust
+        targets:
+          default:
+            package_root: ..
+    expected:
+      - validate.outcome: "Valid"
+
   - name: valid_command_target
-    desc: Binding with a command target parses correctly
-    input:
-      language: rust
-      targets:
-        test:
-          package_root: ../rust/crates/my-app
-          test_root: ../rust/crates/my-app/tests
-          build: "cargo build"
-          command: "cargo test -p my-app --test specgate_generated"
-          outputs:
-            stdout: json
-    outcome: Valid
-    outputs:
-      language: rust
-      target_count: 1
+    desc: A target may declare a shell command and an output format
+    operation: validate
+    inputs:
+      yaml: |
+        language: rust
+        targets:
+          run-cli:
+            package_root: ../my-cli
+            command: cargo run -q -p my-cli -- {spec_path}
+            outputs:
+              stdout: json
+    expected:
+      - validate.outcome: "Valid"
 
   - name: valid_api_target
-    desc: Binding with an api target parses correctly
-    input:
-      language: rust
-      targets:
-        generate:
-          package_root: ../rust/crates/my-backend
-          function: "my_backend::RustBackend::generate"
-          constructor: "my_backend::RustBackend::new"
-    outcome: Valid
-    outputs:
-      language: rust
-      target_count: 1
+    desc: A target may declare a function for in-process API calls
+    operation: validate
+    inputs:
+      yaml: |
+        language: rust
+        targets:
+          validate-spec:
+            package_root: ../my-crate
+            function: my_crate::validate
+    expected:
+      - validate.outcome: "Valid"
 
   - name: multiple_targets
-    desc: Binding with multiple targets of different kinds
-    input:
-      language: rust
-      targets:
-        test:
-          package_root: ../rust/crates/my-app
-          command: "cargo test -p my-app"
-        generate:
-          package_root: ../rust/crates/my-backend
-          function: "backend::generate"
-    outcome: Valid
-    outputs:
-      language: rust
-      target_count: 2
+    desc: A binding may declare multiple named targets
+    operation: validate
+    inputs:
+      yaml: |
+        language: rust
+        targets:
+          test:
+            package_root: ../my-crate
+            command: cargo test -p my-crate
+          build-only:
+            package_root: ../my-crate
+            build: cargo build -p my-crate
+    expected:
+      - validate.outcome: "Valid"
 
-  - name: missing_language
-    desc: Binding without language field is invalid
-    input:
-      targets: {}
-    outcome: Invalid
-    outputs:
-      error: missing required field 'language'
+  - name: empty_targets_is_valid
+    desc: A binding with no targets is still valid (targets is optional)
+    operation: validate
+    inputs:
+      yaml: |
+        language: csharp
+    expected:
+      - validate.outcome: "Valid"
 
-  - name: empty_targets
-    desc: Binding with no targets is valid (targets are optional)
-    input:
-      language: csharp
-    outcome: Valid
-    outputs:
-      language: csharp
-      target_count: 0
+  - name: build_only_target
+    desc: A target may declare only a build command (no command or function)
+    operation: validate
+    inputs:
+      yaml: |
+        language: rust
+        targets:
+          compile-check:
+            package_root: ../my-crate
+            build: cargo build -q
+    expected:
+      - validate.outcome: "Valid"
 
-  - name: target_with_both_command_and_function
-    desc: Target with both command and function is ambiguous and invalid
-    input:
-      language: rust
-      targets:
-        test:
-          package_root: ../rust/crates/my-app
-          command: "cargo test -p my-app"
-          function: "backend::run"
-    outcome: Invalid
-    outputs:
-      error: target cannot have both command and function
+  - name: file_based_output
+    desc: A target may declare a file output with template variables
+    operation: validate
+    inputs:
+      yaml: |
+        language: rust
+        targets:
+          test:
+            package_root: ../my-crate
+            command: cargo test -p my-crate
+            outputs:
+              file: "{workdir}/results.json"
+    expected:
+      - validate.outcome: "Valid"
 
-  - name: target_with_neither_command_nor_function
-    desc: Target with only build is valid (build-only target)
-    input:
-      language: rust
-      targets:
-        test:
-          package_root: ../rust/crates/my-app
-          build: "cargo build"
-    outcome: Valid
-    outputs:
-      language: rust
-      target_count: 1
+  # === Invalid bindings ===
 
-  - name: target_with_file_output
-    desc: Target using file-based output
-    input:
-      language: rust
-      targets:
-        test:
-          package_root: ../rust/crates/my-app
-          command: "cargo test -p my-app"
-          outputs:
-            file: "{workdir}/results.json"
-    outcome: Valid
-    outputs:
-      language: rust
-      target_count: 1
+  - name: reject_missing_language
+    desc: language is a required top-level field
+    operation: validate
+    inputs:
+      yaml: |
+        targets:
+          default:
+            package_root: ..
+    expected:
+      - validate.outcome: "Invalid"
+      - validate.error: "missing required field: language"
 
-  - name: target_missing_package_root
-    desc: Target without package_root field is invalid
-    input:
-      language: rust
-      targets:
-        test:
-          command: "cargo test"
-    outcome: Invalid
-    outputs:
-      error: missing required field 'package_root'
+  - name: reject_unknown_language
+    desc: language must be one of the supported backends (rust, csharp)
+    operation: validate
+    inputs:
+      yaml: |
+        language: cobol
+        targets:
+          default:
+            package_root: ..
+    expected:
+      - validate.outcome: "Invalid"
+
+  - name: reject_target_missing_package_root
+    desc: Every target must declare package_root
+    operation: validate
+    inputs:
+      yaml: |
+        language: rust
+        targets:
+          test:
+            command: cargo test
+    expected:
+      - validate.outcome: "Invalid"
+      - validate.error: "missing required field: package_root"
+
+  - name: reject_target_with_both_command_and_function
+    desc: A target cannot declare both command and function — they are mutually exclusive
+    operation: validate
+    inputs:
+      yaml: |
+        language: rust
+        targets:
+          ambiguous:
+            package_root: ../my-crate
+            command: cargo test
+            function: my_crate::run
+    expected:
+      - validate.outcome: "Invalid"
+      - validate.error: "target cannot have both command and function"

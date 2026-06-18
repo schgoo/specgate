@@ -4,31 +4,15 @@
 # Defines the shape of a valid .spec.yaml file. This is SpecGate's spec
 # format, specified using SpecGate's own type system.
 #
-# This spec is the source of truth for the spec file format. The JSON
-# Schema (spec-schema.json) must be consistent with these type
-# definitions. Consumer specs (harness.core, harness.rust) depend on
-# these types — when they change, consumers must re-validate.
+# The Rust SpecDocument struct (rust/crates/specgate-types/src/spec_document.rs)
+# and the JSON Schema (spec-schema.json) must be consistent with the
+# type definitions in this file.
 #
-# Kind: Structural — no runtime operations, just type definitions and
-# validation rules.
+# Consumer specs declare `depends_on: [core.spec_document]` if they rely
+# on SpecDocument/SpecCase types.
 
 name: core.spec_document
-binding:
-  - name: rust
-    target: validate-spec
-
-inputs:
-  yaml:
-    type: string
-    desc: YAML content of a spec file to validate
-
-outcome:
-  oneof: [Valid, Invalid]
-
-outputs:
-  when Valid: {}
-  when Invalid:
-    reason: string
+binding: ../bindings/rust.yaml
 
 types:
 
@@ -36,569 +20,299 @@ types:
 
   SpecDocument:
     name: string
-    binding: BindingEntry or List<BindingEntry>  # optional
-    # Single-operation mode (mutually exclusive with operations)
-    inputs: Map<string, InputDeclaration>   # optional
-    outcome: Value                          # optional — oneof or string
-    outputs: Map<string, Value>             # optional
-    # State machine mode (mutually exclusive with inputs)
-    state: Map<string, string>              # optional
-    init: Map<string, Value>                # optional — required when state present
-    operations: Map<string, OperationDeclaration>  # optional
-    invariants: Map<string, string>         # optional
-    # Shared
-    types: Map<string, TypeDefinition>      # optional
-    cases: List<SpecCase>
-    depends_on: List<string>                # optional — spec dependency DAG
+    binding: string                          # optional — path to a binding YAML file (relative)
+    depends_on: List<string>                 # optional — names of other specs this depends on
+    cases: List<SpecCase>                    # required — at least one case for executable specs
+    # The following are tolerated by the schema for self-describing specs
+    # (this file uses some of them) but are NOT part of the standard
+    # fixture-spec authoring path. New specs should use case-level
+    # `operation` / `setup` / `expected` exclusively.
+    inputs: Map<string, InputDeclaration>    # optional, legacy
+    outcome: Value                           # optional, legacy
+    outputs: Map<string, Value>              # optional, legacy
+    types: Map<string, TypeDefinition>       # optional, legacy
 
   InputDeclaration:
     type: string
-    source: string                          # optional
-    desc: string                            # optional
-
-  OperationDeclaration:
-    inputs: Map<string, Value>              # optional
-    outcome: Value                          # optional
-    outputs: Map<string, Value>             # optional
+    source: string                           # optional
+    desc: string                             # optional
 
   TypeDefinition:
-    oneof: Map<string, Value>               # optional — variant type
-    causes: Map<string, Value>              # optional — error type
-    fields: Map<string, string>             # optional — record type
-
-  BindingEntry:
-    name: string                            # binding file identifier
-    target: string                          # execution target in that binding
+    oneof: Map<string, Value>                # optional — variant type
+    causes: Map<string, Value>               # optional — error/cause type
+    fields: Map<string, string>              # optional — record type
 
   # === Test cases ===
 
   SpecCase:
-    name: string
-    desc: string
-    binding: BindingEntry                    # optional — overrides spec-level target
-    # Single-operation mode
-    inputs: Map<string, Value>              # optional
-    expected: Map<string, Value>            # optional
-    # State machine mode (mutually exclusive with flat inputs/expected)
-    steps: List<TestStep>                   # optional
-    # Postconditions — commands run after the case, must exit 0
-    postconditions: List<Postcondition>     # optional
+    name: string                             # required, snake_case unique within file
+    desc: string                             # required
+    operation: string                        # required for single-step cases
+    setup: SetupRef                          # optional — string name or alias->name map
+    inputs: Map<string, Value>               # optional — bound to setup/operation params
+    expected: List<ExpectedEntry>            # required — subsequence matched against trace
+    steps: List<TestStep>                    # optional — mutually exclusive with operation
+    postconditions: List<Postcondition>      # optional
 
-  Postcondition:
-    target: string                          # binding target name — must exit 0
-    inputs: Map<string, string>             # optional — template vars substituted
-    desc: string                            # optional — what this asserts
+  # A SetupRef is either a single setup function name (string), or a
+  # map of alias -> setup function name for multi-setup cases.
+  SetupRef:
+    oneof:
+      Single: string
+      Multi: Map<string, string>
+
+  # Each entry in `expected` is a single-key map. The key is either:
+  #   - the special key `run` whose value is an operation name (Run match), or
+  #   - a trace event name whose value is the expected stringified value (Event match).
+  ExpectedEntry:
+    oneof:
+      Run: { run: string }
+      Event: Map<string, string>              # exactly one entry, key=name, value=stringified value
 
   TestStep:
-    operation: string
-    inputs: Map<string, Value>              # optional
-    expected: Map<string, Value>            # optional
-    assert_state: Map<string, Value>        # optional
+    operation: string                        # required
 
-# No inputs/outcome/outputs — this is a Structural spec.
-# Validation is via structural rules, not runtime operations.
+  Postcondition:
+    target: string                           # required — binding target name; must exit 0
+    inputs: Map<string, string>              # optional — template vars substituted
+    desc: string                             # optional
 
 cases:
 
-  # === Field validation ===
+  # === Minimal valid spec ===
 
-  - name: case_input_matches_declared_input
-    desc: Case input keys must match declared inputs in the spec
+  - name: minimal_pure_function
+    desc: Single case with operation, inputs, expected — the canonical shape
+    operation: validate
     inputs:
       yaml: |
-        name: test.component
-        binding:
-          name: rust
-          target: test
-        inputs:
-          a: { type: int }
-          b: { type: int }
-        outcome: Ok
-        outputs:
-          when Ok:
-            result: int
+        name: fixture.stateless_add
+        binding: binding.yaml
         cases:
-          - name: valid_case
-            desc: Uses declared inputs
-            inputs:
-              a: 1
-              b: 2
+          - name: add_2_3
+            desc: Adding 2 + 3 returns 5
+            operation: add
+            inputs: { a: 2, b: 3 }
             expected:
-              outcome: Ok
-              result: 3
+              - add.result: "5"
     expected:
-      outcome: Valid
+      - validate.outcome: "Valid"
 
-  - name: case_input_undeclared
-    desc: Case input key not declared in spec inputs is invalid
+  - name: state_machine_with_setup
+    desc: Case names a setup function and asserts a subsequence of events and runs
+    operation: validate
     inputs:
       yaml: |
-        name: test.component
-        binding:
-          name: rust
-          target: test
-        inputs:
-          a: { type: int }
-        outcome: Ok
-        outputs:
-          when Ok:
-            result: int
+        name: fixture.statemachine_counter
+        binding: binding.yaml
         cases:
-          - name: bad_case
-            desc: Uses undeclared input
-            inputs:
-              a: 1
-              x: 99
+          - name: increment_once
+            desc: Incrementing counter from 0 produces count 1
+            setup: make_counter
+            operation: increment
             expected:
-              outcome: Ok
-              result: 100
+              - count: "0"
+              - run: increment
+              - count: "1"
     expected:
-      outcome: Invalid
-      reason: "case input 'x' is not declared in spec inputs"
+      - validate.outcome: "Valid"
 
-  - name: case_expected_undeclared
-    desc: Case expected key not declared in spec outputs is invalid
+  - name: multi_step_case
+    desc: Multi-step case uses steps and a single flat expected subsequence
+    operation: validate
     inputs:
       yaml: |
-        name: test.component
-        binding:
-          name: rust
-          target: test
-        inputs:
-          a: { type: int }
-        outcome: Ok
-        outputs:
-          when Ok:
-            result: int
+        name: fixture.multi_step
+        binding: binding.yaml
         cases:
-          - name: bad_case
-            desc: Asserts on undeclared output
-            inputs:
-              a: 1
-            expected:
-              outcome: Ok
-              result: 1
-              extra_field: 42
-    expected:
-      outcome: Invalid
-      reason: "case expected field 'extra_field' is not declared in spec outputs"
-
-  - name: single_operation_minimal
-    desc: Minimal valid single-operation spec has name, binding, outcome, outputs, cases
-    inputs:
-      yaml: |
-        name: test.component
-        binding:
-          name: rust
-          target: test
-        outcome: Ok
-        outputs:
-          when Ok:
-            result: string
-        cases:
-          - name: basic
-            desc: Basic test
-            expected:
-              outcome: Ok
-              result: hello
-    expected:
-      outcome: Valid
-
-  - name: single_operation_with_inputs_and_types
-    desc: Single-operation spec with inputs and named types
-    inputs:
-      yaml: |
-        name: test.component
-        binding:
-          name: rust
-          target: test
-        inputs:
-          shape:
-            type: Shape
-        types:
-          Shape:
-            oneof:
-              Circle: { radius: float }
-              Rectangle: { width: float, height: float }
-        outcome:
-          oneof: [Ok, Error]
-        outputs:
-          when Ok:
-            area: float
-          when Error:
-            message: string
-        cases:
-          - name: circle
-            desc: Circle area
-            inputs:
-              shape:
-                Circle: { radius: 5.0 }
-            expected:
-              outcome: Ok
-              area: 78.54
-    expected:
-      outcome: Valid
-
-  # === State machine format ===
-
-  - name: state_machine_minimal
-    desc: Minimal valid state machine spec with state, init, operations
-    inputs:
-      yaml: |
-        name: test.machine
-        binding:
-          name: rust
-          target: test
-        state:
-          count: int
-        init:
-          count: 0
-        operations:
-          increment:
-            inputs:
-              amount:
-                type: int
-        cases:
-          - name: inc_once
-            desc: Increment once
+          - name: increment_then_decrement
+            desc: Count goes 0 to 1 to 0
+            setup: make_counter
             steps:
               - operation: increment
-                inputs: { amount: 1 }
-                assert_state: { count: 1 }
-    expected:
-      outcome: Valid
-
-  - name: state_machine_with_invariants
-    desc: State machine spec with approved invariants
-    inputs:
-      yaml: |
-        name: test.machine
-        binding:
-          name: rust
-          target: test
-        state:
-          items: Set<string>
-        init:
-          items: []
-        operations:
-          add_item:
-            inputs:
-              name:
-                type: string
-        invariants:
-          never_empty_after_add: "items.size() >= 1"
-        cases:
-          - name: add_one
-            desc: Adding an item
-            steps:
-              - operation: add_item
-                inputs: { name: foo }
-                assert_state:
-                  items: [foo]
-    expected:
-      outcome: Valid
-
-  # === Mutual exclusivity ===
-
-  - name: reject_inputs_and_operations
-    desc: Cannot have both top-level inputs and operations
-    inputs:
-      yaml: |
-        name: test.invalid
-        binding:
-          name: rust
-          target: test
-        inputs:
-          x:
-            type: int
-        operations:
-          foo:
-            inputs: { y: int }
-        outcome: Ok
-        outputs:
-          when Ok:
-            result: int
-        cases:
-          - name: bad
-            desc: Invalid
+              - operation: decrement
             expected:
-              outcome: Ok
-              result: 1
+              - count: "0"
+              - run: increment
+              - count: "1"
+              - run: decrement
+              - count: "0"
     expected:
-      outcome: Invalid
-      reason: "inputs and operations are mutually exclusive"
+      - validate.outcome: "Valid"
 
-  - name: reject_steps_without_operations
-    desc: Cases with steps require an operations section
+  - name: multi_setup_case
+    desc: Setup may be a map of alias to setup function for multi-object cases
+    operation: validate
     inputs:
       yaml: |
-        name: test.invalid
-        binding:
-          name: rust
-          target: test
-        outcome: Ok
-        outputs:
-          when Ok:
-            result: int
+        name: fixture.multi_setup
+        binding: binding.yaml
         cases:
-          - name: bad
-            desc: Invalid
-            steps:
-              - operation: foo
-                inputs: { x: 1 }
-    expected:
-      outcome: Invalid
-      reason: "steps require operations section"
-
-  - name: reject_flat_inputs_in_state_machine_case
-    desc: State machine cases must use steps, not flat inputs/expected
-    inputs:
-      yaml: |
-        name: test.invalid
-        binding:
-          name: rust
-          target: test
-        state:
-          count: int
-        init:
-          count: 0
-        operations:
-          increment:
-            inputs: { amount: int }
-        cases:
-          - name: bad
-            desc: Invalid
-            inputs:
-              amount: 1
+          - name: transfer
+            desc: Two setups create source and target
+            setup:
+              source: make_source
+              target: make_target
+            operation: transfer
+            inputs: { amount: 50 }
             expected:
-              outcome: Ok
+              - source.balance: "100"
+              - target.balance: "0"
+              - run: transfer
+              - source.balance: "50"
+              - target.balance: "50"
     expected:
-      outcome: Invalid
-      reason: "state machine cases must use steps"
+      - validate.outcome: "Valid"
 
-  # === Depends on ===
+  - name: subsequence_with_gaps
+    desc: Expected omits intermediate events — subsequence allows gaps
+    operation: validate
+    inputs:
+      yaml: |
+        name: fixture.subsequence_with_gaps
+        binding: binding.yaml
+        cases:
+          - name: double_increment
+            desc: Assert count=0 then count=2, skipping count=1
+            setup: make_counter
+            operation: increment_twice
+            expected:
+              - count: "0"
+              - count: "2"
+    expected:
+      - validate.outcome: "Valid"
+
+  - name: mock_inputs_table
+    desc: Mock response table goes under inputs.<mock_name>
+    operation: validate
+    inputs:
+      yaml: |
+        name: fixture.mock_field
+        binding: binding.yaml
+        cases:
+          - name: find_user_1
+            desc: Mock db returns Alice
+            setup: make_service
+            operation: get_user
+            inputs:
+              id: "user_1"
+              db:
+                "user_1": "Alice"
+            expected:
+              - run: get_user
+              - db.request: "user_1"
+              - db.response: "Alice"
+              - get_user.result: "Alice"
+    expected:
+      - validate.outcome: "Valid"
 
   - name: depends_on_list
-    desc: Spec can declare dependencies on other specs
+    desc: A spec may declare depends_on for shared-type dependencies
+    operation: validate
     inputs:
       yaml: |
-        name: test.consumer
-        binding:
-          name: rust
-          target: test
+        name: fixture.consumer
+        binding: binding.yaml
         depends_on:
           - core.spec_document
-          - core.types
-        outcome: Ok
-        outputs:
-          when Ok:
-            result: string
         cases:
-          - name: basic
-            desc: Basic
+          - name: trivial
+            desc: Trivial case
+            operation: noop
             expected:
-              outcome: Ok
-              result: hello
+              - run: noop
     expected:
-      outcome: Valid
+      - validate.outcome: "Valid"
 
-  # === Required fields ===
+  - name: binding_optional
+    desc: A spec without a binding still parses (binding is optional)
+    operation: validate
+    inputs:
+      yaml: |
+        name: fixture.bindingless
+        cases:
+          - name: trivial
+            desc: Trivial
+            operation: noop
+            expected:
+              - run: noop
+    expected:
+      - validate.outcome: "Valid"
+
+  # === Negative cases ===
 
   - name: reject_missing_name
-    desc: Name is required
+    desc: name is required at the top level
+    operation: validate
     inputs:
       yaml: |
-        binding:
-          name: rust
-          target: test
-        outcome: Ok
-        outputs:
-          when Ok:
-            result: string
+        binding: binding.yaml
         cases:
-          - name: basic
-            desc: Basic
+          - name: c
+            desc: d
+            operation: op
             expected:
-              outcome: Ok
-              result: hello
+              - op.result: "1"
     expected:
-      outcome: Invalid
-      reason: "missing required field: name"
+      - validate.outcome: "Invalid"
+      - validate.error: "missing required field: name"
 
   - name: reject_missing_cases
-    desc: Cases are required
+    desc: cases is required at the top level
+    operation: validate
     inputs:
       yaml: |
-        name: test.component
-        binding:
-          name: rust
-          target: test
-        outcome: Ok
-        outputs:
-          when Ok:
-            result: string
+        name: fixture.no_cases_field
+        binding: binding.yaml
     expected:
-      outcome: Invalid
-      reason: "missing required field: cases"
+      - validate.outcome: "Invalid"
+      - validate.error: "missing required field: cases"
 
-  - name: reject_state_without_init
-    desc: State requires init
+  - name: reject_case_missing_desc
+    desc: Each case requires both name and desc
+    operation: validate
     inputs:
       yaml: |
-        name: test.machine
-        binding:
-          name: rust
-          target: test
-        state:
-          count: int
-        operations:
-          increment:
-            inputs: { amount: int }
+        name: fixture.bad_case
+        binding: binding.yaml
         cases:
-          - name: inc
-            desc: Increment
-            steps:
-              - operation: increment
-                inputs: { amount: 1 }
-    expected:
-      outcome: Invalid
-      reason: "state requires init"
-
-  # === Binding formats ===
-
-  - name: multi_binding_list
-    desc: Spec with multiple bindings for multi-language implementation
-    inputs:
-      yaml: |
-        name: core.shared_types
-        binding:
-          - name: rust
-            target: test
-          - name: csharp
-            target: test
-        outcome: Ok
-        outputs:
-          when Ok:
-            result: string
-        cases:
-          - name: basic
-            desc: Basic
+          - name: no_desc
+            operation: op
             expected:
-              outcome: Ok
-              result: hello
+              - op.result: "1"
     expected:
-      outcome: Valid
+      - validate.outcome: "Invalid"
 
-  - name: no_binding
-    desc: Spec without binding is valid (binding is optional)
+  - name: reject_expected_as_map
+    desc: Case `expected` must be a list of single-entry maps, not a map
+    operation: validate
     inputs:
       yaml: |
-        name: test.component
-        outcome: Ok
-        outputs:
-          when Ok:
-            result: string
-        cases:
-          - name: basic
-            desc: Basic
-            expected:
-              outcome: Ok
-              result: hello
-    expected:
-      outcome: Valid
-
-  # === Type varieties ===
-
-  - name: types_with_causes
-    desc: Spec with error types using causes
-    inputs:
-      yaml: |
-        name: test.component
-        binding:
-          name: rust
-          target: test
-        types:
-          MyError:
-            causes:
-              NotFound: { id: string }
-              PermissionDenied: { user: string, resource: string }
-        inputs:
-          id:
-            type: string
-        outcome:
-          oneof: [Ok, Error]
-        outputs:
-          when Ok:
-            result: string
-          when Error:
-            error: MyError
-        cases:
-          - name: not_found
-            desc: Returns not found
-            inputs:
-              id: "missing"
-            expected:
-              outcome: Error
-    expected:
-      outcome: Valid
-
-  - name: types_with_fields
-    desc: Spec with record types using fields
-    inputs:
-      yaml: |
-        name: test.component
-        binding:
-          name: rust
-          target: test
-        types:
-          Config:
-            fields:
-              timeout_ms: int
-              retries: int
-              endpoint: string
-        inputs:
-          config:
-            type: Config
-        outcome: Ok
-        outputs:
-          when Ok:
-            result: string
-        cases:
-          - name: with_config
-            desc: Accepts config
-            inputs:
-              config: { timeout_ms: 5000, retries: 3, endpoint: "http://localhost" }
-            expected:
-              outcome: Ok
-              result: ok
-    expected:
-      outcome: Valid
-
-  # === Case-level mutual exclusivity ===
-
-  - name: reject_case_with_inputs_and_steps
-    desc: A single case cannot have both inputs and steps
-    inputs:
-      yaml: |
-        name: test.machine
-        binding:
-          name: rust
-          target: test
-        state:
-          count: int
-        init:
-          count: 0
-        operations:
-          increment:
-            inputs: { amount: int }
+        name: fixture.expected_as_map
+        binding: binding.yaml
         cases:
           - name: bad
-            desc: Has both inputs and steps
-            inputs:
-              amount: 1
-            steps:
-              - operation: increment
-                inputs: { amount: 1 }
+            desc: Uses map-form expected
+            operation: op
+            expected:
+              op.result: "1"
     expected:
-      outcome: Invalid
-      reason: "case cannot have both inputs and steps"
+      - validate.outcome: "Invalid"
+
+  - name: reject_case_with_operation_and_steps
+    desc: A case cannot have both operation and steps
+    operation: validate
+    inputs:
+      yaml: |
+        name: fixture.both
+        binding: binding.yaml
+        cases:
+          - name: bad
+            desc: Has both operation and steps
+            operation: op
+            steps:
+              - operation: op
+            expected:
+              - op.result: "1"
+    expected:
+      - validate.outcome: "Invalid"
