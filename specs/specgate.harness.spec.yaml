@@ -133,6 +133,25 @@ cases:
   # Happy path — basic operations
   # ================================================================
 
+  - name: async_operation
+    desc: Async operation compiles and produces traces via async runtime
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/async_fetch.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: fetch_returns_response
+              status: pass
+              expected:
+                - $run: fetch
+                - fetch.result: "response from https://example.com"
+              traces:
+                - Run: { operation: fetch }
+                - Event: { name: fetch.url, value: "https://example.com" }
+                - Event: { name: fetch.result, value: "response from https://example.com" }
+
   - name: stateless_return_value
     desc: Stateless function captures return value
     operation: run_spec
