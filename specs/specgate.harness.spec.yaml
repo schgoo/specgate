@@ -28,10 +28,18 @@ types:
       $unordered: { items: List<Assertion> }
       $anywhere: { items: List<Assertion> }
 
+  Source:
+    assertion_ids: List<string>
+    spec: string
+    section: string
+
   CaseResult:
     name: string
     status:
       oneof: [pass, fail, skip, warn]
+    level:
+      oneof: [must, should, may]
+    source: Source  # optional
     expected: List<Assertion>
     traces: List<TraceEvent>
 
@@ -843,6 +851,30 @@ cases:
   # ================================================================
   # Normative strength — level: must/should/may
   # ================================================================
+
+  - name: provenance_passes_through
+    desc: Source metadata and level are included in CaseResult
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/provenance_example.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: add_with_provenance
+              status: pass
+              level: must
+              source:
+                assertion_ids: [TEST-A1, TEST-A2]
+                spec: "Test Specification v1.0"
+                section: "§3.1"
+              expected:
+                - add.result: "5"
+              traces:
+                - Run: { operation: add }
+                - Event: { name: add.a, value: "2" }
+                - Event: { name: add.b, value: "3" }
+                - Event: { name: add.result, value: "5" }
 
   - name: level_may_missing_skips
     desc: MAY operation not implemented — case is skipped, not an error

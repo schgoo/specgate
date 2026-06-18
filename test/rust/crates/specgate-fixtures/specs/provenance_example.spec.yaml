@@ -1,0 +1,21 @@
+spec_version: "0.4.0"
+name: fixture.provenance_example
+binding: binding.yaml
+
+operations:
+  add:
+    inputs: { a: i32, b: i32 }
+    outputs: [add.result]
+
+cases:
+  - name: add_with_provenance
+    desc: Case with source provenance metadata
+    level: must
+    source:
+      assertion_ids: [TEST-A1, TEST-A2]
+      spec: "Test Specification v1.0"
+      section: "§3.1"
+    operation: add
+    inputs: { a: 2, b: 3 }
+    expected:
+      - add.result: "5"
