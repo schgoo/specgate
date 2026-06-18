@@ -1,10 +1,18 @@
 # yaml-language-server: $schema=../binding-schema.json
 # Binding: Rust implementation
 # All paths are relative to this file (bindings/rust.yaml)
+#
+# Targets are addressed by name. When a spec uses `binding: bindings/rust.yaml`
+# without specifying a target, the harness selects the **first** target listed
+# below as the default — currently `harness`, which points at the harness crate.
 
 language: rust
 
 targets:
+  harness:
+    package_root: ../rust/crates/specgate-harness
+    function: specgate_harness::run_spec
+
   validate-spec:
     package_root: ../rust/crates/specgate-types
     test_root: ../rust/crates/specgate-types/tests

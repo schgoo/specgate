@@ -1,0 +1,10 @@
+[package]
+name = "specgate-harness"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_yaml = { workspace = true }
+syn = { workspace = true }
+proc-macro2 = { workspace = true }

@@ -4,4 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-# specgate-annotations will be added when the annotation crate is rebuilt
+# `specgate-annotations` provides empty no-op proc-macros that make
+# `use specgate_annotations::*;` resolve. The fixture crate is intentionally
+# **not** part of the workspace build: `#[spec_event]` placed directly on
+# struct fields is rejected by `rustc` (procedural attribute macros are not
+# allowed in the field position without a containing macro). The harness
+# (`specgate-harness`) reads these source files via `syn` and interprets them
+# symbolically, so they never go through `rustc`.
+specgate-annotations = { path = "../../../../rust/crates/specgate-annotations" }
+
