@@ -4,12 +4,8 @@ binding: binding.yaml
 
 operations:
   process:
-    inputs: { data: { type: string } }
-    outcome:
-      oneof: [Complete]
-    outputs:
-      when Complete:
-        result: string
+    inputs: { data: string }
+    outputs: [after_upper, process.result]
 
 cases:
   - name: process_hello

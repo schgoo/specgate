@@ -5,15 +5,15 @@ binding: binding.yaml
 operations:
   make_account:
     kind: setup
-    outputs:
-      when Complete:
-        returns: Account
   transfer:
-    inputs: { amount: { type: i32 } }
+    inputs: { amount: i32 }
+    outputs: [balance]
   withdraw:
-    inputs: { amount: { type: i32 } }
+    inputs: { amount: i32 }
+    outputs: [balance]
   deposit:
-    inputs: { amount: { type: i32 } }
+    inputs: { amount: i32 }
+    outputs: [balance]
 
 cases:
   - name: transfer_50

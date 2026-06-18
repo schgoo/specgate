@@ -5,12 +5,9 @@ binding: binding.yaml
 operations:
   make_counter:
     kind: setup
-    inputs: { initial: { type: i32 } }
-    outputs:
-      when Complete:
-        returns: Counter
+    inputs: { initial: i32 }
   increment:
-    desc: Increments the counter by 1.
+    outputs: [count]
 
 cases:
   - name: start_at_10

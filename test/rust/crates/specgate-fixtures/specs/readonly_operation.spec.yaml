@@ -5,15 +5,8 @@ binding: binding.yaml
 operations:
   make_counter:
     kind: setup
-    outputs:
-      when Complete:
-        returns: Counter
   get_count:
-    outcome:
-      oneof: [Complete]
-    outputs:
-      when Complete:
-        result: i32
+    outputs: [get_count.result]
 
 cases:
   - name: read_count

@@ -86,7 +86,7 @@ fn inline_checkpoint_emits_event() {
     let trace_names: Vec<_> = traces.iter().map(|t| t.name()).collect();
     assert!(
         trace_names.iter().any(|n| n == "after_upper"),
-        "spec_event_record! must emit a named event, got: {:?}",
+        "spec_trace! must emit a named event, got: {:?}",
         trace_names
     );
 }

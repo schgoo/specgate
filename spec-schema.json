@@ -61,12 +61,15 @@
           "type": "object",
           "description": "Named input declarations for this operation."
         },
-        "outcome": {
-          "description": "Outcome variants for this operation."
-        },
         "outputs": {
-          "type": "object",
-          "description": "Output declarations keyed by 'when <Outcome>'."
+          "type": "array",
+          "description": "List of observable outputs this operation can produce. Each item is either a bare event name (string) or a map declaring the event name with its type or enum variants.",
+          "items": {
+            "oneOf": [
+              { "type": "string" },
+              { "type": "object" }
+            ]
+          }
         }
       }
     },
@@ -130,8 +133,16 @@
           "description": "Input values for this case (validated against the operation's declared inputs)."
         },
         "expected": {
-          "description": "Expected outcome and outputs. For trace-based operations, includes a list of trace assertions matched as a subsequence.",
-          "type": "object"
+          "description": "Expected results. A list of trace assertions (for annotated operations, matched as a subsequence), or an object with structured output (for function operations like run_spec).",
+          "oneOf": [
+            {
+              "type": "array",
+              "items": { "type": "object" }
+            },
+            {
+              "type": "object"
+            }
+          ]
         },
         "steps": {
           "type": "array",

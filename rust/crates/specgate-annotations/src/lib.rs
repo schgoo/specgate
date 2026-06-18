@@ -39,6 +39,6 @@ pub fn spec_mock(_attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 #[proc_macro]
-pub fn spec_event_record(_input: TokenStream) -> TokenStream {
+pub fn spec_trace(_input: TokenStream) -> TokenStream {
     TokenStream::new()
 }

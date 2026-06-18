@@ -5,16 +5,9 @@ binding: binding.yaml
 operations:
   make_service:
     kind: setup
-    outputs:
-      when Complete:
-        returns: UserService
   get_user:
-    inputs: { id: { type: string } }
-    outcome:
-      oneof: [Complete]
-    outputs:
-      when Complete:
-        result: string
+    inputs: { id: string }
+    outputs: [db.request, db.response, get_user.result]
 
 cases:
   - name: find_user_1

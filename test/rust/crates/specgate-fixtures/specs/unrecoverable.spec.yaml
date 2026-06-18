@@ -4,14 +4,8 @@ binding: binding.yaml
 
 operations:
   divide:
-    inputs: { a: { type: i32 }, b: { type: i32 } }
-    outcome:
-      oneof: [Ok, Unrecoverable]
-    outputs:
-      when Ok:
-        result: i32
-      when Unrecoverable:
-        error: string
+    inputs: { a: i32, b: i32 }
+    outputs: [divide.outcome, divide.error]
 
 cases:
   - name: divide_by_zero_panics

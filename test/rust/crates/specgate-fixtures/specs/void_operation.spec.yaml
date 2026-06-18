@@ -5,11 +5,9 @@ binding: binding.yaml
 operations:
   make_logger:
     kind: setup
-    outputs:
-      when Complete:
-        returns: Logger
   log:
-    inputs: { msg: { type: string } }
+    inputs: { msg: string }
+    outputs: [count]
 
 cases:
   - name: log_a_message

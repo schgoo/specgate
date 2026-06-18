@@ -4,11 +4,7 @@ binding: binding.yaml
 
 operations:
   broken:
-    outcome:
-      oneof: [Complete]
-    outputs:
-      when Complete:
-        result: i32
+    outputs: [broken.result]
 
 cases:
   - name: broken_fn

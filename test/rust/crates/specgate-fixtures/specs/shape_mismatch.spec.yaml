@@ -1,5 +1,5 @@
 spec_version: "0.3.0"
-name: fixture.stateless_add
+name: fixture.shape_mismatch
 binding: binding.yaml
 
 operations:
@@ -8,9 +8,9 @@ operations:
     outputs: [add.result]
 
 cases:
-  - name: add_2_3
-    desc: Adding 2 + 3 returns 5
+  - name: wrong_output_name
+    desc: Expected uses 'answer' which is not a declared output
     operation: add
     inputs: { a: 2, b: 3 }
     expected:
-      - add.result: "5"
+      - answer: "5"

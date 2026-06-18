@@ -11,4 +11,4 @@ cases:
     desc: The binding cannot be resolved.
     operation: something
     expected:
-      outcome: Complete
+      - outcome: "Complete"

@@ -5,16 +5,11 @@ binding: binding.yaml
 operations:
   make_source:
     kind: setup
-    outputs:
-      when Complete:
-        returns: Account
   make_target:
     kind: setup
-    outputs:
-      when Complete:
-        returns: Account
   transfer:
-    inputs: { amount: { type: i32 } }
+    inputs: { amount: i32 }
+    outputs: [source.balance, target.balance]
 
 cases:
   - name: transfer_between_accounts

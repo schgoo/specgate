@@ -5,11 +5,8 @@ binding: binding.yaml
 operations:
   make_counter:
     kind: setup
-    outputs:
-      when Complete:
-        returns: Counter
   increment_twice:
-    desc: Increments the counter twice in one operation.
+    outputs: [count]
 
 cases:
   - name: double_increment

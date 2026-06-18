@@ -5,11 +5,9 @@ binding: binding.yaml
 operations:
   make_account:
     kind: setup
-    outputs:
-      when Complete:
-        returns: Account
   withdraw:
-    inputs: { amount: { type: i32 } }
+    inputs: { amount: i32 }
+    outputs: [balance, transaction_count]
 
 cases:
   - name: withdraw_50
