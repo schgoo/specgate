@@ -1,58 +1,59 @@
 # Binding files
 
-Binding files connect a spec to a language-specific implementation. They tell
-the harness what language backend to use and where targets live.
+A binding file connects a spec to a language-specific package. Specs
+reference a binding by **path** — `binding: binding.yaml` — relative to
+the spec file.
 
-**File convention**: `bindings/<name>.yaml`
-**Schema**: `binding-schema.json`
+**Schema**: `binding-schema.json`.
 
 ## Structure
 
 ```yaml
-language: rust    # required: rust | csharp
-
+# binding.yaml
+language: rust            # required: "rust" or "csharp"
 targets:
-  test-geometry:
-    package_root: ../rust/crates/geometry
-    test_root: ../rust/crates/geometry/tests
-  test-renderer:
-    package_root: ../rust/crates/renderer
-    command: cargo run -p renderer -- {input}
+  default:
+    package_root: ..      # path to the crate/project under test, relative to this file
 ```
 
-All paths are relative to the binding file location.
+All paths in a binding file are relative to the binding file's own
+location.
+
+The simplest fixture binding (`test/rust/crates/specgate-fixtures/specs/binding.yaml`)
+is exactly the example above — one `default` target pointing at the
+fixture crate.
 
 ## How specs reference bindings
 
-The spec declares a binding name and target:
-
 ```yaml
-name: geometry.area
-binding:
-  name: rust
-  target: test-geometry
+# fixture.stateless_add.spec.yaml
+name: fixture.stateless_add
+binding: binding.yaml      # sibling file
+cases:
+  - name: add_2_3
+    operation: add
+    inputs: { a: 2, b: 3 }
+    expected:
+      - add.result: "5"
 ```
 
-The harness resolves `rust` to `bindings/rust.yaml`, finds the `test-geometry`
-target, and uses it to determine how to build, generate tests, and run them.
+The harness reads `binding.yaml`, finds `language: rust`, locates the
+`package_root`, discovers `#[spec_operation("add")]` in that crate, and
+runs the case.
 
-## Target types
+## Targets
 
-See `docs/knowledge/targets.md` for details on command, API, and
-build-only targets.
-
-## When to create a binding
-
-Create a binding when implementing a spec for a specific language.
-Each language gets its own binding file. The spec stays language-agnostic.
+A binding may declare multiple named targets — useful when one package
+hosts several test contexts. Most fixtures only need `default`. For the
+full target shape (`command`, `function`, `build`, `outputs`, …) see
+[`targets.md`](targets.md) and `binding-schema.json`.
 
 ## What belongs in bindings vs specs
 
 | Concern | Where |
 |---------|-------|
-| What behavior to test | Spec |
-| What types/inputs/outputs | Spec |
-| What language to use | Binding |
-| Where the project lives | Binding (target `package_root`) |
-| How to run tests | Binding (target `command` or `function`) |
-| Which functions implement which spec names | Annotations (in source code) |
+| What to test (behaviour, cases, expectations) | Spec |
+| Which language to use | Binding |
+| Where the package lives (`package_root`) | Binding |
+| How to invoke (`command` / `function`) | Binding (optional) |
+| Which functions implement which names | Source annotations |

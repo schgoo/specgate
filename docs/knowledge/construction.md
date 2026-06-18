@@ -1,86 +1,110 @@
-# Construction resolution and setup
+# Setup and construction
 
-When an operation's entry point is a method (takes `self`/`this`), the harness
-needs to construct the owning type. This is where `spec_setup` comes in.
+When an operation's entry point is a method or otherwise needs an
+existing object, the case names a `#[spec_setup("…")]` function that
+constructs it.
 
-## Resolution algorithm
+## `spec_setup` rules
 
-1. **Entry point** — what types does it need? (self type, parameter types)
-2. **For each type, try in order:**
-   - Find a `spec_setup` that returns this type → use it
-   - Auto-discover a single public constructor → use it, recurse on its params
-   - Primitive/leaf type → provided by test case inputs
-3. **If unresolvable** — validation error
-
-All resolved constructor/setup parameters bubble up as flat test case inputs.
-
-## spec_setup
-
-Setup functions are test fixtures. They live in test code, not production code.
+- **No `self` / `this`** — setups are free functions or static factories.
+- **Single name argument** — `#[spec_setup("make_counter")]`. The name
+  is the join key that cases reference via `setup:`.
+- **Parameters become inputs** — each parameter is bound from the case's
+  `inputs:` map by name, and is emitted as
+  `Event { name: "<setup>.<param>", value }`.
+- **Multiple setups allowed** — a single source file can declare any
+  number of setups; cases pick the one they want by name.
 
 ```rust
-// Rust
-#[spec_setup("canvas", name = "default")]
-fn make_canvas(width: f64, height: f64) -> Canvas {
-    Canvas::new(width, height)
+// stateless: no setup needed
+#[spec_operation("add")]
+fn add(a: i32, b: i32) -> i32 { a + b }
+
+// stateful: setup constructs the receiver
+#[spec_setup("make_counter")]
+fn make_counter() -> Counter {
+    Counter { count: 0 }
+}
+
+struct Counter {
+    #[spec_event]
+    count: i32,
+}
+
+impl Counter {
+    #[spec_operation("increment")]
+    fn increment(&mut self) { self.count += 1; }
 }
 ```
 
-```csharp
-// C#
-[SpecSetup("canvas", Name = "default")]
-public static Canvas MakeCanvas(double width, double height)
-    => new Canvas(width, height);
+```yaml
+- name: increment_once
+  setup: make_counter
+  operation: increment
+  expected:
+    - count: "0"
+    - run: increment
+    - count: "1"
 ```
 
-### Rules
+## Setup with parameters
 
-- **No `self`/`this`** — setups are free functions, never methods
-- **`name` is required** — the language-agnostic join key referenced from spec cases
-- **Names must be unique** per operation
-- **Multiple setups allowed** — different setups can return different types for the same operation
-
-### Environment setup
-
-A setup that returns `()` / `void` configures environment rather than constructing a type:
+If a setup takes parameters, pass them through the case `inputs:` map:
 
 ```rust
-#[spec_setup("canvas", name = "runtime")]
-fn init_renderer(backend: String) {
-    std::env::set_var("RENDER_BACKEND", backend);
+#[spec_setup("make_counter")]
+fn make_counter(initial: i32) -> Counter {
+    Counter { count: initial }
 }
 ```
 
-### Ambiguous construction warning
+```yaml
+- name: start_at_10
+  setup: make_counter
+  operation: increment
+  inputs: { initial: 10 }
+  expected:
+    - make_counter.initial: "10"   # setup parameter event
+    - count: "10"
+    - run: increment
+    - count: "11"
+```
 
-If the entry point is a method but no `spec_setup` exists, `core.validate`
-emits an `AmbiguousConstruction` warning.
+See `test/rust/crates/specgate-fixtures/specs/setup_with_params.spec.yaml`.
 
-## Full example
+## Multiple setups in one case
+
+When an operation takes more than one constructed object, the case maps
+**aliases** to setup function names. The aliases become both the
+operation parameter names and the prefix for `#[spec_event]` trace
+names:
 
 ```rust
-struct Canvas {
-    #[spec_capture("canvas")]
-    shapes: Vec<Shape>,
-    #[spec_capture("canvas")]
-    total_area: f64,
-}
+#[spec_setup("make_source")] fn make_source() -> Account { Account { balance: 100 } }
+#[spec_setup("make_target")] fn make_target() -> Account { Account { balance: 0 } }
 
-impl Canvas {
-    fn new(width: f64, height: f64) -> Self { ... }
+struct Account { #[spec_event] balance: i32 }
 
-    #[spec_operation("canvas", kind = StateMachine)]
-    fn add_shape(&mut self, shape: Shape) { ... }
-
-    #[spec_mock("canvas", name = "renderer")]
-    fn render(&self) -> Vec<u8> { ... }
-}
-
-#[spec_setup("canvas", name = "default")]
-fn make_canvas(width: f64, height: f64) -> Canvas {
-    Canvas::new(width, height)
+#[spec_operation("transfer")]
+fn transfer(source: &mut Account, target: &mut Account, amount: i32) {
+    source.balance -= amount;
+    target.balance += amount;
 }
 ```
 
-The harness resolves: `add_shape` needs `Canvas` → found `make_canvas`
-→ needs `width: f64, height: f64` (primitives) → they become test case inputs.
+```yaml
+- name: transfer_between_accounts
+  setup:
+    source: make_source
+    target: make_target
+  operation: transfer
+  inputs: { amount: 50 }
+  expected:
+    - source.balance: "100"
+    - target.balance: "0"
+    - run: transfer
+    - source.balance: "50"
+    - target.balance: "50"
+```
+
+See `multi_setup.spec.yaml`.

@@ -6,162 +6,88 @@
 crates/<component-name>/
   Cargo.toml
   src/lib.rs
-  tests/spec_tests.rs
+  tests/spec_tests.rs   # optional — for hand-written companion tests
 ```
 
-Add the crate to the workspace `Cargo.toml` if one exists.
+Add the crate to the workspace `Cargo.toml` if one exists. The
+fixture crate (`test/rust/crates/specgate-fixtures/`) is the running
+example.
 
 ## Common dependencies
 
-- `serde` + `serde_json` + `serde_yaml` — serialization
-- `ohno` — error types (project convention — never use thiserror/anyhow)
-- `clap` — CLI argument parsing (if building a CLI)
+- `specgate-annotations` — provides the five `#[spec_*]` proc macros and
+  the `spec_event!()` macro.
+- `serde` + `serde_yaml` — when the implementation parses spec/binding files.
+- `ohno` — error types (project convention — never use `thiserror` /
+  `anyhow`).
+- `clap` — only if building a CLI.
 
 ## Annotations
 
-Rust uses proc macros from `specgate-annotations`.
-
 ```rust
-// Stateless operation — pure input → output
-#[spec_operation("area", kind = Stateless)]
-fn compute_area(shape: &Shape) -> Result<f64, GeometryError> { ... }
+use specgate_annotations::*;
 
-// Setup — constructs inputs for tests (no self)
-#[spec_setup("area", name = "circle")]
-fn make_circle(radius: f64) -> Shape {
-    Shape::Circle { radius }
+// Pure function operation
+#[spec_operation("add")]
+fn add(a: i32, b: i32) -> i32 { a + b }
+
+// Setup constructs the system-under-test
+#[spec_setup("make_counter")]
+fn make_counter() -> Counter { Counter { count: 0 } }
+
+struct Counter {
+    #[spec_event]
+    count: i32,
 }
 
-// Capture on struct — all public fields captured
-#[spec_capture("area")]
-struct AreaResult {
-    pub area: f64,
-    pub perimeter: f64,
+impl Counter {
+    // Method operation
+    #[spec_operation("increment")]
+    fn increment(&mut self) { self.count += 1; }
 }
 
-// Capture on individual fields
-struct Canvas {
-    #[spec_capture("canvas")]
-    total_area: f64,
-    internal_buffer: Vec<u8>,  // not captured
+// Inline checkpoint
+#[spec_operation("process")]
+fn process(data: &str) -> String {
+    let upper = data.to_uppercase();
+    spec_event!("after_upper", &upper);
+    upper.trim().to_string()
 }
 
-impl Canvas {
-    // StateMachine operation
-    #[spec_operation("canvas", kind = StateMachine)]
-    fn add_shape(&mut self, shape: Shape) { ... }
-
-    // Mock — external dependency
-    #[spec_mock("canvas", name = "renderer")]
-    fn render(&self) -> Vec<u8> { ... }
-
-    // Checkpoint — intermediate value
-    #[spec_checkpoint("canvas")]
-    fn current_bounds(&self) -> (f64, f64) { ... }
-}
-
-// Inline checkpoint — captures any expression
-#[spec_operation("pipeline", kind = Sequence)]
-fn process(input: &str) -> Output {
-    let validated = spec_checkpoint!("pipeline", validator.check(input));
-    Output { validated }
+// Mock — replaces a call with a case-supplied response
+struct UserService { db: RealDb }
+impl UserService {
+    #[spec_operation("get_user")]
+    fn get_user(&self, id: &str) -> String {
+        #[spec_mock("db")]
+        let response = self.db.find(id);
+        response
+    }
 }
 ```
 
-Symbol paths are fully qualified: `my_crate::module::Type::method`.
+Every fixture under `test/rust/crates/specgate-fixtures/src/` is a
+copy-paste-ready example.
 
-## Mapping spec types to Rust
+## Return value conventions
 
-| Spec type | Rust type |
-|-----------|-----------|
-| `string` | `String` |
-| `int` | `i64` |
-| `float` | `f64` |
-| `bool` | `bool` |
-| `List<T>` | `Vec<T>` |
-| `Option<T>` | `Option<T>` |
-| `Map<K, V>` | `BTreeMap<K, V>` |
-| `oneof` | `enum` |
-| `causes` | ohno structs (see below) |
-| record | `struct` |
+| Return shape | Trace events emitted | Spec asserts |
+|--------------|----------------------|--------------|
+| `T` (any value) | `Event { "<op>.result", value }` | `- <op>.result: "<value>"` |
+| `Result<T, E>` Ok arm | `Event { "<op>.outcome", "Ok" }` + `Event { "<op>.result", value }` | `- <op>.outcome: "Ok"` + result |
+| `Result<T, E>` Err arm | `Event { "<op>.outcome", "Error" }` + `Event { "<op>.error", msg }` | `- <op>.outcome: "Error"` + error |
+| `panic!()` | `Event { "<op>.error", panic_msg }` | `- <op>.error: "<msg>"` |
+| `()` / no return | no `.result` event | rely on `#[spec_event]` field events |
 
-## Spec to Rust mapping example
+See `result_ok.rs`, `result_err.rs`, `unrecoverable.rs`, `void_operation.rs`.
 
-### Spec
+## Field naming
 
-```yaml
-types:
-  Shape:
-    oneof:
-      Circle: { radius: float }
-      Rectangle: { width: float, height: float }
-  GeometryError:
-    causes:
-      NegativeDimension: { field: string }
-      UnsupportedShape: { name: string }
-
-outcome:
-  oneof: [Ok, Error]
-outputs:
-  when Ok:
-    area: float
-  when Error:
-    error: GeometryError
-```
-
-### Rust
-
-```rust
-// oneof → enum
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Shape {
-    Circle { radius: f64 },
-    Rectangle { width: f64, height: f64 },
-}
-
-// causes → ohno structs
-#[ohno::error]
-#[display("negative dimension: {field}")]
-pub struct NegativeDimension { pub field: String }
-
-#[ohno::error]
-#[display("unsupported shape: {name}")]
-pub struct UnsupportedShape { pub name: String }
-
-#[ohno::error]
-#[display("geometry error")]
-#[from(NegativeDimension, UnsupportedShape)]
-pub struct GeometryError;
-
-// outcome → Result
-pub fn compute_area(shape: &Shape) -> Result<f64, GeometryError> { ... }
-```
-
-## Generated tests
-
-Each spec case maps to one `#[test]`:
-
-```rust
-#[test]
-fn circle_area() {
-    let area = compute_area(&Shape::Circle { radius: 5.0 }).unwrap();
-    assert!((area - 78.54).abs() < 0.01);
-}
-
-#[test]
-fn negative_radius() {
-    use ohno::ErrorExt;
-    let err = compute_area(&Shape::Circle { radius: -1.0 }).unwrap_err();
-    assert!(err.find_source::<NegativeDimension>().is_some());
-}
-```
+A `#[spec_event]` field emits events under the bare field name in
+single-setup cases (`count`, `balance`). In multi-setup cases the
+case's alias becomes a prefix (`source.balance`, `target.balance`).
 
 ## Error handling
 
-Use `ohno` for all error types. Never use thiserror/anyhow.
-
-| Spec outcome | Rust pattern | Test assertion |
-|---|---|---|
-| `when Ok` | `Result::Ok(T)` | `.unwrap()` |
-| `when Error` | `Result::Err(E)` | `find_source::<T>()` |
-| `when Unrecoverable` | `panic!()` | `#[should_panic(expected = "...")]` |
+Use `ohno` for any error types you author. Never use `thiserror` /
+`anyhow`.

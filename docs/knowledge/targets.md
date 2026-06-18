@@ -1,78 +1,99 @@
 # Binding targets
 
-Each binding file defines one or more **targets**. A target tells the harness
-how to test a particular spec against an implementation.
-
-## Target types
-
-### Command target
-
-A target with a `command` field. The harness runs the command for each test
-case, substituting `{input_name}` placeholders with values from the case
-inputs. The command outputs JSON to stdout, which the harness parses and
-compares against the spec's expected output.
+Each binding file defines one or more **targets**. A target tells the
+harness how to test a particular spec against an implementation. The
+simplest target — and the one every fixture uses — has only a
+`package_root`:
 
 ```yaml
+language: rust
 targets:
-  test-annotations:
-    package_root: ../rust/crates/geometry
-    command: cargo run -p annotation-test-runner -- {source}
+  default:
+    package_root: ..
 ```
 
-If the command references a tool that does not exist yet (e.g.
-`annotation-test-runner`), **building that tool is part of the
-implementation**. The implementation must ensure the tool exists and
-produces the correct JSON output for each test case.
-
-### API target
-
-A target with a `function` field. The harness generates test code that
-calls the function directly with case inputs and checks return values.
-
-```yaml
-targets:
-  test-geometry:
-    package_root: ../rust/crates/geometry
-    test_root: ../rust/crates/geometry/tests
-    function: geometry::compute_area
-```
-
-### Build-only target
-
-A target with only `build` (no command or function).
-Used for targets that just need to compile successfully.
-
-## Annotations
-
-Annotations are a discovery mechanism. Any target can
-have annotated source code. The harness builds the project, reads
-`annotations.json`, and uses the discovered symbols to generate test code
-that exercises the annotated operations.
+This is enough for the harness to discover annotations in the crate at
+`package_root`, generate tests, and run them.
 
 ## Target fields
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `package_root` | Yes | Path to the project root, relative to the binding file |
-| `test_root` | No | Where to write generated tests, relative to the binding file |
-| `command` | No | Shell command template for command targets |
-| `function` | No | Fully qualified function for API targets |
-| `constructor` | No | Constructor for API targets that need object creation |
-| `build` | No | Custom build command |
+| `package_root` | yes | Path to the project root, relative to the binding file. Commands run from here. |
+| `test_root` | no | Where to write generated test files, relative to the binding file. |
+| `build` | no | Optional build command run before execution. |
+| `command` | no | Shell command template for command targets (supports `{workdir}`, `{spec_path}`). |
+| `function` | no | Fully qualified function for API targets. |
+| `constructor` | no | Fully qualified constructor for API targets that need a receiver. |
+| `outputs.file` | no | Path to an output file the harness reads. |
+| `outputs.stdout` | no | Format to parse stdout in (e.g. `"json"`). |
 
-## String inputs in command targets
+See `binding-schema.json` for the authoritative definitions.
+
+## Target shapes
+
+### Default (annotation discovery)
+
+```yaml
+targets:
+  default:
+    package_root: ../my-crate
+```
+
+The harness builds the crate, discovers annotated symbols, generates
+per-case tests, and runs them. This is what every fixture uses.
+
+### Command target
+
+```yaml
+targets:
+  run-cli:
+    package_root: ../my-cli
+    command: cargo run -q -p my-cli -- {spec_path}
+    outputs:
+      stdout: json
+```
+
+The harness invokes the command, reads stdout (or `outputs.file`),
+parses it as JSON, and treats the result as the test outcome. Useful
+for testing CLIs or external tools.
+
+### API target
+
+```yaml
+targets:
+  validate-spec:
+    package_root: ../my-crate
+    function: my_crate::validate
+```
+
+The harness calls the named function in-process. Useful when the
+implementation is a library and you don't need a subprocess.
+
+### Build-only target
+
+```yaml
+targets:
+  compile-check:
+    package_root: ../my-crate
+    build: cargo build -q
+```
+
+A target with only `build` and no `command` / `function` — used when
+"does it compile" is the entire assertion (e.g. trybuild-style negative
+tests).
+
+## String inputs
 
 When a case input is a string (e.g. source code), the generated test
-embeds it as a string literal. The test code can write it to a temp file
-and pass the file path to the command — the transport is handled by the
-generated test, not the shell.
+embeds it as a literal. For command targets the test may write it to a
+temp file and pass that path through the command template; this is the
+generator's responsibility, not the shell's.
 
 ## Error cases in command targets
 
-For test cases with `outcome: Error`, the command should exit with a
-non-zero status or output JSON with an error structure. The harness
-compares the error output against the spec's expected errors.
-
-Language-specific details for error testing (e.g. Rust `trybuild` for
-compile errors, C# Roslyn diagnostics) belong in the language knowledge
-files, not here.
+For a case where the expected trace stream contains an error event
+(e.g. `<op>.outcome: "Error"`), the command may exit non-zero or emit
+an error payload in stdout. The harness compares trace events, not
+exit codes — exit-code interpretation is a per-target detail to be
+decided by the binding.

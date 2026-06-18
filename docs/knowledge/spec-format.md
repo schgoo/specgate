@@ -1,339 +1,245 @@
 # Spec file format
 
-Spec files are YAML, validated by `spec-schema.json`. One file per component or
-logical group of operations.
+Spec files are YAML, validated by `spec-schema.json`. One spec file per
+component (or logical group of operations that share state).
 
-**File convention**: `specs/<name>.spec.yaml`
+**File convention**: `<name>.spec.yaml` (e.g.
+`test/rust/crates/specgate-fixtures/specs/stateless_add.spec.yaml`).
+
+The canonical examples of every supported pattern live under
+`test/rust/crates/specgate-fixtures/specs/`. When this doc and a fixture
+disagree, the fixture is the source of truth.
 
 ## Top-level fields
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `name` | yes | Dotted component name, e.g. `core.validate` |
-| `binding` | no | Binding declaration(s) — `{ name, target }` object or list of objects. `name` resolves to `bindings/<name>.yaml`, `target` selects the execution target. |
-| `inputs` | cond | Named inputs with type/source/desc (single-operation specs) |
-| `types` | no | Named type definitions (oneof, causes, or record) |
-| `outcome` | cond | Outcome variants or single type (single-operation specs) |
-| `outputs` | cond | Per-outcome output fields (single-operation specs) |
-| `state` | no | State variables and types (StateMachine specs) |
-| `init` | no | Initial state values (required when `state` is present) |
-| `operations` | no | Named operations with inputs/outcomes (StateMachine specs) |
-| `invariants` | no | Approved invariants (proposed by `specgate propose-invariants`) |
-| `depends_on` | no | List of spec names this spec depends on for shared types |
-| `cases` | yes | Test cases (≥1) |
+| `name` | yes | Dotted component name, e.g. `fixture.stateless_add` |
+| `binding` | no | **Path** (string) to a binding YAML file, relative to this spec file |
+| `cases` | yes | List of test cases (≥1; some fixtures intentionally have `cases: []` to test loader behaviour) |
+| `depends_on` | no | List of other spec names this spec depends on for shared types |
 
-A spec is either **single-operation** (has `inputs`/`outcome`/`outputs` at the top
-level) or **multi-operation / state machine** (has `state`/`operations`). These are
-mutually exclusive.
+There are **no** top-level `inputs` / `outcome` / `outputs` /
+`state` / `init` / `operations` / `invariants` fields in the current
+fixture format. Outcomes are asserted through `expected:` entries on
+each case (e.g. `divide.outcome: "Ok"`), not through a top-level
+declaration. (The `core.*` self-specs and the harness spec retain some
+of these top-level fields for legacy reasons; they are scheduled for
+removal.)
 
-## Type declarations
+## `binding`
 
-Types can be inline or named. Use named types for variants (`oneof`), error
-types (`causes`), or reuse.
+A string path. The harness reads the file at that path to learn the
+language and where the package under test lives.
 
 ```yaml
-# Named type with variants (discriminated union)
-types:
-  Shape:
-    oneof:
-      Circle: { radius: float }
-      Rectangle: { width: float, height: float }
-
-# Named error type with causes (error chain, not a discriminated union)
-types:
-  GeometryError:
-    causes:
-      NegativeDimension: { field: string }
-      UnsupportedShape: { name: string }
-
-# Named record type
-types:
-  Point:
-    fields:
-      x: float
-      y: float
+# fixture.stateless_add.spec.yaml
+name: fixture.stateless_add
+binding: binding.yaml   # sibling of this spec file
 ```
 
-**`oneof` vs `causes`:** Use `oneof` for data variants the caller matches
-exhaustively (e.g. Shape). Use `causes` for error types where each entry is a
-possible failure cause — languages map this to error chains (Rust/ohno) or
-exception hierarchies (C#), not discriminated unions.
-
-Bare keys (without `fields:` wrapper) are also valid for record types:
-
 ```yaml
-types:
-  Point:
-    x: float
-    y: float
+# binding.yaml
+language: rust
+targets:
+  default:
+    package_root: ..
 ```
 
-**Types are suggestions, not rules.** They describe what fields must be available,
-not how the implementation structures data internally. A Rust enum, a struct, a
-trait object — any representation works as long as test cases can construct inputs
-and assert outputs using the declared fields.
+See `docs/knowledge/bindings.md` for binding file shape.
 
-## Inputs
+## `cases`
 
 ```yaml
-inputs:
-  shape:
-    type: Shape
-  precision:
-    type: int
-    source: config
-    desc: Decimal places for rounding
-```
-
-- `type` is required
-- `source` is optional — tells the harness where the input comes from if not a function argument
-- `desc` is optional human-readable description
-
-## Outcomes and outputs
-
-```yaml
-outcome:
-  oneof: [Ok, Error]
-
-outputs:
-  when Ok:
-    result: float
-  when Error:
-    message: string
-```
-
-Outcome can also be a single string: `outcome: Ok`
-
-### Outcome kinds
-
-Outcomes fall into three categories based on how they map to language constructs:
-
-| Outcome kind | Meaning | Rust | C# |
-|---|---|---|---|
-| Success (e.g. `Ok`, `Complete`) | Operation succeeded | Return value | Return value |
-| Error (e.g. `Error`, `Invalid`) | Recoverable failure — caller can handle | `Result::Err(E)` | `Result<T>.Error` |
-| `Unrecoverable` | Invariant violated — process must stop | `panic!()` | `throw Exception` |
-
-**Error vs Unrecoverable:**
-
-- **Error** — the caller can do something about it (retry, fallback, report to user).
-  Model as a returned `Result` in all languages. The spec declares the error type and
-  its fields. Generated tests check the returned error variant.
-- **Unrecoverable** — the system is in a bad state and continuing would make things
-  worse. The operation must abort. Model as panic (Rust) or throw (C#). The spec
-  declares an expected message. Generated tests use `#[should_panic]` (Rust) or
-  `Assert.Throws<>` (C#).
-
-```yaml
-# Example with all three outcome kinds
-outcome:
-  oneof: [Complete, Error, Unrecoverable]
-
-outputs:
-  when Complete:
-    report: RunReport
-  when Error:
-    error: GeometryError
-  when Unrecoverable:
-    message: string
-
 cases:
-  - name: corrupted_registry
-    desc: Aborts if annotation registry has impossible state
-    inputs:
-      spec_path: fixtures/corrupted_registry.spec.yaml
+  - name: add_2_3              # snake_case, unique within the file
+    desc: Adding 2 + 3 returns 5
+    operation: add             # name from a #[spec_operation("add")] in source
+    inputs: { a: 2, b: 3 }     # passed to the operation by name
     expected:
-      outcome: Unrecoverable
-      message: "annotation registry is corrupted"
+      - add.result: "5"        # one Event match
 ```
 
-## Test cases
+| Case field | Required | Description |
+|------------|----------|-------------|
+| `name` | yes | Snake_case identifier, unique within the file |
+| `desc` | yes | Human-readable description |
+| `operation` | for single-step cases | Operation name (from a `#[spec_operation(…)]`) |
+| `steps` | for multi-step cases | Ordered list of `{operation: <name>}` entries |
+| `setup` | no | Setup function name (string) or `{alias: setup_fn}` map for multi-setup cases |
+| `inputs` | no | Values bound to setup and operation parameters by name |
+| `expected` | yes | List of single-entry maps, matched as a subsequence of the trace stream |
+
+`operation` and `steps` are mutually exclusive on a single case.
+
+### `setup`
+
+A case can name a `#[spec_setup("…")]` function:
 
 ```yaml
-cases:
-  - name: circle_area
-    desc: Computes area of a circle
-    inputs:
-      shape:
-        Circle: { radius: 5.0 }
-    expected:
-      outcome: Ok
-      result: 78.54
+- name: increment_once
+  setup: make_counter
+  operation: increment
+  expected:
+    - count: "0"
+    - run: increment
+    - count: "1"
 ```
 
-- `name` is unique, snake_case
-- `desc` is required
-- `inputs` is optional (if the component takes no inputs)
-- `expected.outcome` is required, must match an outcome variant
-- `binding` is optional — overrides the spec-level binding target for this case
-
-### Per-case binding target
-
-Cases inherit the spec-level binding target by default. To use a different
-target for specific cases, add a `binding` field:
+Multi-setup form — aliases map to setup function names, and the aliases
+become the operation's parameter names and the prefixes used in
+`#[spec_event]` trace names:
 
 ```yaml
-binding:
-  name: rust
-  target: extract-annotations  # default
-
-cases:
-  - name: stateless_extraction
-    desc: Extracts annotation metadata from source
-    inputs:
-      source: "#[spec_operation(\"op_a\", kind = Stateless)]\nfn handler() {}"
-    expected:
-      outcome: Ok
-      annotations:
-        - SpecOperation: { operation: op_a, kind: Stateless }
-
-  - name: capture_runtime
-    desc: Capture annotation records field values at runtime
-    binding:
-      target: run-annotations  # different target for runtime tests
-    inputs:
-      source: "..."
-    expected:
-      outcome: Ok
-      traces:
-        - Capture: { operation: op_a, field: total_area, value: 78.54 }
+- name: transfer_between_accounts
+  setup:
+    source: make_source
+    target: make_target
+  operation: transfer
+  inputs: { amount: 50 }
+  expected:
+    - source.balance: "100"
+    - target.balance: "0"
+    - run: transfer
+    - source.balance: "50"
+    - target.balance: "50"
 ```
 
-## YAML quirks
+See `test/rust/crates/specgate-fixtures/specs/multi_setup.spec.yaml`.
 
-- `List<T>` with angle brackets does not need quoting
-- `[...]` is YAML flow sequence — quote if used as a string value
-- `{ }` is YAML flow mapping — both inline and block indent are equivalent
-- Add `# yaml-language-server: $schema=../spec-schema.json` at the top for editor support
+### `inputs`
 
-## State machine specs
-
-State machine specs describe components with multiple operations that share state.
-They use `state`, `init`, `operations`, and optionally `invariants` instead of
-top-level `inputs`/`outcome`/`outputs`.
+A flat map of parameter values. The harness binds each entry to the
+matching parameter on the setup or operation. Mock response tables go in
+`inputs` too, keyed by the mock's name:
 
 ```yaml
-name: geometry.canvas
-binding:
-  name: rust
-  target: test-canvas
-
-state:
-  shapes: List<Shape>
-  total_area: float
-
-init:
-  shapes: []
-  total_area: 0.0
-
-operations:
-  add_shape:
-    inputs: { shape: Shape }
-  clear:
-    inputs: {}
-
-invariants:
-  area_non_negative: "total_area >= 0.0"
+- name: find_user_1
+  setup: make_service
+  operation: get_user
+  inputs:
+    id: "user_1"
+    db:                      # name of a #[spec_mock("db")]
+      "user_1": "Alice"      # input → mocked response
+  expected:
+    - run: get_user
+    - db.request: "user_1"
+    - db.response: "Alice"
+    - get_user.result: "Alice"
 ```
 
-- `state` declares state variable names and types. Types match what `SpecCapture`
-  getters return.
-- `init` declares the initial state values (what `SpecSetup` constructor produces).
-- `operations` declares each operation's inputs and optional outcome. No
-  transition expressions — those are inferred from traces.
-- `invariants` are proposed by `specgate propose-invariants` from observed
-  traces. The user approves each one. Invariant expressions are opaque strings
-  consumed by Quint generation.
+See `mock_field.spec.yaml`, `mock_multi_response.spec.yaml`,
+`mock_not_found.spec.yaml`.
 
-## Multi-step test cases
+### `expected` — list of single-entry maps
 
-For state machine specs, cases use `steps` instead of flat `inputs`/`expected`:
+Every entry is one of:
+
+- `{<name>: <value>}` — matches an `Event` with that `name` and stringified `value`.
+- `{run: <operation>}` — matches a `Run` for that operation.
+
+Values are compared as strings; quoting them in YAML avoids surprises
+with bare numbers and booleans (`"0"`, `"true"`).
 
 ```yaml
-cases:
-  - name: add_shapes_updates_area
-    desc: Adding shapes accumulates total area
-    steps:
-      - operation: add_shape
-        inputs: { shape: { Circle: { radius: 5.0 } } }
-        assert_state:
-          total_area: 78.54
-      - operation: add_shape
-        inputs: { shape: { Rectangle: { width: 3.0, height: 4.0 } } }
-        assert_state:
-          total_area: 90.54
+expected:
+  - count: "0"          # Event { name: "count", value: "0" }
+  - run: increment       # Run   { operation: "increment" }
+  - count: "1"
 ```
 
-Each step has:
-- `operation` (required) — operation name from the `operations` section
-- `inputs` (optional) — input values for this call
-- `expected` (optional) — expected return value (partial match)
-- `assert_state` (optional) — expected state after this step (partial match)
+#### Subsequence matching semantics
 
-Partial matching: omitted fields in `expected` or `assert_state` are not checked.
+The `expected:` list is matched as an **in-order subsequence** of the
+actual trace stream:
 
-### File references
+- Every expected entry must appear in the actual trace.
+- Order is preserved.
+- **Gaps are allowed** — extra events may appear between matches.
+- **Trailing events are allowed** — the actual stream can be longer.
 
-Any input or expected value can be a file reference instead of a literal:
+So a spec can assert as much or as little as it cares about. The
+fixture `subsequence_with_gaps.spec.yaml` only asserts the first and
+last value of a counter that increments twice, skipping the intermediate
+value:
 
 ```yaml
-cases:
-  - name: large_payload
-    inputs:
-      payload:
-        file: fixtures/large_payload.json
-    expected:
-      outcome: Complete
-      result:
-        file: fixtures/expected_output.json
+- name: double_increment
+  setup: make_counter
+  operation: increment_twice
+  expected:
+    - count: "0"
+    - count: "2"          # the intermediate count: "1" is intentionally skipped
 ```
 
-When the value is an object with a single `file` key, the harness reads the file
-content and uses it as the value. Paths are relative to the spec file. This is
-useful for large inputs, golden-file testing, or sharing test data across cases.
+Out-of-order expectations fail
+(`subsequence_wrong_order.spec.yaml`); missing expectations fail
+(`mismatch_missing_event.spec.yaml`); extra events in the actual stream
+do not.
 
-### Postconditions
+### Multi-step cases
 
-Cases can include a `postconditions` field — a list of binding target invocations
-to run after all steps complete. The harness resolves each postcondition's
-`target` through the active binding, substitutes template variables from the
-harness context (e.g., `{generated_test_path}`, `{workdir}`) into the
-postcondition `inputs`, renders the binding target's `command`, and requires
-the command to exit 0 for the case to pass.
+Use `steps:` instead of `operation:` when a single case invokes more
+than one operation against the same setup:
 
 ```yaml
-cases:
-  - name: cleanup_verified
-    steps:
-      - operation: run_spec
-        inputs: { spec_path: fixtures/example.spec.yaml }
-        expected: { outcome: Complete }
-    postconditions:
-      - target: assert-file-absent
-        inputs:
-          path: "{generated_test_path}"
-        desc: Generated test file removed after run
+- name: increment_then_decrement
+  setup: make_counter
+  steps:
+    - operation: increment
+    - operation: decrement
+  expected:
+    - count: "0"
+    - run: increment
+    - count: "1"
+    - run: decrement
+    - count: "0"
 ```
 
-Postconditions are useful for asserting side effects (file absence, process
-state, environment changes) that aren't captured in the operation's return value.
+`expected:` is still one flat subsequence covering the whole case — there
+is no per-step `expected:` and no `assert_state` field. See
+`multi_step.spec.yaml`, `mismatch_second_step.spec.yaml`.
 
-Cases without `steps` use flat `inputs`/`expected` — backward compatible for
-single-operation specs.
+### Results, errors, and panics
+
+Operations returning `Result<T, E>` use trace names by convention
+(`<operation>.outcome`, `<operation>.result`, `<operation>.error`):
+
+```yaml
+# result_ok.spec.yaml
+- name: divide_10_by_2
+  operation: divide
+  inputs: { a: 10, b: 2 }
+  expected:
+    - divide.outcome: "Ok"
+    - divide.result: "5"
+```
+
+```yaml
+# result_err.spec.yaml
+- name: divide_by_zero
+  operation: divide
+  inputs: { a: 10, b: 0 }
+  expected:
+    - divide.outcome: "Error"
+    - divide.error: "division by zero"
+```
+
+Panics are asserted via a `<operation>.error` event whose value is the
+panic message (`unrecoverable.spec.yaml`).
+
+## YAML tips
+
+- Bare numbers / booleans are stringified by the matcher; quoting them
+  explicitly (`"0"`, `"true"`) keeps the YAML and the trace equal.
+- `# yaml-language-server: $schema=…/spec-schema.json` enables editor
+  validation (VS Code Red Hat YAML, JetBrains IDEs).
+- `[ ]` inline-flow sequences and `{ }` inline-flow mappings are
+  equivalent to indented block form.
 
 ## Spec boundary rule
 
-**One spec = one state boundary.** Operations that share state belong in the same
-spec. Operations with independent state belong in separate specs. No spec
-composition or include mechanism exists.
-
-If a spec gets too big because too many operations share state, that is a signal
-the component is too coupled — refactor the code. If there are just too many test
-cases, split into case-only files:
-
-```
-specs/geometry.canvas.spec.yaml           # state, operations, types, invariants
-specs/geometry.canvas.cases/
-  happy_path.yaml                         # cases only
-  error_handling.yaml
-```
+**One spec = one state boundary.** Operations that share state belong
+in the same spec; operations with independent state belong in separate
+specs. No spec composition or include mechanism exists. Specs share
+**types** (not state) via `depends_on:`.

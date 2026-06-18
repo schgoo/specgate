@@ -1,76 +1,91 @@
 # Annotations
 
-Annotations link source code symbols to spec operation names. They serve two
-purposes: discovery (the harness finds what to call) and instrumentation (the
-runtime emits trace events during execution).
+Annotations link source code symbols to spec operation / setup / event /
+mock names. They serve two purposes:
+
+1. **Discovery** — the harness finds what to call.
+2. **Instrumentation** — the runtime emits trace events during execution.
 
 ## Trace model
 
-All traces use two event types:
-- `Event { name, value }` — any observation (state snapshot, return value, checkpoint, mock interaction)
-- `Run { operation }` — marks when an operation executes
+All traces use exactly two event types:
 
-Position in the sequence determines before/after semantics. Events before a
-`Run` are pre-state; events after are post-state.
+- `Event { name, value }` — any value observation (field mutation,
+  return value, mock interaction, inline checkpoint, setup parameter).
+- `Run { operation }` — marks where an operation invocation begins.
 
-## Annotation types
+Position in the sequence determines before/after semantics. Events
+before a `Run` for op X are "pre-X"; events after are "post-X". The
+spec author rarely thinks in these terms — they just list events in the
+order they care about.
+
+## The five annotations
 
 | Annotation | Placed on | Purpose | Trace emitted |
 |------------|-----------|---------|---------------|
-| **`#[spec_operation]`** | Entry point method | Marks the function the spec tests. Kind required. | `Run { operation }` |
-| **`#[spec_setup]`** | Free function or constructor | Constructs objects. Must not take `self`. | `Event { name, value }` for each argument |
-| **`#[spec_event]`** | Struct field or method | On a field: emits `Event` on every mutation and at operation boundaries. On a method: captures return value. | `Event { name, value }` |
-| **`spec_event!()`** | Inline expression | Records a value at a specific point in execution. | `Event { name, value }` |
-| **`#[spec_mock]`** | Method calling external service | Makes function mockable. Records call input/output. | `Event { name: "mock.input/output", value }` |
+| `#[spec_operation("name")]` | Free function or method | Marks the operation a case invokes by `operation:`/`steps[].operation:`. | `Run { operation: name }` at the entry point, plus per-parameter `Event { "<name>.<param>", value }` and `Event { "<name>.result", value }` for the return value (or `<name>.outcome` + `<name>.error` for `Result`). |
+| `#[spec_setup("name")]` | Free function (no `self`) | Names a factory a case invokes by `setup:`. | `Event { "<name>.<param>", value }` per parameter. |
+| `#[spec_event]` | Struct field | Every write to the field emits an event. | `Event { name: "<field>", value: new_value }` on each mutation. Multi-setup cases prefix with the alias (`source.balance`). |
+| `spec_event!("name", expr)` | Inline expression | Records the value of `expr` at this point in execution. | `Event { name, value: format!("{}", expr) }`. |
+| `#[spec_mock("name")]` | Local binding around a method call | Intercepts the call and returns the case-supplied response. | `Event { "<name>.request", input }` then `Event { "<name>.response", mocked_response }`. |
+
+**No `kind` parameter.** Every `#[spec_operation("…")]` in the fixtures
+is name-only. The shape of the operation is expressed entirely by the
+contents of the spec's `expected:` list.
+
+**No `spec_capture` or `spec_checkpoint!()` annotations.** Field capture
+is `#[spec_event]`; inline capture is `spec_event!()`. Those two cover
+every observation pattern in the fixtures.
 
 ## Rules
 
-- **Operation** requires both the operation name and `kind`
-- **Setup** must NOT take `self`/`this`
-- **`spec_event`** on a field emits a trace on every mutation and at operation boundaries
-- **`spec_event`** on a method captures the return value after the operation
-- Only one **Operation** per operation name per project
-- **Mock** names must be unique per operation
+- `#[spec_setup]` functions must **not** take `self` / `this`.
+- An operation name may have at most one `#[spec_operation]` in a given
+  source file. Naming-lookup is scoped per source file (so two fixtures
+  can share an operation name without colliding).
+- A `#[spec_mock]` name must be unique within an operation.
+- `#[spec_event]` on a field captures **every** mutation, including the
+  initial value set by the setup function. This is why so many fixtures
+  show a leading `count: "0"` (or similar) before the first `run:`.
 
 ## How annotations compose
 
-All annotations sharing the same operation name are collected into one operation.
+A single operation typically uses several annotations across one source
+file. They are joined at runtime by name and source-file scope.
 
 ```
-#[spec_operation("canvas", kind=StateMachine)] ─┐
-#[spec_setup("canvas")]                        ─┤  → one operation: "canvas"
-#[spec_event] on struct fields                 ─┤
-#[spec_mock("canvas", name="renderer")]        ─┘
+#[spec_setup("make_counter")]                    ─┐
+#[spec_event] on Counter.count                   ─┼─► one operation, "increment"
+#[spec_operation("increment")] on Counter::incr  ─┘
 ```
 
-## Output capture
+See `test/rust/crates/specgate-fixtures/src/statemachine_counter.rs`
+for the full example.
 
-Two mechanisms capture operation outputs for comparison:
+## Reference fixtures
 
-1. **Capture (field-level):** `spec_capture` on a struct or individual fields.
-   On a struct, all public fields are captured. On individual fields, only
-   annotated fields are captured.
-2. **Checkpoint (expression-level):** inline `spec_checkpoint!()` captures any
-   expression, including calls to third-party types.
-
-For StateMachine operations, captured fields are recorded **before and after**
-the operation call. For all other kinds, fields are captured **after** only.
+| Pattern | Source file |
+|---------|-------------|
+| `#[spec_operation]` only (no setup) | `stateless_add.rs` |
+| `#[spec_setup]` + `#[spec_event]` + method op | `statemachine_counter.rs` |
+| Multiple `#[spec_event]` fields | `multi_field_capture.rs` |
+| `spec_event!()` inline | `checkpoint_inline.rs` |
+| `#[spec_mock]` | `mock_field.rs`, `mock_multi_response.rs` |
+| Setup with parameters | `setup_with_params.rs` |
+| Multiple setups | `multi_setup.rs` |
+| `Result` return | `result_ok.rs` (Ok and Err paths share this file) |
+| Panic / unrecoverable | `unrecoverable.rs` |
+| Void operation | `void_operation.rs` |
+| Nested operation calls | `nested_operations.rs` |
 
 ## Zero-cost in production
 
-All annotations are **no-op in release builds** by default. The capture,
-checkpoint, and mock instrumentation is compiled out unless explicitly enabled.
+Annotations are expected to be **no-ops** when the SpecGate feature
+flag is disabled (Rust) or the `SPECGATE` define is absent (C#). With
+the flag off the macros expand to nothing — no trace buffer, no event
+records, no cost.
 
-| Build mode | Behavior |
-|------------|----------|
-| `debug` (default) | Annotations are active — values are captured, mocks can be injected |
-| `release` | Annotations are no-op — zero runtime overhead, zero binary size impact |
-| Feature flag off | Annotations are no-op regardless of build mode |
-
-- **Rust:** feature flag controls activation. Disabled = macros expand to nothing.
-  `spec_checkpoint!(expr)` evaluates to just `expr`.
-- **C#:** `[Conditional("SPECGATE")]` attributes. Absent define = no-op.
-  `SpecCheckpoint.Capture()` compiles to a pass-through.
-
-Users can force annotations on in release builds (e.g. for integration testing
-in staging) by explicitly enabling the feature/define.
+| Build mode | Behaviour |
+|------------|-----------|
+| Tests with `specgate` feature on | Annotations active, events captured |
+| Release build, feature off | Annotations are no-op; zero overhead |

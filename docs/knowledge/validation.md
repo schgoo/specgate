@@ -1,34 +1,52 @@
 # Validation rules
 
-`core.validate` checks that extracted annotations form structurally correct
-operations. It produces a `Valid` or `Invalid` outcome, plus warnings.
+Two kinds of validation happen before a case is executed:
 
-## Errors (make outcome Invalid)
+1. **Schema validation** — does the YAML conform to `spec-schema.json`?
+2. **Annotation lookup** — do the `setup:` and `operation:` names
+   referenced by the case resolve to annotated functions in the source?
 
-| Error | Condition |
-|-------|-----------|
-| `MissingEntryPoint` | Annotations reference an operation with no `SpecOperation` |
-| `DuplicateEntryPoint` | Two `SpecOperation` annotations for the same operation name |
-| `IncompleteOperation` | StateMachine has no Capture, or Sequence has no Checkpoint |
-| `InvalidRoleForKind` | Role not allowed for this kind (see kinds.md) |
-| `ConflictingParamNames` | Two setups contribute the same parameter name |
-| `OrphanAnnotation` | Annotation references operation name not found (likely typo) |
-| `DuplicateMockName` | Two mocks on the same operation with the same `mock_name` |
-| `DuplicateSetupName` | Two setups on the same operation with the same `name` |
+## Schema validation
 
-## Warnings (outcome can still be Valid)
+`spec-schema.json` (draft-07) covers the YAML shape:
 
-| Warning | Condition |
-|---------|-----------|
-| `AbstractTypeNoGenerator` | Abstract type in parameters without a generator |
-| `PrivateCheckpoint` | Checkpoint has private accessibility — harness may not reach it |
-| `AmbiguousConstruction` | Entry point is a method but no `spec_setup` exists for its type |
+- `name` and `cases` are required at the top level.
+- `binding` is a string (path).
+- Each case requires `name` and `desc`; may have `operation`, `setup`,
+  `inputs`, `expected`, `steps`, `postconditions`.
+- `expected` is an array of single-entry maps (Event matches or `{run:
+  …}` entries).
 
-## Key rules
+Schema errors are reported as `Invalid` with a `reason`.
 
-- Errors and warnings are reported independently — an Invalid result can still have warnings
-- Validation is per-operation: one invalid operation makes the whole result Invalid
-- Duplicate mock/setup names are scoped per operation — same name in different operations is fine
-- Empty annotation list is vacuously Valid
-- Structural kind forbids ALL runtime roles (Setup, Mock, Capture, Checkpoint)
-- Setup with `self` in params is an error (setups must be free functions)
+## Annotation lookup errors
+
+The fixtures intentionally include cases that exercise these failure
+modes:
+
+| Fixture | What it asserts |
+|---------|-----------------|
+| `missing_setup.spec.yaml` | Referencing a `setup:` name that has no `#[spec_setup]` in the source under test fails the case. |
+| `missing_operation.spec.yaml` | Referencing an `operation:` name with no `#[spec_operation]` fails the case. |
+| `bad_binding.spec.yaml` | A binding path that does not resolve to a valid binding file fails. |
+| `bad_yaml.spec.yaml` | A YAML parse error on the spec file fails. |
+| `no_cases.spec.yaml` | A spec with `cases: []` is rejected (or returns an empty result, depending on loader). |
+| `compile_error.spec.yaml` | A source file that fails to compile fails the case. |
+
+## Subsequence-match outcomes
+
+A case that loads and runs successfully still fails if the actual trace
+stream does not contain `expected:` as a subsequence. The failing
+fixtures exercise each shape of mismatch:
+
+| Fixture | What it asserts |
+|---------|-----------------|
+| `mismatch_missing_event.spec.yaml` | Expected entry never appears in the actual trace. |
+| `mismatch_wrong_field.spec.yaml` | Expected event name doesn't match any actual event. |
+| `mismatch_second_step.spec.yaml` | The second step's expected slice is absent. |
+| `subsequence_wrong_order.spec.yaml` | Two expected entries appear, but in the wrong order. |
+| `statemachine_counter_wrong.spec.yaml` | Expected value doesn't match the actual mutation. |
+
+Each is marked `pass` in the harness spec because the harness is
+expected to report the case as `fail` — these are negative tests of the
+matcher.

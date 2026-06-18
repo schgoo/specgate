@@ -1,17 +1,21 @@
 # SpecGate Knowledge Base
 
-Read this file first. Then read only the topics relevant to your current task.
+Read this first. Then read only the topics relevant to your current task.
 
 | Topic | File | When to read |
-|-------|------|-------------|
-| Spec format | `spec-format.md` | Always — you need to understand the spec you're implementing |
-| Annotation syntax | `annotations.md` | When placing annotations in source code |
-| Operation kinds | `kinds.md` | When the spec uses StateMachine, Sequence, ErrorMap, or Structural |
-| Construction & setup | `construction.md` | When the entry point is a method (needs `self`/`this`) |
-| Binding files | `bindings.md` | When creating or modifying a binding file |
-| Binding targets | `targets.md` | When configuring command, API, or build-only targets |
-| Validation rules | `validation.md` | When you need to understand what makes annotations valid or invalid |
-| Rust conventions | `rust.md` | When implementing in Rust |
-| C# conventions | `csharp.md` | When implementing in C# |
-| Incremental updates | `incremental.md` | When an implementation already exists and the spec has changed |
-| Greenfield setup | `greenfield.md` | When no implementation exists yet for the spec |
+|-------|------|--------------|
+| Spec format | [`spec-format.md`](spec-format.md) | Always — how a `.spec.yaml` is structured |
+| Annotation syntax | [`annotations.md`](annotations.md) | When placing `#[spec_*]` annotations in source |
+| Setup & construction | [`construction.md`](construction.md) | When the operation is a method or needs setup |
+| Binding files | [`bindings.md`](bindings.md) | When writing or reading a binding YAML |
+| Binding targets | [`targets.md`](targets.md) | When configuring command / API / build-only targets |
+| Validation & failure cases | [`validation.md`](validation.md) | When debugging why a case fails to load or match |
+| Rust conventions | [`rust.md`](rust.md) | When implementing in Rust |
+| C# conventions | [`csharp.md`](csharp.md) | When implementing in C# |
+| Greenfield workflow | [`greenfield.md`](greenfield.md) | When no implementation exists yet |
+| Incremental updates | [`incremental.md`](incremental.md) | When updating an existing implementation |
+| Kinds (historical) | [`kinds.md`](kinds.md) | Note: the `kind` taxonomy is superseded |
+
+The canonical examples of every supported spec pattern live under
+`test/rust/crates/specgate-fixtures/`. When this knowledge base and a
+fixture disagree, the fixture is the source of truth.
