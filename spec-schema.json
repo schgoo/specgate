@@ -8,7 +8,7 @@
     "spec_version": {
       "type": "string",
       "description": "Schema version. Current version is '0.3.0'.",
-      "enum": ["0.3.0"]
+      "enum": ["0.3.0", "0.4.0"]
     },
     "name": {
       "type": "string",
@@ -52,6 +52,11 @@
           "type": "string",
           "description": "Operation kind. 'setup' creates state objects. 'command' runs a shell command. Default is a regular annotated operation.",
           "enum": ["setup", "command"]
+        },
+        "async": {
+          "type": "boolean",
+          "description": "Whether this operation is async. The harness validates this against annotations — mismatch is an error. The generated runner uses an async runtime when true.",
+          "default": false
         },
         "desc": {
           "type": "string",
@@ -117,6 +122,31 @@
           "type": "string",
           "description": "Human-readable description."
         },
+        "level": {
+          "type": "string",
+          "description": "Normative strength. Affects what happens when the annotation is missing: must=error, should=warn, may=skip. If implemented, case must pass regardless of level.",
+          "enum": ["must", "should", "may"],
+          "default": "must"
+        },
+        "source": {
+          "type": "object",
+          "description": "Provenance metadata linking this case to source specification assertions. Opaque to the harness, consumed by reporting tools.",
+          "properties": {
+            "assertion_ids": {
+              "type": "array",
+              "description": "IDs of source spec assertions this case verifies.",
+              "items": { "type": "string" }
+            },
+            "spec": {
+              "type": "string",
+              "description": "Name of the source specification."
+            },
+            "section": {
+              "type": "string",
+              "description": "Section reference in the source specification."
+            }
+          }
+        },
         "operation": {
           "type": "string",
           "description": "Operation to invoke (must match a key in the operations block)."
@@ -133,7 +163,7 @@
           "description": "Input values for this case (validated against the operation's declared inputs)."
         },
         "expected": {
-          "description": "Expected results. A list of trace assertions (for annotated operations, matched as a subsequence), or an object with structured output (for function operations like run_spec).",
+          "description": "Expected results. A list of trace assertions using $-prefixed directives ($run, $unordered, $anywhere) and bare event assertions (name: value). Or an object with structured output for function operations.",
           "oneOf": [
             {
               "type": "array",
@@ -146,7 +176,24 @@
         },
         "steps": {
           "type": "array",
-          "description": "Ordered operation sequence for multi-step cases. Each step references an operation.",
+          "description": "Ordered step sequence. Each item is a sequential operation or a concurrent block of parallel operations.",
+          "items": {
+            "oneOf": [
+              { "$ref": "#/definitions/testStep" },
+              { "$ref": "#/definitions/concurrentBlock" }
+            ]
+          },
+          "minItems": 1
+        }
+      }
+    },
+    "concurrentBlock": {
+      "type": "object",
+      "required": ["concurrent"],
+      "properties": {
+        "concurrent": {
+          "type": "array",
+          "description": "Operations that run in parallel. The block completes (barrier) before the next sequential step.",
           "items": { "$ref": "#/definitions/testStep" },
           "minItems": 1
         }

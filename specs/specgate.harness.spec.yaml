@@ -18,8 +18,8 @@ binding: bindings/rust.yaml
 types:
   TraceEvent:
     oneof:
-      Event: { name: string, value: string }
-      Run: { operation: string }
+      Event: { span: string, name: string, value: string }
+      Run: { span: string, operation: string }
 
   CaseResult:
     name: string
