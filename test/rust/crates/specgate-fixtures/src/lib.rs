@@ -18,4 +18,8 @@ pub mod void_operation;
 pub mod readonly_operation;
 pub mod unrecoverable;
 pub mod option_some;
+pub mod async_fetch;
+pub mod keyword_collision;
+pub mod unordered_fields;
+pub mod anywhere_event;
 // pub mod compile_error;  // intentionally broken — syntax error

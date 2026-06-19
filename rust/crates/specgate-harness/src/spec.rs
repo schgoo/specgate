@@ -4,14 +4,17 @@
 //! incompatible with `specgate-types::SpecDocument`, so we parse with
 //! `serde_yaml::Value` and pull out the fields we care about by hand.
 
+use crate::types::{Assertion, CaseLevel, Source};
 use serde_yaml::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
 pub struct Spec {
     pub binding_path: Option<String>,
     pub cases: Vec<Case>,
+    /// Names of operations declared `async: true` in the spec.
+    pub async_ops: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -21,7 +24,9 @@ pub struct Case {
     pub operation: Option<String>,
     pub steps: Vec<String>,
     pub inputs: BTreeMap<String, Value>,
-    pub expected: Vec<BTreeMap<String, String>>,
+    pub expected: Vec<Assertion>,
+    pub level: CaseLevel,
+    pub source: Option<Source>,
 }
 
 #[derive(Debug, Clone)]
@@ -62,6 +67,19 @@ fn parse_spec_value(v: &Value) -> Result<Spec, ParseError> {
         .and_then(|b| b.as_str())
         .map(String::from);
 
+    let mut async_ops = BTreeSet::new();
+    if let Some(Value::Mapping(ops)) = map.get(Value::String("operations".into())) {
+        for (k, v) in ops {
+            let Some(name) = k.as_str() else { continue };
+            let Some(body) = v.as_mapping() else { continue };
+            if let Some(a) = body.get(Value::String("async".into())) {
+                if a.as_bool() == Some(true) {
+                    async_ops.insert(name.to_string());
+                }
+            }
+        }
+    }
+
     let cases_v = map
         .get(Value::String("cases".into()))
         .ok_or_else(|| ParseError::Shape("missing field: cases".into()))?;
@@ -73,7 +91,11 @@ fn parse_spec_value(v: &Value) -> Result<Spec, ParseError> {
     for c in cases_seq {
         cases.push(parse_case(c)?);
     }
-    Ok(Spec { binding_path, cases })
+    Ok(Spec {
+        binding_path,
+        cases,
+        async_ops,
+    })
 }
 
 fn parse_case(v: &Value) -> Result<Case, ParseError> {
@@ -91,11 +113,6 @@ fn parse_case(v: &Value) -> Result<Case, ParseError> {
         None => Setup::None,
         Some(Value::String(s)) => Setup::Single(s.clone()),
         Some(Value::Mapping(mp)) => {
-            // Either:
-            //   - multi-setup with aliases: `source: make_source, target: make_target`
-            //     (all values are strings)
-            //   - single-setup with params: `make_counter: { initial: 10 }`
-            //     (one entry, value is a mapping)
             let all_strings = mp.iter().all(|(_, v)| v.as_str().is_some());
             if all_strings {
                 let mut entries = Vec::new();
@@ -109,11 +126,10 @@ fn parse_case(v: &Value) -> Result<Case, ParseError> {
                 }
                 Setup::Multi(entries)
             } else {
-                // Each entry: key = setup fn name, value = mapping of params.
-                // Currently the harness only handles a single such entry.
-                let (k, v) = mp.iter().next().ok_or_else(|| {
-                    ParseError::Shape("empty setup mapping".into())
-                })?;
+                let (k, v) = mp
+                    .iter()
+                    .next()
+                    .ok_or_else(|| ParseError::Shape("empty setup mapping".into()))?;
                 let fn_name = k
                     .as_str()
                     .ok_or_else(|| ParseError::Shape("setup name not str".into()))?
@@ -171,8 +187,6 @@ fn parse_case(v: &Value) -> Result<Case, ParseError> {
         }
         Some(_) => return Err(ParseError::Shape("inputs has invalid shape".into())),
     };
-    // Merge per-setup params (from `setup: { make_X: { p: v } }` form) into
-    // the case inputs so downstream code can resolve them uniformly.
     let mut inputs = inputs;
     for (k, v) in extra_inputs {
         inputs.entry(k).or_insert(v);
@@ -180,30 +194,44 @@ fn parse_case(v: &Value) -> Result<Case, ParseError> {
 
     let expected = match m.get(Value::String("expected".into())) {
         None => Vec::new(),
-        Some(Value::Sequence(seq)) => {
-            let mut out = Vec::new();
-            for entry in seq {
-                let em = entry
-                    .as_mapping()
-                    .ok_or_else(|| ParseError::Shape("expected entry not a mapping".into()))?;
-                let mut single = BTreeMap::new();
-                for (k, v) in em {
-                    let key = k
-                        .as_str()
-                        .ok_or_else(|| ParseError::Shape("expected key not string".into()))?
-                        .to_string();
-                    let val = stringify_value(v);
-                    single.insert(key, val);
-                }
-                out.push(single);
-            }
-            out
-        }
-        // Legacy / non-list `expected:` shapes (e.g. `expected: { outcome: ... }`)
-        // are tolerated as empty: cases that need real expectations go through
-        // the list form. This keeps loader-shape error fixtures (`bad_binding`,
-        // `no_cases`) reachable without first failing on `expected:` shape.
+        Some(Value::Sequence(seq)) => parse_assertion_list(seq)?,
+        // Legacy / non-list `expected:` shapes are tolerated as empty.
         Some(_) => Vec::new(),
+    };
+
+    let level = match m.get(Value::String("level".into())) {
+        None => CaseLevel::Must,
+        Some(Value::String(s)) => match s.as_str() {
+            "must" => CaseLevel::Must,
+            "should" => CaseLevel::Should,
+            "may" => CaseLevel::May,
+            other => {
+                return Err(ParseError::Shape(format!("invalid level value: {other}")));
+            }
+        },
+        Some(_) => return Err(ParseError::Shape("level has invalid shape".into())),
+    };
+
+    let source = match m.get(Value::String("source".into())) {
+        None => None,
+        Some(Value::Mapping(sm)) => {
+            let mut s = Source::default();
+            if let Some(Value::Sequence(ids)) = sm.get(Value::String("assertion_ids".into())) {
+                for id in ids {
+                    if let Some(t) = id.as_str() {
+                        s.assertion_ids.push(t.to_string());
+                    }
+                }
+            }
+            if let Some(Value::String(t)) = sm.get(Value::String("spec".into())) {
+                s.spec = t.clone();
+            }
+            if let Some(Value::String(t)) = sm.get(Value::String("section".into())) {
+                s.section = t.clone();
+            }
+            Some(s)
+        }
+        Some(_) => return Err(ParseError::Shape("source has invalid shape".into())),
     };
 
     Ok(Case {
@@ -213,7 +241,61 @@ fn parse_case(v: &Value) -> Result<Case, ParseError> {
         steps,
         inputs,
         expected,
+        level,
+        source,
     })
+}
+
+fn parse_assertion_list(seq: &[Value]) -> Result<Vec<Assertion>, ParseError> {
+    let mut out = Vec::new();
+    for entry in seq {
+        out.push(parse_assertion(entry)?);
+    }
+    Ok(out)
+}
+
+fn parse_assertion(v: &Value) -> Result<Assertion, ParseError> {
+    let m = v
+        .as_mapping()
+        .ok_or_else(|| ParseError::Shape("assertion is not a mapping".into()))?;
+    if m.len() != 1 {
+        return Err(ParseError::Shape(
+            "assertion entry must be a single-key mapping".into(),
+        ));
+    }
+    let (k, val) = m.iter().next().unwrap();
+    let key = k
+        .as_str()
+        .ok_or_else(|| ParseError::Shape("assertion key not string".into()))?;
+    match key {
+        "$run" => {
+            let op = val
+                .as_str()
+                .ok_or_else(|| ParseError::Shape("$run value not string".into()))?
+                .to_string();
+            Ok(Assertion::Run { operation: op })
+        }
+        "$unordered" => {
+            let seq = val
+                .as_sequence()
+                .ok_or_else(|| ParseError::Shape("$unordered value not a sequence".into()))?;
+            Ok(Assertion::Unordered {
+                items: parse_assertion_list(seq)?,
+            })
+        }
+        "$anywhere" => {
+            let seq = val
+                .as_sequence()
+                .ok_or_else(|| ParseError::Shape("$anywhere value not a sequence".into()))?;
+            Ok(Assertion::Anywhere {
+                items: parse_assertion_list(seq)?,
+            })
+        }
+        other => Ok(Assertion::Event {
+            name: other.to_string(),
+            value: stringify_value(val),
+        }),
+    }
 }
 
 pub fn stringify_value(v: &Value) -> String {

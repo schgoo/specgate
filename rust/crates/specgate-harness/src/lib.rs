@@ -18,7 +18,7 @@ pub mod scan;
 mod spec;
 mod types;
 
-pub use types::{CaseResult, CaseStatus, RunOutcome, TraceEvent};
+pub use types::{Assertion, CaseLevel, CaseResult, CaseStatus, RunOutcome, Source, TraceEvent};
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -87,6 +87,11 @@ pub fn run_spec(spec_path: &str) -> RunOutcome {
     ) {
         Some(p) => p,
         None => {
+            // No source file matched. If every case is non-MUST, surface
+            // skip/warn per case rather than failing the spec.
+            if let Some(results) = short_circuit_non_must(&parsed.cases, None) {
+                return RunOutcome::Complete { results };
+            }
             return RunOutcome::Error {
                 reason: format!(
                     "source file not found: {}",
@@ -114,6 +119,11 @@ pub fn run_spec(spec_path: &str) -> RunOutcome {
     let mut required_setups: BTreeSet<String> = BTreeSet::new();
     let mut required_ops: BTreeSet<String> = BTreeSet::new();
     for case in &parsed.cases {
+        // Cases with a non-MUST level whose pieces are missing get
+        // short-circuited later, so do not contribute to required sets.
+        if case.level != CaseLevel::Must && !case_pieces_available(case, &annotated) {
+            continue;
+        }
         match &case.setup {
             spec::Setup::None => {}
             spec::Setup::Single(name) => {
@@ -153,16 +163,55 @@ pub fn run_spec(spec_path: &str) -> RunOutcome {
         return RunOutcome::Error { reason };
     }
 
+    // Decide which cases will run via cargo vs short-circuit (skip/warn).
+    let mut case_disposition: Vec<CaseDisposition> = Vec::with_capacity(parsed.cases.len());
+    let mut runnable = false;
+    for case in &parsed.cases {
+        let disp = if case_pieces_available(case, &annotated) {
+            runnable = true;
+            CaseDisposition::Run
+        } else {
+            match case.level {
+                CaseLevel::Must => {
+                    // Already handled above by the required_* loops.
+                    runnable = true;
+                    CaseDisposition::Run
+                }
+                CaseLevel::Should => CaseDisposition::Warn,
+                CaseLevel::May => CaseDisposition::Skip,
+            }
+        };
+        case_disposition.push(disp);
+    }
+
+    if !runnable {
+        // Every case is non-MUST and short-circuited. No cargo needed.
+        let results = build_short_circuit_results(&parsed.cases, &case_disposition);
+        return RunOutcome::Complete { results };
+    }
+
     // Locate workspace root for path deps.
     let workspace_root = workspace_root();
     let scratch_dir = scratch_for(&fixture_basename);
+
+    // Determine if ANY runnable case uses an async op — drives async runtime
+    // scaffolding in the generated runner.
+    let cases_to_run: Vec<&spec::Case> = parsed
+        .cases
+        .iter()
+        .zip(case_disposition.iter())
+        .filter_map(|(c, d)| matches!(d, CaseDisposition::Run).then_some(c))
+        .collect();
+    let needs_async = cases_to_run.iter().any(|c| case_uses_async(c, &parsed));
 
     let proj = match codegen::generate(
         &scratch_dir,
         &fixture_src,
         &parsed,
+        &cases_to_run,
         &annotated,
         &workspace_root,
+        needs_async,
     ) {
         Ok(p) => p,
         Err(e) => {
@@ -183,6 +232,12 @@ pub fn run_spec(spec_path: &str) -> RunOutcome {
     cmd.env_remove("RUSTC_WORKSPACE_WRAPPER");
     cmd.env_remove("CARGO");
     cmd.env_remove("CARGO_MANIFEST_DIR");
+    // Default to offline if not explicitly overridden — git deps are already
+    // cached by the parent workspace build, and crates.io is often blocked
+    // in restricted sandboxes.
+    if std::env::var_os("CARGO_NET_OFFLINE").is_none() {
+        cmd.env("CARGO_NET_OFFLINE", "true");
+    }
     cmd.env(
         "CARGO_TARGET_DIR",
         proj.crate_dir.join("target").as_os_str(),
@@ -199,9 +254,6 @@ pub fn run_spec(spec_path: &str) -> RunOutcome {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        // Heuristic: if rustc/cargo reports a compile error, surface
-        // "source failed to compile". Other failures (panic at runtime)
-        // are unexpected — surface their message.
         if stderr.contains("error[E") || stderr.contains("error:") || stderr.contains("could not compile") {
             return RunOutcome::Error {
                 reason: "source failed to compile".into(),
@@ -232,17 +284,138 @@ pub fn run_spec(spec_path: &str) -> RunOutcome {
         };
 
     let mut results = Vec::with_capacity(parsed.cases.len());
-    for case in &parsed.cases {
-        let traces = trace_map.get(&case.name).cloned().unwrap_or_default();
-        let pass = match_traces::matches(&case.expected, &traces);
-        results.push(CaseResult {
-            name: case.name.clone(),
-            status: if pass { CaseStatus::Pass } else { CaseStatus::Fail },
-            expected: case.expected.clone(),
-            traces,
-        });
+    for (case, disp) in parsed.cases.iter().zip(case_disposition.iter()) {
+        match disp {
+            CaseDisposition::Skip => results.push(CaseResult {
+                name: case.name.clone(),
+                status: CaseStatus::Skip,
+                level: case.level,
+                source: case.source.clone(),
+                expected: Vec::new(),
+                traces: Vec::new(),
+            }),
+            CaseDisposition::Warn => results.push(CaseResult {
+                name: case.name.clone(),
+                status: CaseStatus::Warn,
+                level: case.level,
+                source: case.source.clone(),
+                expected: Vec::new(),
+                traces: Vec::new(),
+            }),
+            CaseDisposition::Run => {
+                let traces = trace_map.get(&case.name).cloned().unwrap_or_default();
+                let pass = match_traces::matches(&case.expected, &traces);
+                results.push(CaseResult {
+                    name: case.name.clone(),
+                    status: if pass { CaseStatus::Pass } else { CaseStatus::Fail },
+                    level: case.level,
+                    source: case.source.clone(),
+                    expected: case.expected.clone(),
+                    traces,
+                });
+            }
+        }
     }
     RunOutcome::Complete { results }
+}
+
+// ---------------------------------------------------------------------------
+// Per-case classification helpers
+// ---------------------------------------------------------------------------
+
+enum CaseDisposition {
+    Run,
+    Skip,
+    Warn,
+}
+
+fn case_pieces_available(case: &spec::Case, annotated: &scan::AnnotatedSource) -> bool {
+    match &case.setup {
+        spec::Setup::None => {}
+        spec::Setup::Single(n) => {
+            if !annotated.setups.contains_key(n) {
+                return false;
+            }
+        }
+        spec::Setup::Multi(entries) => {
+            for (_, n) in entries {
+                if !annotated.setups.contains_key(n) {
+                    return false;
+                }
+            }
+        }
+    }
+    let ops: Vec<&str> = if !case.steps.is_empty() {
+        case.steps.iter().map(String::as_str).collect()
+    } else if let Some(op) = case.operation.as_deref() {
+        vec![op]
+    } else {
+        return true;
+    };
+    ops.iter().all(|o| annotated.operations.contains_key(*o))
+}
+
+/// If every case has level != MUST, return per-case warn/skip results.
+fn short_circuit_non_must(
+    cases: &[spec::Case],
+    _annotated: Option<&scan::AnnotatedSource>,
+) -> Option<Vec<CaseResult>> {
+    if cases.iter().any(|c| c.level == CaseLevel::Must) {
+        return None;
+    }
+    let mut out = Vec::with_capacity(cases.len());
+    for c in cases {
+        let status = match c.level {
+            CaseLevel::Should => CaseStatus::Warn,
+            CaseLevel::May => CaseStatus::Skip,
+            CaseLevel::Must => unreachable!(),
+        };
+        out.push(CaseResult {
+            name: c.name.clone(),
+            status,
+            level: c.level,
+            source: c.source.clone(),
+            expected: Vec::new(),
+            traces: Vec::new(),
+        });
+    }
+    Some(out)
+}
+
+fn build_short_circuit_results(
+    cases: &[spec::Case],
+    disp: &[CaseDisposition],
+) -> Vec<CaseResult> {
+    cases
+        .iter()
+        .zip(disp.iter())
+        .map(|(c, d)| {
+            let status = match d {
+                CaseDisposition::Skip => CaseStatus::Skip,
+                CaseDisposition::Warn => CaseStatus::Warn,
+                CaseDisposition::Run => unreachable!("runnable case in short-circuit path"),
+            };
+            CaseResult {
+                name: c.name.clone(),
+                status,
+                level: c.level,
+                source: c.source.clone(),
+                expected: Vec::new(),
+                traces: Vec::new(),
+            }
+        })
+        .collect()
+}
+
+fn case_uses_async(case: &spec::Case, spec: &spec::Spec) -> bool {
+    let ops: Vec<&str> = if !case.steps.is_empty() {
+        case.steps.iter().map(String::as_str).collect()
+    } else if let Some(op) = case.operation.as_deref() {
+        vec![op]
+    } else {
+        return false;
+    };
+    ops.iter().any(|o| spec.async_ops.contains(*o))
 }
 
 fn spec_basename(p: &Path) -> String {
@@ -394,43 +567,46 @@ fn check_shape(spec: &spec::Spec, raw: &serde_yaml::Value) -> Option<String> {
         }
 
         for entry in &case.expected {
-            if entry.len() != 1 {
-                continue;
-            }
-            let (k, _) = entry.iter().next().unwrap();
-            if k == "run" {
-                continue;
-            }
-            if allowed.contains(k) {
-                continue;
-            }
-            // Any event prefixed with one of the case's op names is
-            // accepted (the matcher itself decides whether it actually
-            // appeared in traces).
-            if case_ops.iter().any(|op| k.starts_with(&format!("{op}."))) {
-                continue;
-            }
-            // Strict-mode ops have ALL declared outputs prefixed with
-            // `<op>.`. If no op in this case is strict-mode, skip the
-            // shape check entirely — bare field events (state-machine
-            // style) are allowed to be anything.
-            let strict_op = case_ops.iter().find(|op| {
-                ops_meta
-                    .get(**op)
-                    .map(|m| {
-                        !m.outputs.is_empty()
-                            && m.outputs.iter().all(|o| o.starts_with(&format!("{op}.")))
-                    })
-                    .unwrap_or(false)
-            });
-            if let Some(op) = strict_op {
-                return Some(format!(
-                    "expected event '{k}' is not a declared output of operation '{op}'"
-                ));
+            // Recursively collect leaf Event names from this assertion.
+            let mut leaf_names: Vec<String> = Vec::new();
+            collect_event_names(entry, &mut leaf_names);
+            for k in &leaf_names {
+                if allowed.contains(k) {
+                    continue;
+                }
+                if case_ops.iter().any(|op| k.starts_with(&format!("{op}."))) {
+                    continue;
+                }
+                let strict_op = case_ops.iter().find(|op| {
+                    ops_meta
+                        .get(**op)
+                        .map(|m| {
+                            !m.outputs.is_empty()
+                                && m.outputs.iter().all(|o| o.starts_with(&format!("{op}.")))
+                        })
+                        .unwrap_or(false)
+                });
+                if let Some(op) = strict_op {
+                    return Some(format!(
+                        "expected event '{k}' is not a declared output of operation '{op}'"
+                    ));
+                }
             }
         }
     }
     None
+}
+
+fn collect_event_names(a: &types::Assertion, out: &mut Vec<String>) {
+    match a {
+        types::Assertion::Event { name, .. } => out.push(name.clone()),
+        types::Assertion::Run { .. } => {}
+        types::Assertion::Unordered { items } | types::Assertion::Anywhere { items } => {
+            for it in items {
+                collect_event_names(it, out);
+            }
+        }
+    }
 }
 
 #[derive(Debug, Default)]

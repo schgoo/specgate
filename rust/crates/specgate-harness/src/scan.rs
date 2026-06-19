@@ -204,6 +204,34 @@ pub fn scan(src: &str) -> AnnotatedSource {
                         }
                         continue;
                     }
+                    // Skip leading function qualifiers (`async`, `const`, `unsafe`,
+                    // `extern "C"`) so `#[spec_operation] async fn foo` is
+                    // recognised.
+                    if starts_word_at(&chars, p, "async")
+                        || starts_word_at(&chars, p, "const")
+                        || starts_word_at(&chars, p, "unsafe")
+                    {
+                        let word_len = if starts_word_at(&chars, p, "async") {
+                            5
+                        } else if starts_word_at(&chars, p, "const") {
+                            5
+                        } else {
+                            6
+                        };
+                        p += word_len;
+                        continue;
+                    }
+                    if starts_word_at(&chars, p, "extern") {
+                        p += 6;
+                        while p < n && chars[p].is_whitespace() { p += 1; }
+                        // Optional ABI string.
+                        if p < n && chars[p] == '"' {
+                            p += 1;
+                            while p < n && chars[p] != '"' { p += 1; }
+                            if p < n { p += 1; }
+                        }
+                        continue;
+                    }
                     break;
                 }
                 if !starts_word_at(&chars, p, "fn") {

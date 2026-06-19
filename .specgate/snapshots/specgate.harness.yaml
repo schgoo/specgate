@@ -4,27 +4,43 @@
 # The unified harness. Compiles annotated code, runs operations, collects
 # traces, and compares against expected assertions.
 #
-# Trace matching rules (subsequence):
-#   - Each expected assertion must appear in the traces in order
-#   - Gaps between matches are allowed (subsequence, not exact)
-#   - Extra events in the trace stream are allowed (subset)
-#   - "run: operation" matches a Run event
+# Trace matching rules:
+#   - Ordered assertions matched as subsequence (gaps allowed)
+#   - "$run: operation" matches a Run event
 #   - "name: value" matches an Event with that name and value
+#   - "$unordered: [...]" — all items must appear, any order, between surrounding ordered items
+#   - "$anywhere: [...]" — items must appear somewhere in the trace, position irrelevant
 
-spec_version: "0.3.0"
+spec_version: "0.4.0"
 name: specgate.harness
 binding: bindings/rust.yaml
 
 types:
   TraceEvent:
     oneof:
+      Event: { span: string, name: string, value: string }
+      Run: { span: string, operation: string }
+
+  Assertion:
+    oneof:
       Event: { name: string, value: string }
-      Run: { operation: string }
+      $run: { operation: string }
+      $unordered: { items: List<Assertion> }
+      $anywhere: { items: List<Assertion> }
+
+  Source:
+    assertion_ids: List<string>
+    spec: string
+    section: string
 
   CaseResult:
     name: string
-    status: string
-    expected: List<Map<string, string>>
+    status:
+      oneof: [pass, fail, skip, warn]
+    level:
+      oneof: [must, should, may]
+    source: Source  # optional
+    expected: List<Assertion>
     traces: List<TraceEvent>
 
 operations:
@@ -101,9 +117,40 @@ cases:
       - Confirm no syn-based expression evaluation in harness source
       - The harness should invoke cargo build/test, not evaluate Rust in-process
 
+  - name: paths_resolve_relative_to_spec
+    kind: narrative
+    desc: >
+      All paths in a spec (binding, fixture source) must resolve relative to
+      the spec file's location, not the working directory of the test runner.
+      Generated Cargo.toml paths must use forward slashes or properly escape
+      backslashes to avoid TOML unicode escape interpretation on Windows.
+    verify:
+      - Run `cargo test -p specgate-harness --test specgate_harness_spec` from the workspace root
+      - All Complete-outcome cases must find their fixture source and binding
+      - Generated Cargo.toml must not contain raw backslash paths
+
   # ================================================================
   # Happy path — basic operations
   # ================================================================
+
+  - name: async_operation
+    desc: Async operation compiles and produces traces via async runtime
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/async_fetch.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: fetch_returns_response
+              status: pass
+              expected:
+                - $run: fetch
+                - fetch.result: "response from https://example.com"
+              traces:
+                - Run: { operation: fetch }
+                - Event: { name: fetch.url, value: "https://example.com" }
+                - Event: { name: fetch.result, value: "response from https://example.com" }
 
   - name: stateless_return_value
     desc: Stateless function captures return value
@@ -137,7 +184,7 @@ cases:
               status: pass
               expected:
                 - count: "0"
-                - run: increment
+                - $run: increment
                 - count: "1"
               traces:
                 - Event: { name: count, value: "0" }
@@ -157,7 +204,7 @@ cases:
               status: pass
               expected:
                 - balance: "100"
-                - run: withdraw
+                - $run: withdraw
                 - balance: "50"
                 - transaction_count: "1"
               traces:
@@ -179,7 +226,7 @@ cases:
             - name: process_hello
               status: pass
               expected:
-                - run: process
+                - $run: process
                 - after_upper: " HELLO "
                 - process.result: "HELLO"
               traces:
@@ -200,7 +247,7 @@ cases:
               status: pass
               expected:
                 - count: "0"
-                - run: increment_twice
+                - $run: increment_twice
                 - count: "1"
                 - count: "2"
               traces:
@@ -222,10 +269,10 @@ cases:
               status: pass
               expected:
                 - balance: "100"
-                - run: transfer
-                - run: withdraw
+                - $run: transfer
+                - $run: withdraw
                 - balance: "50"
-                - run: deposit
+                - $run: deposit
                 - balance: "100"
               traces:
                 - Event: { name: balance, value: "100" }
@@ -253,7 +300,7 @@ cases:
               expected:
                 - make_counter.initial: "10"
                 - count: "10"
-                - run: increment
+                - $run: increment
                 - count: "11"
               traces:
                 - Event: { name: make_counter.initial, value: "10" }
@@ -275,7 +322,7 @@ cases:
               expected:
                 - source.balance: "100"
                 - target.balance: "0"
-                - run: transfer
+                - $run: transfer
                 - source.balance: "50"
                 - target.balance: "50"
               traces:
@@ -320,9 +367,9 @@ cases:
               status: pass
               expected:
                 - count: "0"
-                - run: increment
+                - $run: increment
                 - count: "1"
-                - run: decrement
+                - $run: decrement
                 - count: "0"
               traces:
                 - Event: { name: count, value: "0" }
@@ -347,7 +394,7 @@ cases:
             - name: find_user_1
               status: pass
               expected:
-                - run: get_user
+                - $run: get_user
                 - db.request: "user_1"
                 - db.response: "Alice"
                 - get_user.result: "Alice"
@@ -369,7 +416,7 @@ cases:
             - name: get_two_different_users
               status: pass
               expected:
-                - run: get_users
+                - $run: get_users
                 - db.request: "user_1"
                 - db.response: "Alice"
                 - db.request: "user_2"
@@ -500,7 +547,7 @@ cases:
               status: pass
               expected:
                 - count: "0"
-                - run: log
+                - $run: log
                 - count: "1"
               traces:
                 - Event: { name: count, value: "0" }
@@ -612,7 +659,7 @@ cases:
             - name: increment_then_decrement
               status: fail
               expected:
-                - run: decrement
+                - $run: decrement
                 - count: "999"
               traces:
                 - Event: { name: count, value: "0" }
@@ -663,6 +710,218 @@ cases:
                 - Run: { operation: increment_twice }
                 - Event: { name: count, value: "1" }
                 - Event: { name: count, value: "2" }
+
+  # ================================================================
+  # Matching directives — $unordered, $anywhere, $run collision
+  # ================================================================
+
+  - name: unordered_field_matching
+    desc: $unordered block matches fields in any order between ordered items
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/unordered_fields.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: unordered_both_present
+              status: pass
+              expected:
+                - $run: withdraw
+                - $unordered:
+                  - balance: "50"
+                  - transaction_count: "1"
+              traces:
+                - Event: { name: balance, value: "100" }
+                - Event: { name: transaction_count, value: "0" }
+                - Run: { operation: withdraw }
+                - Event: { name: balance, value: "50" }
+                - Event: { name: transaction_count, value: "1" }
+            - name: unordered_reversed_still_passes
+              status: pass
+              expected:
+                - $run: withdraw
+                - $unordered:
+                  - transaction_count: "1"
+                  - balance: "50"
+              traces:
+                - Event: { name: balance, value: "100" }
+                - Event: { name: transaction_count, value: "0" }
+                - Run: { operation: withdraw }
+                - Event: { name: balance, value: "50" }
+                - Event: { name: transaction_count, value: "1" }
+            - name: unordered_wrong_value_fails
+              status: fail
+              expected:
+                - $run: withdraw
+                - $unordered:
+                  - balance: "999"
+                  - transaction_count: "1"
+              traces:
+                - Event: { name: balance, value: "100" }
+                - Event: { name: transaction_count, value: "0" }
+                - Run: { operation: withdraw }
+                - Event: { name: balance, value: "50" }
+                - Event: { name: transaction_count, value: "1" }
+            - name: unordered_multiple_blocks
+              status: pass
+              expected:
+                - $unordered:
+                  - balance: "100"
+                  - transaction_count: "0"
+                - $run: withdraw
+                - $unordered:
+                  - balance: "50"
+                  - transaction_count: "1"
+              traces:
+                - Event: { name: balance, value: "100" }
+                - Event: { name: transaction_count, value: "0" }
+                - Run: { operation: withdraw }
+                - Event: { name: balance, value: "50" }
+                - Event: { name: transaction_count, value: "1" }
+
+  - name: anywhere_event_matching
+    desc: $anywhere matches events regardless of position in trace
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/anywhere_event.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: anywhere_matches_early_event
+              status: pass
+              expected:
+                - $run: increment_twice
+                - count: "2"
+                - $anywhere:
+                  - count: "0"
+              traces:
+                - Event: { name: count, value: "0" }
+                - Run: { operation: increment_twice }
+                - Event: { name: count, value: "1" }
+                - Event: { name: count, value: "2" }
+            - name: anywhere_matches_late_event
+              status: pass
+              expected:
+                - count: "0"
+                - $run: increment_twice
+                - $anywhere:
+                  - count: "2"
+              traces:
+                - Event: { name: count, value: "0" }
+                - Run: { operation: increment_twice }
+                - Event: { name: count, value: "1" }
+                - Event: { name: count, value: "2" }
+            - name: anywhere_matches_middle_event
+              status: pass
+              expected:
+                - $anywhere:
+                  - count: "1"
+                - $run: increment_twice
+                - count: "2"
+              traces:
+                - Event: { name: count, value: "0" }
+                - Run: { operation: increment_twice }
+                - Event: { name: count, value: "1" }
+                - Event: { name: count, value: "2" }
+            - name: anywhere_multiple_items
+              status: pass
+              expected:
+                - $anywhere:
+                  - count: "0"
+                  - count: "1"
+                  - count: "2"
+              traces:
+                - Event: { name: count, value: "0" }
+                - Run: { operation: increment_twice }
+                - Event: { name: count, value: "1" }
+                - Event: { name: count, value: "2" }
+            - name: anywhere_missing_fails
+              status: fail
+              expected:
+                - $anywhere:
+                  - count: "999"
+              traces:
+                - Event: { name: count, value: "0" }
+                - Run: { operation: increment_twice }
+                - Event: { name: count, value: "1" }
+                - Event: { name: count, value: "2" }
+
+  - name: keyword_collision_operation_named_run
+    desc: Operation named "run" works with $run prefix — no collision
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/keyword_collision.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: operation_named_run
+              status: pass
+              expected:
+                - $run: run
+                - run.result: "executed: test"
+              traces:
+                - Run: { operation: run }
+                - Event: { name: run.input, value: "test" }
+                - Event: { name: run.result, value: "executed: test" }
+
+  # ================================================================
+  # Normative strength — level: must/should/may
+  # ================================================================
+
+  - name: provenance_passes_through
+    desc: Source metadata and level are included in CaseResult
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/provenance_example.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: add_with_provenance
+              status: pass
+              level: must
+              source:
+                assertion_ids: [TEST-A1, TEST-A2]
+                spec: "Test Specification v1.0"
+                section: "§3.1"
+              expected:
+                - add.result: "5"
+              traces:
+                - Run: { operation: add }
+                - Event: { name: add.a, value: "2" }
+                - Event: { name: add.b, value: "3" }
+                - Event: { name: add.result, value: "5" }
+
+  - name: level_may_missing_skips
+    desc: MAY operation not implemented — case is skipped, not an error
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/level_may_missing.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: optional_not_implemented
+              status: skip
+              expected: []
+              traces: []
+
+  - name: level_should_missing_warns
+    desc: SHOULD operation not implemented — case produces warning status
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/level_should_missing.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: recommended_not_implemented
+              status: warn
+              expected: []
+              traces: []
 
   # ================================================================
   # Error cases

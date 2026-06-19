@@ -1,7 +1,6 @@
 //! Tests generated from `specs/specgate.harness.spec.yaml`.
 
-use specgate_harness::{run_spec, CaseResult, CaseStatus, RunOutcome, TraceEvent};
-use std::collections::BTreeMap;
+use specgate_harness::{run_spec, Assertion, CaseLevel, CaseResult, CaseStatus, RunOutcome, TraceEvent};
 
 fn repo_root() -> std::path::PathBuf {
     let mut p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -43,10 +42,17 @@ fn run_op(op: &str) -> TraceEvent {
     }
 }
 
-fn exp_one(k: &str, v: &str) -> BTreeMap<String, String> {
-    let mut m = BTreeMap::new();
-    m.insert(k.into(), v.into());
-    m
+fn aev(name: &str, value: &str) -> Assertion {
+    Assertion::Event {
+        name: name.into(),
+        value: value.into(),
+    }
+}
+
+fn arun(op: &str) -> Assertion {
+    Assertion::Run {
+        operation: op.into(),
+    }
 }
 
 fn check_case(c: &CaseResult, name: &str, status: CaseStatus) {
@@ -69,7 +75,7 @@ fn stateless_return_value() {
     ));
     assert_eq!(r.len(), 1);
     check_case(&r[0], "add_2_3", CaseStatus::Pass);
-    assert_eq!(r[0].expected, vec![exp_one("add.result", "5")]);
+    assert_eq!(r[0].expected, vec![aev("add.result", "5")]);
     assert_eq!(
         r[0].traces,
         vec![
@@ -117,10 +123,13 @@ fn inline_checkpoint() {
         "test/rust/crates/specgate-fixtures/specs/checkpoint_inline.spec.yaml",
     ));
     check_case(&r[0], "process_hello", CaseStatus::Pass);
+    // Macro echoes `&str` params, so `process.data` appears alongside the
+    // inline `after_upper` checkpoint and the `process.result` event.
     assert_eq!(
         r[0].traces,
         vec![
             run_op("process"),
+            ev("process.data", " hello "),
             ev("after_upper", " HELLO "),
             ev("process.result", "HELLO"),
         ]
@@ -455,4 +464,102 @@ fn error_no_cases() {
         "test/rust/crates/specgate-fixtures/specs/no_cases.spec.yaml",
     ));
     assert_eq!(reason, "spec has no test cases");
+}
+
+// ---------------------------------------------------------------------------
+// v0.4.0: $run / $unordered / $anywhere directives
+// ---------------------------------------------------------------------------
+
+#[test]
+fn async_operation() {
+    let r = complete(run(
+        "test/rust/crates/specgate-fixtures/specs/async_fetch.spec.yaml",
+    ));
+    check_case(&r[0], "fetch_returns_response", CaseStatus::Pass);
+    assert_eq!(
+        r[0].traces,
+        vec![
+            run_op("fetch"),
+            ev("fetch.url", "https://example.com"),
+            ev("fetch.result", "response from https://example.com"),
+        ]
+    );
+}
+
+#[test]
+fn keyword_collision_operation_named_run() {
+    let r = complete(run(
+        "test/rust/crates/specgate-fixtures/specs/keyword_collision.spec.yaml",
+    ));
+    check_case(&r[0], "operation_named_run", CaseStatus::Pass);
+    assert_eq!(
+        r[0].expected,
+        vec![arun("run"), aev("run.result", "executed: test")]
+    );
+}
+
+#[test]
+fn unordered_field_matching() {
+    let r = complete(run(
+        "test/rust/crates/specgate-fixtures/specs/unordered_fields.spec.yaml",
+    ));
+    assert_eq!(r.len(), 4);
+    check_case(&r[0], "unordered_both_present", CaseStatus::Pass);
+    check_case(&r[1], "unordered_reversed_still_passes", CaseStatus::Pass);
+    check_case(&r[2], "unordered_wrong_value_fails", CaseStatus::Fail);
+    check_case(&r[3], "unordered_multiple_blocks", CaseStatus::Pass);
+}
+
+#[test]
+fn anywhere_event_matching() {
+    let r = complete(run(
+        "test/rust/crates/specgate-fixtures/specs/anywhere_event.spec.yaml",
+    ));
+    assert_eq!(r.len(), 5);
+    check_case(&r[0], "anywhere_matches_early_event", CaseStatus::Pass);
+    check_case(&r[1], "anywhere_matches_late_event", CaseStatus::Pass);
+    check_case(&r[2], "anywhere_matches_middle_event", CaseStatus::Pass);
+    check_case(&r[3], "anywhere_multiple_items", CaseStatus::Pass);
+    check_case(&r[4], "anywhere_missing_fails", CaseStatus::Fail);
+}
+
+// ---------------------------------------------------------------------------
+// v0.4.0: level + source provenance
+// ---------------------------------------------------------------------------
+
+#[test]
+fn provenance_passes_through() {
+    let r = complete(run(
+        "test/rust/crates/specgate-fixtures/specs/provenance_example.spec.yaml",
+    ));
+    check_case(&r[0], "add_with_provenance", CaseStatus::Pass);
+    assert_eq!(r[0].level, CaseLevel::Must);
+    let src = r[0].source.as_ref().expect("source missing");
+    assert_eq!(src.assertion_ids, vec!["TEST-A1", "TEST-A2"]);
+    assert_eq!(src.spec, "Test Specification v1.0");
+    assert_eq!(src.section, "§3.1");
+}
+
+#[test]
+fn level_may_missing_skips() {
+    let r = complete(run(
+        "test/rust/crates/specgate-fixtures/specs/level_may_missing.spec.yaml",
+    ));
+    assert_eq!(r.len(), 1);
+    check_case(&r[0], "optional_not_implemented", CaseStatus::Skip);
+    assert_eq!(r[0].level, CaseLevel::May);
+    assert!(r[0].expected.is_empty());
+    assert!(r[0].traces.is_empty());
+}
+
+#[test]
+fn level_should_missing_warns() {
+    let r = complete(run(
+        "test/rust/crates/specgate-fixtures/specs/level_should_missing.spec.yaml",
+    ));
+    assert_eq!(r.len(), 1);
+    check_case(&r[0], "recommended_not_implemented", CaseStatus::Warn);
+    assert_eq!(r[0].level, CaseLevel::Should);
+    assert!(r[0].expected.is_empty());
+    assert!(r[0].traces.is_empty());
 }

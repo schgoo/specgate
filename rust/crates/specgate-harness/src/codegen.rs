@@ -16,8 +16,10 @@ pub fn generate(
     scratch_dir: &Path,
     fixture_src: &Path,
     spec: &Spec,
+    cases_to_run: &[&Case],
     annotated: &AnnotatedSource,
     workspace_root: &Path,
+    needs_async: bool,
 ) -> std::io::Result<GeneratedProject> {
     std::fs::create_dir_all(scratch_dir.join("src"))?;
     let trace_file = scratch_dir.join("traces.json");
@@ -56,7 +58,7 @@ serde_derive = {{ git = "https://github.com/serde-rs/serde", tag = "v1.0.228" }}
     let _ = macros_path;
     std::fs::write(scratch_dir.join("Cargo.toml"), manifest)?;
 
-    let main_rs = render_main(fixture_src, spec, annotated, &trace_file)?;
+    let main_rs = render_main(fixture_src, spec, cases_to_run, annotated, &trace_file, needs_async)?;
     std::fs::write(scratch_dir.join("src").join("main.rs"), main_rs)?;
 
     Ok(GeneratedProject {
@@ -68,8 +70,10 @@ serde_derive = {{ git = "https://github.com/serde-rs/serde", tag = "v1.0.228" }}
 fn render_main(
     fixture_src: &Path,
     spec: &Spec,
+    cases_to_run: &[&Case],
     annotated: &AnnotatedSource,
     trace_out: &Path,
+    needs_async: bool,
 ) -> std::io::Result<String> {
     let mut out = String::new();
     let abs = std::fs::canonicalize(fixture_src)?;
@@ -87,17 +91,21 @@ fn render_main(
     out.push_str("    \"panic\".to_string()\n");
     out.push_str("}\n\n");
 
+    if needs_async {
+        out.push_str(ASYNC_BLOCK_ON);
+    }
+
     out.push_str("fn main() {\n");
     out.push_str(
         "    let out_path = std::env::args().nth(1).expect(\"missing output path\");\n",
     );
     out.push_str("    let mut all: std::collections::BTreeMap<String, Vec<TraceEvent>> = std::collections::BTreeMap::new();\n");
 
-    for (idx, case) in spec.cases.iter().enumerate() {
-        out.push_str(&format!("    // ---- case[{idx}]: {} ----\n", case.name));
+    for case in cases_to_run {
+        out.push_str(&format!("    // ---- case: {} ----\n", case.name));
         out.push_str("    {\n");
         out.push_str("        reset();\n");
-        render_case(&mut out, case, annotated);
+        render_case(&mut out, case, spec, annotated);
         out.push_str(&format!(
             "        all.insert({:?}.to_string(), take_traces());\n",
             case.name
@@ -117,6 +125,31 @@ fn render_main(
 
     Ok(out)
 }
+
+/// A minimal no-op-waker block_on. Sufficient for fixture async fns that
+/// don't yield to a real reactor — they complete on the first poll.
+const ASYNC_BLOCK_ON: &str = r#"
+fn sg_block_on<F: ::std::future::Future>(fut: F) -> F::Output {
+    use ::std::pin::pin;
+    use ::std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+    const VT: RawWakerVTable = RawWakerVTable::new(
+        |_| RawWaker::new(::std::ptr::null(), &VT),
+        |_| {},
+        |_| {},
+        |_| {},
+    );
+    let raw = RawWaker::new(::std::ptr::null(), &VT);
+    let waker = unsafe { Waker::from_raw(raw) };
+    let mut cx = Context::from_waker(&waker);
+    let mut fut = pin!(fut);
+    loop {
+        if let Poll::Ready(v) = fut.as_mut().poll(&mut cx) {
+            return v;
+        }
+    }
+}
+"#;
+
 
 const JSON_HELPER: &str = r#"
 fn serde_json_lite_to_string(map: &std::collections::BTreeMap<String, Vec<TraceEvent>>) -> String {
@@ -171,7 +204,7 @@ fn serde_json_lite_to_string(map: &std::collections::BTreeMap<String, Vec<TraceE
 }
 "#;
 
-fn render_case(out: &mut String, case: &Case, annotated: &AnnotatedSource) {
+fn render_case(out: &mut String, case: &Case, spec: &Spec, annotated: &AnnotatedSource) {
     // Mock table: any input key that's a mapping is treated as a mock table
     // named after the key. (Convention from fixtures.)
     for (k, v) in &case.inputs {
@@ -197,7 +230,6 @@ fn render_case(out: &mut String, case: &Case, annotated: &AnnotatedSource) {
             out.push_str(&format!(
                 "        let mut {var} = fut::{name}({args});\n"
             ));
-            // Emit fields if the setup return type is a SpecEvent-derived struct.
             if let Some(sig) = sig {
                 if annotated.spec_event_structs.contains(sig.return_type.trim()) {
                     out.push_str(&format!(
@@ -239,7 +271,10 @@ fn render_case(out: &mut String, case: &Case, annotated: &AnnotatedSource) {
 
     for op in ops {
         let decl = annotated.operations.get(op);
-        let call = render_op_call(op, decl, &case.inputs, &setup_vars, &annotated);
+        let mut call = render_op_call(op, decl, &case.inputs, &setup_vars, annotated);
+        if spec.async_ops.contains(op) {
+            call = format!("sg_block_on({call})");
+        }
         out.push_str("        {\n");
         out.push_str(&format!(
             "            let __r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {{ {call}; }}));\n"

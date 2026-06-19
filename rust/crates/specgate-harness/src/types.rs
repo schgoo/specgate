@@ -11,17 +11,55 @@ pub enum TraceEvent {
     Run { operation: String },
 }
 
+/// Structured expected-trace assertion. Mirrors the `Assertion` oneof in
+/// the v0.4.0 spec: `Event { name, value }`, `$run { operation }`,
+/// `$unordered { items }`, `$anywhere { items }`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Assertion {
+    Event { name: String, value: String },
+    Run { operation: String },
+    Unordered { items: Vec<Assertion> },
+    Anywhere { items: Vec<Assertion> },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CaseStatus {
     Pass,
     Fail,
+    Skip,
+    Warn,
+}
+
+/// Normative strength of a case. Affects what happens when the operation
+/// or setup the case references is missing from the source annotations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaseLevel {
+    Must,
+    Should,
+    May,
+}
+
+impl Default for CaseLevel {
+    fn default() -> Self {
+        CaseLevel::Must
+    }
+}
+
+/// Free-form provenance metadata threaded through from the spec.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Source {
+    pub assertion_ids: Vec<String>,
+    pub spec: String,
+    pub section: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct CaseResult {
     pub name: String,
     pub status: CaseStatus,
-    pub expected: Vec<std::collections::BTreeMap<String, String>>,
+    pub level: CaseLevel,
+    pub source: Option<Source>,
+    pub expected: Vec<Assertion>,
     pub traces: Vec<TraceEvent>,
 }
 
@@ -42,6 +80,18 @@ impl CaseStatus {
         match self {
             CaseStatus::Pass => "pass",
             CaseStatus::Fail => "fail",
+            CaseStatus::Skip => "skip",
+            CaseStatus::Warn => "warn",
+        }
+    }
+}
+
+impl CaseLevel {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CaseLevel::Must => "must",
+            CaseLevel::Should => "should",
+            CaseLevel::May => "may",
         }
     }
 }

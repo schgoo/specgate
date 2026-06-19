@@ -78,6 +78,7 @@ fn is_owned_primitive(ty: &Type) -> bool {
                     | "bool"
                     | "char"
                     | "String"
+                    | "str"
             );
         }
     }
@@ -86,6 +87,18 @@ fn is_owned_primitive(ty: &Type) -> bool {
 
 fn is_reference(ty: &Type) -> bool {
     matches!(ty, Type::Reference(_))
+}
+
+/// Like `is_owned_primitive` but also accepts shared references to primitives
+/// (notably `&str`) — the printed value just goes through `format!("{}", x)`.
+fn is_printable_param(ty: &Type) -> bool {
+    if is_owned_primitive(ty) {
+        return true;
+    }
+    if let Type::Reference(r) = ty {
+        return is_owned_primitive(&r.elem);
+    }
+    false
 }
 
 fn typed_params(f: &ItemFn) -> Vec<(syn::Ident, syn::Type)> {
@@ -338,15 +351,15 @@ fn build_pre_stmts(
     op_name: &str,
     params: &[(syn::Ident, syn::Type)],
     is_method: bool,
-    has_ref_param: bool,
+    _has_ref_param: bool,
 ) -> Vec<Stmt> {
     let rt = rt();
     let mut out: Vec<Stmt> = vec![parse_quote!(#rt::emit_run(#op_name);)];
-    if is_method || has_ref_param {
+    if is_method {
         return out;
     }
-    let all_primitive = params.iter().all(|(_, t)| is_owned_primitive(t));
-    if !all_primitive {
+    let all_printable = params.iter().all(|(_, t)| is_printable_param(t));
+    if !all_printable {
         return out;
     }
     for (id, _) in params {
