@@ -24,6 +24,10 @@
         }
       ]
     },
+    "target": {
+      "type": "string",
+      "description": "Which target in the binding to use. Defaults to the first target if omitted. Useful for multi-crate workspaces where one binding has targets for each crate."
+    },
     "depends_on": {
       "type": "array",
       "description": "List of spec names this spec depends on.",
@@ -146,6 +150,10 @@
         "desc": {
           "type": "string",
           "description": "Human-readable description."
+        },
+        "target": {
+          "type": "string",
+          "description": "Override the spec-level target for this case. Useful when a case exercises a different binding target (e.g. command targets for mechanism proofs)."
         },
         "level": {
           "type": "string",

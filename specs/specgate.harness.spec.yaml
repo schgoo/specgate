@@ -199,6 +199,66 @@ cases:
                 - Event: { name: add.b, value: "20" }
                 - Event: { name: $result, value: "30" }
 
+  - name: target_selection
+    desc: >
+      Spec with target: alt selects a different crate than the default.
+      Proves the harness dispatches to the correct binding target.
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/target_selection.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: greet_world
+              status: pass
+              expected:
+                - $result: "Hello, World!"
+              traces:
+                - Run: { operation: greet }
+                - Event: { name: greet.name, value: "World" }
+                - Event: { name: $result, value: "Hello, World!" }
+
+  - name: per_case_target_override
+    desc: >
+      One spec with two cases using different targets. First case uses
+      default target (add from fixtures), second overrides to alt (greet
+      from fixtures-alt).
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/per_case_target.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: add_from_default
+              status: pass
+              expected:
+                - $result: "3"
+              traces:
+                - Run: { operation: add }
+                - Event: { name: add.a, value: "1" }
+                - Event: { name: add.b, value: "2" }
+                - Event: { name: $result, value: "3" }
+            - name: greet_from_alt
+              status: pass
+              expected:
+                - $result: "Hello, Test!"
+              traces:
+                - Run: { operation: greet }
+                - Event: { name: greet.name, value: "Test" }
+                - Event: { name: $result, value: "Hello, Test!" }
+
+  - name: missing_target_error
+    desc: Spec references a target that doesn't exist in the binding
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/missing_target.spec.yaml
+    expected:
+      outcome:
+        Error:
+          reason: "target 'nonexistent' not found in binding"
+
   - name: no_vacuous_match
     desc: >
       Non-empty expected with zero matching traces must fail, not pass.

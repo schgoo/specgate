@@ -1,13 +1,38 @@
 //! Binding YAML resolution.
 
 use serde_yaml::Value;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, Clone)]
+pub struct Target {
+    pub package_root: PathBuf,
+    pub command: Option<String>,
+}
+
 #[derive(Debug)]
-#[allow(dead_code)]
 pub struct Binding {
     pub language: String,
-    pub package_root: PathBuf,
+    pub targets: BTreeMap<String, Target>,
+}
+
+impl Binding {
+    /// Get a target by name, or the target named "default" (falling back to
+    /// the first target) if name is None.
+    pub fn target(&self, name: Option<&str>) -> Option<&Target> {
+        match name {
+            Some(n) => self.targets.get(n),
+            None => self
+                .targets
+                .get("default")
+                .or_else(|| self.targets.values().next()),
+        }
+    }
+
+    /// Get the package_root for a target (convenience for backward compat).
+    pub fn package_root(&self, target_name: Option<&str>) -> Option<&Path> {
+        self.target(target_name).map(|t| t.package_root.as_path())
+    }
 }
 
 pub fn load_binding(path: &Path) -> Option<Binding> {
@@ -18,17 +43,31 @@ pub fn load_binding(path: &Path) -> Option<Binding> {
         .get(Value::String("language".into()))?
         .as_str()?
         .to_string();
-    let targets = map.get(Value::String("targets".into()))?.as_mapping()?;
-    let target = targets.values().next()?.as_mapping()?;
-    let pkg = target
-        .get(Value::String("package_root".into()))?
-        .as_str()?;
+    let targets_map = map.get(Value::String("targets".into()))?.as_mapping()?;
     let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
-    let package_root = normalize(&dir.join(pkg));
-    Some(Binding {
-        language,
-        package_root,
-    })
+
+    let mut targets = BTreeMap::new();
+    for (k, v) in targets_map {
+        let name = k.as_str()?;
+        let target_map = v.as_mapping()?;
+        let pkg = target_map
+            .get(Value::String("package_root".into()))
+            .and_then(|v| v.as_str())
+            .unwrap_or(".");
+        let command = target_map
+            .get(Value::String("command".into()))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        targets.insert(
+            name.to_string(),
+            Target {
+                package_root: normalize(&dir.join(pkg)),
+                command,
+            },
+        );
+    }
+
+    Some(Binding { language, targets })
 }
 
 fn normalize(p: &Path) -> PathBuf {

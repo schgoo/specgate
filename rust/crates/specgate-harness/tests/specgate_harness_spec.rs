@@ -619,6 +619,49 @@ fn paths_resolve_from_nested_spec() {
 }
 
 // ---------------------------------------------------------------------------
+// Target selection — multi-target binding
+// ---------------------------------------------------------------------------
+
+#[test]
+fn target_selection() {
+    let r = complete(run(
+        "test/rust/crates/specgate-fixtures/specs/target_selection.spec.yaml",
+    ));
+    assert_eq!(r.len(), 1);
+    check_case(&r[0], "greet_world", CaseStatus::Pass);
+    assert_eq!(
+        r[0].traces,
+        vec![
+            run_op("greet"),
+            ev("greet.name", "World"),
+            ev("$result", "Hello, World!"),
+        ]
+    );
+}
+
+#[test]
+fn per_case_target_override() {
+    let r = complete(run(
+        "test/rust/crates/specgate-fixtures/specs/per_case_target.spec.yaml",
+    ));
+    assert_eq!(r.len(), 2);
+    // First case uses default target (add from specgate-fixtures)
+    check_case(&r[0], "add_from_default", CaseStatus::Pass);
+    assert!(r[0].traces.iter().any(|t| matches!(t, TraceEvent::Run { operation, .. } if operation == "add")));
+    // Second case uses alt target (greet from specgate-fixtures-alt)
+    check_case(&r[1], "greet_from_alt", CaseStatus::Pass);
+    assert!(r[1].traces.iter().any(|t| matches!(t, TraceEvent::Run { operation, .. } if operation == "greet")));
+}
+
+#[test]
+fn missing_target_error() {
+    let reason = err_reason(run(
+        "test/rust/crates/specgate-fixtures/specs/missing_target.spec.yaml",
+    ));
+    assert_eq!(reason, "target 'nonexistent' not found in binding");
+}
+
+// ---------------------------------------------------------------------------
 // Structured value + operator specs
 // ---------------------------------------------------------------------------
 

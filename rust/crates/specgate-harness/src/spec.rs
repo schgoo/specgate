@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone)]
 pub struct Spec {
     pub binding_path: Option<String>,
+    pub target: Option<String>,
     pub cases: Vec<Case>,
     /// Names of operations declared `async: true` in the spec.
     pub async_ops: BTreeSet<String>,
@@ -20,6 +21,8 @@ pub struct Spec {
 #[derive(Debug, Clone)]
 pub struct Case {
     pub name: String,
+    /// Case-level target override (overrides the spec-level `target`).
+    pub target: Option<String>,
     pub setup: Setup,
     pub operation: Option<String>,
     pub steps: Vec<String>,
@@ -67,6 +70,11 @@ fn parse_spec_value(v: &YValue) -> Result<Spec, ParseError> {
         .and_then(|b| b.as_str())
         .map(String::from);
 
+    let target = map
+        .get(YValue::String("target".into()))
+        .and_then(|t| t.as_str())
+        .map(String::from);
+
     let mut async_ops = BTreeSet::new();
     if let Some(YValue::Mapping(ops)) = map.get(YValue::String("operations".into())) {
         for (k, v) in ops {
@@ -93,6 +101,7 @@ fn parse_spec_value(v: &YValue) -> Result<Spec, ParseError> {
     }
     Ok(Spec {
         binding_path,
+        target,
         cases,
         async_ops,
     })
@@ -107,6 +116,11 @@ fn parse_case(v: &YValue) -> Result<Case, ParseError> {
         .and_then(|x| x.as_str())
         .ok_or_else(|| ParseError::Shape("case missing name".into()))?
         .to_string();
+
+    let target = m
+        .get(YValue::String("target".into()))
+        .and_then(|t| t.as_str())
+        .map(String::from);
 
     let mut extra_inputs: BTreeMap<String, YValue> = BTreeMap::new();
     let setup = match m.get(YValue::String("setup".into())) {
@@ -236,6 +250,7 @@ fn parse_case(v: &YValue) -> Result<Case, ParseError> {
 
     Ok(Case {
         name,
+        target,
         setup,
         operation,
         steps,

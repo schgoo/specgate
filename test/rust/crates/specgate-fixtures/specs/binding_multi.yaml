@@ -1,0 +1,6 @@
+language: rust
+targets:
+  default:
+    package_root: ..
+  alt:
+    package_root: ../../specgate-fixtures-alt

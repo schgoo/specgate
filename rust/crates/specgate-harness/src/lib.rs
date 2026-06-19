@@ -83,48 +83,127 @@ pub fn run_spec(spec_path: &str) -> RunOutcome {
         }
     };
 
+    // Shape check: spec-level event key validation.
+    if let Some(reason) = check_shape(&parsed, &yaml_value) {
+        return RunOutcome::Error { reason };
+    }
+
     let fixture_basename = spec_basename(&path);
-    let fixture_src = match resolve_fixture_source(
-        &binding.package_root,
-        &fixture_basename,
-        &parsed,
-    ) {
-        Some(p) => p,
-        None => {
-            // No source file matched. If every case is non-MUST, surface
-            // skip/warn per case rather than failing the spec.
-            if let Some(results) = short_circuit_non_must(&parsed.cases, None) {
-                return RunOutcome::Complete { results };
+    let workspace_root = workspace_root();
+
+    // Group cases by effective target (case.target ?? spec.target ?? None),
+    // preserving first-appearance order.
+    let mut groups: Vec<(Option<String>, Vec<usize>)> = Vec::new();
+    {
+        let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for (i, case) in parsed.cases.iter().enumerate() {
+            let eff = case.target.clone().or_else(|| parsed.target.clone());
+            // Use a sentinel key that can't clash with real target names.
+            let key = eff
+                .as_deref()
+                .map(String::from)
+                .unwrap_or_else(|| "\x00default\x00".to_string());
+            if let Some(&gidx) = seen.get(&key) {
+                groups[gidx].1.push(i);
+            } else {
+                seen.insert(key, groups.len());
+                groups.push((eff, vec![i]));
             }
+        }
+    }
+
+    // Validate every target exists before doing any IO-heavy work.
+    for (eff_target, _) in &groups {
+        let target_name = eff_target.as_deref();
+        if binding.target(target_name).is_none() {
             return RunOutcome::Error {
                 reason: format!(
-                    "source file not found: {}",
-                    binding
-                        .package_root
-                        .join("src")
-                        .join(format!("{fixture_basename}.rs"))
-                        .display()
+                    "target '{}' not found in binding",
+                    target_name.unwrap_or("<default>")
                 ),
             };
         }
-    };
-    let src_text = match std::fs::read_to_string(&fixture_src) {
-        Ok(t) => t,
-        Err(e) => {
-            return RunOutcome::Error {
-                reason: format!("source file unreadable: {} ({})", fixture_src.display(), e),
-            };
+    }
+
+    // Process each target group and accumulate results by original case index.
+    let mut results_by_index: Vec<Option<CaseResult>> = vec![None; parsed.cases.len()];
+
+    for (eff_target, case_indices) in &groups {
+        let target = binding.target(eff_target.as_deref()).unwrap();
+        let group_cases: Vec<&spec::Case> =
+            case_indices.iter().map(|&i| &parsed.cases[i]).collect();
+
+        // Give each target group a distinct scratch directory.
+        let scratch_suffix = match eff_target.as_deref() {
+            None => fixture_basename.clone(),
+            Some(t) => format!("{fixture_basename}_{t}"),
+        };
+        let scratch_dir = scratch_for(&scratch_suffix);
+
+        match run_group(
+            target,
+            &group_cases,
+            &parsed,
+            &fixture_basename,
+            &workspace_root,
+            &scratch_dir,
+        ) {
+            Ok(group_results) => {
+                for (&case_idx, result) in case_indices.iter().zip(group_results.into_iter()) {
+                    results_by_index[case_idx] = Some(result);
+                }
+            }
+            Err(reason) => return RunOutcome::Error { reason },
+        }
+    }
+
+    let results = results_by_index
+        .into_iter()
+        .map(|r| r.expect("all case indices covered by groups"))
+        .collect();
+    RunOutcome::Complete { results }
+}
+
+/// Run one target group: resolve source, validate annotations, generate a
+/// temporary runner, compile + execute it, and return per-case results.
+fn run_group(
+    target: &binding::Target,
+    group_cases: &[&spec::Case],
+    spec: &spec::Spec,
+    fixture_basename: &str,
+    workspace_root: &Path,
+    scratch_dir: &Path,
+) -> Result<Vec<CaseResult>, String> {
+    let fixture_src = match resolve_fixture_source(
+        &target.package_root,
+        fixture_basename,
+        group_cases,
+    ) {
+        Some(p) => p,
+        None => {
+            if let Some(results) = short_circuit_non_must(group_cases, None) {
+                return Ok(results);
+            }
+            return Err(format!(
+                "source file not found: {}",
+                target
+                    .package_root
+                    .join("src")
+                    .join(format!("{fixture_basename}.rs"))
+                    .display()
+            ));
         }
     };
 
+    let src_text = std::fs::read_to_string(&fixture_src)
+        .map_err(|e| format!("source file unreadable: {} ({})", fixture_src.display(), e))?;
+
     let annotated = scan::scan(&src_text);
 
-    // Required setups + ops across all cases.
+    // Required setups + ops across all MUST cases in this group.
     let mut required_setups: BTreeSet<String> = BTreeSet::new();
     let mut required_ops: BTreeSet<String> = BTreeSet::new();
-    for case in &parsed.cases {
-        // Cases with a non-MUST level whose pieces are missing get
-        // short-circuited later, so do not contribute to required sets.
+    for case in group_cases {
         if case.level != CaseLevel::Must && !case_pieces_available(case, &annotated) {
             continue;
         }
@@ -149,35 +228,25 @@ pub fn run_spec(spec_path: &str) -> RunOutcome {
     }
     for s in &required_setups {
         if !annotated.setups.contains_key(s) {
-            return RunOutcome::Error {
-                reason: format!("setup '{s}' not found in source annotations"),
-            };
+            return Err(format!("setup '{s}' not found in source annotations"));
         }
     }
     for o in &required_ops {
         if !annotated.operations.contains_key(o) {
-            return RunOutcome::Error {
-                reason: format!("operation '{o}' not found in source annotations"),
-            };
+            return Err(format!("operation '{o}' not found in source annotations"));
         }
     }
 
-    // Shape-check expected events against declared operation outputs.
-    if let Some(reason) = check_shape(&parsed, &yaml_value) {
-        return RunOutcome::Error { reason };
-    }
-
-    // Decide which cases will run via cargo vs short-circuit (skip/warn).
-    let mut case_disposition: Vec<CaseDisposition> = Vec::with_capacity(parsed.cases.len());
+    // Decide which cases run via cargo vs short-circuit (skip/warn).
+    let mut case_disposition: Vec<CaseDisposition> = Vec::with_capacity(group_cases.len());
     let mut runnable = false;
-    for case in &parsed.cases {
+    for case in group_cases {
         let disp = if case_pieces_available(case, &annotated) {
             runnable = true;
             CaseDisposition::Run
         } else {
             match case.level {
                 CaseLevel::Must => {
-                    // Already handled above by the required_* loops.
                     runnable = true;
                     CaseDisposition::Run
                 }
@@ -189,42 +258,27 @@ pub fn run_spec(spec_path: &str) -> RunOutcome {
     }
 
     if !runnable {
-        // Every case is non-MUST and short-circuited. No cargo needed.
-        let results = build_short_circuit_results(&parsed.cases, &case_disposition);
-        return RunOutcome::Complete { results };
+        return Ok(build_short_circuit_results(group_cases, &case_disposition));
     }
 
-    // Locate workspace root for path deps.
-    let workspace_root = workspace_root();
-    let scratch_dir = scratch_for(&fixture_basename);
-
-    // Determine if ANY runnable case uses an async op — drives async runtime
-    // scaffolding in the generated runner.
-    let cases_to_run: Vec<&spec::Case> = parsed
-        .cases
+    let cases_to_run: Vec<&spec::Case> = group_cases
         .iter()
         .zip(case_disposition.iter())
-        .filter_map(|(c, d)| matches!(d, CaseDisposition::Run).then_some(c))
+        .filter_map(|(&c, d)| matches!(d, CaseDisposition::Run).then_some(c))
         .collect();
-    let needs_async = cases_to_run.iter().any(|c| case_uses_async(c, &parsed));
+    let needs_async = cases_to_run.iter().any(|c| case_uses_async(c, spec));
 
-    let proj = match codegen::generate(
-        &scratch_dir,
+    let proj = codegen::generate(
+        scratch_dir,
         &fixture_src,
-        &parsed,
+        spec,
         &cases_to_run,
         &annotated,
-        &workspace_root,
+        workspace_root,
         needs_async,
-        Some(&binding.package_root),
-    ) {
-        Ok(p) => p,
-        Err(e) => {
-            return RunOutcome::Error {
-                reason: format!("failed to scaffold runner: {e}"),
-            };
-        }
-    };
+        Some(&target.package_root),
+    )
+    .map_err(|e| format!("failed to scaffold runner: {e}"))?;
 
     // Shell out: cargo run -- <trace_out>
     let mut cmd = Command::new(cargo_bin());
@@ -237,59 +291,34 @@ pub fn run_spec(spec_path: &str) -> RunOutcome {
     cmd.env_remove("RUSTC_WORKSPACE_WRAPPER");
     cmd.env_remove("CARGO");
     cmd.env_remove("CARGO_MANIFEST_DIR");
-    // Default to offline if not explicitly overridden — git deps are already
-    // cached by the parent workspace build, and crates.io is often blocked
-    // in restricted sandboxes.
-    if std::env::var_os("CARGO_NET_OFFLINE").is_none() {
-        cmd.env("CARGO_NET_OFFLINE", "true");
-    }
     cmd.env(
         "CARGO_TARGET_DIR",
         proj.crate_dir.join("target").as_os_str(),
     );
 
-    let output = match cmd.output() {
-        Ok(o) => o,
-        Err(e) => {
-            return RunOutcome::Error {
-                reason: format!("failed to invoke cargo: {e}"),
-            };
-        }
-    };
+    let output = cmd
+        .output()
+        .map_err(|e| format!("failed to invoke cargo: {e}"))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        if stderr.contains("error[E") || stderr.contains("error:") || stderr.contains("could not compile") {
-            return RunOutcome::Error {
-                reason: "source failed to compile".into(),
-            };
+        if stderr.contains("error[E")
+            || stderr.contains("error:")
+            || stderr.contains("could not compile")
+        {
+            return Err("source failed to compile".into());
         }
-        return RunOutcome::Error {
-            reason: format!("runner failed: {}", stderr),
-        };
+        return Err(format!("runner failed: {}", stderr));
     }
 
-    // Load traces.
-    let trace_text = match std::fs::read_to_string(&proj.trace_file) {
-        Ok(t) => t,
-        Err(_) => {
-            return RunOutcome::Error {
-                reason: "runner produced no trace output".into(),
-            };
-        }
-    };
+    let trace_text = std::fs::read_to_string(&proj.trace_file)
+        .map_err(|_| "runner produced no trace output".to_string())?;
     let trace_map: std::collections::BTreeMap<String, Vec<TraceEvent>> =
-        match serde_yaml::from_str(&trace_text) {
-            Ok(m) => m,
-            Err(e) => {
-                return RunOutcome::Error {
-                    reason: format!("failed to parse traces: {e}"),
-                };
-            }
-        };
+        serde_yaml::from_str(&trace_text)
+            .map_err(|e| format!("failed to parse traces: {e}"))?;
 
-    let mut results = Vec::with_capacity(parsed.cases.len());
-    for (case, disp) in parsed.cases.iter().zip(case_disposition.iter()) {
+    let mut results = Vec::with_capacity(group_cases.len());
+    for (case, disp) in group_cases.iter().zip(case_disposition.iter()) {
         match disp {
             CaseDisposition::Skip => results.push(CaseResult {
                 name: case.name.clone(),
@@ -321,7 +350,7 @@ pub fn run_spec(spec_path: &str) -> RunOutcome {
             }
         }
     }
-    RunOutcome::Complete { results }
+    Ok(results)
 }
 
 // ---------------------------------------------------------------------------
@@ -362,7 +391,7 @@ fn case_pieces_available(case: &spec::Case, annotated: &scan::AnnotatedSource) -
 
 /// If every case has level != MUST, return per-case warn/skip results.
 fn short_circuit_non_must(
-    cases: &[spec::Case],
+    cases: &[&spec::Case],
     _annotated: Option<&scan::AnnotatedSource>,
 ) -> Option<Vec<CaseResult>> {
     if cases.iter().any(|c| c.level == CaseLevel::Must) {
@@ -388,7 +417,7 @@ fn short_circuit_non_must(
 }
 
 fn build_short_circuit_results(
-    cases: &[spec::Case],
+    cases: &[&spec::Case],
     disp: &[CaseDisposition],
 ) -> Vec<CaseResult> {
     cases
@@ -458,20 +487,20 @@ fn cargo_bin() -> String {
 
 /// Try to find the fixture source file for a spec. Prefer `<basename>.rs`;
 /// otherwise pick the .rs file under src/ whose annotations contain the
-/// most setups + operations the spec needs.
+/// most setups + operations the cases need.
 fn resolve_fixture_source(
     package_root: &Path,
     fixture_basename: &str,
-    spec: &spec::Spec,
+    cases: &[&spec::Case],
 ) -> Option<PathBuf> {
     let direct = package_root.join("src").join(format!("{fixture_basename}.rs"));
     if direct.exists() {
         return Some(direct);
     }
-    // Build required sets.
+    // Build required sets from the provided cases.
     let mut req_setups: BTreeSet<String> = BTreeSet::new();
     let mut req_ops: BTreeSet<String> = BTreeSet::new();
-    for case in &spec.cases {
+    for case in cases {
         match &case.setup {
             spec::Setup::None => {}
             spec::Setup::Single(n) => {

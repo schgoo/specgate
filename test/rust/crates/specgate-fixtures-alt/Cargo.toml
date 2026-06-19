@@ -1,0 +1,7 @@
+[package]
+name = "specgate-fixtures-alt"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+specgate-annotations = { path = "../../../../rust/crates/specgate-annotations" }

@@ -1,0 +1,27 @@
+spec_version: "0.4.0"
+name: fixture.per_case_target
+binding: binding_multi.yaml
+
+operations:
+  add:
+    inputs: { a: i32, b: i32 }
+    outputs: [$result]
+  greet:
+    inputs: { name: string }
+    outputs: [$result]
+
+cases:
+  - name: add_from_default
+    desc: Uses default target (specgate-fixtures crate)
+    operation: add
+    inputs: { a: 1, b: 2 }
+    expected:
+      - $result: "3"
+
+  - name: greet_from_alt
+    desc: Overrides to alt target (specgate-fixtures-alt crate)
+    target: alt
+    operation: greet
+    inputs: { name: "Test" }
+    expected:
+      - $result: "Hello, Test!"

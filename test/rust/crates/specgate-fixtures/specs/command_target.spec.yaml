@@ -1,0 +1,15 @@
+spec_version: "0.4.0"
+name: fixture.command_target
+binding: binding_command.yaml
+target: check
+
+operations:
+  check:
+    kind: command
+
+cases:
+  - name: command_succeeds
+    desc: Command target runs shell command and passes on exit 0
+    operation: check
+    expected:
+      - $outcome: "Complete"
