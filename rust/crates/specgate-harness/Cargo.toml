@@ -6,8 +6,9 @@ edition.workspace = true
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
 serde_yaml = { workspace = true }
-specgate-runtime = { path = "../specgate-runtime" }
+specgate-runtime = { workspace = true }
+regex = { workspace = true }
 
 [dev-dependencies]
-specgate-annotations = { path = "../specgate-annotations" }
+specgate-annotations = { workspace = true }
 specgate-fixtures = { path = "../../../test/rust/crates/specgate-fixtures" }

@@ -216,6 +216,7 @@ pub fn run_spec(spec_path: &str) -> RunOutcome {
         &annotated,
         &workspace_root,
         needs_async,
+        Some(&binding.package_root),
     ) {
         Ok(p) => p,
         Err(e) => {

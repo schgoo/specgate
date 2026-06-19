@@ -4,5 +4,5 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-specgate-runtime = { path = "../specgate-runtime" }
-specgate-annotations-macros = { path = "../specgate-annotations-macros" }
+specgate-runtime = { workspace = true }
+specgate-annotations-macros = { workspace = true }

@@ -20,9 +20,11 @@ serde_yaml = "0.9.34"
 syn = { version = "2.0.118", features = ["full", "extra-traits"] }
 quote = "1.0.45"
 proc-macro2 = "1.0.106"
+regex = "1.12"
 specgate-types = { path = "crates/specgate-types" }
 specgate-annotations = { path = "crates/specgate-annotations" }
+specgate-annotations-macros = { path = "crates/specgate-annotations-macros" }
+specgate-runtime = { path = "crates/specgate-runtime" }
+specgate-harness = { path = "crates/specgate-harness" }
 
 # Dependencies are fetched from crates.io normally.
-equivalent = { git = "https://github.com/indexmap-rs/equivalent", tag = "v1.0.2" }
-hashbrown = { git = "https://github.com/rust-lang/hashbrown", tag = "v0.17.1" }

@@ -27,4 +27,6 @@ pub mod operators;
 pub mod structured_map;
 pub mod structured_output;
 pub mod structured_set;
+pub mod nested_structured;
+pub mod scalar_operators;
 // pub mod compile_error;  // intentionally broken — syntax error

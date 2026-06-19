@@ -12,6 +12,77 @@ pub struct GeneratedProject {
     pub trace_file: PathBuf,
 }
 
+/// Information about the fixture crate for use as a Cargo dependency.
+struct FixtureCrateInfo {
+    /// The `name` field from the fixture crate's Cargo.toml (e.g., `specgate-fixtures`).
+    cargo_name: String,
+    /// Rust identifier form (hyphens → underscores, e.g., `specgate_fixtures`).
+    rust_ident: String,
+    /// Module name declared in lib.rs (e.g., `cross_dep`).
+    module_name: String,
+    /// Path to the fixture crate root.
+    path: PathBuf,
+}
+
+/// Try to resolve the fixture crate dependency info. Returns `Some` only when:
+/// 1. `fixture_pkg_root` has a `Cargo.toml` with a `[package] name`
+/// 2. `fixture_pkg_root/src/lib.rs` contains `pub mod <module_name>;`
+fn resolve_fixture_crate(
+    fixture_pkg_root: &Path,
+    module_name: &str,
+) -> Option<FixtureCrateInfo> {
+    let cargo_toml = fixture_pkg_root.join("Cargo.toml");
+    let text = std::fs::read_to_string(&cargo_toml).ok()?;
+    let cargo_name = parse_cargo_name(&text)?;
+    let rust_ident = cargo_name.replace('-', "_");
+
+    let lib_rs = fixture_pkg_root.join("src").join("lib.rs");
+    let lib_text = std::fs::read_to_string(&lib_rs).ok()?;
+    let decl = format!("pub mod {module_name};");
+    if !lib_text.contains(&decl) {
+        return None;
+    }
+
+    Some(FixtureCrateInfo {
+        cargo_name,
+        rust_ident,
+        module_name: module_name.to_string(),
+        path: fixture_pkg_root.to_path_buf(),
+    })
+}
+
+fn parse_cargo_name(toml: &str) -> Option<String> {
+    let mut in_package = false;
+    for line in toml.lines() {
+        let trimmed = line.trim();
+        if trimmed == "[package]" {
+            in_package = true;
+            continue;
+        }
+        if trimmed.starts_with('[') {
+            in_package = false;
+        }
+        if in_package {
+            if let Some(rest) = trimmed.strip_prefix("name") {
+                let rest = rest.trim_start_matches([' ', '\t', '=']).trim();
+                let name = rest.trim_matches('"').trim_matches('\'');
+                if !name.is_empty() {
+                    return Some(name.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Convert a path to a forward-slash string suitable for Cargo.toml.
+/// Strips the Windows extended path prefix `\\?\` if present.
+fn to_cargo_path(p: &Path) -> String {
+    let s = p.display().to_string();
+    let s = s.strip_prefix(r"\\?\").unwrap_or(&s);
+    s.replace('\\', "/")
+}
+
 pub fn generate(
     scratch_dir: &Path,
     fixture_src: &Path,
@@ -20,6 +91,7 @@ pub fn generate(
     annotated: &AnnotatedSource,
     workspace_root: &Path,
     needs_async: bool,
+    fixture_pkg_root: Option<&Path>,
 ) -> std::io::Result<GeneratedProject> {
     std::fs::create_dir_all(scratch_dir.join("src"))?;
     let trace_file = scratch_dir.join("traces.json");
@@ -28,6 +100,27 @@ pub fn generate(
     let runtime_path = workspace_root.join("crates/specgate-runtime");
     let macros_path = workspace_root.join("crates/specgate-annotations-macros");
     let harness_path = workspace_root.join("crates/specgate-harness");
+
+    // Determine the fixture module name from the source file stem.
+    let module_name = fixture_src
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("fixture")
+        .to_string();
+
+    // Try to use the fixture crate as a path dependency when possible.
+    let fixture_crate = fixture_pkg_root
+        .and_then(|root| resolve_fixture_crate(root, &module_name));
+
+    let fixture_dep = if let Some(ref fc) = fixture_crate {
+        format!(
+            "\n{} = {{ path = \"{}\" }}",
+            fc.cargo_name,
+            to_cargo_path(&fc.path)
+        )
+    } else {
+        String::new()
+    };
 
     let manifest = format!(
         r#"[package]
@@ -41,12 +134,12 @@ path = "src/main.rs"
 
 [dependencies]
 specgate-annotations = {{ path = "{ann}" }}
-specgate-harness = {{ path = "{harness}" }}
+specgate-harness = {{ path = "{harness}" }}{fixture_dep}
 
 [workspace]
 "#,
-        ann = annotations_path.display().to_string().replace('\\', "/"),
-        harness = harness_path.display().to_string().replace('\\', "/"),
+        ann = to_cargo_path(&annotations_path),
+        harness = to_cargo_path(&harness_path),
     );
     let _ = runtime_path;
     let _ = macros_path;
@@ -60,7 +153,7 @@ specgate-harness = {{ path = "{harness}" }}
         let _ = std::fs::copy(&parent_lock, &tmp_lock);
     }
 
-    let main_rs = render_main(fixture_src, spec, cases_to_run, annotated, &trace_file, needs_async)?;
+    let main_rs = render_main(fixture_src, spec, cases_to_run, annotated, &trace_file, needs_async, fixture_crate.as_ref())?;
     std::fs::write(scratch_dir.join("src").join("main.rs"), main_rs)?;
 
     Ok(GeneratedProject {
@@ -76,15 +169,27 @@ fn render_main(
     annotated: &AnnotatedSource,
     trace_out: &Path,
     needs_async: bool,
+    fixture_crate: Option<&FixtureCrateInfo>,
 ) -> std::io::Result<String> {
     let mut out = String::new();
-    let abs = std::fs::canonicalize(fixture_src)?;
     out.push_str("#![allow(unused, unused_mut, unused_variables, dead_code, clippy::all)]\n");
     out.push_str("use specgate_annotations::{TraceEvent, Value, take_traces, reset, set_mock, SpecEvent};\n");
-    out.push_str(&format!(
-        "#[path = \"{}\"] mod fut;\n",
-        abs.display().to_string().replace('\\', "\\\\")
-    ));
+
+    if let Some(fc) = fixture_crate {
+        // Alias the fixture module as `fut` so call sites work uniformly.
+        out.push_str(&format!(
+            "use {}::{} as fut;\n",
+            fc.rust_ident, fc.module_name
+        ));
+    } else {
+        let abs = std::fs::canonicalize(fixture_src)?;
+        let abs_str = abs.display().to_string();
+        let abs_str = abs_str.strip_prefix(r"\\?\").unwrap_or(&abs_str);
+        out.push_str(&format!(
+            "#[path = \"{}\"] mod fut;\n",
+            abs_str.replace('\\', "\\\\")
+        ));
+    }
     out.push_str("use fut::*;\n");
     out.push_str("\n");
     out.push_str("fn panic_msg(e: &Box<dyn std::any::Any + Send>) -> String {\n");

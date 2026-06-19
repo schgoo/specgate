@@ -39,14 +39,20 @@ impl From<bool> for AssertValue {
 pub enum Matcher {
     Eq(Value),
     Size(usize),
-    Contains(Value),
+    Contains(Box<AnyArg>),
     ContainsAll(Vec<Value>),
     Excludes(Vec<Value>),
     Match(BTreeMap<String, Value>),
     Exists(bool),
     Any(Box<AnyArg>),
+    Every(Box<AnyArg>),
     Type(String),
     Matches(String),
+    Not(Box<Matcher>),
+    Gt(Value),
+    Gte(Value),
+    Lt(Value),
+    Lte(Value),
     Composite(Vec<Matcher>),
 }
 

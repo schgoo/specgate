@@ -381,7 +381,21 @@ fn parse_single_op(op: &str, v: &YValue) -> Result<Matcher, ParseError> {
                 .ok_or_else(|| ParseError::Shape("$size expects an integer".into()))?;
             Ok(Matcher::Size(n as usize))
         }
-        "$contains" => Ok(Matcher::Contains(parse_value(v)?)),
+        "$contains" => {
+            let arg = if let YValue::Mapping(mp) = v {
+                let has_op = mp.iter().any(|(k, _)| {
+                    k.as_str().map(|s| s.starts_with('$')).unwrap_or(false)
+                });
+                if has_op {
+                    AnyArg::Matcher(parse_matcher(mp)?)
+                } else {
+                    AnyArg::Value(parse_value(v)?)
+                }
+            } else {
+                AnyArg::Value(parse_value(v)?)
+            };
+            Ok(Matcher::Contains(Box::new(arg)))
+        }
         "$containsAll" => {
             let seq = v
                 .as_sequence()
@@ -437,6 +451,40 @@ fn parse_single_op(op: &str, v: &YValue) -> Result<Matcher, ParseError> {
             };
             Ok(Matcher::Any(Box::new(arg)))
         }
+        "$every" => {
+            let arg = if let YValue::Mapping(mp) = v {
+                let has_op = mp.iter().any(|(k, _)| {
+                    k.as_str().map(|s| s.starts_with('$')).unwrap_or(false)
+                });
+                if has_op {
+                    AnyArg::Matcher(parse_matcher(mp)?)
+                } else {
+                    AnyArg::Value(parse_value(v)?)
+                }
+            } else {
+                AnyArg::Value(parse_value(v)?)
+            };
+            Ok(Matcher::Every(Box::new(arg)))
+        }
+        "$not" => {
+            let inner = if let YValue::Mapping(mp) = v {
+                let has_op = mp.iter().any(|(k, _)| {
+                    k.as_str().map(|s| s.starts_with('$')).unwrap_or(false)
+                });
+                if has_op {
+                    parse_matcher(mp)?
+                } else {
+                    Matcher::Eq(parse_value(v)?)
+                }
+            } else {
+                Matcher::Eq(parse_value(v)?)
+            };
+            Ok(Matcher::Not(Box::new(inner)))
+        }
+        "$gt" => Ok(Matcher::Gt(parse_value(v)?)),
+        "$gte" => Ok(Matcher::Gte(parse_value(v)?)),
+        "$lt" => Ok(Matcher::Lt(parse_value(v)?)),
+        "$lte" => Ok(Matcher::Lte(parse_value(v)?)),
         "$type" => {
             let s = v
                 .as_str()

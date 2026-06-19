@@ -617,3 +617,107 @@ fn paths_resolve_from_nested_spec() {
         ]
     );
 }
+
+// ---------------------------------------------------------------------------
+// Structured value + operator specs
+// ---------------------------------------------------------------------------
+
+#[test]
+fn structured_output_spec() {
+    let r = complete(run(
+        "test/rust/crates/specgate-fixtures/specs/structured_output.spec.yaml",
+    ));
+    assert_eq!(r.len(), 5);
+    check_case(&r[0], "list_exact_match", CaseStatus::Pass);
+    check_case(&r[1], "list_contains_check", CaseStatus::Pass);
+    check_case(&r[2], "list_size_check", CaseStatus::Pass);
+    check_case(&r[3], "list_any_operator", CaseStatus::Pass);
+    check_case(&r[4], "list_wrong_value_fails", CaseStatus::Fail);
+}
+
+#[test]
+fn structured_map_spec() {
+    let r = complete(run(
+        "test/rust/crates/specgate-fixtures/specs/structured_map.spec.yaml",
+    ));
+    assert_eq!(r.len(), 4);
+    check_case(&r[0], "map_key_value_match", CaseStatus::Pass);
+    check_case(&r[1], "map_subset_match", CaseStatus::Pass);
+    check_case(&r[2], "map_wrong_value_fails", CaseStatus::Fail);
+    check_case(&r[3], "map_size_check", CaseStatus::Pass);
+}
+
+#[test]
+fn structured_set_spec() {
+    let r = complete(run(
+        "test/rust/crates/specgate-fixtures/specs/structured_set.spec.yaml",
+    ));
+    assert_eq!(r.len(), 5);
+    check_case(&r[0], "set_presence_match", CaseStatus::Pass);
+    check_case(&r[1], "set_all_items", CaseStatus::Pass);
+    check_case(&r[2], "set_missing_item_fails", CaseStatus::Fail);
+    check_case(&r[3], "set_size_check", CaseStatus::Pass);
+    check_case(&r[4], "set_contains_check", CaseStatus::Pass);
+}
+
+#[test]
+fn operators_spec() {
+    let r = complete(run(
+        "test/rust/crates/specgate-fixtures/specs/operators.spec.yaml",
+    ));
+    assert_eq!(r.len(), 12);
+    check_case(&r[0], "eq_scalar", CaseStatus::Pass);
+    check_case(&r[1], "size_list", CaseStatus::Pass);
+    check_case(&r[2], "size_map", CaseStatus::Pass);
+    check_case(&r[3], "contains_single", CaseStatus::Pass);
+    check_case(&r[4], "contains_all", CaseStatus::Pass);
+    check_case(&r[5], "excludes_values", CaseStatus::Pass);
+    check_case(&r[6], "excludes_fails_when_present", CaseStatus::Fail);
+    check_case(&r[7], "match_partial_object", CaseStatus::Pass);
+    check_case(&r[8], "exists_field", CaseStatus::Pass);
+    check_case(&r[9], "any_with_matcher", CaseStatus::Pass);
+    check_case(&r[10], "type_check", CaseStatus::Pass);
+    check_case(&r[11], "composed_operators", CaseStatus::Pass);
+}
+
+#[test]
+fn scalar_operators_spec() {
+    let r = complete(run(
+        "test/rust/crates/specgate-fixtures/specs/scalar_operators.spec.yaml",
+    ));
+    assert_eq!(r.len(), 13);
+    check_case(&r[0], "regex_match", CaseStatus::Pass);
+    check_case(&r[1], "regex_no_match_fails", CaseStatus::Fail);
+    check_case(&r[2], "not_value", CaseStatus::Pass);
+    check_case(&r[3], "not_fails_when_equal", CaseStatus::Fail);
+    check_case(&r[4], "gt_passes", CaseStatus::Pass);
+    check_case(&r[5], "gte_passes_equal", CaseStatus::Pass);
+    check_case(&r[6], "lt_passes", CaseStatus::Pass);
+    check_case(&r[7], "lte_fails", CaseStatus::Fail);
+    check_case(&r[8], "empty_list", CaseStatus::Pass);
+    check_case(&r[9], "every_element", CaseStatus::Pass);
+    check_case(&r[10], "every_fails", CaseStatus::Fail);
+    check_case(&r[11], "combined_multi_field", CaseStatus::Pass);
+    check_case(&r[12], "combined_multi_field_one_fails", CaseStatus::Fail);
+}
+
+#[test]
+fn nested_structured_spec() {
+    let r = complete(run(
+        "test/rust/crates/specgate-fixtures/specs/nested_structured.spec.yaml",
+    ));
+    assert_eq!(r.len(), 4);
+    check_case(&r[0], "nested_list_of_maps_exact", CaseStatus::Pass);
+    check_case(&r[1], "nested_any_with_match", CaseStatus::Pass);
+    check_case(&r[2], "nested_size", CaseStatus::Pass);
+    check_case(&r[3], "nested_contains_element", CaseStatus::Pass);
+}
+
+#[test]
+fn cross_dep_spec() {
+    let r = complete(run(
+        "test/rust/crates/specgate-fixtures/specs/cross_dep.spec.yaml",
+    ));
+    assert_eq!(r.len(), 1);
+    check_case(&r[0], "extract_yaml_value", CaseStatus::Pass);
+}

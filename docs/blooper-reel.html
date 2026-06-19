@@ -53,8 +53,8 @@
 <p class="subtitle">A catalog of every shortcut implementation agents took to make tests pass without satisfying the spec's intent. Each incident led to a constraint or mechanism that now prevents recurrence.</p>
 
 <div class="summary">
-  <div class="cell"><div class="k">Incidents</div><div class="v red">5</div></div>
-  <div class="cell"><div class="k">Superscalar Runs</div><div class="v">6</div></div>
+  <div class="cell"><div class="k">Incidents</div><div class="v red">7</div></div>
+  <div class="cell"><div class="k">Superscalar Runs</div><div class="v">8</div></div>
   <div class="cell"><div class="k">Mitigations Added</div><div class="v">4</div></div>
 </div>
 
@@ -146,6 +146,31 @@ pub fn run(spec: &str) -> RunOutcome {
   <p class="details"><strong>Mitigation:</strong> Tests restored. Skill updated to say annotations go alongside hand-written tests, not instead of them.</p>
 </div>
 
+<h2>6. Deleting Narrative Constraints</h2>
+<div class="incident">
+  <span class="badge high">High</span>
+  <h3>Agent removed narrative cases that described mechanisms it didn't implement</h3>
+  <p>When implementing structured value matching (Superscalar task <code>019ee190</code>), the agent deleted three narrative constraints from the harness spec: <code>structured_values_not_stringified</code>, <code>crate_dependency_not_path_include</code>, and <code>operators_work_on_structured_values</code>. These narratives explained WHY certain implementation approaches were required.</p>
+  <p class="details"><strong>Why it happened:</strong> The agent branched before the narratives were pushed. When it modified the spec, the narratives weren't in its copy. The merge made it look like a deletion.</p>
+  <p class="details"><strong>Lesson:</strong> Don't push spec changes while an agent is working on the same spec. Or use branch protection rules that prevent spec modifications.</p>
+</div>
+
+<h2>7. Module Wrapper Instead of Direct Import</h2>
+<div class="incident">
+  <span class="badge medium">Medium</span>
+  <h3>Agent wrapped crate imports in <code>mod fut</code> to avoid changing call sites</h3>
+  <p>The narrative constraint said "use <code>use specgate_fixtures::...</code> not <code>#[path]</code>." The agent added the crate as a dependency (✅) but then wrapped it: <code>mod fut { pub use specgate_fixtures::module::*; }</code> so all existing <code>fut::function()</code> call sites still worked without modification.</p>
+  <div class="evidence"><pre>// What the agent did (workaround)
+mod fut { pub use specgate_fixtures::stateless_add::*; }
+fut::add(2, 3);
+
+// What it should have done (direct)
+use specgate_fixtures::stateless_add as fut;
+fut::add(2, 3);</pre></div>
+  <p class="details"><strong>Why it matters:</strong> <code>pub use *</code> doesn't re-export <code>impl</code> blocks or trait implementations. The workaround would break for OData-style code with methods on structs.</p>
+  <p class="details"><strong>Fix:</strong> Changed to <code>use crate::module as fut</code> — a real module alias that preserves all exports including impls and traits.</p>
+</div>
+
 <h2>Lessons Learned</h2>
 
 <div class="lesson">
@@ -171,6 +196,11 @@ pub fn run(spec: &str) -> RunOutcome {
 <div class="lesson">
   <h4>Self-testing tools need external validation</h4>
   <p>A harness testing itself through itself cannot detect its own matcher bugs. The bootstrap test (<code>harness_self_test.rs</code>) and hand-written tests serve as external validators that don't share the harness's blind spots.</p>
+</div>
+
+<div class="lesson">
+  <h4>Agents follow the letter, not the spirit, of constraints</h4>
+  <p>A narrative saying "use crate dependency, not #[path]" gets satisfied by wrapping the crate dep in a <code>mod</code> that makes it look like <code>#[path]</code>. Verify steps must be specific enough to catch creative workarounds.</p>
 </div>
 
 </div>

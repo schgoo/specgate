@@ -8,6 +8,7 @@
 //! whole trace and do not advance the ordered cursor.
 
 use crate::types::{AnyArg, AssertValue, Assertion, Matcher, TraceEvent, Value};
+use std::cmp::Ordering;
 
 pub fn matches(expected: &[Assertion], actual: &[TraceEvent]) -> bool {
     match_ordered(expected, actual, 0).is_some()
@@ -113,21 +114,27 @@ fn matcher_matches(m: &Matcher, v: &Value) -> bool {
     match m {
         Matcher::Eq(target) => values_equal(target, v),
         Matcher::Size(n) => length_of(v).map(|l| l == *n).unwrap_or(false),
-        Matcher::Contains(item) => match v {
-            Value::List(xs) => xs.iter().any(|x| values_equal(item, x)),
-            Value::Set(xs) => xs.iter().any(|x| values_equal(item, x)),
-            Value::String(s) => match item {
-                Value::String(needle) => s.contains(needle.as_str()),
+        Matcher::Contains(arg) => match v {
+            Value::List(xs) => xs.iter().any(|x| match arg.as_ref() {
+                AnyArg::Value(val) => values_equal(val, x),
+                AnyArg::Matcher(m) => matcher_matches(m, x),
+            }),
+            Value::Set(xs) => xs.iter().any(|x| match arg.as_ref() {
+                AnyArg::Value(val) => values_equal(val, x),
+                AnyArg::Matcher(m) => matcher_matches(m, x),
+            }),
+            Value::String(s) => match arg.as_ref() {
+                AnyArg::Value(Value::String(needle)) => s.contains(needle.as_str()),
                 _ => false,
             },
             _ => false,
         },
         Matcher::ContainsAll(items) => items
             .iter()
-            .all(|it| matcher_matches(&Matcher::Contains(it.clone()), v)),
+            .all(|it| matcher_matches(&Matcher::Contains(Box::new(AnyArg::Value(it.clone()))), v)),
         Matcher::Excludes(items) => items
             .iter()
-            .all(|it| !matcher_matches(&Matcher::Contains(it.clone()), v)),
+            .all(|it| !matcher_matches(&Matcher::Contains(Box::new(AnyArg::Value(it.clone()))), v)),
         Matcher::Match(spec) => match v {
             Value::Map(m) => spec
                 .iter()
@@ -146,9 +153,38 @@ fn matcher_matches(m: &Matcher, v: &Value) -> bool {
                 AnyArg::Matcher(m) => matcher_matches(m, x),
             })
         }
+        Matcher::Every(arg) => {
+            let items: Vec<&Value> = match v {
+                Value::List(xs) => xs.iter().collect(),
+                Value::Set(xs) => xs.iter().collect(),
+                _ => return false,
+            };
+            if items.is_empty() {
+                return true;
+            }
+            items.iter().all(|x| match arg.as_ref() {
+                AnyArg::Value(val) => values_equal(val, x),
+                AnyArg::Matcher(m) => matcher_matches(m, x),
+            })
+        }
+        Matcher::Not(inner) => !matcher_matches(inner, v),
+        Matcher::Gt(target) => numeric_compare(v, target)
+            .map(|o| o == Ordering::Greater)
+            .unwrap_or(false),
+        Matcher::Gte(target) => numeric_compare(v, target)
+            .map(|o| matches!(o, Ordering::Greater | Ordering::Equal))
+            .unwrap_or(false),
+        Matcher::Lt(target) => numeric_compare(v, target)
+            .map(|o| o == Ordering::Less)
+            .unwrap_or(false),
+        Matcher::Lte(target) => numeric_compare(v, target)
+            .map(|o| matches!(o, Ordering::Less | Ordering::Equal))
+            .unwrap_or(false),
         Matcher::Type(t) => v.type_name() == t.as_str() || (t == "int" && matches!(v, Value::Integer(_))),
         Matcher::Matches(pat) => match v {
-            Value::String(s) => simple_regex_match(pat, s),
+            Value::String(s) => regex::Regex::new(pat)
+                .map(|r| r.is_match(s))
+                .unwrap_or(false),
             _ => false,
         },
         Matcher::Composite(parts) => parts.iter().all(|p| matcher_matches(p, v)),
@@ -165,21 +201,13 @@ fn length_of(v: &Value) -> Option<usize> {
     }
 }
 
-/// Minimal regex subset: `^prefix`, `suffix$`, `^exact$`, otherwise substring.
-fn simple_regex_match(pat: &str, s: &str) -> bool {
-    let starts = pat.starts_with('^');
-    let ends = pat.ends_with('$');
-    let body: &str = match (starts, ends) {
-        (true, true) => &pat[1..pat.len() - 1],
-        (true, false) => &pat[1..],
-        (false, true) => &pat[..pat.len() - 1],
-        (false, false) => pat,
-    };
-    match (starts, ends) {
-        (true, true) => s == body,
-        (true, false) => s.starts_with(body),
-        (false, true) => s.ends_with(body),
-        (false, false) => s.contains(body),
+fn numeric_compare(v: &Value, target: &Value) -> Option<Ordering> {
+    match (v, target) {
+        (Value::Integer(a), Value::Integer(b)) => Some(a.cmp(b)),
+        (Value::Float(a), Value::Float(b)) => a.partial_cmp(b),
+        (Value::Integer(a), Value::Float(b)) => (*a as f64).partial_cmp(b),
+        (Value::Float(a), Value::Integer(b)) => a.partial_cmp(&(*b as f64)),
+        _ => None,
     }
 }
 
