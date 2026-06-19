@@ -568,3 +568,43 @@ fn level_should_missing_warns() {
     assert!(r[0].expected.is_empty());
     assert!(r[0].traces.is_empty());
 }
+
+// ---------------------------------------------------------------------------
+// Vacuous matching — non-empty expected with zero matches must fail
+// ---------------------------------------------------------------------------
+
+#[test]
+fn no_vacuous_match() {
+    let r = complete(run(
+        "test/rust/crates/specgate-fixtures/specs/vacuous_match.spec.yaml",
+    ));
+    assert_eq!(r.len(), 2);
+    // Wrong value — must fail, not pass
+    check_case(&r[0], "wrong_value_fails", CaseStatus::Fail);
+    assert!(!r[0].traces.is_empty(), "operation ran, traces should exist");
+    // $run for non-matching operation — must fail, not vacuously pass
+    check_case(&r[1], "wrong_run_fails", CaseStatus::Fail);
+    assert!(!r[1].traces.is_empty(), "operation ran, traces should exist");
+}
+
+// ---------------------------------------------------------------------------
+// Path absolutization — specs at nested paths resolve correctly
+// ---------------------------------------------------------------------------
+
+#[test]
+fn paths_resolve_from_nested_spec() {
+    let r = complete(run(
+        "test/fixtures/nested/deep/path/nested_path.spec.yaml",
+    ));
+    assert_eq!(r.len(), 1);
+    check_case(&r[0], "add_from_nested_path", CaseStatus::Pass);
+    assert_eq!(
+        r[0].traces,
+        vec![
+            run_op("add"),
+            ev("add.a", "10"),
+            ev("add.b", "20"),
+            ev("add.result", "30"),
+        ]
+    );
+}

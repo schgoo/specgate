@@ -1,0 +1,16 @@
+spec_version: "0.4.0"
+name: fixture.nested_path
+binding: binding.yaml
+
+operations:
+  add:
+    inputs: { a: i32, b: i32 }
+    outputs: [add.result]
+
+cases:
+  - name: add_from_nested_path
+    desc: Spec at a deep path resolves binding and source correctly
+    operation: add
+    inputs: { a: 10, b: 20 }
+    expected:
+      - add.result: "30"

@@ -118,32 +118,48 @@ cases:
       - The harness should invoke cargo build/test, not evaluate Rust in-process
 
   - name: paths_resolve_relative_to_spec
-    kind: narrative
     desc: >
-      All paths in a spec (binding, fixture source) must resolve relative to
-      the spec file's location, not the working directory of the test runner.
-      Generated Cargo.toml paths must use forward slashes or properly escape
-      backslashes to avoid TOML unicode escape interpretation on Windows.
-      When the harness generates a runner project in a scratch directory,
-      spec input paths (e.g. fixture spec paths passed to run_spec) must be
-      resolved to absolute paths before being embedded in the generated code.
-    verify:
-      - Run `cargo test -p specgate-harness --test specgate_harness_spec` from the workspace root
-      - All Complete-outcome cases must find their fixture source and binding
-      - Generated Cargo.toml must not contain raw backslash paths
+      Spec at a deeply nested path resolves binding and fixture source
+      correctly. Tests that the harness absolutizes paths before embedding
+      them in the generated runner, so the runner finds files regardless
+      of its own working directory.
+    operation: run_spec
+    inputs:
+      spec: test/fixtures/nested/deep/path/nested_path.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: add_from_nested_path
+              status: pass
+              expected:
+                - add.result: "30"
+              traces:
+                - Run: { operation: add }
+                - Event: { name: add.a, value: "10" }
+                - Event: { name: add.b, value: "20" }
+                - Event: { name: add.result, value: "30" }
 
   - name: no_vacuous_match
-    kind: narrative
     desc: >
-      The subsequence matcher must not pass when zero assertions match.
-      An empty expected list is valid (no assertions = always pass), but
-      a non-empty expected list where no assertions matched the trace
-      stream is a failure. This prevents the harness from silently passing
-      cases with structured expected objects it cannot parse.
-    verify:
-      - Create a spec case with expected assertions that don't match any trace events
-      - Confirm the harness reports it as a failure, not a pass
-      - Specifically: a non-empty expected list with zero matches must produce status fail
+      Non-empty expected with zero matching traces must fail, not pass.
+      Prevents the harness from silently passing unparseable or impossible assertions.
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/vacuous_match.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: impossible_assertion
+              status: fail
+              expected:
+                - nonexistent.field: "impossible"
+              traces:
+                - Run: { operation: add }
+                - Event: { name: add.a, value: "2" }
+                - Event: { name: add.b, value: "3" }
+                - Event: { name: add.result, value: "5" }
 
   - name: self_test_rejects_all_errors
     desc: >
