@@ -1,0 +1,106 @@
+spec_version: "0.4.0"
+name: fixture.scalar_operators
+binding: binding.yaml
+
+operations:
+  get_measurement:
+    outputs:
+      - temperature: i32
+      - label: string
+      - readings:
+          type: list
+          items: i32
+  get_empty:
+    outputs:
+      - $result:
+          type: list
+          items: string
+
+cases:
+  # $matches — regex
+  - name: regex_match
+    desc: Label matches regex pattern
+    operation: get_measurement
+    expected:
+      - label: { $matches: "^sensor-[A-Z]\\d+-\\w+$" }
+
+  - name: regex_no_match_fails
+    desc: Regex that doesn't match fails
+    operation: get_measurement
+    expected:
+      - label: { $matches: "^invalid" }
+
+  # $not — negation
+  - name: not_value
+    desc: Temperature is not 100
+    operation: get_measurement
+    expected:
+      - temperature: { $not: 100 }
+
+  - name: not_fails_when_equal
+    desc: Not fails when value matches
+    operation: get_measurement
+    expected:
+      - temperature: { $not: 72 }
+
+  # $gt, $gte, $lt, $lte — numeric comparisons
+  - name: gt_passes
+    desc: Temperature greater than 70
+    operation: get_measurement
+    expected:
+      - temperature: { $gt: 70 }
+
+  - name: gte_passes_equal
+    desc: Temperature greater than or equal to 72
+    operation: get_measurement
+    expected:
+      - temperature: { $gte: 72 }
+
+  - name: lt_passes
+    desc: Temperature less than 100
+    operation: get_measurement
+    expected:
+      - temperature: { $lt: 100 }
+
+  - name: lte_fails
+    desc: Temperature not less than or equal to 50
+    operation: get_measurement
+    expected:
+      - temperature: { $lte: 50 }
+
+  # Empty collection
+  - name: empty_list
+    desc: Empty list has size 0
+    operation: get_empty
+    expected:
+      - $result: { $size: 0 }
+
+  # $every on list
+  - name: every_element
+    desc: Every reading is greater than 60
+    operation: get_measurement
+    expected:
+      - readings: { $every: { $gt: 60 } }
+
+  - name: every_fails
+    desc: Not every reading is greater than 71
+    operation: get_measurement
+    expected:
+      - readings: { $every: { $gt: 71 } }
+
+  # Multiple fields with multiple operators in one case
+  - name: combined_multi_field
+    desc: Multiple fields asserted with different operators in a single case
+    operation: get_measurement
+    expected:
+      - temperature: { $gt: 60, $lt: 100 }
+      - label: { $matches: "^sensor-[A-Z]" }
+      - readings: { $size: 5, $every: { $gte: 60 } }
+
+  - name: combined_multi_field_one_fails
+    desc: Multiple field assertions where one fails — whole case fails
+    operation: get_measurement
+    expected:
+      - temperature: { $gt: 60 }
+      - label: { $matches: "^invalid" }
+      - readings: { $size: 5 }

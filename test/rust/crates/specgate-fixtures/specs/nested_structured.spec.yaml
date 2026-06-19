@@ -1,0 +1,40 @@
+spec_version: "0.4.0"
+name: fixture.nested_structured
+binding: binding.yaml
+
+operations:
+  get_properties:
+    outputs:
+      - $result:
+          type: list
+          fields:
+            name: string
+            type: string
+            nullable: string
+
+cases:
+  - name: nested_list_of_maps_exact
+    desc: List of maps matches exact structure
+    operation: get_properties
+    expected:
+      - $result:
+        - { name: "ID", type: "Edm.Int32", nullable: "false" }
+        - { name: "Name", type: "Edm.String", nullable: "true" }
+
+  - name: nested_any_with_match
+    desc: At least one element matches partial object
+    operation: get_properties
+    expected:
+      - $result: { $any: { $match: { name: "ID", nullable: "false" } } }
+
+  - name: nested_size
+    desc: List has expected number of elements
+    operation: get_properties
+    expected:
+      - $result: { $size: 2 }
+
+  - name: nested_contains_element
+    desc: List contains an element with matching fields
+    operation: get_properties
+    expected:
+      - $result: { $contains: { $match: { name: "Name" } } }
