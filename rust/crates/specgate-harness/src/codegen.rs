@@ -27,6 +27,7 @@ pub fn generate(
     let annotations_path = workspace_root.join("crates/specgate-annotations");
     let runtime_path = workspace_root.join("crates/specgate-runtime");
     let macros_path = workspace_root.join("crates/specgate-annotations-macros");
+    let harness_path = workspace_root.join("crates/specgate-harness");
 
     let manifest = format!(
         r#"[package]
@@ -40,6 +41,7 @@ path = "src/main.rs"
 
 [dependencies]
 specgate-annotations = {{ path = "{ann}" }}
+specgate-harness = {{ path = "{harness}" }}
 
 [workspace]
 
@@ -51,12 +53,29 @@ syn = {{ git = "https://github.com/dtolnay/syn", tag = "2.0.118" }}
 serde = {{ git = "https://github.com/serde-rs/serde", tag = "v1.0.228" }}
 serde_core = {{ git = "https://github.com/serde-rs/serde", tag = "v1.0.228" }}
 serde_derive = {{ git = "https://github.com/serde-rs/serde", tag = "v1.0.228" }}
+serde_yaml = {{ git = "https://github.com/dtolnay/serde-yaml", tag = "0.9.34" }}
+serde_json = {{ git = "https://github.com/serde-rs/json", tag = "v1.0.145" }}
+itoa = {{ git = "https://github.com/dtolnay/itoa", tag = "1.0.18" }}
+ryu = {{ git = "https://github.com/dtolnay/ryu", tag = "1.0.21" }}
+unsafe-libyaml = {{ git = "https://github.com/dtolnay/unsafe-libyaml", tag = "0.2.11" }}
+indexmap = {{ git = "https://github.com/indexmap-rs/indexmap", tag = "2.14.0" }}
+equivalent = {{ git = "https://github.com/indexmap-rs/equivalent", tag = "v1.0.2" }}
+hashbrown = {{ git = "https://github.com/rust-lang/hashbrown", tag = "v0.17.1" }}
 "#,
         ann = annotations_path.display().to_string().replace('\\', "/"),
+        harness = harness_path.display().to_string().replace('\\', "/"),
     );
     let _ = runtime_path;
     let _ = macros_path;
     std::fs::write(scratch_dir.join("Cargo.toml"), manifest)?;
+
+    // Seed the tmp project's Cargo.lock from the parent workspace so cargo
+    // doesn't need to consult crates.io (the env may have it blocked).
+    let parent_lock = workspace_root.join("Cargo.lock");
+    let tmp_lock = scratch_dir.join("Cargo.lock");
+    if parent_lock.exists() {
+        let _ = std::fs::copy(&parent_lock, &tmp_lock);
+    }
 
     let main_rs = render_main(fixture_src, spec, cases_to_run, annotated, &trace_file, needs_async)?;
     std::fs::write(scratch_dir.join("src").join("main.rs"), main_rs)?;

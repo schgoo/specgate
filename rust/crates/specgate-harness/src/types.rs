@@ -86,6 +86,15 @@ impl CaseStatus {
     }
 }
 
+impl std::fmt::Display for RunOutcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RunOutcome::Complete { results } => write!(f, "Complete({} results)", results.len()),
+            RunOutcome::Error { reason } => write!(f, "Error({reason})"),
+        }
+    }
+}
+
 impl CaseLevel {
     pub fn as_str(&self) -> &'static str {
         match self {

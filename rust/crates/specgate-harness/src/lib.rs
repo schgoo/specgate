@@ -26,6 +26,7 @@ use std::process::Command;
 
 pub fn run_spec(spec_path: &str) -> RunOutcome {
     let path = PathBuf::from(spec_path);
+    let path = std::fs::canonicalize(&path).unwrap_or(path);
     let raw = match std::fs::read_to_string(&path) {
         Ok(t) => t,
         Err(_) => {

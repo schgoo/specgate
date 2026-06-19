@@ -318,5 +318,20 @@ pub fn binding_path_resolved(spec_path: &Path, binding: &str) -> PathBuf {
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
-    parent.join(binding)
+    // Try spec-relative first.
+    let direct = parent.join(binding);
+    if direct.exists() {
+        return direct;
+    }
+    // Walk up parent directories and try each.
+    let mut cur = parent.as_path();
+    while let Some(p) = cur.parent() {
+        let candidate = p.join(binding);
+        if candidate.exists() {
+            return candidate;
+        }
+        cur = p;
+    }
+    // Fall back to the spec-relative path (will surface as "not found").
+    direct
 }
