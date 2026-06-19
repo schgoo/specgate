@@ -9,4 +9,4 @@ edition = "2024"
 # dev-dependency of specgate-harness, so `cargo test` in the main workspace
 # forces compilation.
 specgate-annotations = { path = "../../../../rust/crates/specgate-annotations" }
-
+serde_yaml = "0.9"

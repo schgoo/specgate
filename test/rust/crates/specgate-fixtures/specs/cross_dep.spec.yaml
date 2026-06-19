@@ -1,0 +1,18 @@
+spec_version: "0.4.0"
+name: fixture.cross_dep
+binding: binding.yaml
+
+operations:
+  parse_yaml_key:
+    inputs: { input: string, key: string }
+    outputs: [$result]
+
+cases:
+  - name: extract_yaml_value
+    desc: Operation using external crate dependency (serde_yaml) produces correct result
+    operation: parse_yaml_key
+    inputs:
+      input: "name: Customer\nid: 42"
+      key: "name"
+    expected:
+      - $result: "Customer"

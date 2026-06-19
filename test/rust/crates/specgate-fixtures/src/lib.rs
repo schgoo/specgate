@@ -22,4 +22,5 @@ pub mod async_fetch;
 pub mod keyword_collision;
 pub mod unordered_fields;
 pub mod anywhere_event;
+pub mod cross_dep;
 // pub mod compile_error;  // intentionally broken — syntax error
