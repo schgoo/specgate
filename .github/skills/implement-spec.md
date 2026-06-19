@@ -141,20 +141,20 @@ See the language-specific knowledge files for test code examples.
 
 ## Rules
 
-### Mode selection
-- **Annotated mode** (default): Use when `specgate-annotations` is available as a
-  workspace dependency. Add `#[spec_operation]`, `#[spec_capture]`, `#[spec_setup]`,
-  `#[spec_checkpoint]`, and `#[spec_mock]` annotations to the implementation code.
-  The annotations mark which functions implement which spec operations, enabling
-  the harness to discover and validate them automatically.
-- **Bootstrap mode**: Use only when the annotations crate does not exist yet
-  (early project bootstrap). Write conventional tests without annotations.
+### Annotations are required
+All implementation code MUST be annotated with `specgate-annotations`. There is
+no bootstrap or non-annotated mode. Add `#[spec_operation]`, `#[spec_setup]`,
+`#[derive(SpecEvent)]`, `#[spec_event]`, `spec_trace!()`, and `#[spec_mock]`
+annotations to the implementation code. The annotations mark which functions
+implement which spec operations, enabling the harness to discover, compile,
+execute, and validate them automatically.
 
-### Annotated mode only
-- **Every `spec_operation` needs a `kind`** — infer from the spec's structure
+- **Every operation declared in the spec** must have a corresponding
+  `#[spec_operation("name")]` annotation on the implementing function
 - **Every `spec_setup` needs a `name`** — use the setup's purpose as the name
 - **Every `spec_mock` needs a `name`** — use the dependency's logical name
 - **Setup functions must not take `self`** — they are free functions
+- **Async operations** (`async: true` in spec) must be `async fn`
 
 ### Trust boundary — validation artifacts are off-limits
 
@@ -171,7 +171,7 @@ If you use them as input, the validation becomes circular and loses its value.
 Your only sources of truth are: the spec file, the binding file, and your own
 source code.
 
-### Both modes
+### General rules
 - **Types are suggestions, not prescriptions** — the spec says what fields must be
   available, not how to structure internals. Use idiomatic language constructs.
 - **Spec cases are exhaustive** — every case must have a corresponding test
@@ -222,8 +222,7 @@ Then read only what you need:
 
 - Always read: `spec-format.md` (understand the spec you're implementing)
 - Always read: `rust.md` or `csharp.md` (whichever language you're implementing in)
-- Read if placing annotations: `annotations.md`
-- Read if kind is not Stateless: `kinds.md`
+- Always read: `annotations.md` (all implementations must be annotated)
 - Read if spec has `operations` section: `kinds.md` (StateMachine test patterns)
 - Read if entry point is a method: `construction.md`
 - Read if creating binding: `bindings.md`
@@ -235,12 +234,12 @@ Then read only what you need:
 - [ ] All spec types implemented as idiomatic language types
 - [ ] Every spec case has a corresponding test function
 - [ ] Core logic implemented — all spec-case tests pass
+- [ ] All implementation functions annotated (`#[spec_operation]`, etc.)
 - [ ] Unit tests added for code paths not reachable through spec cases
 - [ ] Tests build and pass (`cargo test` / `dotnet test`)
 - [ ] Coverage measured and reported (target: 100% line coverage)
 - [ ] Uncovered branches identified and tested, or justified if untestable
-- [ ] If annotated mode: annotations present, binding file created
-- [ ] If bootstrap mode: conventional tests cover all cases
+- [ ] Binding file created/updated for this spec
 - [ ] **Spec harness validation** — run the spec through the harness (see below)
 
 ## Running the spec harness
