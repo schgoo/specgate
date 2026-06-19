@@ -5,7 +5,7 @@ binding: binding.yaml
 operations:
   divide:
     inputs: { a: i32, b: i32 }
-    outputs: [divide.outcome, divide.result]
+    outputs: [$outcome, $result]
 
 cases:
   - name: divide_10_by_2
@@ -13,5 +13,5 @@ cases:
     operation: divide
     inputs: { a: 10, b: 2 }
     expected:
-      - divide.outcome: "Ok"
-      - divide.result: "5"
+      - $outcome: "Ok"
+      - $result: "5"

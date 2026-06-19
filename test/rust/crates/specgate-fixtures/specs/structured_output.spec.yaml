@@ -1,0 +1,47 @@
+spec_version: "0.4.0"
+name: fixture.structured_output
+binding: binding.yaml
+
+operations:
+  resolve_entity:
+    outputs:
+      - entity_name: string
+      - key_properties:
+          type: list
+          items: string
+      - structural_properties:
+          type: list
+          items: string
+
+cases:
+  - name: list_exact_match
+    desc: Array output matches exact values in order
+    operation: resolve_entity
+    expected:
+      - entity_name: "Customer"
+      - key_properties: ["ID"]
+      - structural_properties: ["ID", "Name", "Email"]
+
+  - name: list_contains_check
+    desc: Array output checked with $contains operator
+    operation: resolve_entity
+    expected:
+      - structural_properties: { $contains: "Name" }
+
+  - name: list_size_check
+    desc: Array output checked with $size operator
+    operation: resolve_entity
+    expected:
+      - structural_properties: { $size: 3 }
+
+  - name: list_any_operator
+    desc: At least one element matches
+    operation: resolve_entity
+    expected:
+      - key_properties: { $any: "ID" }
+
+  - name: list_wrong_value_fails
+    desc: Array with wrong expected value fails
+    operation: resolve_entity
+    expected:
+      - key_properties: ["NonexistentKey"]

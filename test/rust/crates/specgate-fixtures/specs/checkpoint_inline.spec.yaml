@@ -15,4 +15,4 @@ cases:
     expected:
       - $run: process
       - after_upper: " HELLO "
-      - process.result: "HELLO"
+      - $result: "HELLO"

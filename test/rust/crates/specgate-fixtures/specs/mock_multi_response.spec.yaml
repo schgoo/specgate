@@ -26,4 +26,4 @@ cases:
       - db.response: "Alice"
       - db.request: "user_2"
       - db.response: "Bob"
-      - get_users.result: "Alice and Bob"
+      - $result: "Alice and Bob"

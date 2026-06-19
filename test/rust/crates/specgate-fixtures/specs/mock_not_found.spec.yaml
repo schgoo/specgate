@@ -19,4 +19,4 @@ cases:
       db: {}
     expected:
       - db.request: "user_99"
-      - db.error: "no mock response for input 'user_99'"
+      - $error: "no mock response for input 'user_99'"

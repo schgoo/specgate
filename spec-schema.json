@@ -68,13 +68,38 @@
         },
         "outputs": {
           "type": "array",
-          "description": "List of observable outputs this operation can produce. Each item is either a bare event name (string) or a map declaring the event name with its type or enum variants.",
+          "description": "List of observable outputs this operation can produce. Each item is either a bare event name (string), a name with scalar type (name: type), or a name with structured type definition.",
           "items": {
             "oneOf": [
               { "type": "string" },
               { "type": "object" }
             ]
           }
+        }
+      }
+    },
+    "typeDefinition": {
+      "description": "Inline type definition for structured outputs. Used when an output is a collection or complex type.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Type kind: string, i32, i64, f64, bool, list, map, set, or a reference to a named type.",
+          "enum": ["string", "i32", "i64", "f64", "bool", "list", "map", "set"]
+        },
+        "fields": {
+          "type": "object",
+          "description": "For list element types or inline struct definitions. Keys are field names, values are types."
+        },
+        "items": {
+          "description": "Element type for set types. A string (type name) or inline type definition."
+        },
+        "keys": {
+          "type": "string",
+          "description": "Key type for map types."
+        },
+        "values": {
+          "description": "Value type for map types. A string (type name) or inline type definition."
         }
       }
     },

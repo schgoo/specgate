@@ -6,7 +6,7 @@ operations:
   make_counter:
     kind: setup
   get_count:
-    outputs: [get_count.result]
+    outputs: [$result]
 
 cases:
   - name: read_count
@@ -14,4 +14,4 @@ cases:
     setup: make_counter
     operation: get_count
     expected:
-      - get_count.result: "42"
+      - $result: "42"

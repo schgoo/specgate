@@ -1,0 +1,41 @@
+spec_version: "0.4.0"
+name: fixture.structured_map
+binding: binding.yaml
+
+operations:
+  get_entity_values:
+    inputs: { id: i32 }
+    outputs:
+      - $result:
+          type: map
+          keys: string
+          values: string
+
+cases:
+  - name: map_key_value_match
+    desc: Map output matches expected keys with values
+    operation: get_entity_values
+    inputs: { id: 1 }
+    expected:
+      - $result: { "ID": "1", "Name": "Customer" }
+
+  - name: map_subset_match
+    desc: Map with extra keys still passes (subset matching)
+    operation: get_entity_values
+    inputs: { id: 1 }
+    expected:
+      - $result: { "ID": "1" }
+
+  - name: map_wrong_value_fails
+    desc: Map with wrong value for a key fails
+    operation: get_entity_values
+    inputs: { id: 1 }
+    expected:
+      - $result: { "ID": "999" }
+
+  - name: map_size_check
+    desc: Map checked with $size operator
+    operation: get_entity_values
+    inputs: { id: 1 }
+    expected:
+      - $result: { $size: 3 }

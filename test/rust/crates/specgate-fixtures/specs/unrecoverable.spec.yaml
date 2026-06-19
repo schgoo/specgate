@@ -5,7 +5,7 @@ binding: binding.yaml
 operations:
   divide:
     inputs: { a: i32, b: i32 }
-    outputs: [divide.outcome, divide.error]
+    outputs: [$outcome, $error]
 
 cases:
   - name: divide_by_zero_panics
@@ -13,5 +13,5 @@ cases:
     operation: divide
     inputs: { a: 10, b: 0 }
     expected:
-      - divide.outcome: "Unrecoverable"
-      - divide.error: "attempt to divide by zero"
+      - $outcome: "Unrecoverable"
+      - $error: "attempt to divide by zero"

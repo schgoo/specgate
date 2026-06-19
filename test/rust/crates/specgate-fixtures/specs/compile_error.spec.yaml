@@ -4,11 +4,11 @@ binding: binding.yaml
 
 operations:
   broken:
-    outputs: [broken.result]
+    outputs: [$result]
 
 cases:
   - name: broken_fn
     desc: Source has a syntax error
     operation: broken
     expected:
-      - broken.result: "42"
+      - $result: "42"

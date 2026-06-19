@@ -4,7 +4,7 @@ binding: binding.yaml
 
 operations:
   recommended_feature:
-    outputs: [recommended_feature.result]
+    outputs: [$result]
 
 cases:
   - name: recommended_not_implemented
@@ -13,4 +13,4 @@ cases:
     operation: recommended_feature
     inputs: {}
     expected:
-      - recommended_feature.result: "done"
+      - $result: "done"

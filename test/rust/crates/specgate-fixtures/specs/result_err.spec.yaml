@@ -5,7 +5,7 @@ binding: binding.yaml
 operations:
   divide:
     inputs: { a: i32, b: i32 }
-    outputs: [divide.outcome, divide.error]
+    outputs: [$outcome, $error]
 
 cases:
   - name: divide_by_zero
@@ -13,5 +13,5 @@ cases:
     operation: divide
     inputs: { a: 10, b: 0 }
     expected:
-      - divide.outcome: "Error"
-      - divide.error: "division by zero"
+      - $outcome: "Error"
+      - $error: "division by zero"

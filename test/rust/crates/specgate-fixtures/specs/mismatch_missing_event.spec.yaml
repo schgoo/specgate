@@ -5,7 +5,7 @@ binding: binding.yaml
 operations:
   add:
     inputs: { a: i32, b: i32 }
-    outputs: [add.result]
+    outputs: [$result]
 
 cases:
   - name: add_2_3
@@ -13,5 +13,5 @@ cases:
     operation: add
     inputs: { a: 2, b: 3 }
     expected:
-      - add.result: "5"
+      - $result: "5"
       - add.extra: "bonus"

@@ -13,4 +13,4 @@ cases:
     operation: find
     inputs: { items: [10, 20, 30], target: 99 }
     expected:
-      - find.outcome: "None"
+      - $outcome: "None"

@@ -6,7 +6,7 @@ operations:
   fetch:
     async: true
     inputs: { url: string }
-    outputs: [fetch.result]
+    outputs: [$result]
 
 cases:
   - name: fetch_returns_response
@@ -15,4 +15,4 @@ cases:
     inputs: { url: "https://example.com" }
     expected:
       - $run: fetch
-      - fetch.result: "response from https://example.com"
+      - $result: "response from https://example.com"

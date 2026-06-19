@@ -1,0 +1,99 @@
+spec_version: "0.4.0"
+name: fixture.operators
+binding: binding.yaml
+
+operations:
+  get_product:
+    outputs:
+      - product_name: string
+      - price: i32
+      - tags:
+          type: list
+          items: string
+      - attributes:
+          type: map
+          keys: string
+          values: string
+
+cases:
+  # $eq — explicit deep equality
+  - name: eq_scalar
+    desc: Explicit equality on scalar value
+    operation: get_product
+    expected:
+      - product_name: { $eq: "Milk" }
+
+  # $size — collection length
+  - name: size_list
+    desc: Assert list has specific length
+    operation: get_product
+    expected:
+      - tags: { $size: 3 }
+
+  - name: size_map
+    desc: Assert map has specific number of entries
+    operation: get_product
+    expected:
+      - attributes: { $size: 2 }
+
+  # $contains — element presence
+  - name: contains_single
+    desc: List contains a specific value
+    operation: get_product
+    expected:
+      - tags: { $contains: "dairy" }
+
+  # $containsAll — all values present (order-independent)
+  - name: contains_all
+    desc: List contains all listed values in any order
+    operation: get_product
+    expected:
+      - tags: { $containsAll: ["dairy", "organic"] }
+
+  # $excludes — none of listed values present
+  - name: excludes_values
+    desc: List does not contain any of the listed values
+    operation: get_product
+    expected:
+      - tags: { $excludes: ["expired", "recalled"] }
+
+  - name: excludes_fails_when_present
+    desc: Excludes fails when a listed value is present
+    operation: get_product
+    expected:
+      - tags: { $excludes: ["dairy"] }
+
+  # $match — partial object match
+  - name: match_partial_object
+    desc: Map matches listed keys with values, ignores unlisted
+    operation: get_product
+    expected:
+      - attributes: { $match: { "category": "food" } }
+
+  # $exists — field presence
+  - name: exists_field
+    desc: Field is present with any value
+    operation: get_product
+    expected:
+      - product_name: { $exists: true }
+
+  # $any — at least one element satisfies nested matcher
+  - name: any_with_matcher
+    desc: At least one tag starts with "org"
+    operation: get_product
+    expected:
+      - tags: { $any: { $matches: "^org" } }
+
+  # $type — assert variant/type
+  - name: type_check
+    desc: Value is a string type
+    operation: get_product
+    expected:
+      - product_name: { $type: "string" }
+
+  # Composable — operators can nest
+  - name: composed_operators
+    desc: Size and containsAll combined
+    operation: get_product
+    expected:
+      - tags: { $size: 3, $containsAll: ["dairy", "organic", "local"] }

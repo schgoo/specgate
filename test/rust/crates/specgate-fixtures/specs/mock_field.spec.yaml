@@ -22,4 +22,4 @@ cases:
       - $run: get_user
       - db.request: "user_1"
       - db.response: "Alice"
-      - get_user.result: "Alice"
+      - $result: "Alice"

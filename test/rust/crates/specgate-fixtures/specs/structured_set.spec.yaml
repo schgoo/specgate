@@ -1,0 +1,41 @@
+spec_version: "0.4.0"
+name: fixture.structured_set
+binding: binding.yaml
+
+operations:
+  get_navigation_properties:
+    outputs:
+      - $result:
+          type: set
+          items: string
+
+cases:
+  - name: set_presence_match
+    desc: Set output matches presence of items regardless of order
+    operation: get_navigation_properties
+    expected:
+      - $result: { $containsAll: ["Orders", "Address"] }
+
+  - name: set_all_items
+    desc: All items present in the set
+    operation: get_navigation_properties
+    expected:
+      - $result: { $containsAll: ["Orders", "Address", "Contacts"] }
+
+  - name: set_missing_item_fails
+    desc: Expected item not in set fails
+    operation: get_navigation_properties
+    expected:
+      - $result: { $containsAll: ["Orders", "NonexistentNav"] }
+
+  - name: set_size_check
+    desc: Set checked with $size operator
+    operation: get_navigation_properties
+    expected:
+      - $result: { $size: 3 }
+
+  - name: set_contains_check
+    desc: Set checked with $contains operator
+    operation: get_navigation_properties
+    expected:
+      - $result: { $contains: "Contacts" }

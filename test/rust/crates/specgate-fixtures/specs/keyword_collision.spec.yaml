@@ -5,7 +5,7 @@ binding: binding.yaml
 operations:
   run:
     inputs: { input: string }
-    outputs: [run.result]
+    outputs: [$result]
 
 cases:
   - name: operation_named_run
@@ -14,4 +14,4 @@ cases:
     inputs: { input: "test" }
     expected:
       - $run: run
-      - run.result: "executed: test"
+      - $result: "executed: test"
