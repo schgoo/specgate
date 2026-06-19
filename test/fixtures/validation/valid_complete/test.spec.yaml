@@ -1,0 +1,29 @@
+spec_version: "0.4.0"
+name: test.valid_complete
+operations:
+  add:
+    inputs: { a: i32, b: i32 }
+    outputs: [add.result]
+cases:
+  - name: add_positive
+    desc: Adding positive numbers
+    level: must
+    source:
+      assertion_ids: [ADD-1]
+      spec: "Math Spec"
+      section: "§1"
+    operation: add
+    inputs: { a: 2, b: 3 }
+    expected:
+      - add.result: "5"
+  - name: add_negative_error
+    desc: Negative case — overflow
+    level: must
+    source:
+      assertion_ids: [ADD-2]
+      spec: "Math Spec"
+      section: "§1"
+    operation: add
+    inputs: { a: 2147483647, b: 1 }
+    expected:
+      - add.outcome: "Error"

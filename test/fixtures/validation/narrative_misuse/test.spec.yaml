@@ -1,0 +1,12 @@
+spec_version: "0.4.0"
+name: test.narrative_misuse
+operations:
+  validate:
+    outputs: [validate.result]
+cases:
+  - name: should_be_runnable
+    kind: narrative
+    desc: Validates input and returns Ok
+    verify:
+      - Confirm validate returns Ok for valid input
+      - Confirm validate rejects empty input

@@ -1,0 +1,12 @@
+spec_version: "0.4.0"
+name: test.bad_expected
+operations:
+  do_thing:
+    outputs: [result]
+cases:
+  - name: bad_format
+    desc: Expected entry has multiple keys
+    operation: do_thing
+    expected:
+      - result: "ok"
+        extra: "bad"

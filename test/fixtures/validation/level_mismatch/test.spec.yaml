@@ -1,0 +1,16 @@
+spec_version: "0.4.0"
+name: test.level_mismatch
+operations:
+  required_feature:
+    outputs: [required_feature.result]
+cases:
+  - name: required_but_marked_may
+    desc: Source assertion is MUST but case level is may
+    level: may
+    source:
+      assertion_ids: [TEST-MUST-1]
+      spec: "Test Spec"
+      section: "§1"
+    operation: required_feature
+    expected:
+      - required_feature.result: "done"

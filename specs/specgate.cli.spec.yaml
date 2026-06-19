@@ -24,7 +24,6 @@ types:
     failed: i32
     skipped: i32
     warned: i32
-    cases: List<CaseResult>
 
 operations:
   validate:
@@ -63,14 +62,14 @@ operations:
 cases:
 
   # ================================================================
-  # Validate — schema checks
+  # Validate — 1. Schema validation
   # ================================================================
 
-  - name: validate_valid_spec
-    desc: A well-formed spec produces no errors
+  - name: validate_schema_pass
+    desc: Well-formed spec passes schema validation
     operation: validate
     inputs:
-      spec_dir: test/rust/crates/specgate-fixtures/specs
+      spec_dir: test/fixtures/validation/valid_complete
       strict: false
       suppress: []
     expected:
@@ -79,8 +78,8 @@ cases:
           report:
             errors: 0
 
-  - name: validate_missing_spec_version
-    desc: Spec without spec_version produces schema error
+  - name: validate_schema_missing_version
+    desc: Spec without spec_version fails schema validation
     operation: validate
     inputs:
       spec_dir: test/fixtures/validation/missing_version
@@ -97,11 +96,24 @@ cases:
                 message: "missing required field 'spec_version'"
 
   # ================================================================
-  # Validate — operation reference checks
+  # Validate — 2. Operation reference check
   # ================================================================
 
-  - name: validate_case_references_missing_operation
-    desc: Case references an operation not in the operations block
+  - name: validate_op_ref_pass
+    desc: Case referencing existing operation passes
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/valid_complete
+      strict: false
+      suppress: []
+    expected:
+      outcome:
+        Pass:
+          report:
+            findings: []
+
+  - name: validate_op_ref_fail
+    desc: Case referencing undefined operation fails
     operation: validate
     inputs:
       spec_dir: test/fixtures/validation/bad_op_ref
@@ -118,11 +130,24 @@ cases:
                 message: "case 'test_case' references undefined operation 'nonexistent'"
 
   # ================================================================
-  # Validate — name uniqueness
+  # Validate — 3. Name uniqueness
   # ================================================================
 
-  - name: validate_duplicate_case_names
-    desc: Two cases with the same name produces an error
+  - name: validate_names_unique_pass
+    desc: Unique case names pass
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/valid_complete
+      strict: false
+      suppress: []
+    expected:
+      outcome:
+        Pass:
+          report:
+            errors: 0
+
+  - name: validate_names_duplicate_fail
+    desc: Duplicate case names fail
     operation: validate
     inputs:
       spec_dir: test/fixtures/validation/duplicate_names
@@ -139,11 +164,24 @@ cases:
                 message: "duplicate case name 'my_case'"
 
   # ================================================================
-  # Validate — provenance
+  # Validate — 4. Source provenance
   # ================================================================
 
-  - name: validate_missing_provenance
-    desc: Runnable case without source.assertion_ids produces warning
+  - name: validate_provenance_pass
+    desc: Case with source.assertion_ids produces no warning
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/valid_complete
+      strict: false
+      suppress: []
+    expected:
+      outcome:
+        Pass:
+          report:
+            warnings: 0
+
+  - name: validate_provenance_missing_warn
+    desc: Case without source.assertion_ids produces warning
     operation: validate
     inputs:
       spec_dir: test/fixtures/validation/no_provenance
@@ -159,7 +197,7 @@ cases:
                 check: provenance
                 message: "case 'my_case' has no source.assertion_ids"
 
-  - name: validate_missing_provenance_strict
+  - name: validate_provenance_strict_fail
     desc: In strict mode, provenance warning becomes error
     operation: validate
     inputs:
@@ -173,10 +211,195 @@ cases:
             errors: 1
 
   # ================================================================
+  # Validate — 5. Input completeness
+  # ================================================================
+
+  - name: validate_inputs_complete_pass
+    desc: Case provides all declared operation inputs
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/valid_complete
+      strict: false
+      suppress: []
+    expected:
+      outcome:
+        Pass:
+          report:
+            errors: 0
+
+  - name: validate_inputs_missing_fail
+    desc: Case missing a declared input produces error
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/input_mismatch
+      strict: false
+      suppress: []
+    expected:
+      outcome:
+        Fail:
+          report:
+            errors: 1
+            findings:
+              - severity: error
+                check: input_completeness
+                message: "case 'missing_input' missing required input 'b' for operation 'add'"
+
+  # ================================================================
+  # Validate — 6. Expected format
+  # ================================================================
+
+  - name: validate_expected_format_pass
+    desc: Well-formed expected entries pass
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/valid_complete
+      strict: false
+      suppress: []
+    expected:
+      outcome:
+        Pass:
+          report:
+            errors: 0
+
+  - name: validate_expected_format_fail
+    desc: Expected entry with multiple keys fails
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/bad_expected
+      strict: false
+      suppress: []
+    expected:
+      outcome:
+        Fail:
+          report:
+            errors: 1
+            findings:
+              - severity: error
+                check: expected_format
+                message: "case 'bad_format' has expected entry with multiple keys"
+
+  # ================================================================
+  # Validate — 7. Narrative misuse detection
+  # ================================================================
+
+  - name: validate_narrative_proper_pass
+    desc: Proper narrative case produces no warning
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/valid_complete
+      strict: false
+      suppress: []
+    expected:
+      outcome:
+        Pass:
+          report:
+            warnings: 0
+
+  - name: validate_narrative_misuse_warn
+    desc: Narrative with testable-looking verify steps produces warning
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/narrative_misuse
+      strict: false
+      suppress: []
+    expected:
+      outcome:
+        Pass:
+          report:
+            warnings: 1
+            findings:
+              - severity: warn
+                check: narrative_misuse
+                message: "narrative case 'should_be_runnable' has verify steps that look testable"
+
+  # ================================================================
+  # Validate — 8. Assertion coverage (requires assertions dir)
+  # ================================================================
+
+  - name: validate_coverage_not_applicable
+    kind: narrative
+    desc: >
+      Assertion coverage check requires an assertions directory input.
+      When no assertions dir is provided, this check is skipped.
+      When provided, it cross-references spec cases against source
+      assertions and reports uncovered ones as info.
+    verify:
+      - Run with --assertions-dir pointing to a dir with assertion files
+      - Uncovered assertions reported as info-level findings
+
+  # ================================================================
+  # Validate — 9. Level matching
+  # ================================================================
+
+  - name: validate_level_match_pass
+    desc: Source keyword matches case level — no warning
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/valid_complete
+      strict: false
+      suppress: []
+    expected:
+      outcome:
+        Pass:
+          report:
+            warnings: 0
+
+  - name: validate_level_mismatch_warn
+    desc: Source says MUST but case level is may — produces warning
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/level_mismatch
+      strict: false
+      suppress: []
+    expected:
+      outcome:
+        Pass:
+          report:
+            warnings: 1
+            findings:
+              - severity: warn
+                check: level_match
+                message: "case 'required_but_marked_may' has level 'may' but source assertion TEST-MUST-1 appears to be MUST"
+
+  # ================================================================
+  # Validate — 10. Negative case coverage
+  # ================================================================
+
+  - name: validate_negative_coverage_pass
+    desc: MUST operation with both positive and negative cases passes
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/valid_complete
+      strict: false
+      suppress: []
+    expected:
+      outcome:
+        Pass:
+          report:
+            warnings: 0
+
+  - name: validate_negative_coverage_warn
+    desc: MUST operation with only positive cases produces warning
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/no_negative_case
+      strict: false
+      suppress: []
+    expected:
+      outcome:
+        Pass:
+          report:
+            warnings: 1
+            findings:
+              - severity: warn
+                check: negative_coverage
+                message: "operation 'parse' has MUST cases but no error/rejection case"
+
+  # ================================================================
   # Validate — suppress
   # ================================================================
 
-  - name: validate_suppress_check
+  - name: validate_suppress_single_check
     desc: Suppressed check produces no findings
     operation: validate
     inputs:
@@ -189,12 +412,25 @@ cases:
           report:
             warnings: 0
 
+  - name: validate_suppress_multiple_checks
+    desc: Multiple suppressed checks all silenced
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/level_mismatch
+      strict: false
+      suppress: [provenance, level_match]
+    expected:
+      outcome:
+        Pass:
+          report:
+            warnings: 0
+
   # ================================================================
-  # Run — basic
+  # Run — all status types
   # ================================================================
 
-  - name: run_passing_spec
-    desc: Running a passing spec produces a complete report
+  - name: run_all_pass
+    desc: Running a passing spec reports all passed
     operation: run
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/stateless_add.spec.yaml
@@ -209,8 +445,8 @@ cases:
             skipped: 0
             warned: 0
 
-  - name: run_failing_spec
-    desc: Running a failing spec reports failures
+  - name: run_with_failure
+    desc: Running a failing spec reports failure count
     operation: run
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/statemachine_counter_wrong.spec.yaml
@@ -222,6 +458,38 @@ cases:
             total_cases: 1
             passed: 0
             failed: 1
+            skipped: 0
+            warned: 0
+
+  - name: run_with_skip
+    desc: Running a spec with level may + missing annotation reports skip
+    operation: run
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/level_may_missing.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          report:
+            total_cases: 1
+            passed: 0
+            failed: 0
+            skipped: 1
+            warned: 0
+
+  - name: run_with_warn
+    desc: Running a spec with level should + missing annotation reports warn
+    operation: run
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/level_should_missing.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          report:
+            total_cases: 1
+            passed: 0
+            failed: 0
+            skipped: 0
+            warned: 1
 
   - name: run_nonexistent_spec
     desc: Running a spec that doesn't exist produces error
@@ -232,6 +500,16 @@ cases:
       outcome:
         Error:
           reason: "spec file not found: does/not/exist.spec.yaml"
+
+  - name: run_invalid_yaml
+    desc: Running a spec with bad YAML produces error
+    operation: run
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/bad_yaml.spec.yaml
+    expected:
+      outcome:
+        Error:
+          reason: "spec file is not valid YAML"
 
   # ================================================================
   # Narrative
@@ -247,3 +525,13 @@ cases:
       - Run specgate validate on valid specs — exit 0
       - Run specgate validate on invalid specs — exit 1
       - Run specgate with no args — exit 2
+
+  - name: terminal_output_format
+    kind: narrative
+    desc: >
+      Default terminal output uses colored pass/fail indicators,
+      a summary line, and gap warnings. Readable at a glance.
+    verify:
+      - Run specgate run on a fixture spec
+      - Output shows colored pass/fail per case
+      - Summary line at end shows counts

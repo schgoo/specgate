@@ -1,0 +1,19 @@
+spec_version: "0.4.0"
+name: test.no_negative_case
+operations:
+  parse:
+    inputs: { input: string }
+    outputs: [parse.outcome, parse.result, parse.error]
+cases:
+  - name: valid_input
+    desc: Valid input parses successfully
+    level: must
+    source:
+      assertion_ids: [PARSE-1]
+      spec: "Test Spec"
+      section: "§2"
+    operation: parse
+    inputs: { input: "good" }
+    expected:
+      - parse.outcome: "Ok"
+      - parse.result: "good"

@@ -1,0 +1,13 @@
+spec_version: "0.4.0"
+name: test.input_mismatch
+operations:
+  add:
+    inputs: { a: i32, b: i32 }
+    outputs: [add.result]
+cases:
+  - name: missing_input
+    desc: Case only provides 'a' but operation needs 'a' and 'b'
+    operation: add
+    inputs: { a: 2 }
+    expected:
+      - add.result: "5"
