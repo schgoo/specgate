@@ -1,0 +1,10 @@
+name: test.missing_version
+operations:
+  do_thing:
+    outputs: [result]
+cases:
+  - name: test_case
+    desc: A test
+    operation: do_thing
+    expected:
+      - result: "ok"

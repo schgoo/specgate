@@ -1,0 +1,11 @@
+spec_version: "0.4.0"
+name: test.bad_op_ref
+operations:
+  real_op:
+    outputs: [result]
+cases:
+  - name: test_case
+    desc: References nonexistent operation
+    operation: nonexistent
+    expected:
+      - result: "ok"

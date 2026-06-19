@@ -1,0 +1,11 @@
+spec_version: "0.4.0"
+name: test.no_provenance
+operations:
+  do_thing:
+    outputs: [result]
+cases:
+  - name: my_case
+    desc: No source metadata
+    operation: do_thing
+    expected:
+      - result: "ok"
