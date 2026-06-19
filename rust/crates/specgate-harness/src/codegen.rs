@@ -44,23 +44,6 @@ specgate-annotations = {{ path = "{ann}" }}
 specgate-harness = {{ path = "{harness}" }}
 
 [workspace]
-
-[patch.crates-io]
-proc-macro2 = {{ git = "https://github.com/dtolnay/proc-macro2", tag = "1.0.106" }}
-quote = {{ git = "https://github.com/dtolnay/quote", tag = "1.0.45" }}
-unicode-ident = {{ git = "https://github.com/dtolnay/unicode-ident", tag = "1.0.20" }}
-syn = {{ git = "https://github.com/dtolnay/syn", tag = "2.0.118" }}
-serde = {{ git = "https://github.com/serde-rs/serde", tag = "v1.0.228" }}
-serde_core = {{ git = "https://github.com/serde-rs/serde", tag = "v1.0.228" }}
-serde_derive = {{ git = "https://github.com/serde-rs/serde", tag = "v1.0.228" }}
-serde_yaml = {{ git = "https://github.com/dtolnay/serde-yaml", tag = "0.9.34" }}
-serde_json = {{ git = "https://github.com/serde-rs/json", tag = "v1.0.145" }}
-itoa = {{ git = "https://github.com/dtolnay/itoa", tag = "1.0.18" }}
-ryu = {{ git = "https://github.com/dtolnay/ryu", tag = "1.0.21" }}
-unsafe-libyaml = {{ git = "https://github.com/dtolnay/unsafe-libyaml", tag = "0.2.11" }}
-indexmap = {{ git = "https://github.com/indexmap-rs/indexmap", tag = "2.14.0" }}
-equivalent = {{ git = "https://github.com/indexmap-rs/equivalent", tag = "v1.0.2" }}
-hashbrown = {{ git = "https://github.com/rust-lang/hashbrown", tag = "v0.17.1" }}
 "#,
         ann = annotations_path.display().to_string().replace('\\', "/"),
         harness = harness_path.display().to_string().replace('\\', "/"),

@@ -23,21 +23,6 @@ proc-macro2 = "1.0.106"
 specgate-types = { path = "crates/specgate-types" }
 specgate-annotations = { path = "crates/specgate-annotations" }
 
-# Network restrictions: crates.io static downloads are blocked, so we redirect
-# all crates.io sources to upstream github tags via [patch.crates-io].
-[patch.crates-io]
-proc-macro2 = { git = "https://github.com/dtolnay/proc-macro2", tag = "1.0.106" }
-quote = { git = "https://github.com/dtolnay/quote", tag = "1.0.45" }
-unicode-ident = { git = "https://github.com/dtolnay/unicode-ident", tag = "1.0.20" }
-syn = { git = "https://github.com/dtolnay/syn", tag = "2.0.118" }
-serde = { git = "https://github.com/serde-rs/serde", tag = "v1.0.228" }
-serde_core = { git = "https://github.com/serde-rs/serde", tag = "v1.0.228" }
-serde_derive = { git = "https://github.com/serde-rs/serde", tag = "v1.0.228" }
-serde_yaml = { git = "https://github.com/dtolnay/serde-yaml", tag = "0.9.34" }
-serde_json = { git = "https://github.com/serde-rs/json", tag = "v1.0.145" }
-itoa = { git = "https://github.com/dtolnay/itoa", tag = "1.0.18" }
-ryu = { git = "https://github.com/dtolnay/ryu", tag = "1.0.21" }
-unsafe-libyaml = { git = "https://github.com/dtolnay/unsafe-libyaml", tag = "0.2.11" }
-indexmap = { git = "https://github.com/indexmap-rs/indexmap", tag = "2.14.0" }
+# Dependencies are fetched from crates.io normally.
 equivalent = { git = "https://github.com/indexmap-rs/equivalent", tag = "v1.0.2" }
 hashbrown = { git = "https://github.com/rust-lang/hashbrown", tag = "v0.17.1" }
