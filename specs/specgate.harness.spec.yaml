@@ -136,6 +136,46 @@ cases:
       - Confirm no syn-based expression evaluation in harness source
       - The harness should invoke cargo build/test, not evaluate Rust in-process
 
+  - name: structured_values_not_stringified
+    kind: narrative
+    desc: >
+      Collection fields (Vec, BTreeMap, BTreeSet) annotated with #[spec_event]
+      must emit structured Value events (Value::List, Value::Map, Value::Set),
+      not stringified representations. The codegen must use emit_event_v (or
+      equivalent structured emission) for these types. Using format!("{}", x)
+      to stringify a Vec into "["a", "b"]" is incorrect — the matcher cannot
+      apply $size, $contains, $any operators on a plain string.
+    verify:
+      - Run structured_output.spec.yaml — list_exact_match expects value: ["ID"]
+      - If the trace contains value: "[\"ID\"]" (a string), matching will fail
+
+  - name: crate_dependency_not_path_include
+    kind: narrative
+    desc: >
+      The generated runner must depend on the fixture crate as a Cargo
+      dependency (in [dependencies] of the generated Cargo.toml), not use
+      #[path = "..."] mod inclusion. #[path] inclusion breaks when the
+      fixture uses external crate dependencies, cross-module imports, or
+      build script generated code. The cross_dep fixture uses serde_yaml
+      which is impossible to resolve via #[path] inclusion.
+    verify:
+      - Run cross_dep.spec.yaml — it uses serde_yaml
+      - Check generated Cargo.toml has specgate-fixtures in [dependencies]
+      - Generated main.rs uses "use specgate_fixtures::..." not "#[path]"
+
+  - name: operators_work_on_structured_values
+    kind: narrative
+    desc: >
+      Assertion operators ($size, $contains, $containsAll, $any, $every,
+      $match, $excludes) operate on structured Value types, not strings.
+      The matcher must parse the expected operator syntax and apply it
+      against the actual Value in the trace event. String equality is
+      only the default for scalar values without operators.
+    verify:
+      - Run operators.spec.yaml — $size on a list Value works
+      - Run scalar_operators.spec.yaml — $gt on an integer Value works
+      - A string value "3" does not satisfy $size: 3 (type mismatch)
+
   - name: paths_resolve_relative_to_spec
     desc: >
       Spec at a deeply nested path resolves binding and fixture source
