@@ -5,8 +5,7 @@ version = 4
 [[package]]
 name = "proc-macro2"
 version = "1.0.106"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
+source = "git+https://github.com/dtolnay/proc-macro2?tag=1.0.106#58ab776b95a4c2865554badbb6629c50971a9118"
 dependencies = [
  "unicode-ident",
 ]
@@ -14,8 +13,7 @@ dependencies = [
 [[package]]
 name = "quote"
 version = "1.0.45"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41f2619966050689382d2b44f664f4bc593e129785a36d6ee376ddf37259b924"
+source = "git+https://github.com/dtolnay/quote?tag=1.0.45#842ffde933fdd76cd1681a288bed136d8b95a97a"
 dependencies = [
  "proc-macro2",
 ]
@@ -23,8 +21,7 @@ dependencies = [
 [[package]]
 name = "serde"
 version = "1.0.228"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
+source = "git+https://github.com/serde-rs/serde?tag=v1.0.228#a866b336f14aa57a07f0d0be9f8762746e64ecb4"
 dependencies = [
  "serde_core",
  "serde_derive",
@@ -33,8 +30,7 @@ dependencies = [
 [[package]]
 name = "serde_core"
 version = "1.0.228"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41d385c7d4ca58e59fc732af25c3983b67ac852c1a25000afe1175de458b67ad"
+source = "git+https://github.com/serde-rs/serde?tag=v1.0.228#a866b336f14aa57a07f0d0be9f8762746e64ecb4"
 dependencies = [
  "serde_derive",
 ]
@@ -42,8 +38,7 @@ dependencies = [
 [[package]]
 name = "serde_derive"
 version = "1.0.228"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79"
+source = "git+https://github.com/serde-rs/serde?tag=v1.0.228#a866b336f14aa57a07f0d0be9f8762746e64ecb4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -84,8 +79,7 @@ dependencies = [
 [[package]]
 name = "syn"
 version = "2.0.118"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b9ae57f904213ebb649ce6895b8a66c66f0203b9319718f69a5612a065b1422"
+source = "git+https://github.com/dtolnay/syn?tag=2.0.118#f033ef1403b4dbd276d95c26ff05b51d758d7b14"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -94,6 +88,5 @@ dependencies = [
 
 [[package]]
 name = "unicode-ident"
-version = "1.0.24"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+version = "1.0.20"
+source = "git+https://github.com/dtolnay/unicode-ident?tag=1.0.20#12f0a68b138f1914e9abff76bb1d438b4a953f49"

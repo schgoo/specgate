@@ -261,7 +261,7 @@ fn field_emit_from_lhs(lhs: &Expr, param_names: &[String]) -> Option<Stmt> {
     };
     let rt = rt();
     let stmt: Stmt = parse_quote! {
-        #rt::emit_event(#event_name, &::std::format!("{}", #lhs));
+        #rt::emit_event_v(#event_name, #rt::ToSpecValue::to_spec_value(&(#lhs)));
     };
     Some(stmt)
 }
@@ -286,63 +286,13 @@ pub fn spec_operation(attr: TokenStream, item: TokenStream) -> TokenStream {
     };
     visitor.visit_block_mut(&mut func.block);
     let body = &func.block;
-    let rt = rt();
 
-    let new_body: Block = match return_kind {
-        ReturnKind::Result => {
-            let outcome = format!("{op_name}.outcome");
-            let result_name = format!("{op_name}.result");
-            let error_name = format!("{op_name}.error");
-            parse_quote!({
-                let __sg_ret = (move || #body )();
-                match &__sg_ret {
-                    ::std::result::Result::Ok(__sg_v) => {
-                        #rt::emit_event(#outcome, "Ok");
-                        #rt::emit_event(#result_name, &::std::format!("{}", __sg_v));
-                    }
-                    ::std::result::Result::Err(__sg_e) => {
-                        #rt::emit_event(#outcome, "Error");
-                        #rt::emit_event(#error_name, &::std::format!("{}", __sg_e));
-                    }
-                }
-                __sg_ret
-            })
-        }
-        ReturnKind::Option => {
-            let outcome = format!("{op_name}.outcome");
-            let value_name = format!("{op_name}.value");
-            parse_quote!({
-                let __sg_ret = (move || #body )();
-                match &__sg_ret {
-                    ::std::option::Option::Some(__sg_v) => {
-                        #rt::emit_event(#outcome, "Some");
-                        #rt::emit_event(#value_name, &::std::format!("{}", __sg_v));
-                    }
-                    ::std::option::Option::None => {
-                        #rt::emit_event(#outcome, "None");
-                    }
-                }
-                __sg_ret
-            })
-        }
-        ReturnKind::Unit => {
-            let pre = build_pre_stmts(&op_name, &params, is_method, has_ref_param);
-            parse_quote!({
-                #(#pre)*
-                #body
-            })
-        }
-        ReturnKind::Other => {
-            let result_name = format!("{op_name}.result");
-            let pre = build_pre_stmts(&op_name, &params, is_method, has_ref_param);
-            parse_quote!({
-                #(#pre)*
-                let __sg_ret = #body;
-                #rt::emit_event(#result_name, &::std::format!("{}", __sg_ret));
-                __sg_ret
-            })
-        }
-    };
+    let _ = return_kind;
+    let pre = build_pre_stmts(&op_name, &params, is_method, has_ref_param);
+    let new_body: Block = parse_quote!({
+        #(#pre)*
+        #body
+    });
     func.block = Box::new(new_body);
     quote!(#func).into()
 }
@@ -424,18 +374,34 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
     let mut emits = Vec::new();
     if let Data::Struct(s) = &input.data {
         for field in &s.fields {
-            let marked = field.attrs.iter().any(|a| a.path().is_ident("spec_event"));
-            if !marked {
-                continue;
+            let mut marked = false;
+            let mut override_name: Option<String> = None;
+            for a in &field.attrs {
+                if !a.path().is_ident("spec_event") {
+                    continue;
+                }
+                marked = true;
+                // Optional `name = "X"` override.
+                let _ = a.parse_nested_meta(|meta| {
+                    if meta.path.is_ident("name") {
+                        let lit: LitStr = meta.value()?.parse()?;
+                        override_name = Some(lit.value());
+                    }
+                    Ok(())
+                });
             }
+            if !marked { continue; }
             if let Some(id) = &field.ident {
-                let fname = id.to_string();
+                let fname = override_name.unwrap_or_else(|| id.to_string());
                 emits.push(quote! {
                     let __sg_name = match __sg_prefix {
                         ::std::option::Option::Some(p) => ::std::format!("{}.{}", p, #fname),
                         ::std::option::Option::None => #fname.to_string(),
                     };
-                    #rt::emit_event(&__sg_name, &::std::format!("{}", self.#id));
+                    #rt::emit_event_v(
+                        &__sg_name,
+                        #rt::ToSpecValue::to_spec_value(&self.#id),
+                    );
                 });
             }
         }

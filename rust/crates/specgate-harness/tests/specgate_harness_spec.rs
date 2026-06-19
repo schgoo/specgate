@@ -34,7 +34,7 @@ fn err_reason(o: RunOutcome) -> String {
     }
 }
 
-fn ev(name: &str, value: &str) -> TraceEvent {
+fn ev<V: Into<specgate_harness::Value>>(name: &str, value: V) -> TraceEvent {
     TraceEvent::Event {
         name: name.into(),
         value: value.into(),
@@ -47,7 +47,7 @@ fn run_op(op: &str) -> TraceEvent {
     }
 }
 
-fn aev(name: &str, value: &str) -> Assertion {
+fn aev<V: Into<specgate_harness::AssertValue>>(name: &str, value: V) -> Assertion {
     Assertion::Event {
         name: name.into(),
         value: value.into(),
@@ -80,14 +80,14 @@ fn stateless_return_value() {
     ));
     assert_eq!(r.len(), 1);
     check_case(&r[0], "add_2_3", CaseStatus::Pass);
-    assert_eq!(r[0].expected, vec![aev("add.result", "5")]);
+    assert_eq!(r[0].expected, vec![aev("$result", "5")]);
     assert_eq!(
         r[0].traces,
         vec![
             run_op("add"),
             ev("add.a", "2"),
             ev("add.b", "3"),
-            ev("add.result", "5"),
+            ev("$result", "5"),
         ]
     );
 }
@@ -100,7 +100,7 @@ fn statemachine_before_after() {
     check_case(&r[0], "increment_once", CaseStatus::Pass);
     assert_eq!(
         r[0].traces,
-        vec![ev("count", "0"), run_op("increment"), ev("count", "1")]
+        vec![ev("count", 0i64), run_op("increment"), ev("count", 1i64)]
     );
 }
 
@@ -113,11 +113,11 @@ fn multi_field_capture() {
     assert_eq!(
         r[0].traces,
         vec![
-            ev("balance", "100"),
-            ev("transaction_count", "0"),
+            ev("balance", 100i64),
+            ev("transaction_count", 0i64),
             run_op("withdraw"),
-            ev("balance", "50"),
-            ev("transaction_count", "1"),
+            ev("balance", 50i64),
+            ev("transaction_count", 1i64),
         ]
     );
 }
@@ -136,7 +136,7 @@ fn inline_checkpoint() {
             run_op("process"),
             ev("process.data", " hello "),
             ev("after_upper", " HELLO "),
-            ev("process.result", "HELLO"),
+            ev("$result", "HELLO"),
         ]
     );
 }
@@ -150,10 +150,10 @@ fn multi_mutation() {
     assert_eq!(
         r[0].traces,
         vec![
-            ev("count", "0"),
+            ev("count", 0i64),
             run_op("increment_twice"),
-            ev("count", "1"),
-            ev("count", "2"),
+            ev("count", 1i64),
+            ev("count", 2i64),
         ]
     );
 }
@@ -167,12 +167,12 @@ fn nested_operations() {
     assert_eq!(
         r[0].traces,
         vec![
-            ev("balance", "100"),
+            ev("balance", 100i64),
             run_op("transfer"),
             run_op("withdraw"),
-            ev("balance", "50"),
+            ev("balance", 50i64),
             run_op("deposit"),
-            ev("balance", "100"),
+            ev("balance", 100i64),
         ]
     );
 }
@@ -191,9 +191,9 @@ fn setup_with_input_params() {
         r[0].traces,
         vec![
             ev("make_counter.initial", "10"),
-            ev("count", "10"),
+            ev("count", 10i64),
             run_op("increment"),
-            ev("count", "11"),
+            ev("count", 11i64),
         ]
     );
 }
@@ -207,11 +207,11 @@ fn multiple_setups() {
     assert_eq!(
         r[0].traces,
         vec![
-            ev("source.balance", "100"),
-            ev("target.balance", "0"),
+            ev("source.balance", 100i64),
+            ev("target.balance", 0i64),
             run_op("transfer"),
-            ev("source.balance", "50"),
-            ev("target.balance", "50"),
+            ev("source.balance", 50i64),
+            ev("target.balance", 50i64),
         ]
     );
 }
@@ -239,11 +239,11 @@ fn multi_step_sequence() {
     assert_eq!(
         r[0].traces,
         vec![
-            ev("count", "0"),
+            ev("count", 0i64),
             run_op("increment"),
-            ev("count", "1"),
+            ev("count", 1i64),
             run_op("decrement"),
-            ev("count", "0"),
+            ev("count", 0i64),
         ]
     );
 }
@@ -264,7 +264,7 @@ fn mock_call_site() {
             run_op("get_user"),
             ev("db.request", "user_1"),
             ev("db.response", "Alice"),
-            ev("get_user.result", "Alice"),
+            ev("$result", "Alice"),
         ]
     );
 }
@@ -283,7 +283,7 @@ fn mock_multi_response() {
             ev("db.response", "Alice"),
             ev("db.request", "user_2"),
             ev("db.response", "Bob"),
-            ev("get_users.result", "Alice and Bob"),
+            ev("$result", "Alice and Bob"),
         ]
     );
 }
@@ -308,7 +308,13 @@ fn result_ok_path() {
     check_case(&r[0], "divide_10_by_2", CaseStatus::Pass);
     assert_eq!(
         r[0].traces,
-        vec![ev("divide.outcome", "Ok"), ev("divide.result", "5")]
+        vec![
+            run_op("divide"),
+            ev("divide.a", "10"),
+            ev("divide.b", "2"),
+            ev("$outcome", "Ok"),
+            ev("$result", "5"),
+        ]
     );
 }
 
@@ -321,8 +327,11 @@ fn result_err_path() {
     assert_eq!(
         r[0].traces,
         vec![
-            ev("divide.outcome", "Error"),
-            ev("divide.error", "division by zero"),
+            run_op("divide"),
+            ev("divide.a", "10"),
+            ev("divide.b", "0"),
+            ev("$outcome", "Error"),
+            ev("$error", "division by zero"),
         ]
     );
 }
@@ -343,7 +352,7 @@ fn void_operation() {
     check_case(&r[0], "log_a_message", CaseStatus::Pass);
     assert_eq!(
         r[0].traces,
-        vec![ev("count", "0"), run_op("log"), ev("count", "1")]
+        vec![ev("count", 0i64), run_op("log"), ev("count", 1i64)]
     );
 }
 
@@ -486,7 +495,7 @@ fn async_operation() {
         vec![
             run_op("fetch"),
             ev("fetch.url", "https://example.com"),
-            ev("fetch.result", "response from https://example.com"),
+            ev("$result", "response from https://example.com"),
         ]
     );
 }
@@ -499,7 +508,7 @@ fn keyword_collision_operation_named_run() {
     check_case(&r[0], "operation_named_run", CaseStatus::Pass);
     assert_eq!(
         r[0].expected,
-        vec![arun("run"), aev("run.result", "executed: test")]
+        vec![arun("run"), aev("$result", "executed: test")]
     );
 }
 
@@ -604,7 +613,7 @@ fn paths_resolve_from_nested_spec() {
             run_op("add"),
             ev("add.a", "10"),
             ev("add.b", "20"),
-            ev("add.result", "30"),
+            ev("$result", "30"),
         ]
     );
 }

@@ -97,7 +97,7 @@ fn render_main(
     let mut out = String::new();
     let abs = std::fs::canonicalize(fixture_src)?;
     out.push_str("#![allow(unused, unused_mut, unused_variables, dead_code, clippy::all)]\n");
-    out.push_str("use specgate_annotations::{TraceEvent, take_traces, reset, set_mock, SpecEvent};\n");
+    out.push_str("use specgate_annotations::{TraceEvent, Value, take_traces, reset, set_mock, SpecEvent};\n");
     out.push_str(&format!(
         "#[path = \"{}\"] mod fut;\n",
         abs.display().to_string().replace('\\', "\\\\")
@@ -171,30 +171,66 @@ fn sg_block_on<F: ::std::future::Future>(fut: F) -> F::Output {
 
 
 const JSON_HELPER: &str = r#"
-fn serde_json_lite_to_string(map: &std::collections::BTreeMap<String, Vec<TraceEvent>>) -> String {
-    fn esc(s: &str) -> String {
-        let mut o = String::with_capacity(s.len() + 2);
-        o.push('"');
-        for c in s.chars() {
-            match c {
-                '"' => o.push_str("\\\""),
-                '\\' => o.push_str("\\\\"),
-                '\n' => o.push_str("\\n"),
-                '\r' => o.push_str("\\r"),
-                '\t' => o.push_str("\\t"),
-                c if (c as u32) < 0x20 => o.push_str(&format!("\\u{:04x}", c as u32)),
-                c => o.push(c),
-            }
+fn esc_str(s: &str, o: &mut String) {
+    o.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => o.push_str("\\\""),
+            '\\' => o.push_str("\\\\"),
+            '\n' => o.push_str("\\n"),
+            '\r' => o.push_str("\\r"),
+            '\t' => o.push_str("\\t"),
+            c if (c as u32) < 0x20 => o.push_str(&format!("\\u{:04x}", c as u32)),
+            c => o.push(c),
         }
-        o.push('"');
-        o
     }
+    o.push('"');
+}
+
+fn value_to_json(v: &Value, o: &mut String) {
+    match v {
+        Value::String(s) => esc_str(s, o),
+        Value::Integer(i) => o.push_str(&i.to_string()),
+        Value::Float(x) => o.push_str(&x.to_string()),
+        Value::Bool(b) => o.push_str(if *b { "true" } else { "false" }),
+        Value::List(items) => {
+            o.push('[');
+            for (i, it) in items.iter().enumerate() {
+                if i > 0 { o.push(','); }
+                value_to_json(it, o);
+            }
+            o.push(']');
+        }
+        Value::Set(items) => {
+            o.push('[');
+            for (i, it) in items.iter().enumerate() {
+                if i > 0 { o.push(','); }
+                value_to_json(it, o);
+            }
+            o.push(']');
+        }
+        Value::Map(m) => {
+            o.push('{');
+            let mut first = true;
+            for (k, vv) in m.iter() {
+                if !first { o.push(','); }
+                first = false;
+                esc_str(k, o);
+                o.push(':');
+                value_to_json(vv, o);
+            }
+            o.push('}');
+        }
+    }
+}
+
+fn serde_json_lite_to_string(map: &std::collections::BTreeMap<String, Vec<TraceEvent>>) -> String {
     let mut s = String::from("{");
     let mut first = true;
     for (k, v) in map.iter() {
         if !first { s.push(','); }
         first = false;
-        s.push_str(&esc(k));
+        esc_str(k, &mut s);
         s.push(':');
         s.push('[');
         let mut f2 = true;
@@ -204,14 +240,14 @@ fn serde_json_lite_to_string(map: &std::collections::BTreeMap<String, Vec<TraceE
             match ev {
                 TraceEvent::Event { name, value } => {
                     s.push_str("{\"kind\":\"Event\",\"name\":");
-                    s.push_str(&esc(name));
+                    esc_str(name, &mut s);
                     s.push_str(",\"value\":");
-                    s.push_str(&esc(value));
+                    value_to_json(value, &mut s);
                     s.push('}');
                 }
                 TraceEvent::Run { operation } => {
                     s.push_str("{\"kind\":\"Run\",\"operation\":");
-                    s.push_str(&esc(operation));
+                    esc_str(operation, &mut s);
                     s.push('}');
                 }
             }
@@ -294,17 +330,95 @@ fn render_case(out: &mut String, case: &Case, spec: &Spec, annotated: &Annotated
         if spec.async_ops.contains(op) {
             call = format!("sg_block_on({call})");
         }
+        let return_type = decl
+            .map(|d| d.sig.return_type.trim().to_string())
+            .unwrap_or_default();
+        let post_emit = build_post_emit(&return_type, &annotated.spec_event_structs);
         out.push_str("        {\n");
         out.push_str(&format!(
-            "            let __r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {{ {call}; }}));\n"
+            "            let __r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {{\n                let __sg_ret = {call};\n                {post_emit}\n            }}));\n"
         ));
         out.push_str("            if let Err(__e) = __r {\n");
-        out.push_str(&format!(
-            "                let msg = panic_msg(&__e);\n                specgate_annotations::emit_event(\"{op}.outcome\", \"Unrecoverable\");\n                specgate_annotations::emit_event(\"{op}.error\", &msg);\n"
-        ));
+        out.push_str(
+            "                let msg = panic_msg(&__e);\n                specgate_annotations::emit_event(\"$outcome\", \"Unrecoverable\");\n                specgate_annotations::emit_event(\"$error\", &msg);\n"
+        );
         out.push_str("            }\n");
         out.push_str("        }\n");
     }
+}
+
+/// Emit Rust source for post-call return handling based on the operation's
+/// declared return type. Produces statements that consume `__sg_ret`.
+fn build_post_emit(
+    return_type: &str,
+    spec_event_structs: &std::collections::BTreeSet<String>,
+) -> String {
+    let rt = return_type.trim();
+    if rt.is_empty() || rt == "()" {
+        return "let _ = __sg_ret;".to_string();
+    }
+    if rt.starts_with("Result<") || rt.starts_with("::std::result::Result<") || rt.starts_with("std::result::Result<") {
+        return r#"
+            match &__sg_ret {
+                Ok(__sg_v) => {
+                    specgate_annotations::emit_event("$outcome", "Ok");
+                    specgate_annotations::emit_event("$result", &format!("{}", __sg_v));
+                }
+                Err(__sg_e) => {
+                    specgate_annotations::emit_event("$outcome", "Error");
+                    specgate_annotations::emit_event("$error", &format!("{}", __sg_e));
+                }
+            }
+            let _ = __sg_ret;
+        "#
+        .to_string();
+    }
+    if rt.starts_with("Option<") || rt.starts_with("::std::option::Option<") || rt.starts_with("std::option::Option<") {
+        return r#"
+            match &__sg_ret {
+                Some(__sg_v) => {
+                    specgate_annotations::emit_event("$outcome", "Some");
+                    specgate_annotations::emit_event("$result", &format!("{}", __sg_v));
+                }
+                None => {
+                    specgate_annotations::emit_event("$outcome", "None");
+                }
+            }
+            let _ = __sg_ret;
+        "#
+        .to_string();
+    }
+    // SpecEvent-derived struct: emit each annotated field.
+    let bare = rt.trim_start_matches('&').trim_start_matches("mut ").trim();
+    let head = bare.split(['<', ' ']).next().unwrap_or(bare);
+    if spec_event_structs.contains(head) {
+        return r#"
+            specgate_annotations::SpecEvent::emit_fields(&__sg_ret, None);
+            let _ = __sg_ret;
+        "#
+        .to_string();
+    }
+    // Known collection types → use ToSpecValue for structured emission.
+    let is_collection = matches!(
+        head,
+        "Vec" | "BTreeMap" | "HashMap" | "BTreeSet" | "HashSet"
+    ) || bare.starts_with('[');
+    if is_collection {
+        return r#"
+            specgate_annotations::emit_event_v(
+                "$result",
+                specgate_annotations::__rt::ToSpecValue::to_spec_value(&__sg_ret),
+            );
+            let _ = __sg_ret;
+        "#
+        .to_string();
+    }
+    // Default: emit $result via Display.
+    r#"
+            specgate_annotations::emit_event("$result", &format!("{}", __sg_ret));
+            let _ = __sg_ret;
+        "#
+    .to_string()
 }
 
 fn render_setup_args(

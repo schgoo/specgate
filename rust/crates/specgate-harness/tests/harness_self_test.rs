@@ -37,7 +37,7 @@ fn self_test_stateless_add_produces_real_traces() {
                 specgate_harness::TraceEvent::Run { operation, .. } => operation.as_str(),
             }).collect();
             assert!(trace_names.contains(&"add"), "must contain Run event for 'add'");
-            assert!(trace_names.contains(&"add.result"), "must contain Event for 'add.result'");
+            assert!(trace_names.contains(&"$result"), "must contain Event for '$result'");
         }
         RunOutcome::Error { reason } => {
             panic!("self-test failed: {reason}");

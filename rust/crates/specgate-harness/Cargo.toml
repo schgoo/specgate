@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
 serde_yaml = { workspace = true }
+specgate-runtime = { path = "../specgate-runtime" }
 
 [dev-dependencies]
 specgate-annotations = { path = "../specgate-annotations" }

@@ -2,10 +2,10 @@
 //!
 //! The harness spec uses a list-of-maps `expected:` shape that is
 //! incompatible with `specgate-types::SpecDocument`, so we parse with
-//! `serde_yaml::Value` and pull out the fields we care about by hand.
+//! `serde_yaml::YValue` and pull out the fields we care about by hand.
 
-use crate::types::{Assertion, CaseLevel, Source};
-use serde_yaml::Value;
+use crate::types::{AnyArg, AssertValue, Assertion, CaseLevel, Matcher, Source, Value};
+use serde_yaml::Value as YValue;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -23,7 +23,7 @@ pub struct Case {
     pub setup: Setup,
     pub operation: Option<String>,
     pub steps: Vec<String>,
-    pub inputs: BTreeMap<String, Value>,
+    pub inputs: BTreeMap<String, YValue>,
     pub expected: Vec<Assertion>,
     pub level: CaseLevel,
     pub source: Option<Source>,
@@ -49,30 +49,30 @@ pub enum ParseError {
 #[allow(dead_code)]
 pub fn load_spec(path: &Path) -> Result<Spec, ParseError> {
     let text = std::fs::read_to_string(path).map_err(|e| ParseError::Io(e.to_string()))?;
-    let v: Value = serde_yaml::from_str(&text).map_err(|e| ParseError::Yaml(e.to_string()))?;
+    let v: YValue = serde_yaml::from_str(&text).map_err(|e| ParseError::Yaml(e.to_string()))?;
     parse_spec_value(&v)
 }
 
-pub fn parse_value(v: &Value) -> Result<Spec, ParseError> {
+pub fn parse_spec(v: &YValue) -> Result<Spec, ParseError> {
     parse_spec_value(v)
 }
 
-fn parse_spec_value(v: &Value) -> Result<Spec, ParseError> {
+fn parse_spec_value(v: &YValue) -> Result<Spec, ParseError> {
     let map = v
         .as_mapping()
         .ok_or_else(|| ParseError::Shape("top-level is not a mapping".into()))?;
 
     let binding_path = map
-        .get(Value::String("binding".into()))
+        .get(YValue::String("binding".into()))
         .and_then(|b| b.as_str())
         .map(String::from);
 
     let mut async_ops = BTreeSet::new();
-    if let Some(Value::Mapping(ops)) = map.get(Value::String("operations".into())) {
+    if let Some(YValue::Mapping(ops)) = map.get(YValue::String("operations".into())) {
         for (k, v) in ops {
             let Some(name) = k.as_str() else { continue };
             let Some(body) = v.as_mapping() else { continue };
-            if let Some(a) = body.get(Value::String("async".into())) {
+            if let Some(a) = body.get(YValue::String("async".into())) {
                 if a.as_bool() == Some(true) {
                     async_ops.insert(name.to_string());
                 }
@@ -81,7 +81,7 @@ fn parse_spec_value(v: &Value) -> Result<Spec, ParseError> {
     }
 
     let cases_v = map
-        .get(Value::String("cases".into()))
+        .get(YValue::String("cases".into()))
         .ok_or_else(|| ParseError::Shape("missing field: cases".into()))?;
     let cases_seq = cases_v
         .as_sequence()
@@ -98,21 +98,21 @@ fn parse_spec_value(v: &Value) -> Result<Spec, ParseError> {
     })
 }
 
-fn parse_case(v: &Value) -> Result<Case, ParseError> {
+fn parse_case(v: &YValue) -> Result<Case, ParseError> {
     let m = v
         .as_mapping()
         .ok_or_else(|| ParseError::Shape("case is not a mapping".into()))?;
     let name = m
-        .get(Value::String("name".into()))
+        .get(YValue::String("name".into()))
         .and_then(|x| x.as_str())
         .ok_or_else(|| ParseError::Shape("case missing name".into()))?
         .to_string();
 
-    let mut extra_inputs: BTreeMap<String, Value> = BTreeMap::new();
-    let setup = match m.get(Value::String("setup".into())) {
+    let mut extra_inputs: BTreeMap<String, YValue> = BTreeMap::new();
+    let setup = match m.get(YValue::String("setup".into())) {
         None => Setup::None,
-        Some(Value::String(s)) => Setup::Single(s.clone()),
-        Some(Value::Mapping(mp)) => {
+        Some(YValue::String(s)) => Setup::Single(s.clone()),
+        Some(YValue::Mapping(mp)) => {
             let all_strings = mp.iter().all(|(_, v)| v.as_str().is_some());
             if all_strings {
                 let mut entries = Vec::new();
@@ -134,7 +134,7 @@ fn parse_case(v: &Value) -> Result<Case, ParseError> {
                     .as_str()
                     .ok_or_else(|| ParseError::Shape("setup name not str".into()))?
                     .to_string();
-                if let Value::Mapping(pm) = v {
+                if let YValue::Mapping(pm) = v {
                     for (pk, pv) in pm {
                         if let Some(pks) = pk.as_str() {
                             extra_inputs.insert(pks.to_string(), pv.clone());
@@ -148,20 +148,20 @@ fn parse_case(v: &Value) -> Result<Case, ParseError> {
     };
 
     let operation = m
-        .get(Value::String("operation".into()))
+        .get(YValue::String("operation".into()))
         .and_then(|x| x.as_str())
         .map(String::from);
 
-    let steps = match m.get(Value::String("steps".into())) {
+    let steps = match m.get(YValue::String("steps".into())) {
         None => Vec::new(),
-        Some(Value::Sequence(seq)) => {
+        Some(YValue::Sequence(seq)) => {
             let mut out = Vec::new();
             for s in seq {
                 let m = s
                     .as_mapping()
                     .ok_or_else(|| ParseError::Shape("step not a mapping".into()))?;
                 let op = m
-                    .get(Value::String("operation".into()))
+                    .get(YValue::String("operation".into()))
                     .and_then(|x| x.as_str())
                     .ok_or_else(|| ParseError::Shape("step missing operation".into()))?
                     .to_string();
@@ -172,9 +172,9 @@ fn parse_case(v: &Value) -> Result<Case, ParseError> {
         Some(_) => return Err(ParseError::Shape("steps has invalid shape".into())),
     };
 
-    let inputs = match m.get(Value::String("inputs".into())) {
+    let inputs = match m.get(YValue::String("inputs".into())) {
         None => BTreeMap::new(),
-        Some(Value::Mapping(mp)) => {
+        Some(YValue::Mapping(mp)) => {
             let mut out = BTreeMap::new();
             for (k, val) in mp {
                 let key = k
@@ -192,16 +192,16 @@ fn parse_case(v: &Value) -> Result<Case, ParseError> {
         inputs.entry(k).or_insert(v);
     }
 
-    let expected = match m.get(Value::String("expected".into())) {
+    let expected = match m.get(YValue::String("expected".into())) {
         None => Vec::new(),
-        Some(Value::Sequence(seq)) => parse_assertion_list(seq)?,
+        Some(YValue::Sequence(seq)) => parse_assertion_list(seq)?,
         // Legacy / non-list `expected:` shapes are tolerated as empty.
         Some(_) => Vec::new(),
     };
 
-    let level = match m.get(Value::String("level".into())) {
+    let level = match m.get(YValue::String("level".into())) {
         None => CaseLevel::Must,
-        Some(Value::String(s)) => match s.as_str() {
+        Some(YValue::String(s)) => match s.as_str() {
             "must" => CaseLevel::Must,
             "should" => CaseLevel::Should,
             "may" => CaseLevel::May,
@@ -212,21 +212,21 @@ fn parse_case(v: &Value) -> Result<Case, ParseError> {
         Some(_) => return Err(ParseError::Shape("level has invalid shape".into())),
     };
 
-    let source = match m.get(Value::String("source".into())) {
+    let source = match m.get(YValue::String("source".into())) {
         None => None,
-        Some(Value::Mapping(sm)) => {
+        Some(YValue::Mapping(sm)) => {
             let mut s = Source::default();
-            if let Some(Value::Sequence(ids)) = sm.get(Value::String("assertion_ids".into())) {
+            if let Some(YValue::Sequence(ids)) = sm.get(YValue::String("assertion_ids".into())) {
                 for id in ids {
                     if let Some(t) = id.as_str() {
                         s.assertion_ids.push(t.to_string());
                     }
                 }
             }
-            if let Some(Value::String(t)) = sm.get(Value::String("spec".into())) {
+            if let Some(YValue::String(t)) = sm.get(YValue::String("spec".into())) {
                 s.spec = t.clone();
             }
-            if let Some(Value::String(t)) = sm.get(Value::String("section".into())) {
+            if let Some(YValue::String(t)) = sm.get(YValue::String("section".into())) {
                 s.section = t.clone();
             }
             Some(s)
@@ -246,7 +246,7 @@ fn parse_case(v: &Value) -> Result<Case, ParseError> {
     })
 }
 
-fn parse_assertion_list(seq: &[Value]) -> Result<Vec<Assertion>, ParseError> {
+fn parse_assertion_list(seq: &[YValue]) -> Result<Vec<Assertion>, ParseError> {
     let mut out = Vec::new();
     for entry in seq {
         out.push(parse_assertion(entry)?);
@@ -254,7 +254,7 @@ fn parse_assertion_list(seq: &[Value]) -> Result<Vec<Assertion>, ParseError> {
     Ok(out)
 }
 
-fn parse_assertion(v: &Value) -> Result<Assertion, ParseError> {
+fn parse_assertion(v: &YValue) -> Result<Assertion, ParseError> {
     let m = v
         .as_mapping()
         .ok_or_else(|| ParseError::Shape("assertion is not a mapping".into()))?;
@@ -293,23 +293,181 @@ fn parse_assertion(v: &Value) -> Result<Assertion, ParseError> {
         }
         other => Ok(Assertion::Event {
             name: other.to_string(),
-            value: stringify_value(val),
+            value: parse_assert_value(val)?,
         }),
     }
 }
 
-pub fn stringify_value(v: &Value) -> String {
+/// Parse a YAML node into either a concrete `Value` or a `Matcher` payload.
+fn parse_assert_value(v: &YValue) -> Result<AssertValue, ParseError> {
+    if let YValue::Mapping(m) = v {
+        let mut has_op = false;
+        for (k, _) in m {
+            if let Some(s) = k.as_str() {
+                if s.starts_with('$') {
+                    has_op = true;
+                    break;
+                }
+            }
+        }
+        if has_op {
+            return Ok(AssertValue::Matcher(parse_matcher(m)?));
+        }
+    }
+    Ok(AssertValue::Exact(parse_value(v)?))
+}
+
+/// Plain YAML → structured Value, preserving type.
+pub fn parse_value(v: &YValue) -> Result<Value, ParseError> {
     match v {
-        Value::String(s) => s.clone(),
-        Value::Number(n) => n.to_string(),
-        Value::Bool(b) => b.to_string(),
-        Value::Null => "null".into(),
-        Value::Sequence(s) => {
+        YValue::String(s) => Ok(Value::String(s.clone())),
+        YValue::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Ok(Value::Integer(i))
+            } else if let Some(u) = n.as_u64() {
+                Ok(Value::Integer(u as i64))
+            } else if let Some(f) = n.as_f64() {
+                Ok(Value::Float(f))
+            } else {
+                Ok(Value::String(n.to_string()))
+            }
+        }
+        YValue::Bool(b) => Ok(Value::Bool(*b)),
+        YValue::Null => Ok(Value::String(String::new())),
+        YValue::Sequence(seq) => {
+            let mut out = Vec::with_capacity(seq.len());
+            for x in seq {
+                out.push(parse_value(x)?);
+            }
+            Ok(Value::List(out))
+        }
+        YValue::Mapping(m) => {
+            let mut out = std::collections::BTreeMap::new();
+            for (k, v) in m {
+                let key = k
+                    .as_str()
+                    .ok_or_else(|| ParseError::Shape("map key not string".into()))?
+                    .to_string();
+                out.insert(key, parse_value(v)?);
+            }
+            Ok(Value::Map(out))
+        }
+        YValue::Tagged(t) => parse_value(&t.value),
+    }
+}
+
+fn parse_matcher(m: &serde_yaml::Mapping) -> Result<Matcher, ParseError> {
+    let mut parts = Vec::new();
+    for (k, v) in m {
+        let key = k
+            .as_str()
+            .ok_or_else(|| ParseError::Shape("matcher key not string".into()))?;
+        let m = parse_single_op(key, v)?;
+        parts.push(m);
+    }
+    if parts.len() == 1 {
+        Ok(parts.into_iter().next().unwrap())
+    } else {
+        Ok(Matcher::Composite(parts))
+    }
+}
+
+fn parse_single_op(op: &str, v: &YValue) -> Result<Matcher, ParseError> {
+    match op {
+        "$eq" => Ok(Matcher::Eq(parse_value(v)?)),
+        "$size" => {
+            let n = v
+                .as_u64()
+                .ok_or_else(|| ParseError::Shape("$size expects an integer".into()))?;
+            Ok(Matcher::Size(n as usize))
+        }
+        "$contains" => Ok(Matcher::Contains(parse_value(v)?)),
+        "$containsAll" => {
+            let seq = v
+                .as_sequence()
+                .ok_or_else(|| ParseError::Shape("$containsAll expects a sequence".into()))?;
+            let mut items = Vec::with_capacity(seq.len());
+            for x in seq {
+                items.push(parse_value(x)?);
+            }
+            Ok(Matcher::ContainsAll(items))
+        }
+        "$excludes" => {
+            let seq = v
+                .as_sequence()
+                .ok_or_else(|| ParseError::Shape("$excludes expects a sequence".into()))?;
+            let mut items = Vec::with_capacity(seq.len());
+            for x in seq {
+                items.push(parse_value(x)?);
+            }
+            Ok(Matcher::Excludes(items))
+        }
+        "$match" => {
+            let mp = v
+                .as_mapping()
+                .ok_or_else(|| ParseError::Shape("$match expects a mapping".into()))?;
+            let mut out = std::collections::BTreeMap::new();
+            for (k, v) in mp {
+                let key = k
+                    .as_str()
+                    .ok_or_else(|| ParseError::Shape("$match key not string".into()))?
+                    .to_string();
+                out.insert(key, parse_value(v)?);
+            }
+            Ok(Matcher::Match(out))
+        }
+        "$exists" => {
+            let b = v
+                .as_bool()
+                .ok_or_else(|| ParseError::Shape("$exists expects a bool".into()))?;
+            Ok(Matcher::Exists(b))
+        }
+        "$any" => {
+            let arg = if let YValue::Mapping(mp) = v {
+                let has_op = mp.iter().any(|(k, _)| {
+                    k.as_str().map(|s| s.starts_with('$')).unwrap_or(false)
+                });
+                if has_op {
+                    AnyArg::Matcher(parse_matcher(mp)?)
+                } else {
+                    AnyArg::Value(parse_value(v)?)
+                }
+            } else {
+                AnyArg::Value(parse_value(v)?)
+            };
+            Ok(Matcher::Any(Box::new(arg)))
+        }
+        "$type" => {
+            let s = v
+                .as_str()
+                .ok_or_else(|| ParseError::Shape("$type expects a string".into()))?
+                .to_string();
+            Ok(Matcher::Type(s))
+        }
+        "$matches" => {
+            let s = v
+                .as_str()
+                .ok_or_else(|| ParseError::Shape("$matches expects a string".into()))?
+                .to_string();
+            Ok(Matcher::Matches(s))
+        }
+        other => Err(ParseError::Shape(format!("unknown matcher operator: {other}"))),
+    }
+}
+
+#[allow(dead_code)]
+pub fn stringify_value(v: &YValue) -> String {
+    match v {
+        YValue::String(s) => s.clone(),
+        YValue::Number(n) => n.to_string(),
+        YValue::Bool(b) => b.to_string(),
+        YValue::Null => "null".into(),
+        YValue::Sequence(s) => {
             let parts: Vec<String> = s.iter().map(stringify_value).collect();
             format!("[{}]", parts.join(","))
         }
-        Value::Mapping(_) => "<map>".into(),
-        Value::Tagged(t) => stringify_value(&t.value),
+        YValue::Mapping(_) => "<map>".into(),
+        YValue::Tagged(t) => stringify_value(&t.value),
     }
 }
 

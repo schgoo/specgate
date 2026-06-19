@@ -18,7 +18,10 @@ pub mod scan;
 mod spec;
 mod types;
 
-pub use types::{Assertion, CaseLevel, CaseResult, CaseStatus, RunOutcome, Source, TraceEvent};
+pub use types::{
+    AnyArg, AssertValue, Assertion, CaseLevel, CaseResult, CaseStatus, Matcher, RunOutcome, Source,
+    TraceEvent, Value,
+};
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -47,7 +50,7 @@ pub fn run_spec(spec_path: &str) -> RunOutcome {
     };
 
     // Then: spec shape parsing.
-    let parsed = match spec::parse_value(&yaml_value) {
+    let parsed = match spec::parse_spec(&yaml_value) {
         Ok(s) => s,
         Err(_) => {
             return RunOutcome::Error {
@@ -558,6 +561,10 @@ fn check_shape(spec: &spec::Spec, raw: &serde_yaml::Value) -> Option<String> {
             allowed.insert(format!("{op}.result"));
             allowed.insert(format!("{op}.error"));
             allowed.insert(format!("{op}.value"));
+            allowed.insert("$result".into());
+            allowed.insert("$outcome".into());
+            allowed.insert("$error".into());
+            allowed.insert("$value".into());
         }
         for setup in &case_setups {
             if let Some(meta) = ops_meta.get(*setup) {
