@@ -381,26 +381,28 @@ fn parse_single_op(op: &str, v: &YValue) -> Result<Matcher, ParseError> {
                 .ok_or_else(|| ParseError::Shape("$size expects an integer".into()))?;
             Ok(Matcher::Size(n as usize))
         }
-        "$contains" => Ok(Matcher::Contains(parse_value(v)?)),
+        "$contains" => Ok(Matcher::Contains(Box::new(parse_any_arg(v)?))),
         "$containsAll" => {
             let seq = v
                 .as_sequence()
                 .ok_or_else(|| ParseError::Shape("$containsAll expects a sequence".into()))?;
             let mut items = Vec::with_capacity(seq.len());
             for x in seq {
-                items.push(parse_value(x)?);
+                items.push(parse_any_arg(x)?);
             }
             Ok(Matcher::ContainsAll(items))
         }
         "$excludes" => {
-            let seq = v
-                .as_sequence()
-                .ok_or_else(|| ParseError::Shape("$excludes expects a sequence".into()))?;
-            let mut items = Vec::with_capacity(seq.len());
-            for x in seq {
-                items.push(parse_value(x)?);
+            // Tolerate both list form ($excludes: [a, b]) and single-value form.
+            if let Some(seq) = v.as_sequence() {
+                let mut items = Vec::with_capacity(seq.len());
+                for x in seq {
+                    items.push(parse_any_arg(x)?);
+                }
+                Ok(Matcher::Excludes(items))
+            } else {
+                Ok(Matcher::Excludes(vec![parse_any_arg(v)?]))
             }
-            Ok(Matcher::Excludes(items))
         }
         "$match" => {
             let mp = v
@@ -422,21 +424,13 @@ fn parse_single_op(op: &str, v: &YValue) -> Result<Matcher, ParseError> {
                 .ok_or_else(|| ParseError::Shape("$exists expects a bool".into()))?;
             Ok(Matcher::Exists(b))
         }
-        "$any" => {
-            let arg = if let YValue::Mapping(mp) = v {
-                let has_op = mp.iter().any(|(k, _)| {
-                    k.as_str().map(|s| s.starts_with('$')).unwrap_or(false)
-                });
-                if has_op {
-                    AnyArg::Matcher(parse_matcher(mp)?)
-                } else {
-                    AnyArg::Value(parse_value(v)?)
-                }
-            } else {
-                AnyArg::Value(parse_value(v)?)
-            };
-            Ok(Matcher::Any(Box::new(arg)))
-        }
+        "$any" => Ok(Matcher::Any(Box::new(parse_any_arg(v)?))),
+        "$every" => Ok(Matcher::Every(Box::new(parse_any_arg(v)?))),
+        "$not" => Ok(Matcher::Not(Box::new(parse_any_arg(v)?))),
+        "$gt" => Ok(Matcher::Gt(parse_value(v)?)),
+        "$gte" => Ok(Matcher::Gte(parse_value(v)?)),
+        "$lt" => Ok(Matcher::Lt(parse_value(v)?)),
+        "$lte" => Ok(Matcher::Lte(parse_value(v)?)),
         "$type" => {
             let s = v
                 .as_str()
@@ -453,6 +447,20 @@ fn parse_single_op(op: &str, v: &YValue) -> Result<Matcher, ParseError> {
         }
         other => Err(ParseError::Shape(format!("unknown matcher operator: {other}"))),
     }
+}
+
+/// Parse a YAML node as either a literal `Value` or a nested matcher (when
+/// it's a mapping whose keys start with `$`).
+fn parse_any_arg(v: &YValue) -> Result<AnyArg, ParseError> {
+    if let YValue::Mapping(mp) = v {
+        let has_op = mp
+            .iter()
+            .any(|(k, _)| k.as_str().map(|s| s.starts_with('$')).unwrap_or(false));
+        if has_op {
+            return Ok(AnyArg::Matcher(parse_matcher(mp)?));
+        }
+    }
+    Ok(AnyArg::Value(parse_value(v)?))
 }
 
 #[allow(dead_code)]

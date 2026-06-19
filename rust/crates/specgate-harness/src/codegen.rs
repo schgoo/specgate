@@ -20,6 +20,7 @@ pub fn generate(
     annotated: &AnnotatedSource,
     workspace_root: &Path,
     needs_async: bool,
+    package_root: &Path,
 ) -> std::io::Result<GeneratedProject> {
     std::fs::create_dir_all(scratch_dir.join("src"))?;
     let trace_file = scratch_dir.join("traces.json");
@@ -28,6 +29,11 @@ pub fn generate(
     let runtime_path = workspace_root.join("crates/specgate-runtime");
     let macros_path = workspace_root.join("crates/specgate-annotations-macros");
     let harness_path = workspace_root.join("crates/specgate-harness");
+
+    let (crate_name, crate_ident) = read_package_name(package_root)
+        .unwrap_or_else(|| ("specgate-fixtures".to_string(), "specgate_fixtures".to_string()));
+    let pkg_root_abs = std::fs::canonicalize(package_root)
+        .unwrap_or_else(|_| package_root.to_path_buf());
 
     let manifest = format!(
         r#"[package]
@@ -42,6 +48,7 @@ path = "src/main.rs"
 [dependencies]
 specgate-annotations = {{ path = "{ann}" }}
 specgate-harness = {{ path = "{harness}" }}
+{crate_name} = {{ path = "{pkg}" }}
 
 [workspace]
 
@@ -64,6 +71,8 @@ hashbrown = {{ git = "https://github.com/rust-lang/hashbrown", tag = "v0.17.1" }
 "#,
         ann = annotations_path.display().to_string().replace('\\', "/"),
         harness = harness_path.display().to_string().replace('\\', "/"),
+        crate_name = crate_name,
+        pkg = pkg_root_abs.display().to_string().replace('\\', "/"),
     );
     let _ = runtime_path;
     let _ = macros_path;
@@ -77,13 +86,47 @@ hashbrown = {{ git = "https://github.com/rust-lang/hashbrown", tag = "v0.17.1" }
         let _ = std::fs::copy(&parent_lock, &tmp_lock);
     }
 
-    let main_rs = render_main(fixture_src, spec, cases_to_run, annotated, &trace_file, needs_async)?;
+    let main_rs = render_main(
+        fixture_src,
+        spec,
+        cases_to_run,
+        annotated,
+        &trace_file,
+        needs_async,
+        &crate_ident,
+    )?;
     std::fs::write(scratch_dir.join("src").join("main.rs"), main_rs)?;
 
     Ok(GeneratedProject {
         crate_dir: scratch_dir.to_path_buf(),
         trace_file,
     })
+}
+
+/// Read `[package] name = "..."` from the fixture crate's Cargo.toml.
+/// Returns `(name, ident)` where ident replaces `-` with `_` for use in
+/// Rust paths (`specgate-fixtures` → `specgate_fixtures`).
+fn read_package_name(package_root: &Path) -> Option<(String, String)> {
+    let manifest = package_root.join("Cargo.toml");
+    let text = std::fs::read_to_string(&manifest).ok()?;
+    let mut in_package = false;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            in_package = line.starts_with("[package]");
+            continue;
+        }
+        if in_package {
+            if let Some(rest) = line.strip_prefix("name") {
+                let rest = rest.trim_start_matches(|c: char| c.is_whitespace() || c == '=');
+                let rest = rest.trim();
+                let name = rest.trim_matches(|c: char| c == '"' || c == '\'').to_string();
+                let ident = name.replace('-', "_");
+                return Some((name, ident));
+            }
+        }
+    }
+    None
 }
 
 fn render_main(
@@ -93,16 +136,24 @@ fn render_main(
     annotated: &AnnotatedSource,
     trace_out: &Path,
     needs_async: bool,
+    crate_ident: &str,
 ) -> std::io::Result<String> {
     let mut out = String::new();
-    let abs = std::fs::canonicalize(fixture_src)?;
+    // Module name within the crate: file stem of the fixture source.
+    let module = fixture_src
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("fixture")
+        .to_string();
+    let _ = std::fs::canonicalize(fixture_src)?; // kept for parity / side-effect.
     out.push_str("#![allow(unused, unused_mut, unused_variables, dead_code, clippy::all)]\n");
     out.push_str("use specgate_annotations::{TraceEvent, Value, take_traces, reset, set_mock, SpecEvent};\n");
+    // Pull the fixture module in as a crate dependency rather than #[path]
+    // including the file. This lets fixtures depend on external crates
+    // (serde_yaml, etc.) via their normal Cargo manifest.
     out.push_str(&format!(
-        "#[path = \"{}\"] mod fut;\n",
-        abs.display().to_string().replace('\\', "\\\\")
+        "use {crate_ident}::{module} as fut;\n"
     ));
-    out.push_str("use fut::*;\n");
     out.push_str("\n");
     out.push_str("fn panic_msg(e: &Box<dyn std::any::Any + Send>) -> String {\n");
     out.push_str("    if let Some(s) = e.downcast_ref::<String>() { return s.clone(); }\n");

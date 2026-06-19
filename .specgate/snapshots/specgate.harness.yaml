@@ -203,6 +203,33 @@ cases:
                 - Event: { name: $result, value: "5" }
 
   # ================================================================
+  # Crate dependency — #[path] inclusion cannot work (#7)
+  # ================================================================
+
+  - name: cross_crate_dependency
+    desc: >
+      Operation uses an external crate (serde_yaml). The harness must
+      depend on the fixture crate as a Cargo dependency, not #[path]
+      include the source file. This proves the harness handles real
+      crate structures with external dependencies.
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/cross_dep.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: extract_yaml_value
+              status: pass
+              expected:
+                - $result: "Customer"
+              traces:
+                - Run: { operation: parse_yaml_key }
+                - Event: { name: parse_yaml_key.input, value: "name: Customer\nid: 42" }
+                - Event: { name: parse_yaml_key.key, value: "name" }
+                - Event: { name: $result, value: "Customer" }
+
+  # ================================================================
   # Structured values — lists, maps, sets, $-operators
   # ================================================================
 
@@ -479,6 +506,153 @@ cases:
               traces:
                 - Run: { operation: get_navigation_properties }
                 - Event: { name: $result, value: ["Address", "Contacts", "Orders"] }
+
+  - name: nested_structured_matching
+    desc: List of maps — nested operators ($any with $match, $contains with $match)
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/nested_structured.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: nested_list_of_maps_exact
+              status: pass
+            - name: nested_any_with_match
+              status: pass
+            - name: nested_size
+              status: pass
+            - name: nested_contains_element
+              status: pass
+
+  - name: scalar_operators_matching
+    desc: Regex, negation, numeric comparisons, empty, $every, multi-field
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/scalar_operators.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: regex_match
+              status: pass
+              expected:
+                - label: { $matches: "^sensor-[A-Z]\\d+-\\w+$" }
+              traces:
+                - Run: { operation: get_measurement }
+                - Event: { name: temperature, value: 72 }
+                - Event: { name: label, value: "sensor-A3-north" }
+                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
+            - name: regex_no_match_fails
+              status: fail
+              expected:
+                - label: { $matches: "^invalid" }
+              traces:
+                - Run: { operation: get_measurement }
+                - Event: { name: temperature, value: 72 }
+                - Event: { name: label, value: "sensor-A3-north" }
+                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
+            - name: not_value
+              status: pass
+              expected:
+                - temperature: { $not: 100 }
+              traces:
+                - Run: { operation: get_measurement }
+                - Event: { name: temperature, value: 72 }
+                - Event: { name: label, value: "sensor-A3-north" }
+                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
+            - name: not_fails_when_equal
+              status: fail
+              expected:
+                - temperature: { $not: 72 }
+              traces:
+                - Run: { operation: get_measurement }
+                - Event: { name: temperature, value: 72 }
+                - Event: { name: label, value: "sensor-A3-north" }
+                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
+            - name: gt_passes
+              status: pass
+              expected:
+                - temperature: { $gt: 70 }
+              traces:
+                - Run: { operation: get_measurement }
+                - Event: { name: temperature, value: 72 }
+                - Event: { name: label, value: "sensor-A3-north" }
+                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
+            - name: gte_passes_equal
+              status: pass
+              expected:
+                - temperature: { $gte: 72 }
+              traces:
+                - Run: { operation: get_measurement }
+                - Event: { name: temperature, value: 72 }
+                - Event: { name: label, value: "sensor-A3-north" }
+                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
+            - name: lt_passes
+              status: pass
+              expected:
+                - temperature: { $lt: 100 }
+              traces:
+                - Run: { operation: get_measurement }
+                - Event: { name: temperature, value: 72 }
+                - Event: { name: label, value: "sensor-A3-north" }
+                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
+            - name: lte_fails
+              status: fail
+              expected:
+                - temperature: { $lte: 50 }
+              traces:
+                - Run: { operation: get_measurement }
+                - Event: { name: temperature, value: 72 }
+                - Event: { name: label, value: "sensor-A3-north" }
+                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
+            - name: empty_list
+              status: pass
+              expected:
+                - $result: { $size: 0 }
+              traces:
+                - Run: { operation: get_empty }
+                - Event: { name: $result, value: [] }
+            - name: every_element
+              status: pass
+              expected:
+                - readings: { $every: { $gt: 60 } }
+              traces:
+                - Run: { operation: get_measurement }
+                - Event: { name: temperature, value: 72 }
+                - Event: { name: label, value: "sensor-A3-north" }
+                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
+            - name: every_fails
+              status: fail
+              expected:
+                - readings: { $every: { $gt: 71 } }
+              traces:
+                - Run: { operation: get_measurement }
+                - Event: { name: temperature, value: 72 }
+                - Event: { name: label, value: "sensor-A3-north" }
+                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
+            - name: combined_multi_field
+              status: pass
+              expected:
+                - temperature: { $gt: 60, $lt: 100 }
+                - label: { $matches: "^sensor-[A-Z]" }
+                - readings: { $size: 5, $every: { $gte: 60 } }
+              traces:
+                - Run: { operation: get_measurement }
+                - Event: { name: temperature, value: 72 }
+                - Event: { name: label, value: "sensor-A3-north" }
+                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
+            - name: combined_multi_field_one_fails
+              status: fail
+              expected:
+                - temperature: { $gt: 60 }
+                - label: { $matches: "^invalid" }
+                - readings: { $size: 5 }
+              traces:
+                - Run: { operation: get_measurement }
+                - Event: { name: temperature, value: 72 }
+                - Event: { name: label, value: "sensor-A3-north" }
+                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
 
   # ================================================================
   # Happy path — basic operations

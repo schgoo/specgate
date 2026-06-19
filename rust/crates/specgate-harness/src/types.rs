@@ -39,19 +39,25 @@ impl From<bool> for AssertValue {
 pub enum Matcher {
     Eq(Value),
     Size(usize),
-    Contains(Value),
-    ContainsAll(Vec<Value>),
-    Excludes(Vec<Value>),
+    Contains(Box<AnyArg>),
+    ContainsAll(Vec<AnyArg>),
+    Excludes(Vec<AnyArg>),
     Match(BTreeMap<String, Value>),
     Exists(bool),
     Any(Box<AnyArg>),
+    Every(Box<AnyArg>),
+    Not(Box<AnyArg>),
+    Gt(Value),
+    Gte(Value),
+    Lt(Value),
+    Lte(Value),
     Type(String),
     Matches(String),
     Composite(Vec<Matcher>),
 }
 
-/// Argument for `$any` — either a concrete value to compare against, or a
-/// nested matcher (`{ $matches: "..." }`).
+/// Pattern argument used by `$any`, `$every`, `$contains`, `$not`, etc. —
+/// either a concrete value to compare against, or a nested matcher.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AnyArg {
     Value(Value),

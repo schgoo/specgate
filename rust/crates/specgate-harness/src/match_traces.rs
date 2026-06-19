@@ -113,21 +113,9 @@ fn matcher_matches(m: &Matcher, v: &Value) -> bool {
     match m {
         Matcher::Eq(target) => values_equal(target, v),
         Matcher::Size(n) => length_of(v).map(|l| l == *n).unwrap_or(false),
-        Matcher::Contains(item) => match v {
-            Value::List(xs) => xs.iter().any(|x| values_equal(item, x)),
-            Value::Set(xs) => xs.iter().any(|x| values_equal(item, x)),
-            Value::String(s) => match item {
-                Value::String(needle) => s.contains(needle.as_str()),
-                _ => false,
-            },
-            _ => false,
-        },
-        Matcher::ContainsAll(items) => items
-            .iter()
-            .all(|it| matcher_matches(&Matcher::Contains(it.clone()), v)),
-        Matcher::Excludes(items) => items
-            .iter()
-            .all(|it| !matcher_matches(&Matcher::Contains(it.clone()), v)),
+        Matcher::Contains(arg) => contains_arg(arg, v),
+        Matcher::ContainsAll(items) => items.iter().all(|it| contains_arg(it, v)),
+        Matcher::Excludes(items) => items.iter().all(|it| !contains_arg(it, v)),
         Matcher::Match(spec) => match v {
             Value::Map(m) => spec
                 .iter()
@@ -141,17 +129,81 @@ fn matcher_matches(m: &Matcher, v: &Value) -> bool {
                 Value::Set(xs) => xs.iter().collect(),
                 _ => return false,
             };
-            items.iter().any(|x| match arg.as_ref() {
-                AnyArg::Value(val) => values_equal(val, x),
-                AnyArg::Matcher(m) => matcher_matches(m, x),
-            })
+            items.iter().any(|x| arg_matches(arg, x))
         }
-        Matcher::Type(t) => v.type_name() == t.as_str() || (t == "int" && matches!(v, Value::Integer(_))),
+        Matcher::Every(arg) => {
+            let items: Vec<&Value> = match v {
+                Value::List(xs) => xs.iter().collect(),
+                Value::Set(xs) => xs.iter().collect(),
+                _ => return false,
+            };
+            items.iter().all(|x| arg_matches(arg, x))
+        }
+        Matcher::Not(arg) => !arg_matches(arg, v),
+        Matcher::Gt(target) => numeric_cmp(v, target).map(|o| o == std::cmp::Ordering::Greater).unwrap_or(false),
+        Matcher::Gte(target) => numeric_cmp(v, target).map(|o| o != std::cmp::Ordering::Less).unwrap_or(false),
+        Matcher::Lt(target) => numeric_cmp(v, target).map(|o| o == std::cmp::Ordering::Less).unwrap_or(false),
+        Matcher::Lte(target) => numeric_cmp(v, target).map(|o| o != std::cmp::Ordering::Greater).unwrap_or(false),
+        Matcher::Type(t) => type_matches(t, v),
         Matcher::Matches(pat) => match v {
-            Value::String(s) => simple_regex_match(pat, s),
+            Value::String(s) => regex_match(pat, s),
             _ => false,
         },
         Matcher::Composite(parts) => parts.iter().all(|p| matcher_matches(p, v)),
+    }
+}
+
+fn arg_matches(arg: &AnyArg, v: &Value) -> bool {
+    match arg {
+        AnyArg::Value(val) => values_equal(val, v),
+        AnyArg::Matcher(m) => matcher_matches(m, v),
+    }
+}
+
+/// `$contains` semantics: the argument matches one of the collection's
+/// elements (deep-eq or matcher), or for strings, is a substring.
+fn contains_arg(arg: &AnyArg, v: &Value) -> bool {
+    match v {
+        Value::List(xs) => xs.iter().any(|x| arg_matches(arg, x)),
+        Value::Set(xs) => xs.iter().any(|x| arg_matches(arg, x)),
+        Value::Map(map) => map.values().any(|x| arg_matches(arg, x)),
+        Value::String(s) => match arg {
+            AnyArg::Value(Value::String(needle)) => s.contains(needle.as_str()),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+/// Compare `v` to `target` numerically. Returns `Some(ordering)` when both
+/// are numeric (coercing Integer/Float as needed); `None` otherwise.
+fn numeric_cmp(v: &Value, target: &Value) -> Option<std::cmp::Ordering> {
+    let a = numeric_value(v)?;
+    let b = numeric_value(target)?;
+    a.partial_cmp(&b)
+}
+
+fn numeric_value(v: &Value) -> Option<f64> {
+    match v {
+        Value::Integer(i) => Some(*i as f64),
+        Value::Float(f) => Some(*f),
+        Value::String(s) => s.parse::<f64>().ok(),
+        _ => None,
+    }
+}
+
+fn type_matches(t: &str, v: &Value) -> bool {
+    let actual = v.type_name();
+    match t {
+        "string" => matches!(v, Value::String(_)),
+        "number" | "int" => matches!(v, Value::Integer(_)) || (t == "number" && matches!(v, Value::Float(_))),
+        "float" => matches!(v, Value::Float(_)),
+        "bool" => matches!(v, Value::Bool(_)),
+        "list" => matches!(v, Value::List(_)),
+        "map" => matches!(v, Value::Map(_)),
+        "set" => matches!(v, Value::Set(_)),
+        "null" => matches!(v, Value::String(s) if s.is_empty()),
+        other => other == actual,
     }
 }
 
@@ -165,21 +217,172 @@ fn length_of(v: &Value) -> Option<usize> {
     }
 }
 
-/// Minimal regex subset: `^prefix`, `suffix$`, `^exact$`, otherwise substring.
-fn simple_regex_match(pat: &str, s: &str) -> bool {
-    let starts = pat.starts_with('^');
-    let ends = pat.ends_with('$');
-    let body: &str = match (starts, ends) {
-        (true, true) => &pat[1..pat.len() - 1],
-        (true, false) => &pat[1..],
-        (false, true) => &pat[..pat.len() - 1],
-        (false, false) => pat,
-    };
-    match (starts, ends) {
-        (true, true) => s == body,
-        (true, false) => s.starts_with(body),
-        (false, true) => s.ends_with(body),
-        (false, false) => s.contains(body),
+/// Regex matcher supporting `^`, `$`, char classes (`[A-Z]`, `\d`, `\w`,
+/// `\s`, `[abc]`, `[^abc]`), `.`, and quantifiers `+`, `*`, `?`. Sufficient
+/// for the regex shapes used by spec fixtures; we don't ship a full engine
+/// because no regex crate is available in the offline sandbox.
+fn regex_match(pat: &str, s: &str) -> bool {
+    let tokens = compile_regex(pat);
+    let anchored_start = pat.starts_with('^');
+    let anchored_end = pat.ends_with('$') && !pat.ends_with("\\$");
+    if anchored_start {
+        return match_tokens(&tokens, 0, s, anchored_end).is_some();
+    }
+    for start in 0..=s.len() {
+        if !s.is_char_boundary(start) { continue; }
+        if match_tokens(&tokens, 0, &s[start..], anchored_end).is_some() {
+            return true;
+        }
+    }
+    false
+}
+
+#[derive(Debug, Clone)]
+enum RxTok {
+    /// Single character class with quantifier. `Many` is "one or more",
+    /// `Star` is zero or more, `Opt` is zero or one, `One` is exactly one.
+    Class(CharClass, Quant),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Quant { One, Many, Star, Opt }
+
+#[derive(Debug, Clone)]
+enum CharClass {
+    Any,
+    Literal(char),
+    Digit,
+    Word,
+    Space,
+    Set(Vec<(char, char)>, bool), // ranges, negated?
+}
+
+impl CharClass {
+    fn matches(&self, c: char) -> bool {
+        match self {
+            CharClass::Any => c != '\n',
+            CharClass::Literal(l) => *l == c,
+            CharClass::Digit => c.is_ascii_digit(),
+            CharClass::Word => c.is_ascii_alphanumeric() || c == '_',
+            CharClass::Space => c.is_whitespace(),
+            CharClass::Set(ranges, neg) => {
+                let in_set = ranges.iter().any(|(lo, hi)| c >= *lo && c <= *hi);
+                in_set ^ *neg
+            }
+        }
+    }
+}
+
+fn compile_regex(pat: &str) -> Vec<RxTok> {
+    // Strip ^/$ anchors before tokenising — they're handled by callers.
+    let mut body = pat;
+    if body.starts_with('^') { body = &body[1..]; }
+    if body.ends_with('$') && !body.ends_with("\\$") { body = &body[..body.len()-1]; }
+    let chars: Vec<char> = body.chars().collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let (class, consumed) = parse_class(&chars, i);
+        i += consumed;
+        let quant = match chars.get(i) {
+            Some('+') => { i += 1; Quant::Many }
+            Some('*') => { i += 1; Quant::Star }
+            Some('?') => { i += 1; Quant::Opt }
+            _ => Quant::One,
+        };
+        out.push(RxTok::Class(class, quant));
+    }
+    out
+}
+
+fn parse_class(chars: &[char], i: usize) -> (CharClass, usize) {
+    match chars[i] {
+        '.' => (CharClass::Any, 1),
+        '\\' => {
+            let c = chars.get(i + 1).copied().unwrap_or('\\');
+            let cl = match c {
+                'd' => CharClass::Digit,
+                'w' => CharClass::Word,
+                's' => CharClass::Space,
+                other => CharClass::Literal(other),
+            };
+            (cl, 2)
+        }
+        '[' => {
+            let mut j = i + 1;
+            let neg = chars.get(j).copied() == Some('^');
+            if neg { j += 1; }
+            let mut ranges: Vec<(char, char)> = Vec::new();
+            while j < chars.len() && chars[j] != ']' {
+                let lo = if chars[j] == '\\' {
+                    j += 1;
+                    chars.get(j).copied().unwrap_or('\\')
+                } else { chars[j] };
+                j += 1;
+                if chars.get(j).copied() == Some('-') && chars.get(j + 1).is_some_and(|&c| c != ']') {
+                    j += 1;
+                    let hi = if chars[j] == '\\' {
+                        j += 1;
+                        chars.get(j).copied().unwrap_or('\\')
+                    } else { chars[j] };
+                    j += 1;
+                    ranges.push((lo, hi));
+                } else {
+                    ranges.push((lo, lo));
+                }
+            }
+            if j < chars.len() && chars[j] == ']' { j += 1; }
+            (CharClass::Set(ranges, neg), j - i)
+        }
+        c => (CharClass::Literal(c), 1),
+    }
+}
+
+fn match_tokens(toks: &[RxTok], ti: usize, s: &str, anchored_end: bool) -> Option<usize> {
+    if ti >= toks.len() {
+        if anchored_end && !s.is_empty() {
+            return None;
+        }
+        return Some(0);
+    }
+    let RxTok::Class(class, quant) = &toks[ti];
+    match quant {
+        Quant::One => {
+            let mut it = s.chars();
+            let c = it.next()?;
+            if !class.matches(c) { return None; }
+            let rest = it.as_str();
+            match_tokens(toks, ti + 1, rest, anchored_end).map(|n| n + (s.len() - rest.len()))
+        }
+        Quant::Opt => {
+            if let Some(c) = s.chars().next() {
+                if class.matches(c) {
+                    let rest_len = c.len_utf8();
+                    if let Some(n) = match_tokens(toks, ti + 1, &s[rest_len..], anchored_end) {
+                        return Some(n + rest_len);
+                    }
+                }
+            }
+            match_tokens(toks, ti + 1, s, anchored_end)
+        }
+        Quant::Star | Quant::Many => {
+            // Greedy: consume as many as possible, then backtrack.
+            let mut idx = 0usize;
+            let mut positions = vec![0usize];
+            for c in s.chars() {
+                if !class.matches(c) { break; }
+                idx += c.len_utf8();
+                positions.push(idx);
+            }
+            let min = if matches!(quant, Quant::Many) { 1 } else { 0 };
+            for k in (min..positions.len()).rev() {
+                let consumed = positions[k];
+                if let Some(n) = match_tokens(toks, ti + 1, &s[consumed..], anchored_end) {
+                    return Some(n + consumed);
+                }
+            }
+            None
+        }
     }
 }
 
