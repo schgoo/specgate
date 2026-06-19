@@ -2,6 +2,7 @@
 
 use std::path::Path;
 
+use specgate_annotations::spec_operation;
 use specgate_harness::{CaseStatus, RunOutcome as HarnessOutcome};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,7 +21,27 @@ pub enum RunOutcome {
     Error { reason: String },
 }
 
-pub fn run(spec_path: &str) -> RunOutcome {
+impl std::fmt::Display for RunOutcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RunOutcome::Complete { report } => write!(
+                f,
+                "Complete(spec={}, total={}, passed={}, failed={}, skipped={}, warned={})",
+                report.spec_name,
+                report.total_cases,
+                report.passed,
+                report.failed,
+                report.skipped,
+                report.warned
+            ),
+            RunOutcome::Error { reason } => write!(f, "Error({reason})"),
+        }
+    }
+}
+
+#[spec_operation("run")]
+pub fn run(spec: &str) -> RunOutcome {
+    let spec_path = spec;
     if !Path::new(spec_path).exists() {
         return RunOutcome::Error {
             reason: format!("spec file not found: {spec_path}"),

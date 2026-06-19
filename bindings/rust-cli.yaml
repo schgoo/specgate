@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=../binding-schema.json
+# Binding: Rust implementation for `specgate.cli`.
+# All paths are relative to this file.
+
+language: rust
+
+targets:
+  cli:
+    package_root: ../rust/crates/specgate-cli
+    function: specgate_cli

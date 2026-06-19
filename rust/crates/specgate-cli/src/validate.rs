@@ -2,6 +2,7 @@
 //! `.spec.yaml` files in a directory tree.
 
 use serde_yaml::Value;
+use specgate_annotations::spec_operation;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -44,6 +45,24 @@ pub enum ValidateOutcome {
     Fail { report: ValidationReport },
 }
 
+impl std::fmt::Display for ValidateOutcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ValidateOutcome::Pass { report } => write!(
+                f,
+                "Pass(files={}, errors={}, warnings={})",
+                report.total_files, report.errors, report.warnings
+            ),
+            ValidateOutcome::Fail { report } => write!(
+                f,
+                "Fail(files={}, errors={}, warnings={})",
+                report.total_files, report.errors, report.warnings
+            ),
+        }
+    }
+}
+
+#[spec_operation("validate")]
 pub fn validate(spec_dir: &str, strict: bool, suppress: &[String]) -> ValidateOutcome {
     let suppress_set: HashSet<String> = suppress.iter().cloned().collect();
     let mut findings: Vec<ValidationFinding> = Vec::new();

@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=../spec-schema.json
 spec_version: "0.4.0"
 name: specgate.cli
-binding: ../bindings/rust.yaml
+binding: ../bindings/rust-cli.yaml
 
 types:
   ValidationFinding:
