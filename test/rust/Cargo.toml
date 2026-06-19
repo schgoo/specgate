@@ -8,3 +8,12 @@ version = "0.1.0"
 
 [workspace.dependencies]
 # specgate-annotations will be added when rebuilt
+
+[patch.crates-io]
+proc-macro2 = { git = "https://github.com/dtolnay/proc-macro2", tag = "1.0.106" }
+quote = { git = "https://github.com/dtolnay/quote", tag = "1.0.45" }
+unicode-ident = { git = "https://github.com/dtolnay/unicode-ident", tag = "1.0.20" }
+syn = { git = "https://github.com/dtolnay/syn", tag = "2.0.118" }
+serde = { git = "https://github.com/serde-rs/serde", tag = "v1.0.228" }
+serde_core = { git = "https://github.com/serde-rs/serde", tag = "v1.0.228" }
+serde_derive = { git = "https://github.com/serde-rs/serde", tag = "v1.0.228" }

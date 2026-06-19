@@ -10,7 +10,7 @@ pub use specgate_annotations_macros::{
 // Re-export the SpecEvent trait under the same name — traits live in the
 // type namespace while the derive macro lives in the macro namespace, so
 // they coexist without conflict.
-pub use specgate_runtime::{take_traces, SpecEvent, TraceEvent};
+pub use specgate_runtime::{take_traces, SpecEvent, ToSpecValue, TraceEvent, Value};
 
 #[doc(hidden)]
 pub mod __rt {
@@ -18,4 +18,4 @@ pub mod __rt {
 }
 
 // Re-export auxiliary runtime helpers under their plain names too.
-pub use specgate_runtime::{emit_event, emit_run, mock_lookup, reset, set_mock};
+pub use specgate_runtime::{emit_event, emit_event_v, emit_run, mock_lookup, reset, set_mock};

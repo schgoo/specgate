@@ -16,14 +16,33 @@ name: specgate.harness
 binding: bindings/rust.yaml
 
 types:
+  Value:
+    desc: >
+      Trace event values can be scalars or structured (collections).
+      The matcher compares based on type: strings use equality,
+      lists use subsequence (or $unordered), maps check key+value,
+      sets check presence. None/null values are represented by the
+      absence of the event — no event emitted means the field is null.
+    oneof:
+      String: string
+      Integer: i64
+      Float: f64
+      Bool: bool
+      List: List<Value>
+      Map: Map<string, Value>
+      Set: Set<Value>
+
   TraceEvent:
     oneof:
-      Event: { span: string, name: string, value: string }
+      Event: { span: string, name: string, value: Value }
       Run: { span: string, operation: string }
 
   Assertion:
+    desc: >
+      Expected assertions support exact values, structured values
+      (lists, maps), and $-operators for flexible matching.
     oneof:
-      Event: { name: string, value: string }
+      Event: { name: string, value: Value }
       $run: { operation: string }
       $unordered: { items: List<Assertion> }
       $anywhere: { items: List<Assertion> }
@@ -118,16 +137,348 @@ cases:
       - The harness should invoke cargo build/test, not evaluate Rust in-process
 
   - name: paths_resolve_relative_to_spec
-    kind: narrative
     desc: >
-      All paths in a spec (binding, fixture source) must resolve relative to
-      the spec file's location, not the working directory of the test runner.
-      Generated Cargo.toml paths must use forward slashes or properly escape
-      backslashes to avoid TOML unicode escape interpretation on Windows.
-    verify:
-      - Run `cargo test -p specgate-harness --test specgate_harness_spec` from the workspace root
-      - All Complete-outcome cases must find their fixture source and binding
-      - Generated Cargo.toml must not contain raw backslash paths
+      Spec at a deeply nested path resolves binding and fixture source
+      correctly. Tests that the harness absolutizes paths before embedding
+      them in the generated runner, so the runner finds files regardless
+      of its own working directory.
+    operation: run_spec
+    inputs:
+      spec: test/fixtures/nested/deep/path/nested_path.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: add_from_nested_path
+              status: pass
+              expected:
+                - $result: "30"
+              traces:
+                - Run: { operation: add }
+                - Event: { name: add.a, value: "10" }
+                - Event: { name: add.b, value: "20" }
+                - Event: { name: $result, value: "30" }
+
+  - name: no_vacuous_match
+    desc: >
+      Non-empty expected with zero matching traces must fail, not pass.
+      Prevents the harness from silently passing unparseable or impossible assertions.
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/vacuous_match.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: impossible_assertion
+              status: fail
+              expected:
+                - nonexistent.field: "impossible"
+              traces:
+                - Run: { operation: add }
+                - Event: { name: add.a, value: "2" }
+                - Event: { name: add.b, value: "3" }
+                - Event: { name: $result, value: "5" }
+
+  - name: self_test_rejects_all_errors
+    desc: >
+      When the harness runs its own spec and every run_spec call returns
+      an error (e.g. file not found), the self-test must fail — it must
+      not pass vacuously.
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/stateless_add.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: add_2_3
+              status: pass
+              expected:
+                - $result: "5"
+              traces:
+                - Run: { operation: add }
+                - Event: { name: add.a, value: "2" }
+                - Event: { name: add.b, value: "3" }
+                - Event: { name: $result, value: "5" }
+
+  # ================================================================
+  # Structured values — lists, maps, sets, $-operators
+  # ================================================================
+
+  - name: assertion_operators
+    desc: All 9 assertion operators work correctly
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/operators.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: eq_scalar
+              status: pass
+              expected:
+                - product_name: { $eq: "Milk" }
+              traces:
+                - Run: { operation: get_product }
+                - Event: { name: product_name, value: "Milk" }
+                - Event: { name: price, value: 4 }
+                - Event: { name: tags, value: ["dairy", "organic", "local"] }
+                - Event: { name: attributes, value: {"category": "food", "origin": "local"} }
+            - name: size_list
+              status: pass
+              expected:
+                - tags: { $size: 3 }
+              traces:
+                - Run: { operation: get_product }
+                - Event: { name: product_name, value: "Milk" }
+                - Event: { name: price, value: 4 }
+                - Event: { name: tags, value: ["dairy", "organic", "local"] }
+                - Event: { name: attributes, value: {"category": "food", "origin": "local"} }
+            - name: size_map
+              status: pass
+              expected:
+                - attributes: { $size: 2 }
+              traces:
+                - Run: { operation: get_product }
+                - Event: { name: product_name, value: "Milk" }
+                - Event: { name: price, value: 4 }
+                - Event: { name: tags, value: ["dairy", "organic", "local"] }
+                - Event: { name: attributes, value: {"category": "food", "origin": "local"} }
+            - name: contains_single
+              status: pass
+              expected:
+                - tags: { $contains: "dairy" }
+              traces:
+                - Run: { operation: get_product }
+                - Event: { name: product_name, value: "Milk" }
+                - Event: { name: price, value: 4 }
+                - Event: { name: tags, value: ["dairy", "organic", "local"] }
+                - Event: { name: attributes, value: {"category": "food", "origin": "local"} }
+            - name: contains_all
+              status: pass
+              expected:
+                - tags: { $containsAll: ["dairy", "organic"] }
+              traces:
+                - Run: { operation: get_product }
+                - Event: { name: product_name, value: "Milk" }
+                - Event: { name: price, value: 4 }
+                - Event: { name: tags, value: ["dairy", "organic", "local"] }
+                - Event: { name: attributes, value: {"category": "food", "origin": "local"} }
+            - name: excludes_values
+              status: pass
+              expected:
+                - tags: { $excludes: ["expired", "recalled"] }
+              traces:
+                - Run: { operation: get_product }
+                - Event: { name: product_name, value: "Milk" }
+                - Event: { name: price, value: 4 }
+                - Event: { name: tags, value: ["dairy", "organic", "local"] }
+                - Event: { name: attributes, value: {"category": "food", "origin": "local"} }
+            - name: excludes_fails_when_present
+              status: fail
+              expected:
+                - tags: { $excludes: ["dairy"] }
+              traces:
+                - Run: { operation: get_product }
+                - Event: { name: product_name, value: "Milk" }
+                - Event: { name: price, value: 4 }
+                - Event: { name: tags, value: ["dairy", "organic", "local"] }
+                - Event: { name: attributes, value: {"category": "food", "origin": "local"} }
+            - name: match_partial_object
+              status: pass
+              expected:
+                - attributes: { $match: { "category": "food" } }
+              traces:
+                - Run: { operation: get_product }
+                - Event: { name: product_name, value: "Milk" }
+                - Event: { name: price, value: 4 }
+                - Event: { name: tags, value: ["dairy", "organic", "local"] }
+                - Event: { name: attributes, value: {"category": "food", "origin": "local"} }
+            - name: exists_field
+              status: pass
+              expected:
+                - product_name: { $exists: true }
+              traces:
+                - Run: { operation: get_product }
+                - Event: { name: product_name, value: "Milk" }
+                - Event: { name: price, value: 4 }
+                - Event: { name: tags, value: ["dairy", "organic", "local"] }
+                - Event: { name: attributes, value: {"category": "food", "origin": "local"} }
+            - name: any_with_matcher
+              status: pass
+              expected:
+                - tags: { $any: { $matches: "^org" } }
+              traces:
+                - Run: { operation: get_product }
+                - Event: { name: product_name, value: "Milk" }
+                - Event: { name: price, value: 4 }
+                - Event: { name: tags, value: ["dairy", "organic", "local"] }
+                - Event: { name: attributes, value: {"category": "food", "origin": "local"} }
+            - name: type_check
+              status: pass
+              expected:
+                - product_name: { $type: "string" }
+              traces:
+                - Run: { operation: get_product }
+                - Event: { name: product_name, value: "Milk" }
+                - Event: { name: price, value: 4 }
+                - Event: { name: tags, value: ["dairy", "organic", "local"] }
+                - Event: { name: attributes, value: {"category": "food", "origin": "local"} }
+            - name: composed_operators
+              status: pass
+              expected:
+                - tags: { $size: 3, $containsAll: ["dairy", "organic", "local"] }
+              traces:
+                - Run: { operation: get_product }
+                - Event: { name: product_name, value: "Milk" }
+                - Event: { name: price, value: 4 }
+                - Event: { name: tags, value: ["dairy", "organic", "local"] }
+                - Event: { name: attributes, value: {"category": "food", "origin": "local"} }
+
+  - name: structured_list_matching
+    desc: List outputs match with exact, $contains, $size, $any operators
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/structured_output.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: list_exact_match
+              status: pass
+              expected:
+                - entity_name: "Customer"
+                - key_properties: ["ID"]
+                - structural_properties: ["ID", "Name", "Email"]
+              traces:
+                - Run: { operation: resolve_entity }
+                - Event: { name: entity_name, value: "Customer" }
+                - Event: { name: key_properties, value: ["ID"] }
+                - Event: { name: structural_properties, value: ["ID", "Name", "Email"] }
+            - name: list_contains_check
+              status: pass
+              expected:
+                - structural_properties: { $contains: "Name" }
+              traces:
+                - Run: { operation: resolve_entity }
+                - Event: { name: entity_name, value: "Customer" }
+                - Event: { name: key_properties, value: ["ID"] }
+                - Event: { name: structural_properties, value: ["ID", "Name", "Email"] }
+            - name: list_size_check
+              status: pass
+              expected:
+                - structural_properties: { $size: 3 }
+              traces:
+                - Run: { operation: resolve_entity }
+                - Event: { name: entity_name, value: "Customer" }
+                - Event: { name: key_properties, value: ["ID"] }
+                - Event: { name: structural_properties, value: ["ID", "Name", "Email"] }
+            - name: list_any_operator
+              status: pass
+              expected:
+                - key_properties: { $any: "ID" }
+              traces:
+                - Run: { operation: resolve_entity }
+                - Event: { name: entity_name, value: "Customer" }
+                - Event: { name: key_properties, value: ["ID"] }
+                - Event: { name: structural_properties, value: ["ID", "Name", "Email"] }
+            - name: list_wrong_value_fails
+              status: fail
+              expected:
+                - key_properties: ["NonexistentKey"]
+              traces:
+                - Run: { operation: resolve_entity }
+                - Event: { name: entity_name, value: "Customer" }
+                - Event: { name: key_properties, value: ["ID"] }
+                - Event: { name: structural_properties, value: ["ID", "Name", "Email"] }
+
+  - name: structured_map_matching
+    desc: Map outputs match with key-value, subset, $size operators
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/structured_map.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: map_key_value_match
+              status: pass
+              expected:
+                - $result: {"ID": "1", "Name": "Customer"}
+              traces:
+                - Run: { operation: get_entity_values }
+                - Event: { name: get_entity_values.id, value: "1" }
+                - Event: { name: $result, value: {"ID": "1", "Name": "Customer", "Email": "cust@example.com"} }
+            - name: map_subset_match
+              status: pass
+              expected:
+                - $result: {"ID": "1"}
+              traces:
+                - Run: { operation: get_entity_values }
+                - Event: { name: get_entity_values.id, value: "1" }
+                - Event: { name: $result, value: {"ID": "1", "Name": "Customer", "Email": "cust@example.com"} }
+            - name: map_wrong_value_fails
+              status: fail
+              expected:
+                - $result: {"ID": "999"}
+              traces:
+                - Run: { operation: get_entity_values }
+                - Event: { name: get_entity_values.id, value: "1" }
+                - Event: { name: $result, value: {"ID": "1", "Name": "Customer", "Email": "cust@example.com"} }
+            - name: map_size_check
+              status: pass
+              expected:
+                - $result: { $size: 3 }
+              traces:
+                - Run: { operation: get_entity_values }
+                - Event: { name: get_entity_values.id, value: "1" }
+                - Event: { name: $result, value: {"ID": "1", "Name": "Customer", "Email": "cust@example.com"} }
+
+  - name: structured_set_matching
+    desc: Set outputs match with $set presence, $contains, $size operators
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/structured_set.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: set_presence_match
+              status: pass
+              expected:
+                - result: { $containsAll: ["Orders", "Address"] }
+              traces:
+                - Run: { operation: get_navigation_properties }
+                - Event: { name: $result, value: ["Address", "Contacts", "Orders"] }
+            - name: set_all_items
+              status: pass
+              expected:
+                - result: { $containsAll: ["Orders", "Address", "Contacts"] }
+              traces:
+                - Run: { operation: get_navigation_properties }
+                - Event: { name: $result, value: ["Address", "Contacts", "Orders"] }
+            - name: set_missing_item_fails
+              status: fail
+              expected:
+                - result: { $containsAll: ["Orders", "NonexistentNav"] }
+              traces:
+                - Run: { operation: get_navigation_properties }
+                - Event: { name: $result, value: ["Address", "Contacts", "Orders"] }
+            - name: set_size_check
+              status: pass
+              expected:
+                - result: { $size: 3 }
+              traces:
+                - Run: { operation: get_navigation_properties }
+                - Event: { name: $result, value: ["Address", "Contacts", "Orders"] }
+            - name: set_contains_check
+              status: pass
+              expected:
+                - result: { $contains: "Contacts" }
+              traces:
+                - Run: { operation: get_navigation_properties }
+                - Event: { name: $result, value: ["Address", "Contacts", "Orders"] }
 
   # ================================================================
   # Happy path — basic operations
@@ -146,11 +497,11 @@ cases:
               status: pass
               expected:
                 - $run: fetch
-                - fetch.result: "response from https://example.com"
+                - $result: "response from https://example.com"
               traces:
                 - Run: { operation: fetch }
                 - Event: { name: fetch.url, value: "https://example.com" }
-                - Event: { name: fetch.result, value: "response from https://example.com" }
+                - Event: { name: $result, value: "response from https://example.com" }
 
   - name: stateless_return_value
     desc: Stateless function captures return value
@@ -164,12 +515,12 @@ cases:
             - name: add_2_3
               status: pass
               expected:
-                - add.result: "5"
+                - $result: "5"
               traces:
                 - Run: { operation: add }
                 - Event: { name: add.a, value: "2" }
                 - Event: { name: add.b, value: "3" }
-                - Event: { name: add.result, value: "5" }
+                - Event: { name: $result, value: "5" }
 
   - name: statemachine_before_after
     desc: StateMachine captures field state before and after
@@ -228,11 +579,11 @@ cases:
               expected:
                 - $run: process
                 - after_upper: " HELLO "
-                - process.result: "HELLO"
+                - $result: "HELLO"
               traces:
                 - Run: { operation: process }
                 - Event: { name: after_upper, value: " HELLO " }
-                - Event: { name: process.result, value: "HELLO" }
+                - Event: { name: $result, value: "HELLO" }
 
   - name: multi_mutation
     desc: Every mutation of an annotated field is captured
@@ -348,11 +699,11 @@ cases:
             - name: add_2_3
               status: pass
               expected:
-                - add.result: "5"
+                - $result: "5"
             - name: add_10_20
               status: pass
               expected:
-                - add.result: "30"
+                - $result: "30"
 
   - name: multi_step_sequence
     desc: Two operations in sequence with state tracked
@@ -397,12 +748,12 @@ cases:
                 - $run: get_user
                 - db.request: "user_1"
                 - db.response: "Alice"
-                - get_user.result: "Alice"
+                - $result: "Alice"
               traces:
                 - Run: { operation: get_user }
                 - Event: { name: db.request, value: "user_1" }
                 - Event: { name: db.response, value: "Alice" }
-                - Event: { name: get_user.result, value: "Alice" }
+                - Event: { name: $result, value: "Alice" }
 
   - name: mock_multi_response
     desc: Mock returns different values for different inputs
@@ -421,14 +772,14 @@ cases:
                 - db.response: "Alice"
                 - db.request: "user_2"
                 - db.response: "Bob"
-                - get_users.result: "Alice and Bob"
+                - $result: "Alice and Bob"
               traces:
                 - Run: { operation: get_users }
                 - Event: { name: db.request, value: "user_1" }
                 - Event: { name: db.response, value: "Alice" }
                 - Event: { name: db.request, value: "user_2" }
                 - Event: { name: db.response, value: "Bob" }
-                - Event: { name: get_users.result, value: "Alice and Bob" }
+                - Event: { name: $result, value: "Alice and Bob" }
 
   - name: mock_input_not_in_table
     desc: Mock called with unknown input produces error event
@@ -461,11 +812,11 @@ cases:
             - name: divide_10_by_2
               status: pass
               expected:
-                - divide.outcome: "Ok"
-                - divide.result: "5"
+                - $outcome: "Ok"
+                - $result: "5"
               traces:
-                - Event: { name: divide.outcome, value: "Ok" }
-                - Event: { name: divide.result, value: "5" }
+                - Event: { name: $outcome, value: "Ok" }
+                - Event: { name: $result, value: "5" }
 
   - name: result_err_path
     desc: Operation returning Err produces outcome Error
@@ -479,11 +830,11 @@ cases:
             - name: divide_by_zero
               status: pass
               expected:
-                - divide.outcome: "Error"
-                - divide.error: "division by zero"
+                - $outcome: "Error"
+                - $error: "division by zero"
               traces:
-                - Event: { name: divide.outcome, value: "Error" }
-                - Event: { name: divide.error, value: "division by zero" }
+                - Event: { name: $outcome, value: "Error" }
+                - Event: { name: $error, value: "division by zero" }
 
   - name: unrecoverable_panic
     desc: Operation that panics produces Unrecoverable outcome
@@ -497,8 +848,8 @@ cases:
             - name: divide_by_zero_panics
               status: pass
               expected:
-                - divide.outcome: "Unrecoverable"
-                - divide.error: "attempt to divide by zero"
+                - $outcome: "Unrecoverable"
+                - $error: "attempt to divide by zero"
 
   - name: option_some_path
     desc: Operation returning Some produces outcome Some with value
@@ -512,11 +863,11 @@ cases:
             - name: find_existing
               status: pass
               expected:
-                - find.outcome: "Some"
-                - find.value: "1"
+                - $outcome: "Some"
+                - $result: "1"
               traces:
-                - Event: { name: find.outcome, value: "Some" }
-                - Event: { name: find.value, value: "1" }
+                - Event: { name: $outcome, value: "Some" }
+                - Event: { name: $result, value: "1" }
 
   - name: option_none_path
     desc: Operation returning None produces outcome None
@@ -530,9 +881,9 @@ cases:
             - name: find_missing
               status: pass
               expected:
-                - find.outcome: "None"
+                - $outcome: "None"
               traces:
-                - Event: { name: find.outcome, value: "None" }
+                - Event: { name: $outcome, value: "None" }
 
   - name: void_operation
     desc: Void operation produces no result event
@@ -566,7 +917,7 @@ cases:
             - name: read_count
               status: pass
               expected:
-                - get_count.result: "42"
+                - $result: "42"
 
   # ================================================================
   # Subsequence matching — field order doesn't matter
@@ -621,13 +972,13 @@ cases:
             - name: add_2_3
               status: fail
               expected:
-                - add.result: "5"
+                - $result: "5"
                 - add.extra: "bonus"
               traces:
                 - Run: { operation: add }
                 - Event: { name: add.a, value: "2" }
                 - Event: { name: add.b, value: "3" }
-                - Event: { name: add.result, value: "5" }
+                - Event: { name: $result, value: "5" }
 
   - name: mismatch_wrong_field_name
     desc: Expected field name differs from actual
@@ -861,11 +1212,11 @@ cases:
               status: pass
               expected:
                 - $run: run
-                - run.result: "executed: test"
+                - $result: "executed: test"
               traces:
                 - Run: { operation: run }
                 - Event: { name: run.input, value: "test" }
-                - Event: { name: run.result, value: "executed: test" }
+                - Event: { name: $result, value: "executed: test" }
 
   # ================================================================
   # Normative strength — level: must/should/may
@@ -888,12 +1239,12 @@ cases:
                 spec: "Test Specification v1.0"
                 section: "§3.1"
               expected:
-                - add.result: "5"
+                - $result: "5"
               traces:
                 - Run: { operation: add }
                 - Event: { name: add.a, value: "2" }
                 - Event: { name: add.b, value: "3" }
-                - Event: { name: add.result, value: "5" }
+                - Event: { name: $result, value: "5" }
 
   - name: level_may_missing_skips
     desc: MAY operation not implemented — case is skipped, not an error

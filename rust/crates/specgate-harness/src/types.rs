@@ -3,20 +3,65 @@
 //! These mirror the `types:` block of `specs/specgate.harness.spec.yaml`.
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind")]
-pub enum TraceEvent {
-    Event { name: String, value: String },
-    Run { operation: String },
+pub use specgate_runtime::{TraceEvent, Value};
+
+/// Either an exact-`Value` assertion or a $-operator matcher.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AssertValue {
+    Exact(Value),
+    Matcher(Matcher),
 }
 
-/// Structured expected-trace assertion. Mirrors the `Assertion` oneof in
-/// the v0.4.0 spec: `Event { name, value }`, `$run { operation }`,
-/// `$unordered { items }`, `$anywhere { items }`.
+impl From<Value> for AssertValue {
+    fn from(v: Value) -> Self { AssertValue::Exact(v) }
+}
+impl From<&str> for AssertValue {
+    fn from(s: &str) -> Self { AssertValue::Exact(Value::String(s.to_string())) }
+}
+impl From<String> for AssertValue {
+    fn from(s: String) -> Self { AssertValue::Exact(Value::String(s)) }
+}
+impl From<i64> for AssertValue {
+    fn from(i: i64) -> Self { AssertValue::Exact(Value::Integer(i)) }
+}
+impl From<i32> for AssertValue {
+    fn from(i: i32) -> Self { AssertValue::Exact(Value::Integer(i as i64)) }
+}
+impl From<bool> for AssertValue {
+    fn from(b: bool) -> Self { AssertValue::Exact(Value::Bool(b)) }
+}
+
+/// Structured matcher for assertion values. Composite is used when a single
+/// assertion-payload mapping contains multiple `$ops` — all must pass.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Matcher {
+    Eq(Value),
+    Size(usize),
+    Contains(Value),
+    ContainsAll(Vec<Value>),
+    Excludes(Vec<Value>),
+    Match(BTreeMap<String, Value>),
+    Exists(bool),
+    Any(Box<AnyArg>),
+    Type(String),
+    Matches(String),
+    Composite(Vec<Matcher>),
+}
+
+/// Argument for `$any` — either a concrete value to compare against, or a
+/// nested matcher (`{ $matches: "..." }`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AnyArg {
+    Value(Value),
+    Matcher(Matcher),
+}
+
+/// Structured expected-trace assertion.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Assertion {
-    Event { name: String, value: String },
+    Event { name: String, value: AssertValue },
     Run { operation: String },
     Unordered { items: Vec<Assertion> },
     Anywhere { items: Vec<Assertion> },
@@ -46,7 +91,7 @@ impl Default for CaseLevel {
 }
 
 /// Free-form provenance metadata threaded through from the spec.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Source {
     pub assertion_ids: Vec<String>,
     pub spec: String,
@@ -104,3 +149,4 @@ impl CaseLevel {
         }
     }
 }
+

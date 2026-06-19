@@ -23,4 +23,8 @@ pub mod keyword_collision;
 pub mod unordered_fields;
 pub mod anywhere_event;
 pub mod cross_dep;
+pub mod operators;
+pub mod structured_map;
+pub mod structured_output;
+pub mod structured_set;
 // pub mod compile_error;  // intentionally broken — syntax error
