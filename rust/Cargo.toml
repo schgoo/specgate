@@ -5,6 +5,7 @@ members = [
     "crates/specgate-annotations-macros",
     "crates/specgate-annotations",
     "crates/specgate-harness",
+    "crates/specgate-cli",
 ]
 resolver = "3"
 

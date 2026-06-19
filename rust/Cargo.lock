@@ -104,6 +104,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "specgate-cli"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_yaml",
+ "specgate-harness",
+]
+
+[[package]]
 name = "specgate-fixtures"
 version = "0.1.0"
 dependencies = [
