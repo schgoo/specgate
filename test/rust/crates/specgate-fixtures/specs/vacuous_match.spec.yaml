@@ -1,0 +1,16 @@
+spec_version: "0.4.0"
+name: fixture.vacuous_match
+binding: binding.yaml
+
+operations:
+  add:
+    inputs: { a: i32, b: i32 }
+    outputs: [add.result]
+
+cases:
+  - name: impossible_assertion
+    desc: Expected has a valid assertion that cannot match any trace
+    operation: add
+    inputs: { a: 2, b: 3 }
+    expected:
+      - nonexistent.field: "impossible"

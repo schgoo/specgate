@@ -119,23 +119,51 @@ See `spec-format.md` for the full format and `kinds.md` for test generation patt
 
 Follow a test-driven workflow: write tests from spec cases **before** implementing.
 
-1. **Spec-case tests come first** — each spec case becomes a test function.
-   These are integration tests exercising the full component. They are your TDD
-   red-green loop. Write them, watch them fail, implement until they pass.
-   For state machine specs, each case follows the component lifecycle
-   (create → step → assert → step → assert) — see `kinds.md` for patterns.
-2. **Unit tests fill gaps** — once spec cases pass, add unit tests for code paths
-   that can't be adequately tested through the integration path. If a behavior
-   IS reachable through a spec case, test it there — don't duplicate coverage
-   with a unit test.
-3. **100% line coverage** — measure with a coverage tool, not by inspection.
-   - Rust: `cargo llvm-cov --summary-only` (install with `cargo install cargo-llvm-cov` if needed)
-   - C#: `dotnet test --collect:"XPlat Code Coverage"` + `reportgenerator`
-   - If line coverage is below 100%, identify uncovered branches and add tests.
-   - Report the final coverage percentage before declaring done.
+1. **Annotate implementation code** — every operation declared in the spec must have
+   a corresponding `#[spec_operation("name")]` on the implementing function. This
+   enables the harness to discover, compile, execute, and collect traces.
 
-The harness generates and runs these tests via the binding, but having them
-inline in the project gives fast feedback during development.
+2. **Write a harness bootstrap test** — create an integration test file that calls
+   `specgate_harness::run_spec("path/to/your.spec.yaml")` and asserts the outcome
+   is `Complete` with all cases passing. This is the entry point that invokes the
+   harness against your annotated code:
+
+   ```rust
+   #[test]
+   fn harness_validates_spec() {
+       let result = specgate_harness::run_spec("specs/my-component.spec.yaml");
+       match result {
+           RunOutcome::Complete { results } => {
+               for case in &results {
+                   assert_eq!(case.status, CaseStatus::Pass, "case '{}' failed", case.name);
+               }
+           }
+           RunOutcome::Error { reason } => panic!("harness error: {reason}"),
+       }
+   }
+   ```
+
+3. **Write spec-case tests alongside** — each spec case also becomes a direct test
+   function that calls the implementation and checks results. These give fast
+   feedback during development without waiting for the full harness pipeline:
+
+   ```rust
+   #[test]
+   fn add_2_3() {
+       let result = add(2, 3);
+       assert_eq!(result, 5);
+   }
+   ```
+
+4. **Unit tests fill gaps** — add unit tests for code paths not reachable through
+   spec cases. If a behavior IS reachable through a spec case, test it there.
+
+5. **100% line coverage** — measure with a coverage tool, not by inspection.
+   - Rust: `cargo llvm-cov --summary-only`
+   - C#: `dotnet test --collect:"XPlat Code Coverage"` + `reportgenerator`
+
+Both the harness bootstrap test and the direct tests must pass. The harness test
+validates trace-level conformance; the direct tests give fast developer feedback.
 
 See the language-specific knowledge files for test code examples.
 
