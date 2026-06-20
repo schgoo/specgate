@@ -1549,6 +1549,50 @@ cases:
               traces: []
 
   # ================================================================
+  # Enum SpecEvent support (#19)
+  # ================================================================
+
+  - name: enum_event_matching
+    desc: derive(SpecEvent) on enum emits variant name + associated fields
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/enum_event.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: unit_variant
+              status: pass
+              expected:
+                - shape: "Point"
+              traces:
+                - Run: { operation: classify }
+                - Event: { name: classify.sides, value: "0" }
+                - Event: { name: shape, value: "Point" }
+            - name: single_field_variant
+              status: pass
+              expected:
+                - shape: "Circle"
+                - shape.radius: "5"
+              traces:
+                - Run: { operation: classify }
+                - Event: { name: classify.sides, value: "1" }
+                - Event: { name: shape, value: "Circle" }
+                - Event: { name: shape.radius, value: "5" }
+            - name: multi_field_variant
+              status: pass
+              expected:
+                - shape: "Rectangle"
+                - shape.width: "3"
+                - shape.height: "4"
+              traces:
+                - Run: { operation: classify }
+                - Event: { name: classify.sides, value: "4" }
+                - Event: { name: shape, value: "Rectangle" }
+                - Event: { name: shape.width, value: "3" }
+                - Event: { name: shape.height, value: "4" }
+
+  # ================================================================
   # Error cases
   # ================================================================
 
