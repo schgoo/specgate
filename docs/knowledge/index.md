@@ -14,7 +14,6 @@ Read this first. Then read only the topics relevant to your current task.
 | C# conventions | [`csharp.md`](csharp.md) | When implementing in C# |
 | Greenfield workflow | [`greenfield.md`](greenfield.md) | When no implementation exists yet |
 | Incremental updates | [`incremental.md`](incremental.md) | When updating an existing implementation |
-| Kinds (historical) | [`kinds.md`](kinds.md) | Note: the `kind` taxonomy is superseded |
 
 The canonical examples of every supported spec pattern live under
 `test/rust/crates/specgate-fixtures/`. When this knowledge base and a

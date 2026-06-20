@@ -18,7 +18,6 @@ repository = "https://github.com/schgoo/specgate"
 homepage = "https://github.com/schgoo/specgate"
 keywords = ["specgate", "testing", "verification", "spec"]
 categories = ["development-tools::testing"]
-readme = "../README.md"
 rust-version = "1.86.0"
 
 [workspace.dependencies]

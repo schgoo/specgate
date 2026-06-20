@@ -32,5 +32,25 @@ deny:
 validate:
     cd rust && cargo run -p specgate-cli --quiet -- validate ../specs
 
+# Generate README.md for each crate from lib.rs doc comments
+readme:
+    cd rust && cargo doc2readme -p specgate-runtime --lib --template crates/README.j2 --out crates/specgate-runtime/README.md
+    cd rust && cargo doc2readme -p specgate-annotations-macros --lib --template crates/README.j2 --out crates/specgate-annotations-macros/README.md
+    cd rust && cargo doc2readme -p specgate-annotations --lib --template crates/README.j2 --out crates/specgate-annotations/README.md
+    cd rust && cargo doc2readme -p specgate-types --lib --template crates/README.j2 --out crates/specgate-types/README.md
+    cd rust && cargo doc2readme -p specgate-harness --lib --template crates/README.j2 --out crates/specgate-harness/README.md
+    cd rust && cargo doc2readme -p specgate --lib --template crates/README.j2 --out crates/specgate/README.md
+    cd rust && cargo doc2readme -p specgate-cli --lib --template crates/README.j2 --out crates/specgate-cli/README.md
+
+# Check READMEs are up to date
+readme-check:
+    cd rust && cargo doc2readme -p specgate-runtime --lib --template crates/README.j2 --out crates/specgate-runtime/README.md --check
+    cd rust && cargo doc2readme -p specgate-annotations-macros --lib --template crates/README.j2 --out crates/specgate-annotations-macros/README.md --check
+    cd rust && cargo doc2readme -p specgate-annotations --lib --template crates/README.j2 --out crates/specgate-annotations/README.md --check
+    cd rust && cargo doc2readme -p specgate-types --lib --template crates/README.j2 --out crates/specgate-types/README.md --check
+    cd rust && cargo doc2readme -p specgate-harness --lib --template crates/README.j2 --out crates/specgate-harness/README.md --check
+    cd rust && cargo doc2readme -p specgate --lib --template crates/README.j2 --out crates/specgate/README.md --check
+    cd rust && cargo doc2readme -p specgate-cli --lib --template crates/README.j2 --out crates/specgate-cli/README.md --check
+
 # Run all pre-PR checks
-check: build test clippy format-check deny validate
+check: build test clippy format-check deny validate readme-check

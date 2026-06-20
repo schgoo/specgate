@@ -105,8 +105,16 @@ about. The harness joins them.
 A spec is a YAML document with this top-level shape:
 
 ```yaml
+spec_version: "0.4.0"
 name: fixture.statemachine_counter   # dotted component name (required)
 binding: binding.yaml                # path to binding file (relative to this spec)
+
+operations:
+  make_counter:
+    kind: setup
+  increment:
+    outputs: [count]
+
 cases:                               # required, non-empty
   - name: increment_once
     desc: Incrementing counter from 0 produces count 1
@@ -115,7 +123,7 @@ cases:                               # required, non-empty
     inputs: { initial: 0 }           # optional — values passed to setup/operation
     expected:                        # required — list of single-entry maps
       - count: "0"                   # Event match: name=count, value="0"
-      - run: increment               # Run match: operation=increment
+      - $run: increment              # Run match: operation=increment
       - count: "1"
 ```
 
@@ -153,7 +161,9 @@ A list of at least one test case. Each case has:
 Each entry is either:
 
 - `{<name>: <value>}` — matches an `Event` with that `name` and stringified `value`
-- `{run: <operation>}` — matches a `Run` for that operation
+- `{$run: <operation>}` — matches a `Run` for that operation
+- `{$unordered: [...]}` — matches contained items in any order
+- `{$anywhere: [...]}` — matches contained items anywhere in the stream
 
 Values are always stringified for comparison (the harness coerces both
 sides). The list is matched as an **in-order subsequence** of the actual

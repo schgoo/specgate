@@ -41,6 +41,21 @@
 //!     assert!(matches!(result, specgate::RunOutcome::Complete { .. }));
 //! }
 //! ```
+//!
+//! ## CLI
+//!
+//! Install the companion CLI for command-line validation and execution:
+//!
+//! ```bash
+//! cargo install specgate-cli
+//! specgate validate specs/
+//! specgate run specs/my-component.spec.yaml
+//! ```
+//!
+//! ## Features
+//!
+//! - **`harness`** — enables `run_spec()` and the test harness (add to `[dev-dependencies]`)
+//! - **`trace`** — enables runtime trace collection (required for harness, zero-cost when off)
 
 // Re-export annotations (always available)
 pub use specgate_annotations::{
