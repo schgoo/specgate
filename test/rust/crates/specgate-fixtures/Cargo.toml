@@ -2,6 +2,7 @@
 name = "specgate-fixtures"
 version = "0.1.0"
 edition = "2024"
+publish = false
 
 [dependencies]
 # The annotations crate provides proc macros that expand into trace-emitting

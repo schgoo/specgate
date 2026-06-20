@@ -28,11 +28,11 @@ syn = { version = "2.0.118", features = ["full", "extra-traits"] }
 quote = "1.0.45"
 proc-macro2 = "1.0.106"
 regex = "1.12"
-specgate-types = { path = "crates/specgate-types" }
-specgate-annotations = { path = "crates/specgate-annotations" }
-specgate-annotations-macros = { path = "crates/specgate-annotations-macros" }
-specgate-runtime = { path = "crates/specgate-runtime" }
-specgate-harness = { path = "crates/specgate-harness" }
+specgate-types = { path = "crates/specgate-types", version = "0.1.0" }
+specgate-annotations = { path = "crates/specgate-annotations", version = "0.1.0" }
+specgate-annotations-macros = { path = "crates/specgate-annotations-macros", version = "0.1.0" }
+specgate-runtime = { path = "crates/specgate-runtime", version = "0.1.0" }
+specgate-harness = { path = "crates/specgate-harness", version = "0.1.0" }
 
 # Dependencies are fetched from crates.io normally.
 
