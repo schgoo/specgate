@@ -14,7 +14,10 @@ pub use specgate_runtime::{take_traces, SpecEvent, ToSpecValue, TraceEvent, Valu
 
 #[doc(hidden)]
 pub mod __rt {
-    pub use specgate_runtime::*;
+    pub use specgate_runtime::{
+        emit_event, emit_event_v, emit_run, mock_lookup, reset, set_mock,
+        take_traces, SpecEvent, ToSpecValue, TraceEvent, Value,
+    };
 }
 
 // Re-export auxiliary runtime helpers under their plain names too.

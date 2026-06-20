@@ -14,14 +14,17 @@
 mod binding;
 mod codegen;
 mod match_traces;
-pub mod scan;
+pub(crate) mod scan;
 mod spec;
 mod types;
 
-pub use types::{
-    AnyArg, AssertValue, Assertion, CaseLevel, CaseResult, CaseStatus, Matcher, RunOutcome, Source,
-    TraceEvent, Value,
-};
+// Public API — what users need for run_spec() results
+pub use types::{CaseLevel, CaseResult, CaseStatus, RunOutcome, Source};
+
+// Internal types — exposed for integration tests within this crate,
+// but hidden from public docs. Not part of the stable API.
+#[doc(hidden)]
+pub use types::{AnyArg, AssertValue, Assertion, Matcher, TraceEvent, Value};
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
