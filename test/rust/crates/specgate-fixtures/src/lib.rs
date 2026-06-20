@@ -29,4 +29,5 @@ pub mod structured_output;
 pub mod structured_set;
 pub mod nested_structured;
 pub mod scalar_operators;
+pub mod enum_event;
 // pub mod compile_error;  // intentionally broken — syntax error

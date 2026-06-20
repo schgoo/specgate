@@ -10,8 +10,8 @@ use quote::{quote, quote_spanned};
 use syn::parse::{Parse, ParseStream};
 use syn::visit_mut::VisitMut;
 use syn::{
-    parse_macro_input, parse_quote, BinOp, Block, Data, DeriveInput, Expr, FnArg, ItemFn, LitStr,
-    Pat, ReturnType, Stmt, Type,
+    parse_macro_input, parse_quote, BinOp, Block, Data, DeriveInput, Expr, FnArg, Fields, ItemFn,
+    LitStr, Pat, ReturnType, Stmt, Type,
 };
 
 struct NameArg(String);
@@ -371,6 +371,81 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
     let name = &input.ident;
     let rt = rt();
 
+    let (impl_g, ty_g, where_c) = input.generics.split_for_impl();
+
+    // --- Enum: match each variant and emit variant name + named fields ---
+    if let Data::Enum(data_enum) = &input.data {
+        let enum_name_lower = name.to_string().to_lowercase();
+        let mut arms: Vec<TokenStream2> = Vec::new();
+
+        for variant in &data_enum.variants {
+            let vname = &variant.ident;
+            let vname_str = vname.to_string();
+            match &variant.fields {
+                Fields::Unit => {
+                    arms.push(quote! {
+                        #name::#vname => {
+                            #rt::emit_event_v(
+                                &__sg_base,
+                                #rt::Value::String(#vname_str.to_string()),
+                            );
+                        }
+                    });
+                }
+                Fields::Named(named) => {
+                    let field_idents: Vec<&syn::Ident> = named
+                        .named
+                        .iter()
+                        .filter_map(|f| f.ident.as_ref())
+                        .collect();
+                    let field_strs: Vec<String> =
+                        field_idents.iter().map(|id| id.to_string()).collect();
+                    arms.push(quote! {
+                        #name::#vname { #(#field_idents),* } => {
+                            #rt::emit_event_v(
+                                &__sg_base,
+                                #rt::Value::String(#vname_str.to_string()),
+                            );
+                            #(
+                                #rt::emit_event_v(
+                                    &::std::format!("{}.{}", __sg_base, #field_strs),
+                                    #rt::ToSpecValue::to_spec_value(#field_idents),
+                                );
+                            )*
+                        }
+                    });
+                }
+                Fields::Unnamed(_) => {
+                    // Tuple variants: emit only the variant name.
+                    arms.push(quote! {
+                        #name::#vname(..) => {
+                            #rt::emit_event_v(
+                                &__sg_base,
+                                #rt::Value::String(#vname_str.to_string()),
+                            );
+                        }
+                    });
+                }
+            }
+        }
+
+        let out = quote! {
+            impl #impl_g #rt::SpecEvent for #name #ty_g #where_c {
+                fn emit_fields(&self, __sg_prefix: ::std::option::Option<&str>) {
+                    let __sg_base: ::std::string::String = match __sg_prefix {
+                        ::std::option::Option::Some(p) => p.to_string(),
+                        ::std::option::Option::None => #enum_name_lower.to_string(),
+                    };
+                    match self {
+                        #(#arms)*
+                    }
+                }
+            }
+        };
+        return out.into();
+    }
+
+    // --- Struct: emit each field annotated with #[spec_event] ---
     let mut emits = Vec::new();
     if let Data::Struct(s) = &input.data {
         for field in &s.fields {
@@ -407,7 +482,6 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
         }
     }
 
-    let (impl_g, ty_g, where_c) = input.generics.split_for_impl();
     let out = quote! {
         impl #impl_g #rt::SpecEvent for #name #ty_g #where_c {
             fn emit_fields(&self, __sg_prefix: ::std::option::Option<&str>) {

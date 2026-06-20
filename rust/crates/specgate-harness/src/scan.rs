@@ -408,7 +408,7 @@ fn scan_struct_name(rest: &str) -> Option<String> {
         }
         None => s,
     };
-    let s = s.strip_prefix("struct")?;
+    let s = s.strip_prefix("struct").or_else(|| s.strip_prefix("enum"))?;
     let s = s.trim_start();
     let end = s
         .find(|c: char| !(c.is_alphanumeric() || c == '_'))

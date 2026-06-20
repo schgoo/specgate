@@ -764,3 +764,22 @@ fn cross_dep_spec() {
     assert_eq!(r.len(), 1);
     check_case(&r[0], "extract_yaml_value", CaseStatus::Pass);
 }
+
+// ---------------------------------------------------------------------------
+// Enum SpecEvent derive
+// ---------------------------------------------------------------------------
+
+#[test]
+fn enum_event_spec() {
+    let r = complete(run(
+        "test/rust/crates/specgate-fixtures/specs/enum_event.spec.yaml",
+    ));
+    assert_eq!(r.len(), 3);
+    check_case(&r[0], "unit_variant", CaseStatus::Pass);
+    check_case(&r[1], "single_field_variant", CaseStatus::Pass);
+    check_case(&r[2], "multi_field_variant", CaseStatus::Pass);
+    // Spot-check that enum variant name events appear in traces.
+    assert!(r[0].traces.contains(&ev("shape", "Point")));
+    assert!(r[1].traces.contains(&ev("shape", "Circle")));
+    assert!(r[2].traces.contains(&ev("shape", "Rectangle")));
+}
