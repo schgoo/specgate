@@ -74,3 +74,31 @@ fn self_test_error_case_returns_error() {
         }
     }
 }
+
+#[test]
+fn workspace_root_is_portable() {
+    // Regression test for #8: workspace_root() must resolve to a real
+    // directory containing the specgate crates, regardless of the runtime
+    // working directory. If this breaks, the generated runner can't find
+    // specgate-annotations.
+    let spec = repo_root().join("test/rust/crates/specgate-fixtures/specs/stateless_add.spec.yaml");
+
+    // Change working directory to something unrelated
+    let original_dir = std::env::current_dir().unwrap();
+    std::env::set_current_dir(std::env::temp_dir()).unwrap();
+
+    let result = run_spec(spec.to_str().unwrap());
+
+    // Restore working directory
+    std::env::set_current_dir(original_dir).unwrap();
+
+    match result {
+        RunOutcome::Complete { results } => {
+            assert_eq!(results[0].status, CaseStatus::Pass,
+                "harness must work from any working directory (regression #8)");
+        }
+        RunOutcome::Error { reason } => {
+            panic!("workspace_root broke from temp dir: {reason}");
+        }
+    }
+}

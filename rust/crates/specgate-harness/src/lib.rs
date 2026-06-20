@@ -461,9 +461,10 @@ fn spec_basename(p: &Path) -> String {
 }
 
 fn workspace_root() -> PathBuf {
-    // CARGO_MANIFEST_DIR for specgate-harness is .../rust/crates/specgate-harness.
-    // Walk up to .../rust.
-    let mut p = PathBuf::from(env_or("CARGO_MANIFEST_DIR", "."));
+    // env! resolves at compile time — always points to specgate-harness's
+    // directory, even when the harness is used as a dependency from an
+    // external project.
+    let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     p.pop(); // specgate-harness
     p.pop(); // crates
     p
