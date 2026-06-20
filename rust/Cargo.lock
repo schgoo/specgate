@@ -156,7 +156,7 @@ dependencies = [
 
 [[package]]
 name = "specgate"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "specgate-annotations",
  "specgate-harness",
@@ -164,7 +164,7 @@ dependencies = [
 
 [[package]]
 name = "specgate-annotations"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "specgate-annotations-macros",
  "specgate-runtime",
@@ -172,7 +172,7 @@ dependencies = [
 
 [[package]]
 name = "specgate-annotations-macros"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -181,7 +181,7 @@ dependencies = [
 
 [[package]]
 name = "specgate-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "regex",
  "serde",
@@ -201,7 +201,7 @@ dependencies = [
 
 [[package]]
 name = "specgate-harness"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "regex",
  "serde",
@@ -214,14 +214,14 @@ dependencies = [
 
 [[package]]
 name = "specgate-runtime"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "specgate-types"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde_yaml",

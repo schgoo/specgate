@@ -1,5 +1,12 @@
 # Copilot Instructions — SpecGate
 
+## Pre-commit Gate
+
+**Always run `just check` from the repo root before committing.**
+
+This runs: build → test → clippy → format-check → deny → validate → readme-check.
+Do not push code that fails `just check`.
+
 ## Implementation Rule
 
 **All implementation changes must go through the spec implementation skill.**

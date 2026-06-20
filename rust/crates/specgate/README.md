@@ -49,6 +49,35 @@ fn spec_passes() {
 }
 ```
 
+### Property Tests
+
+Specs can declare property-based test cases that generate random inputs
+and verify invariants across many iterations:
+
+```yaml
+cases:
+  - name: add_commutative
+    kind: property
+    runs: 100
+    generators:
+      a: i32[-1000, 1000]
+      b: i32[-1000, 1000]
+    calls:
+      forward: { operation: add, inputs: { a: "{a}", b: "{b}" } }
+      reversed: { operation: add, inputs: { a: "{b}", b: "{a}" } }
+    expected:
+      - $assert: "forward.$result == reversed.$result"
+```
+
+Generator types: `i32[min, max]`, `f64[min, max]`, `bool`,
+`string[min_len, max_len]`, `string[min, max, pattern: "regex"]`,
+`oneof["a", "b"]`, `list[type, len: min..max]`,
+`set[type, size: min..max]`, `map[key, value, size: min..max]`, `optional[type]`.
+
+On failure, the `CaseResult` includes a `counterexample` with the shrunk
+generator values that triggered the assertion failure, plus traces from
+the failing run.
+
 ### CLI
 
 Install the companion CLI for command-line validation and execution:

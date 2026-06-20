@@ -140,8 +140,8 @@ cases:
       used source interpretation as a shortcut — it passed all spec-driven
       tests but could not handle real-world code.
     verify:
-      - Confirm no syn-based expression evaluation in harness source
-      - The harness should invoke cargo build/test, not evaluate Rust in-process
+      - No syn-based expression evaluation exists in harness source
+      - The harness invokes cargo build/test, never evaluates Rust in-process
 
   - name: structured_values_not_stringified
     kind: narrative
