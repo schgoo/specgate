@@ -1,0 +1,19 @@
+spec_version: "0.4.0"
+name: fixture.property_invalid_range
+binding: binding.yaml
+
+operations:
+  add:
+    inputs: { a: i32, b: i32 }
+    outputs: [$result]
+
+cases:
+  - name: inverted_range
+    kind: property
+    runs: 10
+    generators:
+      a: i32[1000, -1000]
+    calls:
+      result: { operation: add, inputs: { a: "{a}", b: 0 } }
+    expected:
+      - $assert: "result.$result == a"

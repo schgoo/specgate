@@ -1,0 +1,31 @@
+spec_version: "0.4.0"
+name: fixture.property_add
+binding: binding.yaml
+
+operations:
+  add:
+    inputs: { a: i32, b: i32 }
+    outputs: [$result]
+
+cases:
+  - name: add_commutative
+    kind: property
+    runs: 100
+    generators:
+      a: i32[-1000, 1000]
+      b: i32[-1000, 1000]
+    calls:
+      forward: { operation: add, inputs: { a: "{a}", b: "{b}" } }
+      reversed: { operation: add, inputs: { a: "{b}", b: "{a}" } }
+    expected:
+      - $assert: "forward.$result == reversed.$result"
+
+  - name: add_identity
+    kind: property
+    runs: 100
+    generators:
+      a: i32[-1000, 1000]
+    calls:
+      result: { operation: add, inputs: { a: "{a}", b: 0 } }
+    expected:
+      - $assert: "result.$result == a"

@@ -1,0 +1,19 @@
+spec_version: "0.4.0"
+name: fixture.property_bad_ref
+binding: binding.yaml
+
+operations:
+  add:
+    inputs: { a: i32, b: i32 }
+    outputs: [$result]
+
+cases:
+  - name: undefined_generator_ref
+    kind: property
+    runs: 10
+    generators:
+      a: i32[0, 100]
+    calls:
+      result: { operation: add, inputs: { a: "{a}", b: "{undefined_gen}" } }
+    expected:
+      - $assert: "result.$result == a"

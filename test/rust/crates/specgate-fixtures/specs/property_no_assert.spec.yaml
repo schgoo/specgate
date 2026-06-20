@@ -1,0 +1,20 @@
+spec_version: "0.4.0"
+name: fixture.property_no_assert
+binding: binding.yaml
+
+operations:
+  add:
+    inputs: { a: i32, b: i32 }
+    outputs: [$result]
+
+cases:
+  - name: missing_assert
+    kind: property
+    runs: 10
+    generators:
+      a: i32[0, 100]
+      b: i32[0, 100]
+    calls:
+      result: { operation: add, inputs: { a: "{a}", b: "{b}" } }
+    expected:
+      - $result: 42

@@ -1,0 +1,204 @@
+spec_version: "0.4.0"
+name: fixture.property_types
+binding: binding.yaml
+
+operations:
+  identity_i32:
+    inputs: { x: i32 }
+    outputs: [$result]
+  identity_f64:
+    inputs: { x: f64 }
+    outputs: [$result]
+  identity_bool:
+    inputs: { x: bool }
+    outputs: [$result]
+  identity_string:
+    inputs: { x: string }
+    outputs: [$result]
+  concat:
+    inputs: { a: string, b: string }
+    outputs: [$result]
+  sum_list:
+    inputs: { items: list }
+    outputs: [$result]
+  set_size:
+    inputs: { items: set }
+    outputs: [$result]
+  map_keys:
+    inputs: { data: map }
+    outputs: [$result]
+
+cases:
+  # --- Integer generators ---
+  - name: i32_range
+    kind: property
+    runs: 100
+    generators:
+      x: i32[-1000, 1000]
+    calls:
+      result: { operation: identity_i32, inputs: { x: "{x}" } }
+    expected:
+      - $assert: "result.$result == x"
+
+  - name: i32_positive_only
+    kind: property
+    runs: 50
+    generators:
+      x: i32[1, 1000000]
+    calls:
+      result: { operation: identity_i32, inputs: { x: "{x}" } }
+    expected:
+      - $assert: "result.$result > 0"
+
+  - name: i32_negative_only
+    kind: property
+    runs: 50
+    generators:
+      x: i32[-1000000, -1]
+    calls:
+      result: { operation: identity_i32, inputs: { x: "{x}" } }
+    expected:
+      - $assert: "result.$result < 0"
+
+  - name: i32_single_value
+    kind: property
+    runs: 10
+    generators:
+      x: i32[42, 42]
+    calls:
+      result: { operation: identity_i32, inputs: { x: "{x}" } }
+    expected:
+      - $assert: "result.$result == 42"
+
+  # --- Float generators ---
+  - name: f64_range
+    kind: property
+    runs: 100
+    generators:
+      x: f64[-100.0, 100.0]
+    calls:
+      result: { operation: identity_f64, inputs: { x: "{x}" } }
+    expected:
+      - $assert: "result.$result >= -100.0"
+      - $assert: "result.$result <= 100.0"
+
+  - name: f64_positive
+    kind: property
+    runs: 50
+    generators:
+      x: f64[0.0, 1000.0]
+    calls:
+      result: { operation: identity_f64, inputs: { x: "{x}" } }
+    expected:
+      - $assert: "result.$result >= 0.0"
+
+  # --- Bool generator ---
+  - name: bool_identity
+    kind: property
+    runs: 20
+    generators:
+      x: bool
+    calls:
+      result: { operation: identity_bool, inputs: { x: "{x}" } }
+    expected:
+      - $assert: "result.$result == x"
+
+  # --- String generators ---
+  - name: string_length_bounded
+    kind: property
+    runs: 100
+    generators:
+      s: string[1, 50]
+    calls:
+      result: { operation: identity_string, inputs: { x: "{s}" } }
+    expected:
+      - $assert: "result.$result == s"
+
+  - name: string_with_pattern
+    kind: property
+    runs: 50
+    generators:
+      s: 'string[1, 20, pattern: "[A-Za-z]+"]'
+    calls:
+      result: { operation: identity_string, inputs: { x: "{s}" } }
+    expected:
+      - $assert: "result.$result == s"
+
+  - name: string_exact_length
+    kind: property
+    runs: 30
+    generators:
+      s: string[5, 5]
+    calls:
+      result: { operation: identity_string, inputs: { x: "{s}" } }
+    expected:
+      - $assert: "result.$result == s"
+
+  # --- Oneof generator ---
+  - name: oneof_strings
+    kind: property
+    runs: 30
+    generators:
+      choice: oneof["EntityType", "ComplexType", "EnumType"]
+    calls:
+      result: { operation: identity_string, inputs: { x: "{choice}" } }
+    expected:
+      - $assert: "result.$result == choice"
+
+  # --- List generator ---
+  - name: list_i32
+    kind: property
+    runs: 50
+    generators:
+      items: "list[i32[0, 100], len: 1..10]"
+    calls:
+      result: { operation: sum_list, inputs: { items: "{items}" } }
+    expected:
+      - $assert: "result.$result >= 0"
+
+  # --- Set generator ---
+  - name: set_i32
+    kind: property
+    runs: 50
+    generators:
+      items: "set[i32[0, 100], size: 3..8]"
+    calls:
+      result: { operation: set_size, inputs: { items: "{items}" } }
+    expected:
+      - $assert: "result.$result >= 3"
+      - $assert: "result.$result <= 8"
+
+  # --- Map generator ---
+  - name: map_string_i32
+    kind: property
+    runs: 50
+    generators:
+      data: "map[string[1, 10], i32[0, 100], size: 1..5]"
+    calls:
+      result: { operation: map_keys, inputs: { data: "{data}" } }
+    expected:
+      - $assert: "result.$result >= 1"
+      - $assert: "result.$result <= 5"
+
+  # --- Multiple generators ---
+  - name: multi_generator_concat
+    kind: property
+    runs: 50
+    generators:
+      a: string[1, 20]
+      b: string[1, 20]
+    calls:
+      result: { operation: concat, inputs: { a: "{a}", b: "{b}" } }
+    expected:
+      - $assert: "result.$result == a + b"
+
+  # --- Optional generator ---
+  - name: optional_i32
+    kind: property
+    runs: 50
+    generators:
+      x: optional[i32[0, 100]]
+    calls:
+      result: { operation: identity_i32, inputs: { x: "{x}" } }
+    expected:
+      - $assert: "result.$result == x"

@@ -1,0 +1,17 @@
+spec_version: "0.4.0"
+name: fixture.property_no_calls
+binding: binding.yaml
+
+operations:
+  add:
+    inputs: { a: i32, b: i32 }
+    outputs: [$result]
+
+cases:
+  - name: missing_calls
+    kind: property
+    runs: 10
+    generators:
+      a: i32[0, 100]
+    expected:
+      - $assert: "a > 0"
