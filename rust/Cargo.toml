@@ -18,7 +18,7 @@ repository = "https://github.com/schgoo/specgate"
 homepage = "https://github.com/schgoo/specgate"
 keywords = ["specgate", "testing", "verification", "spec"]
 categories = ["development-tools::testing"]
-rust-version = "1.86.0"
+rust-version = "1.93.0"
 
 [workspace.dependencies]
 serde = { version = "1.0.228", features = ["derive"] }
