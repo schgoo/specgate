@@ -1,0 +1,4 @@
+id: SPEC-ASSERT-1
+level: SHOULD
+negatable: false
+text: The system SHOULD perform assertion SPEC-ASSERT-1.

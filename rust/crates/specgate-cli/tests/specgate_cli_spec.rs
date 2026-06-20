@@ -20,7 +20,23 @@ fn vdir(rel: &str) -> String {
 
 fn do_validate(rel: &str, strict: bool, suppress: &[&str]) -> ValidateOutcome {
     let sup: Vec<String> = suppress.iter().map(|s| s.to_string()).collect();
-    validate::validate(&vdir(rel), strict, &sup)
+    validate::validate(&vdir(rel), strict, &sup, "", false)
+}
+
+fn do_validate_ext(
+    rel: &str,
+    strict: bool,
+    suppress: &[&str],
+    assertions_dir: &str,
+    check_source: bool,
+) -> ValidateOutcome {
+    let sup: Vec<String> = suppress.iter().map(|s| s.to_string()).collect();
+    let adir = if assertions_dir.is_empty() {
+        String::new()
+    } else {
+        vdir(assertions_dir)
+    };
+    validate::validate(&vdir(rel), strict, &sup, &adir, check_source)
 }
 
 fn pass_report(o: ValidateOutcome) -> validate::ValidationReport {
@@ -150,50 +166,6 @@ fn validate_names_duplicate_fail() {
 }
 
 // ---------------------------------------------------------------------------
-// Validate — 4. Provenance
-// ---------------------------------------------------------------------------
-
-#[test]
-fn validate_provenance_pass() {
-    let r = pass_report(do_validate(
-        "test/fixtures/validation/valid_complete",
-        false,
-        &[],
-    ));
-    assert_eq!(r.warnings, 0, "report={:#?}", r);
-}
-
-#[test]
-fn validate_provenance_missing_warn() {
-    let r = pass_report(do_validate(
-        "test/fixtures/validation/no_provenance",
-        false,
-        &[],
-    ));
-    assert_eq!(r.warnings, 1, "report={:#?}", r);
-    assert!(
-        has_finding(
-            &r.findings,
-            Severity::Warn,
-            "provenance",
-            "case 'my_case' has no source.assertion_ids"
-        ),
-        "{:#?}",
-        r.findings
-    );
-}
-
-#[test]
-fn validate_provenance_strict_fail() {
-    let r = fail_report(do_validate(
-        "test/fixtures/validation/no_provenance",
-        true,
-        &[],
-    ));
-    assert_eq!(r.errors, 1, "report={:#?}", r);
-}
-
-// ---------------------------------------------------------------------------
 // Validate — 5. Input completeness
 // ---------------------------------------------------------------------------
 
@@ -319,18 +291,20 @@ fn validate_level_match_pass() {
 
 #[test]
 fn validate_level_mismatch_warn() {
-    let r = pass_report(do_validate(
+    let r = pass_report(do_validate_ext(
         "test/fixtures/validation/level_mismatch",
         false,
         &[],
+        "test/fixtures/validation/assertions",
+        false,
     ));
     assert_eq!(r.warnings, 1, "report={:#?}", r);
     assert!(
         has_finding(
             &r.findings,
             Severity::Warn,
-            "level_match",
-            "case 'required_but_marked_may' has level 'may' but source assertion TEST-MUST-1 appears to be MUST"
+            "level_correctness",
+            "case 'required_but_marked_may' has level 'may' but assertion 'SPEC-REQ-1' is level 'must'"
         ),
         "{:#?}",
         r.findings
@@ -353,10 +327,12 @@ fn validate_negative_coverage_pass() {
 
 #[test]
 fn validate_negative_coverage_warn() {
-    let r = pass_report(do_validate(
+    let r = pass_report(do_validate_ext(
         "test/fixtures/validation/no_negative_case",
         false,
         &[],
+        "test/fixtures/validation/assertions",
+        false,
     ));
     assert_eq!(r.warnings, 1, "report={:#?}", r);
     assert!(
@@ -364,10 +340,31 @@ fn validate_negative_coverage_warn() {
             &r.findings,
             Severity::Warn,
             "negative_coverage",
-            "operation 'parse' has MUST cases but no error/rejection case"
+            "assertion 'SPEC-MUST-1' is negatable but has no negative test case"
         ),
         "{:#?}",
         r.findings
+    );
+}
+
+#[test]
+fn validate_negative_coverage_pass_with_assertions() {
+    let r = pass_report(do_validate_ext(
+        "test/fixtures/validation/negative_coverage_pass",
+        false,
+        &[],
+        "test/fixtures/validation/assertions",
+        false,
+    ));
+    let neg: Vec<_> = r
+        .findings
+        .iter()
+        .filter(|f| f.check == "negative_coverage")
+        .collect();
+    assert!(
+        neg.is_empty(),
+        "unexpected negative_coverage findings: {:#?}",
+        neg
     );
 }
 
@@ -387,10 +384,12 @@ fn validate_suppress_single_check() {
 
 #[test]
 fn validate_suppress_multiple_checks() {
-    let r = pass_report(do_validate(
+    let r = pass_report(do_validate_ext(
         "test/fixtures/validation/level_mismatch",
         false,
-        &["provenance", "level_match"],
+        &["provenance", "level_correctness"],
+        "test/fixtures/validation/assertions",
+        false,
     ));
     assert_eq!(r.warnings, 0, "report={:#?}", r);
 }
@@ -479,6 +478,238 @@ fn run_invalid_yaml() {
     let r = do_run("test/rust/crates/specgate-fixtures/specs/bad_yaml.spec.yaml");
     let reason = err_reason(r);
     assert_eq!(reason, "spec file is not valid YAML");
+}
+
+// ---------------------------------------------------------------------------
+// Validate — 11. Assertion coverage
+// ---------------------------------------------------------------------------
+
+#[test]
+fn validate_assertion_coverage_pass() {
+    let r = pass_report(do_validate_ext(
+        "test/fixtures/validation/assertion_coverage",
+        false,
+        &[],
+        "test/fixtures/validation/assertions",
+        false,
+    ));
+    assert_eq!(r.errors, 0, "report={:#?}", r);
+    let assertion_findings: Vec<_> = r
+        .findings
+        .iter()
+        .filter(|f| f.check == "assertion_coverage")
+        .collect();
+    assert!(
+        assertion_findings.is_empty(),
+        "unexpected assertion_coverage findings: {:#?}",
+        assertion_findings
+    );
+}
+
+#[test]
+fn validate_assertion_coverage_miss() {
+    let r = fail_report(do_validate_ext(
+        "test/fixtures/validation/assertion_coverage_miss",
+        false,
+        &[],
+        "test/fixtures/validation/assertions",
+        false,
+    ));
+    assert!(
+        has_finding(
+            &r.findings,
+            Severity::Error,
+            "assertion_coverage",
+            "assertion 'MISSING-1' referenced in case 'test_case' not found in assertions dir"
+        ),
+        "missing assertion_coverage finding: {:#?}",
+        r.findings
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Validate — 5b. Extra inputs
+// ---------------------------------------------------------------------------
+
+#[test]
+fn validate_extra_inputs_fail() {
+    let r = fail_report(do_validate(
+        "test/fixtures/validation/extra_inputs",
+        false,
+        &[],
+    ));
+    assert_eq!(r.errors, 1, "report={:#?}", r);
+    assert!(
+        has_finding(
+            &r.findings,
+            Severity::Error,
+            "input_completeness",
+            "case 'extra_input' has extra input 'c' not declared in operation 'add'"
+        ),
+        "{:#?}",
+        r.findings
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Validate — dep_consistency
+// ---------------------------------------------------------------------------
+
+#[test]
+fn validate_dep_consistency_pass() {
+    let r = pass_report(do_validate(
+        "test/fixtures/validation/dep_consistency_pass",
+        false,
+        &[],
+    ));
+    assert_eq!(r.errors, 0, "report={:#?}", r);
+}
+
+#[test]
+fn validate_dep_consistency_fail() {
+    let r = fail_report(do_validate(
+        "test/fixtures/validation/dep_consistency_fail",
+        false,
+        &[],
+    ));
+    assert_eq!(r.errors, 1, "report={:#?}", r);
+    assert!(
+        has_finding(
+            &r.findings,
+            Severity::Error,
+            "dep_consistency",
+            "operation 'derived' depends on undefined operation 'missing_op'"
+        ),
+        "{:#?}",
+        r.findings
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Validate — mixed_level_bundle
+// ---------------------------------------------------------------------------
+
+#[test]
+fn validate_mixed_level_bundle_warn() {
+    let r = pass_report(do_validate_ext(
+        "test/fixtures/validation/mixed_level_bundle",
+        false,
+        &[],
+        "test/fixtures/validation/assertions",
+        false,
+    ));
+    assert_eq!(r.warnings, 1, "report={:#?}", r);
+    assert!(
+        has_finding(
+            &r.findings,
+            Severity::Warn,
+            "mixed_level_bundle",
+            "case 'mixed_case' bundles assertions of mixed levels (must and may)"
+        ),
+        "{:#?}",
+        r.findings
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Validate — 12. Runnable cases must have expected
+// ---------------------------------------------------------------------------
+
+#[test]
+fn validate_no_expected_fail() {
+    let r = fail_report(do_validate(
+        "test/fixtures/validation/no_expected",
+        false,
+        &[],
+    ));
+    assert_eq!(r.errors, 1, "report={:#?}", r);
+    assert!(
+        has_finding(
+            &r.findings,
+            Severity::Error,
+            "runnable_expected",
+            "case 'missing_expected' has no expected or steps"
+        ),
+        "{:#?}",
+        r.findings
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Validate — source checks (opt-in)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn validate_source_check_pass() {
+    let r = pass_report(do_validate_ext(
+        "test/fixtures/validation/source_check_pass",
+        false,
+        &[],
+        "",
+        true,
+    ));
+    assert_eq!(r.errors, 0, "report={:#?}", r);
+}
+
+#[test]
+fn validate_source_check_setup_not_pub() {
+    let r = fail_report(do_validate_ext(
+        "test/fixtures/validation/source_check_fail_setup",
+        false,
+        &[],
+        "",
+        true,
+    ));
+    assert_eq!(r.errors, 1, "report={:#?}", r);
+    assert!(
+        has_finding(
+            &r.findings,
+            Severity::Error,
+            "source_setup_visibility",
+            "#[spec_setup] function 'make_request' must be declared 'pub fn'"
+        ),
+        "{:#?}",
+        r.findings
+    );
+}
+
+#[test]
+fn validate_source_check_field_not_pub() {
+    let r = fail_report(do_validate_ext(
+        "test/fixtures/validation/source_check_fail_field",
+        false,
+        &[],
+        "",
+        true,
+    ));
+    assert_eq!(r.errors, 1, "report={:#?}", r);
+    assert!(
+        has_finding(
+            &r.findings,
+            Severity::Error,
+            "source_field_visibility",
+            "field 'x' of input type 'ComputeRequest' must be 'pub'"
+        ),
+        "{:#?}",
+        r.findings
+    );
+}
+
+#[test]
+fn validate_source_checks_skipped_without_flag() {
+    let r = pass_report(do_validate_ext(
+        "test/fixtures/validation/source_check_fail_setup",
+        false,
+        &[],
+        "",
+        false,
+    ));
+    let src: Vec<_> = r
+        .findings
+        .iter()
+        .filter(|f| f.check.starts_with("source_"))
+        .collect();
+    assert!(src.is_empty(), "source checks should be skipped: {:#?}", src);
 }
 
 // ---------------------------------------------------------------------------

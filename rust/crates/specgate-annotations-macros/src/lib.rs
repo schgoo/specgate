@@ -377,6 +377,7 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
     if let Data::Enum(data_enum) = &input.data {
         let enum_name_lower = name.to_string().to_lowercase();
         let mut arms: Vec<TokenStream2> = Vec::new();
+        let mut to_spec_value_arms: Vec<TokenStream2> = Vec::new();
 
         for variant in &data_enum.variants {
             let vname = &variant.ident;
@@ -390,6 +391,9 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
                                 #rt::Value::String(#vname_str.to_string()),
                             );
                         }
+                    });
+                    to_spec_value_arms.push(quote! {
+                        #name::#vname => #rt::Value::String(#vname_str.to_string()),
                     });
                 }
                 Fields::Named(named) => {
@@ -414,6 +418,23 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
                             )*
                         }
                     });
+                    to_spec_value_arms.push(quote! {
+                        #name::#vname { #(#field_idents),* } => {
+                            let mut __sg_inner = ::std::collections::BTreeMap::new();
+                            #(
+                                __sg_inner.insert(
+                                    #field_strs.to_string(),
+                                    #rt::ToSpecValue::to_spec_value(#field_idents),
+                                );
+                            )*
+                            let mut __sg_outer = ::std::collections::BTreeMap::new();
+                            __sg_outer.insert(
+                                #vname_str.to_string(),
+                                #rt::Value::Map(__sg_inner),
+                            );
+                            #rt::Value::Map(__sg_outer)
+                        }
+                    });
                 }
                 Fields::Unnamed(_) => {
                     // Tuple variants: emit only the variant name.
@@ -424,6 +445,9 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
                                 #rt::Value::String(#vname_str.to_string()),
                             );
                         }
+                    });
+                    to_spec_value_arms.push(quote! {
+                        #name::#vname(..) => #rt::Value::String(#vname_str.to_string()),
                     });
                 }
             }
@@ -441,14 +465,34 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
                     }
                 }
             }
+            impl #impl_g #rt::ToSpecValue for #name #ty_g #where_c {
+                fn to_spec_value(&self) -> #rt::Value {
+                    match self {
+                        #(#to_spec_value_arms)*
+                    }
+                }
+            }
         };
         return out.into();
     }
 
     // --- Struct: emit each field annotated with #[spec_event] ---
     let mut emits = Vec::new();
+    let mut to_spec_value_inserts = Vec::new();
     if let Data::Struct(s) = &input.data {
         for field in &s.fields {
+            // Build ToSpecValue insert for every named field.
+            if let Some(id) = &field.ident {
+                let fname = id.to_string();
+                to_spec_value_inserts.push(quote! {
+                    __sg_m.insert(
+                        #fname.to_string(),
+                        #rt::ToSpecValue::to_spec_value(&self.#id),
+                    );
+                });
+            }
+
+            // emit_fields only covers #[spec_event]-annotated fields.
             let mut marked = false;
             let mut override_name: Option<String> = None;
             for a in &field.attrs {
@@ -486,6 +530,13 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
         impl #impl_g #rt::SpecEvent for #name #ty_g #where_c {
             fn emit_fields(&self, __sg_prefix: ::std::option::Option<&str>) {
                 #(#emits)*
+            }
+        }
+        impl #impl_g #rt::ToSpecValue for #name #ty_g #where_c {
+            fn to_spec_value(&self) -> #rt::Value {
+                let mut __sg_m = ::std::collections::BTreeMap::new();
+                #(#to_spec_value_inserts)*
+                #rt::Value::Map(__sg_m)
             }
         }
     };

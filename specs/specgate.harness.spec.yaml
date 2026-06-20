@@ -1133,7 +1133,7 @@ cases:
                 - $error: "attempt to divide by zero"
 
   - name: option_some_path
-    desc: Operation returning Some produces outcome Some with value
+    desc: Operation returning Some produces $result with the value
     operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/option_some.spec.yaml
@@ -1144,14 +1144,12 @@ cases:
             - name: find_existing
               status: pass
               expected:
-                - $outcome: "Some"
                 - $result: "1"
               traces:
-                - Event: { name: $outcome, value: "Some" }
                 - Event: { name: $result, value: "1" }
 
   - name: option_none_path
-    desc: Operation returning None produces outcome None
+    desc: Operation returning None produces $result "None"
     operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/option_none.spec.yaml
@@ -1162,9 +1160,9 @@ cases:
             - name: find_missing
               status: pass
               expected:
-                - $outcome: "None"
+                - $result: "None"
               traces:
-                - Event: { name: $outcome, value: "None" }
+                - Event: { name: $result, value: "None" }
 
   - name: void_operation
     desc: Void operation produces no result event

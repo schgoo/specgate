@@ -1,0 +1,15 @@
+spec_version: "0.4.0"
+name: test.mixed_level_bundle
+operations:
+  do_thing:
+    outputs: [result]
+cases:
+  - name: mixed_case
+    desc: Bundles a MUST-level and a MAY-level assertion in one case
+    source:
+      assertion_ids: [SPEC-REQ-1, SPEC-MAY-1]
+      spec: "Test Spec"
+      section: "§1"
+    operation: do_thing
+    expected:
+      - result: "ok"

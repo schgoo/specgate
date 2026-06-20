@@ -1,0 +1,18 @@
+spec_version: "0.4.0"
+name: test.extra_inputs
+operations:
+  add:
+    inputs: { a: i32, b: i32 }
+    outputs: [add.result]
+cases:
+  - name: extra_input
+    desc: Case provides 'c' which is not declared in operation
+    level: must
+    source:
+      assertion_ids: [ADD-1]
+      spec: "Test Spec"
+      section: "§1"
+    operation: add
+    inputs: { a: 1, b: 2, c: 3 }
+    expected:
+      - add.result: "3"

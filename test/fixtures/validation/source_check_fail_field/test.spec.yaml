@@ -1,0 +1,12 @@
+spec_version: "0.4.0"
+name: test.source_check_fail_field
+binding: binding.yaml
+operations:
+  compute:
+    inputs: { req: ComputeRequest }
+    outputs: [result]
+types:
+  ComputeRequest:
+    x: i32
+    y: i32
+cases: []

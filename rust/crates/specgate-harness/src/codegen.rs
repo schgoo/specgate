@@ -134,7 +134,8 @@ path = "src/main.rs"
 
 [dependencies]
 specgate-annotations = {{ path = "{ann}" }}
-specgate-harness = {{ path = "{harness}" }}{fixture_dep}
+specgate-harness = {{ path = "{harness}" }}
+serde_yaml = "0.9"{fixture_dep}
 
 [workspace]
 "#,
@@ -174,6 +175,7 @@ fn render_main(
     let mut out = String::new();
     out.push_str("#![allow(unused, unused_mut, unused_variables, dead_code, clippy::all)]\n");
     out.push_str("use specgate_annotations::{TraceEvent, Value, take_traces, reset, set_mock, SpecEvent};\n");
+    out.push_str("use std::collections::HashMap;\n");
 
     if let Some(fc) = fixture_crate {
         // Alias the fixture module as `fut` so call sites work uniformly.
@@ -465,23 +467,30 @@ fn build_post_emit(
         return r#"
             match &__sg_ret {
                 Some(__sg_v) => {
-                    specgate_annotations::emit_event("$outcome", "Some");
-                    specgate_annotations::emit_event("$result", &format!("{}", __sg_v));
+                    specgate_annotations::emit_event_v(
+                        "$result",
+                        specgate_annotations::__rt::ToSpecValue::to_spec_value(__sg_v),
+                    );
                 }
                 None => {
-                    specgate_annotations::emit_event("$outcome", "None");
+                    specgate_annotations::emit_event("$result", "None");
                 }
             }
             let _ = __sg_ret;
         "#
         .to_string();
     }
-    // SpecEvent-derived struct: emit each annotated field.
+    // SpecEvent-derived struct: emit each annotated field and the full
+    // structured $result via ToSpecValue.
     let bare = rt.trim_start_matches('&').trim_start_matches("mut ").trim();
     let head = bare.split(['<', ' ']).next().unwrap_or(bare);
     if spec_event_structs.contains(head) {
         return r#"
             specgate_annotations::SpecEvent::emit_fields(&__sg_ret, None);
+            specgate_annotations::emit_event_v(
+                "$result",
+                specgate_annotations::__rt::ToSpecValue::to_spec_value(&__sg_ret),
+            );
             let _ = __sg_ret;
         "#
         .to_string();
@@ -592,6 +601,28 @@ fn value_to_rust(v: Option<&Value>, ty: &str) -> String {
         return "Default::default()".into();
     };
     let ty_norm = ty.trim_start_matches('&').trim_start_matches("mut ").trim();
+
+    // Option<T> → None or Some(inner)
+    if let Some(inner) = strip_option(ty_norm) {
+        return match v {
+            Value::Null => "None".into(),
+            _ => format!("Some({})", value_to_rust(Some(v), inner)),
+        };
+    }
+
+    // &[T] slices — keep inline approach for backward compat
+    if ty_norm.starts_with('[') || ty.starts_with("&[") {
+        let elem_ty = inner_ty(ty_norm);
+        if let Value::Sequence(seq) = v {
+            let elements: Vec<String> = seq
+                .iter()
+                .map(|e| value_to_rust(Some(e), elem_ty.as_deref().unwrap_or("i32")))
+                .collect();
+            return format!("&[{}][..]", elements.join(", "));
+        }
+        return "Default::default()".into();
+    }
+
     match v {
         Value::Number(n) => {
             // Suffix int with type.
@@ -605,26 +636,36 @@ fn value_to_rust(v: Option<&Value>, ty: &str) -> String {
         }
         Value::Bool(b) => b.to_string(),
         Value::String(s) => {
-            // For &str / String / etc.
             if ty_norm == "String" {
                 format!("{:?}.to_string()", s)
-            } else {
+            } else if ty_norm == "&str" || ty_norm == "str" {
                 format!("{:?}", s)
+            } else {
+                // Named type passed as a string scalar (e.g. "Point") → serde_yaml
+                yaml_deser(v, ty_norm)
             }
         }
-        Value::Sequence(seq) => {
-            // For &[i32] or Vec<i32> etc., pick element type by stripping outer.
-            let elem_ty = inner_ty(ty_norm);
-            let elements: Vec<String> = seq
-                .iter()
-                .map(|e| value_to_rust(Some(e), elem_ty.as_deref().unwrap_or("i32")))
-                .collect();
-            format!("&[{}][..]", elements.join(", "))
-        }
+        // Sequences and mappings: always deserialize via serde_yaml
+        Value::Sequence(_) | Value::Mapping(_) => yaml_deser(v, ty_norm),
         Value::Null => "Default::default()".into(),
-        Value::Mapping(_) => "Default::default()".into(),
         Value::Tagged(t) => value_to_rust(Some(&t.value), ty),
     }
+}
+
+/// Emit a `serde_yaml::from_str::<Type>(r#"..."#).unwrap()` expression.
+fn yaml_deser(v: &Value, ty: &str) -> String {
+    let yaml_str = serde_yaml::to_string(v).unwrap_or_else(|_| "~\n".to_string());
+    format!("serde_yaml::from_str::<{}>({}).unwrap()", ty, format!("{:?}", yaml_str))
+}
+
+/// Extract the inner type from `Option<T>`.
+fn strip_option(ty: &str) -> Option<&str> {
+    for prefix in &["Option<", "::std::option::Option<", "std::option::Option<"] {
+        if let Some(rest) = ty.strip_prefix(prefix) {
+            return rest.strip_suffix('>').map(|s| s.trim());
+        }
+    }
+    None
 }
 
 fn inner_ty(ty: &str) -> Option<String> {

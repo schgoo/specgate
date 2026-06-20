@@ -1,0 +1,4 @@
+id: SPEC-MUST-1
+level: MUST
+negatable: true
+text: The system MUST perform assertion SPEC-MUST-1, and MUST reject invalid input.

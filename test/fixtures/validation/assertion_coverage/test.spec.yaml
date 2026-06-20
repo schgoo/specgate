@@ -1,0 +1,16 @@
+spec_version: "0.4.0"
+name: test.assertion_coverage
+operations:
+  do_thing:
+    outputs: [result]
+cases:
+  - name: test_case
+    desc: References SPEC-ASSERT-1 which exists in assertions dir
+    level: should
+    source:
+      assertion_ids: [SPEC-ASSERT-1]
+      spec: "Test Spec"
+      section: "§1"
+    operation: do_thing
+    expected:
+      - result: "ok"

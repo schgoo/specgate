@@ -5,7 +5,7 @@ binding: binding.yaml
 operations:
   find:
     inputs: { items: "List<i32>", target: i32 }
-    outputs: [find.outcome, find.value]
+    outputs: [$result]
 
 cases:
   - name: find_existing
@@ -13,5 +13,4 @@ cases:
     operation: find
     inputs: { items: [10, 20, 30], target: 20 }
     expected:
-      - $outcome: "Some"
       - $result: "1"

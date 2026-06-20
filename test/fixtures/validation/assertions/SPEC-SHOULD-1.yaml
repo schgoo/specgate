@@ -1,0 +1,4 @@
+id: SPEC-SHOULD-1
+level: SHOULD
+negatable: false
+text: The system SHOULD perform assertion SPEC-SHOULD-1.

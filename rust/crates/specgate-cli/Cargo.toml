@@ -11,6 +11,7 @@ name = "specgate"
 path = "src/main.rs"
 
 [dependencies]
+regex = { workspace = true }
 serde = { workspace = true }
 serde_yaml = { workspace = true }
 specgate-annotations = { workspace = true }

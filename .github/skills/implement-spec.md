@@ -278,6 +278,7 @@ Then read only what you need:
 
 ## Checklist before finishing
 
+- [ ] **Spec validation** — run `specgate validate <spec-dir>` (see below)
 - [ ] Project scaffolded with correct structure
 - [ ] All spec types implemented as idiomatic language types
 - [ ] Every spec case has a corresponding test function
@@ -290,25 +291,58 @@ Then read only what you need:
 - [ ] Binding file created/updated for this spec
 - [ ] **Spec harness validation** — run the spec through the harness (see below)
 
+## Using the CLI
+
+Build the CLI from the workspace root (`rust/`):
+
+```bash
+cd rust
+cargo build -p specgate-cli --quiet
+```
+
+Then use it via `cargo run -p specgate-cli --quiet --` or directly at
+`rust/target/debug/specgate` (or `release` with `--release`).
+
+## Running specgate validate
+
+Before implementing, validate the spec file is well-formed:
+
+```bash
+cargo run -p specgate-cli --quiet -- validate <spec-dir>
+```
+
+This checks:
+- Schema validity (YAML parse, spec_version, required fields)
+- Operation references (cases reference valid operations)
+- Input completeness (case inputs match declared operation inputs)
+- Name uniqueness (no duplicate case names)
+- Expected format (expected entries have exactly one key)
+- Narrative misuse (verify steps that should be runnable)
+- Dependency consistency (depends_on references exist)
+- Mixed-level bundles (cases don't mix MUST/SHOULD/MAY assertions)
+- Runnable cases have expected
+
+With `--check-source` and a resolved binding, also checks:
+- Operations and setups are `pub fn`
+- Struct fields for input types are `pub`
+
+Fix all errors before proceeding. Warnings are advisory.
+
 ## Running the spec harness
 
-After implementation passes all tests, validate that the spec harness can
-generate and run the tests deterministically:
+After implementation passes all tests, run the spec through the harness:
 
-1. **Check if a binding exists** for this spec — look at the spec's `binding:`
-   field and the corresponding `bindings/<name>.yaml` file
-2. **Check if the binding defines targets** — if the spec's binding has
-   `target: test` (or similar), the binding file should have a matching entry
-3. **If both exist**, run the harness:
-   - Rust: `cargo run -p specgate-cli -- run <spec-file>` (if CLI exists)
-   - Or programmatically: create a test that calls `Harness::run_spec("<spec-file>")`
-     with the appropriate backend registered
-4. **If the harness run succeeds**, all spec cases should produce `pass` results
-5. **If the harness or CLI doesn't exist yet** (bootstrap phase), skip this step
-   but note it as a follow-up
+```bash
+cargo run -p specgate-cli -- run <spec-file.spec.yaml>
+```
 
-The point: the spec harness should be able to generate and execute the same
-tests you wrote by hand. If it can't, something is missing from the spec,
-binding, or backend.
+This compiles your annotated code, runs each case, collects traces, and
+compares them against the spec's expected assertions. All cases must pass.
+
+If the run fails:
+- Check that all operations are annotated with `#[spec_operation("name")]`
+- Check that the binding file points to the correct package_root
+- Check that complex input types derive `Serialize` + `Deserialize`
+- Review the trace output to see what diverged from expected
 
 

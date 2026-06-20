@@ -1,0 +1,4 @@
+id: SPEC-REQ-1
+level: MUST
+negatable: false
+text: The system MUST expose the required feature.

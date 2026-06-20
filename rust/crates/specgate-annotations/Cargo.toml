@@ -6,3 +6,6 @@ edition.workspace = true
 [dependencies]
 specgate-runtime = { workspace = true }
 specgate-annotations-macros = { workspace = true }
+
+[features]
+specgate-trace = ["specgate-runtime/specgate-trace"]

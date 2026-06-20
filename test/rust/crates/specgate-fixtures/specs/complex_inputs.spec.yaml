@@ -257,7 +257,7 @@ cases:
     expected:
       - $result:
           $size: 3
-          $any: { $match: { x: "0", y: "0" } }
+          $contains: { $match: { x: "0", y: "0" } }
           $any: { $match: { x: "2", y: "2" } }
 
   # --- Map deserialization (input) ---
@@ -323,7 +323,7 @@ cases:
         - { x: 1, y: 2 }
       target_x: 99
     expected:
-      - $result: null
+      - $result: "None"
 
   # --- Nested struct deserialization (input) ---
   - name: describe_person_with_address

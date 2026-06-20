@@ -406,6 +406,15 @@ impl<T: ToSpecValue + Eq + std::hash::Hash> ToSpecValue for HashSet<T> {
     }
 }
 
+impl<T: ToSpecValue> ToSpecValue for Option<T> {
+    fn to_spec_value(&self) -> Value {
+        match self {
+            Some(v) => v.to_spec_value(),
+            None => Value::String(String::new()),
+        }
+    }
+}
+
 impl<T: ToSpecValue + ?Sized> ToSpecValue for &T {
     fn to_spec_value(&self) -> Value { (**self).to_spec_value() }
 }

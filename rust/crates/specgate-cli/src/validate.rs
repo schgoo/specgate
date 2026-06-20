@@ -1,6 +1,7 @@
 //! `specgate validate <spec-dir>` — static checks across one or more
 //! `.spec.yaml` files in a directory tree.
 
+use regex::Regex;
 use serde_yaml::Value;
 use specgate_annotations::spec_operation;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -63,10 +64,31 @@ impl std::fmt::Display for ValidateOutcome {
 }
 
 #[spec_operation("validate")]
-pub fn validate(spec_dir: &str, strict: bool, suppress: &[String]) -> ValidateOutcome {
+pub fn validate(
+    spec_dir: &str,
+    strict: bool,
+    suppress: &[String],
+    assertions_dir: &str,
+    check_source: bool,
+) -> ValidateOutcome {
     let suppress_set: HashSet<String> = suppress.iter().cloned().collect();
     let mut findings: Vec<ValidationFinding> = Vec::new();
     let mut total_files = 0;
+
+    // 2. Resolve the assertions directory. An explicit dir is used as-is;
+    // otherwise default to `<spec_dir>/sources/assertions`. Assertion-aware
+    // checks only run when the resolved directory actually exists.
+    let resolved_assertions_dir: PathBuf = if !assertions_dir.is_empty() {
+        PathBuf::from(assertions_dir)
+    } else {
+        Path::new(spec_dir).join("sources").join("assertions")
+    };
+    let assertions_active = resolved_assertions_dir.exists();
+    let assertions: BTreeMap<String, Assertion> = if assertions_active {
+        load_assertions(&resolved_assertions_dir)
+    } else {
+        BTreeMap::new()
+    };
 
     let files = collect_spec_files(Path::new(spec_dir));
     for path in files {
@@ -88,13 +110,19 @@ pub fn validate(spec_dir: &str, strict: bool, suppress: &[String]) -> ValidateOu
                 continue;
             }
         };
-        check_file(&value, &file_str, &mut findings);
+        check_file(
+            &value,
+            &file_str,
+            &path,
+            &assertions,
+            assertions_active,
+            check_source,
+            &mut findings,
+        );
     }
 
-    // Apply suppression by removing matching findings.
     findings.retain(|f| !suppress_set.contains(&f.check));
 
-    // In strict mode, upgrade warns to errors.
     if strict {
         for f in findings.iter_mut() {
             if f.severity == Severity::Warn {
@@ -124,6 +152,76 @@ pub fn validate(spec_dir: &str, strict: bool, suppress: &[String]) -> ValidateOu
     } else {
         ValidateOutcome::Fail { report }
     }
+}
+
+#[derive(Debug, Clone)]
+struct Assertion {
+    level: String,
+    negatable: bool,
+}
+
+/// Normalize an RFC 2119 keyword into one of "must", "should", "may", or the
+/// lowercased input for anything unrecognized.
+fn normalize_level(raw: &str) -> String {
+    match raw.trim().to_uppercase().as_str() {
+        "MUST" | "REQUIRED" | "SHALL" => "must".to_string(),
+        "SHOULD" | "RECOMMENDED" => "should".to_string(),
+        "MAY" | "OPTIONAL" => "may".to_string(),
+        other => other.to_lowercase(),
+    }
+}
+
+/// Recursively load assertion source files (`.yaml`/`.yml`) from `dir`, keyed
+/// by their `id` field. Each file is a mapping with `id`, `level`, and an
+/// optional `negatable` flag.
+fn load_assertions(dir: &Path) -> BTreeMap<String, Assertion> {
+    let mut map = BTreeMap::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        let Ok(rd) = std::fs::read_dir(&d) else {
+            continue;
+        };
+        for entry in rd.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                stack.push(p);
+                continue;
+            }
+            let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("");
+            if ext != "yaml" && ext != "yml" {
+                continue;
+            }
+            let Ok(raw) = std::fs::read_to_string(&p) else {
+                continue;
+            };
+            let Ok(val) = serde_yaml::from_str::<Value>(&raw) else {
+                continue;
+            };
+            let Some(m) = val.as_mapping() else { continue };
+            let Some(id) = m
+                .get(Value::String("id".into()))
+                .and_then(|v| v.as_str())
+            else {
+                continue;
+            };
+            let level = m
+                .get(Value::String("level".into()))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let negatable = m
+                .get(Value::String("negatable".into()))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            map.insert(
+                id.to_string(),
+                Assertion {
+                    level: normalize_level(level),
+                    negatable,
+                },
+            );
+        }
+    }
+    map
 }
 
 fn collect_spec_files(dir: &Path) -> Vec<PathBuf> {
@@ -156,7 +254,16 @@ struct OpDecl {
     declared_inputs: Vec<String>,
 }
 
-fn check_file(spec: &Value, file: &str, findings: &mut Vec<ValidationFinding>) {
+fn check_file(
+    spec: &Value,
+    file: &str,
+    path: &Path,
+    assertions: &BTreeMap<String, Assertion>,
+    assertions_active: bool,
+    check_source: bool,
+    findings: &mut Vec<ValidationFinding>,
+) {
+    let _ = path;
     let map = match spec.as_mapping() {
         Some(m) => m,
         None => {
@@ -199,16 +306,38 @@ fn check_file(spec: &Value, file: &str, findings: &mut Vec<ValidationFinding>) {
         }
     }
 
+    // dep_consistency: each operation's `depends_on` must reference another
+    // declared operation. Iterate operations and their deps in document order.
+    if let Some(Value::Mapping(ops_map)) = map.get(Value::String("operations".into())) {
+        for (k, v) in ops_map {
+            let Some(op_name) = k.as_str() else { continue };
+            let Some(body) = v.as_mapping() else { continue };
+            if let Some(Value::Sequence(deps)) = body.get(Value::String("depends_on".into())) {
+                for dep in deps {
+                    if let Some(dep_name) = dep.as_str() {
+                        if !ops.contains_key(dep_name) {
+                            findings.push(ValidationFinding {
+                                severity: Severity::Error,
+                                check: "dep_consistency".into(),
+                                file: file.into(),
+                                message: format!(
+                                    "operation '{op_name}' depends on undefined operation '{dep_name}'"
+                                ),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     let cases_v = map.get(Value::String("cases".into()));
     let cases_seq: Vec<&Value> = match cases_v.and_then(|c| c.as_sequence()) {
         Some(s) => s.iter().collect(),
         None => Vec::new(),
     };
 
-    // For negative_coverage: track per-operation MUST-with-source presence and
-    // whether any case looks like an error/rejection case.
-    let mut op_must_with_source: BTreeMap<String, bool> = BTreeMap::new();
-    let mut op_has_negative: BTreeMap<String, bool> = BTreeMap::new();
+    let mut referenced_ids: BTreeMap<String, bool> = BTreeMap::new();
     let mut seen_names: BTreeSet<String> = BTreeSet::new();
 
     for c in &cases_seq {
@@ -282,7 +411,6 @@ fn check_file(spec: &Value, file: &str, findings: &mut Vec<ValidationFinding>) {
                     });
                 }
             }
-            // Narrative cases skip the runnable-case checks below.
             continue;
         }
 
@@ -298,7 +426,8 @@ fn check_file(spec: &Value, file: &str, findings: &mut Vec<ValidationFinding>) {
                     ),
                 });
             } else {
-                // 5. input_completeness
+                // 5. input_completeness: missing and extra inputs
+                let has_setup = cm.get(Value::String("setup".into())).is_some();
                 let provided: BTreeSet<String> = cm
                     .get(Value::String("inputs".into()))
                     .and_then(|v| v.as_mapping())
@@ -309,6 +438,9 @@ fn check_file(spec: &Value, file: &str, findings: &mut Vec<ValidationFinding>) {
                     })
                     .unwrap_or_default();
                 let decl = &ops[op];
+                let declared_set: BTreeSet<String> =
+                    decl.declared_inputs.iter().cloned().collect();
+
                 for required in &decl.declared_inputs {
                     if !provided.contains(required) {
                         findings.push(ValidationFinding {
@@ -321,17 +453,21 @@ fn check_file(spec: &Value, file: &str, findings: &mut Vec<ValidationFinding>) {
                         });
                     }
                 }
-            }
-        }
 
-        // 4. provenance: every runnable case should have source.assertion_ids.
-        if source_ids.is_empty() {
-            findings.push(ValidationFinding {
-                severity: Severity::Warn,
-                check: "provenance".into(),
-                file: file.into(),
-                message: format!("case '{name}' has no source.assertion_ids"),
-            });
+                // Skip extra-inputs check when case has setup: (mock injection pattern)
+                if !has_setup {
+                    for extra in provided.difference(&declared_set) {
+                        findings.push(ValidationFinding {
+                            severity: Severity::Error,
+                            check: "input_completeness".into(),
+                            file: file.into(),
+                            message: format!(
+                                "case '{name}' has extra input '{extra}' not declared in operation '{op}'"
+                            ),
+                        });
+                    }
+                }
+            }
         }
 
         // 6. expected_format: each entry must have exactly one key.
@@ -353,47 +489,272 @@ fn check_file(spec: &Value, file: &str, findings: &mut Vec<ValidationFinding>) {
             }
         }
 
-        // 9. level_match: if level=may but some source assertion id looks like MUST.
-        if level == Some("may") {
+        // assertion_coverage: every referenced id must exist in the assertions
+        // map (only when assertion data is available).
+        if assertions_active {
             for aid in &source_ids {
-                if assertion_id_is_must(aid) {
+                if !assertions.contains_key(aid) {
                     findings.push(ValidationFinding {
-                        severity: Severity::Warn,
-                        check: "level_match".into(),
+                        severity: Severity::Error,
+                        check: "assertion_coverage".into(),
                         file: file.into(),
                         message: format!(
-                            "case '{name}' has level 'may' but source assertion {aid} appears to be MUST"
+                            "assertion '{aid}' referenced in case '{name}' not found in assertions dir"
                         ),
                     });
                 }
             }
         }
 
-        // 10. negative_coverage tracking
-        if let Some(op) = operation.as_deref() {
-            if level == Some("must") && !source_ids.is_empty() {
-                op_must_with_source.insert(op.to_string(), true);
+        // level_correctness: a case that declares a level must match the level
+        // of each assertion it references.
+        if assertions_active {
+            if let Some(case_level_raw) = level {
+                let case_level = normalize_level(case_level_raw);
+                for aid in &source_ids {
+                    if let Some(a) = assertions.get(aid) {
+                        if a.level != case_level {
+                            findings.push(ValidationFinding {
+                                severity: Severity::Warn,
+                                check: "level_correctness".into(),
+                                file: file.into(),
+                                message: format!(
+                                    "case '{name}' has level '{case_level}' but assertion '{aid}' is level '{}'",
+                                    a.level
+                                ),
+                            });
+                        }
+                    }
+                }
             }
-            if case_is_negative(cm, &name) {
-                op_has_negative.insert(op.to_string(), true);
+        }
+
+        // mixed_level_bundle: a case must not bundle both MUST and MAY
+        // assertions.
+        if assertions_active {
+            let mut levels: BTreeSet<String> = BTreeSet::new();
+            for aid in &source_ids {
+                if let Some(a) = assertions.get(aid) {
+                    levels.insert(a.level.clone());
+                }
+            }
+            if levels.contains("must") && levels.contains("may") {
+                findings.push(ValidationFinding {
+                    severity: Severity::Warn,
+                    check: "mixed_level_bundle".into(),
+                    file: file.into(),
+                    message: format!(
+                        "case '{name}' bundles assertions of mixed levels (must and may)"
+                    ),
+                });
+            }
+        }
+
+        // 12. runnable_expected: runnable case must have expected or steps with expected.
+        let has_expected = cm.get(Value::String("expected".into())).is_some();
+        let has_steps_with_expected = cm
+            .get(Value::String("steps".into()))
+            .and_then(|v| v.as_sequence())
+            .map(|steps| {
+                steps.iter().any(|step| {
+                    step.as_mapping()
+                        .map(|sm| sm.get(Value::String("expected".into())).is_some())
+                        .unwrap_or(false)
+                })
+            })
+            .unwrap_or(false);
+        if !has_expected && !has_steps_with_expected {
+            findings.push(ValidationFinding {
+                severity: Severity::Error,
+                check: "runnable_expected".into(),
+                file: file.into(),
+                message: format!("case '{name}' has no expected or steps"),
+            });
+        }
+
+        // negative_coverage tracking: record every referenced assertion id and
+        // whether any referencing case is a negative case.
+        let is_negative = cm
+            .get(Value::String("negative".into()))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        for aid in &source_ids {
+            let entry = referenced_ids.entry(aid.clone()).or_insert(false);
+            if is_negative {
+                *entry = true;
             }
         }
     }
 
-    // 10. negative_coverage: emit warnings for ops with MUST cases but no negative case.
-    for (op, _) in op_must_with_source.iter() {
-        if !op_has_negative.get(op).copied().unwrap_or(false) {
+    // negative_coverage: a negatable assertion that is referenced but never by a
+    // negative case is flagged. BTreeMap iteration keeps output sorted by id.
+    if assertions_active {
+        for (aid, has_negative) in &referenced_ids {
+            if let Some(a) = assertions.get(aid) {
+                if a.negatable && !*has_negative {
+                    findings.push(ValidationFinding {
+                        severity: Severity::Warn,
+                        check: "negative_coverage".into(),
+                        file: file.into(),
+                        message: format!(
+                            "assertion '{aid}' is negatable but has no negative test case"
+                        ),
+                    });
+                }
+            }
+        }
+    }
+
+    // Source-level checks (opt-in via --check-source)
+    if check_source {
+        run_source_checks(spec, file, findings);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Source-level checks
+// ---------------------------------------------------------------------------
+
+fn run_source_checks(spec: &Value, file: &str, findings: &mut Vec<ValidationFinding>) {
+    let map = match spec.as_mapping() {
+        Some(m) => m,
+        None => return,
+    };
+
+    let binding_rel = match map
+        .get(Value::String("binding".into()))
+        .and_then(|v| v.as_str())
+    {
+        Some(b) => b,
+        None => return,
+    };
+
+    let spec_dir = Path::new(file).parent().unwrap_or(Path::new(""));
+    let binding_path = spec_dir.join(binding_rel);
+
+    let binding_raw = match std::fs::read_to_string(&binding_path) {
+        Ok(t) => t,
+        Err(_) => return,
+    };
+    let binding: Value = match serde_yaml::from_str(&binding_raw) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+
+    let package_root_rel = binding
+        .as_mapping()
+        .and_then(|bm| bm.get(Value::String("targets".into())))
+        .and_then(|v| v.as_mapping())
+        .and_then(|targets| targets.iter().next())
+        .and_then(|(_, tv)| tv.as_mapping())
+        .and_then(|tm| tm.get(Value::String("package_root".into())))
+        .and_then(|v| v.as_str())
+        .unwrap_or("src");
+
+    let binding_dir = binding_path.parent().unwrap_or(Path::new(""));
+    let package_root = binding_dir.join(package_root_rel);
+
+    if !package_root.exists() {
+        return;
+    }
+
+    let rs_content = collect_rs_content(&package_root);
+
+    // (F) source_setup_visibility: every `#[spec_setup(...)]` function must be
+    // declared `pub fn`.
+    let setup_re = Regex::new(r"(?s)#\[spec_setup[^\]]*\]\s*(pub\s+)?fn\s+([A-Za-z_]\w*)").unwrap();
+    for caps in setup_re.captures_iter(&rs_content) {
+        let is_pub = caps.get(1).is_some();
+        if !is_pub {
+            let fname = &caps[2];
             findings.push(ValidationFinding {
-                severity: Severity::Warn,
-                check: "negative_coverage".into(),
+                severity: Severity::Error,
+                check: "source_setup_visibility".into(),
                 file: file.into(),
-                message: format!(
-                    "operation '{op}' has MUST cases but no error/rejection case"
-                ),
+                message: format!("#[spec_setup] function '{fname}' must be declared 'pub fn'"),
             });
         }
     }
+
+    // (G) source_field_visibility: every field of an operation's input type
+    // (when that type is also declared in the spec's `types`) must be `pub`.
+    let declared_types: BTreeSet<String> = map
+        .get(Value::String("types".into()))
+        .and_then(|v| v.as_mapping())
+        .map(|tm| {
+            tm.iter()
+                .filter_map(|(k, _)| k.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mut input_types: Vec<String> = Vec::new();
+    if let Some(Value::Mapping(ops_map)) = map.get(Value::String("operations".into())) {
+        for (_, v) in ops_map {
+            let Some(body) = v.as_mapping() else { continue };
+            if let Some(Value::Mapping(inputs)) = body.get(Value::String("inputs".into())) {
+                for (_, tv) in inputs {
+                    if let Some(type_name) = tv.as_str() {
+                        if declared_types.contains(type_name)
+                            && !input_types.iter().any(|t| t == type_name)
+                        {
+                            input_types.push(type_name.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let field_re = Regex::new(r"(?m)^\s*(pub\s+)?([A-Za-z_]\w*)\s*:").unwrap();
+    for type_name in &input_types {
+        let pat = format!(r"struct\s+{}\s*\{{([^}}]*)\}}", regex::escape(type_name));
+        let Ok(struct_re) = Regex::new(&pat) else {
+            continue;
+        };
+        if let Some(caps) = struct_re.captures(&rs_content) {
+            let body = &caps[1];
+            for fcaps in field_re.captures_iter(body) {
+                let is_pub = fcaps.get(1).is_some();
+                if !is_pub {
+                    let fname = &fcaps[2];
+                    findings.push(ValidationFinding {
+                        severity: Severity::Error,
+                        check: "source_field_visibility".into(),
+                        file: file.into(),
+                        message: format!(
+                            "field '{fname}' of input type '{type_name}' must be 'pub'"
+                        ),
+                    });
+                }
+            }
+        }
+    }
 }
+
+fn collect_rs_content(dir: &Path) -> String {
+    let mut content = String::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        let Ok(rd) = std::fs::read_dir(&d) else { continue };
+        for entry in rd.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if p.extension().and_then(|s| s.to_str()) == Some("rs") {
+                if let Ok(s) = std::fs::read_to_string(&p) {
+                    content.push_str(&s);
+                    content.push('\n');
+                }
+            }
+        }
+    }
+    content
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 fn looks_testable(s: &str) -> bool {
     let lower = s.to_lowercase();
@@ -402,46 +763,6 @@ fn looks_testable(s: &str) -> bool {
         "produces", "outputs", "asserts", "must ",
     ];
     HINTS.iter().any(|h| lower.contains(h))
-}
-
-fn assertion_id_is_must(id: &str) -> bool {
-    let upper = id.to_uppercase();
-    upper.contains("MUST") || upper.contains("SHALL") || upper.contains("REQUIRED")
-}
-
-fn case_is_negative(cm: &serde_yaml::Mapping, name: &str) -> bool {
-    let lower_name = name.to_lowercase();
-    if lower_name.contains("error")
-        || lower_name.contains("reject")
-        || lower_name.contains("fail")
-        || lower_name.contains("invalid")
-        || lower_name.contains("bad")
-        || lower_name.contains("negative")
-    {
-        return true;
-    }
-    if let Some(Value::Sequence(items)) = cm.get(Value::String("expected".into())) {
-        for entry in items {
-            if let Value::Mapping(em) = entry {
-                for (k, v) in em {
-                    let kname = k.as_str().unwrap_or("");
-                    if kname.ends_with("outcome") {
-                        if let Some(val) = v.as_str() {
-                            let lv = val.to_lowercase();
-                            if lv.contains("error") || lv.contains("reject") || lv.contains("fail")
-                            {
-                                return true;
-                            }
-                        }
-                    }
-                    if kname.ends_with("error") || kname.ends_with(".error") {
-                        return true;
-                    }
-                }
-            }
-        }
-    }
-    false
 }
 
 /// Render a validate outcome to a colored, human-readable string for

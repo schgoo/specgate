@@ -38,6 +38,12 @@ operations:
       suppress:
         type: List<string>
         desc: Check names to suppress
+      assertions_dir:
+        type: string
+        desc: Directory of assertion source files for coverage checking (opt-in)
+      check_source:
+        type: bool
+        desc: Scan source files for annotation coverage (opt-in)
     outputs:
       - outcome:
           oneof:
@@ -72,6 +78,8 @@ cases:
       spec_dir: test/fixtures/validation/valid_complete
       strict: false
       suppress: []
+      assertions_dir: ""
+      check_source: false
     expected:
       outcome:
         Pass:
@@ -85,6 +93,8 @@ cases:
       spec_dir: test/fixtures/validation/missing_version
       strict: false
       suppress: []
+      assertions_dir: ""
+      check_source: false
     expected:
       outcome:
         Fail:
@@ -106,6 +116,8 @@ cases:
       spec_dir: test/fixtures/validation/valid_complete
       strict: false
       suppress: []
+      assertions_dir: ""
+      check_source: false
     expected:
       outcome:
         Pass:
@@ -119,6 +131,8 @@ cases:
       spec_dir: test/fixtures/validation/bad_op_ref
       strict: false
       suppress: []
+      assertions_dir: ""
+      check_source: false
     expected:
       outcome:
         Fail:
@@ -140,6 +154,8 @@ cases:
       spec_dir: test/fixtures/validation/valid_complete
       strict: false
       suppress: []
+      assertions_dir: ""
+      check_source: false
     expected:
       outcome:
         Pass:
@@ -153,6 +169,8 @@ cases:
       spec_dir: test/fixtures/validation/duplicate_names
       strict: false
       suppress: []
+      assertions_dir: ""
+      check_source: false
     expected:
       outcome:
         Fail:
@@ -174,6 +192,8 @@ cases:
       spec_dir: test/fixtures/validation/valid_complete
       strict: false
       suppress: []
+      assertions_dir: ""
+      check_source: false
     expected:
       outcome:
         Pass:
@@ -187,6 +207,8 @@ cases:
       spec_dir: test/fixtures/validation/no_provenance
       strict: false
       suppress: []
+      assertions_dir: ""
+      check_source: false
     expected:
       outcome:
         Pass:
@@ -204,6 +226,8 @@ cases:
       spec_dir: test/fixtures/validation/no_provenance
       strict: true
       suppress: []
+      assertions_dir: ""
+      check_source: false
     expected:
       outcome:
         Fail:
@@ -221,6 +245,8 @@ cases:
       spec_dir: test/fixtures/validation/valid_complete
       strict: false
       suppress: []
+      assertions_dir: ""
+      check_source: false
     expected:
       outcome:
         Pass:
@@ -234,6 +260,8 @@ cases:
       spec_dir: test/fixtures/validation/input_mismatch
       strict: false
       suppress: []
+      assertions_dir: ""
+      check_source: false
     expected:
       outcome:
         Fail:
@@ -255,6 +283,8 @@ cases:
       spec_dir: test/fixtures/validation/valid_complete
       strict: false
       suppress: []
+      assertions_dir: ""
+      check_source: false
     expected:
       outcome:
         Pass:
@@ -268,6 +298,8 @@ cases:
       spec_dir: test/fixtures/validation/bad_expected
       strict: false
       suppress: []
+      assertions_dir: ""
+      check_source: false
     expected:
       outcome:
         Fail:
@@ -289,6 +321,8 @@ cases:
       spec_dir: test/fixtures/validation/valid_complete
       strict: false
       suppress: []
+      assertions_dir: ""
+      check_source: false
     expected:
       outcome:
         Pass:
@@ -302,6 +336,8 @@ cases:
       spec_dir: test/fixtures/validation/narrative_misuse
       strict: false
       suppress: []
+      assertions_dir: ""
+      check_source: false
     expected:
       outcome:
         Pass:
@@ -319,13 +355,18 @@ cases:
   - name: validate_coverage_not_applicable
     kind: narrative
     desc: >
-      Assertion coverage check requires an assertions directory input.
-      When no assertions dir is provided, this check is skipped.
-      When provided, it cross-references spec cases against source
-      assertions and reports uncovered ones as info.
+      Assertion-aware checks (assertion_coverage, level_correctness,
+      negative_coverage, mixed_level_bundle) require a directory of assertion
+      source files. When --assertions-dir is omitted it defaults to
+      <spec_dir>/sources/assertions; if that directory does not exist these
+      checks are skipped. Assertion source files are YAML documents with an
+      'id', an RFC 2119 'level' (MUST/SHOULD/MAY), and an optional
+      'negatable' flag. assertion_coverage reports any referenced
+      assertion_id that is absent from the sources as an error.
     verify:
-      - Run with --assertions-dir pointing to a dir with assertion files
-      - Uncovered assertions reported as info-level findings
+      - Run with --assertions-dir pointing to a dir of assertion YAML files
+      - Referenced assertion_ids missing from the sources are errors
+      - When the (default) assertions dir does not exist, the checks are skipped
 
   # ================================================================
   # Validate — 9. Level matching
@@ -338,6 +379,8 @@ cases:
       spec_dir: test/fixtures/validation/valid_complete
       strict: false
       suppress: []
+      assertions_dir: ""
+      check_source: false
     expected:
       outcome:
         Pass:
@@ -345,12 +388,14 @@ cases:
             warnings: 0
 
   - name: validate_level_mismatch_warn
-    desc: Source says MUST but case level is may — produces warning
+    desc: Source assertion is MUST but case level is may — produces warning
     operation: validate
     inputs:
       spec_dir: test/fixtures/validation/level_mismatch
       strict: false
       suppress: []
+      assertions_dir: test/fixtures/validation/assertions
+      check_source: false
     expected:
       outcome:
         Pass:
@@ -358,33 +403,37 @@ cases:
             warnings: 1
             findings:
               - severity: warn
-                check: level_match
-                message: "case 'required_but_marked_may' has level 'may' but source assertion TEST-MUST-1 appears to be MUST"
+                check: level_correctness
+                message: "case 'required_but_marked_may' has level 'may' but assertion 'SPEC-REQ-1' is level 'must'"
 
   # ================================================================
   # Validate — 10. Negative case coverage
   # ================================================================
 
   - name: validate_negative_coverage_pass
-    desc: MUST operation with both positive and negative cases passes
+    desc: Negatable assertion with both a positive and a negative case passes
     operation: validate
     inputs:
-      spec_dir: test/fixtures/validation/valid_complete
+      spec_dir: test/fixtures/validation/negative_coverage_pass
       strict: false
       suppress: []
+      assertions_dir: test/fixtures/validation/assertions
+      check_source: false
     expected:
       outcome:
         Pass:
           report:
-            warnings: 0
+            errors: 0
 
   - name: validate_negative_coverage_warn
-    desc: MUST operation with only positive cases produces warning
+    desc: Negatable assertion with only a positive case produces warning
     operation: validate
     inputs:
       spec_dir: test/fixtures/validation/no_negative_case
       strict: false
       suppress: []
+      assertions_dir: test/fixtures/validation/assertions
+      check_source: false
     expected:
       outcome:
         Pass:
@@ -393,7 +442,7 @@ cases:
             findings:
               - severity: warn
                 check: negative_coverage
-                message: "operation 'parse' has MUST cases but no error/rejection case"
+                message: "assertion 'SPEC-MUST-1' is negatable but has no negative test case"
 
   # ================================================================
   # Validate — suppress
@@ -406,6 +455,8 @@ cases:
       spec_dir: test/fixtures/validation/no_provenance
       strict: false
       suppress: [provenance]
+      assertions_dir: ""
+      check_source: false
     expected:
       outcome:
         Pass:
@@ -418,12 +469,216 @@ cases:
     inputs:
       spec_dir: test/fixtures/validation/level_mismatch
       strict: false
-      suppress: [provenance, level_match]
+      suppress: [provenance, level_correctness]
+      assertions_dir: test/fixtures/validation/assertions
+      check_source: false
     expected:
       outcome:
         Pass:
           report:
             warnings: 0
+
+  # ================================================================
+  # Validate — 11. Assertion coverage
+  # ================================================================
+
+  - name: validate_assertion_coverage_pass
+    desc: Assertion IDs that exist in assertions dir produce no findings
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/assertion_coverage
+      strict: false
+      suppress: []
+      assertions_dir: test/fixtures/validation/assertions
+      check_source: false
+    expected:
+      outcome:
+        Pass:
+          report:
+            errors: 0
+
+  - name: validate_assertion_coverage_miss
+    desc: Assertion ID not found in assertions dir produces an error
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/assertion_coverage_miss
+      strict: false
+      suppress: []
+      assertions_dir: test/fixtures/validation/assertions
+      check_source: false
+    expected:
+      outcome:
+        Fail:
+          report:
+            errors: 1
+            findings:
+              - severity: error
+                check: assertion_coverage
+                message: "assertion 'MISSING-1' referenced in case 'test_case' not found in assertions dir"
+
+  # ================================================================
+  # Validate — 5b. Extra inputs
+  # ================================================================
+
+  - name: validate_extra_inputs_fail
+    desc: Case providing undeclared input produces error
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/extra_inputs
+      strict: false
+      suppress: []
+      assertions_dir: ""
+      check_source: false
+    expected:
+      outcome:
+        Fail:
+          report:
+            errors: 1
+            findings:
+              - severity: error
+                check: input_completeness
+                message: "case 'extra_input' has extra input 'c' not declared in operation 'add'"
+
+  # ================================================================
+  # Validate — dep_consistency
+  # ================================================================
+
+  - name: validate_dep_consistency_pass
+    desc: Operation depends_on referencing a defined operation produces no error
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/dep_consistency_pass
+      strict: false
+      suppress: []
+      assertions_dir: ""
+      check_source: false
+    expected:
+      outcome:
+        Pass:
+          report:
+            errors: 0
+
+  - name: validate_dep_consistency_fail
+    desc: Operation depends_on referencing an undefined operation produces error
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/dep_consistency_fail
+      strict: false
+      suppress: []
+      assertions_dir: ""
+      check_source: false
+    expected:
+      outcome:
+        Fail:
+          report:
+            errors: 1
+            findings:
+              - severity: error
+                check: dep_consistency
+                message: "operation 'derived' depends on undefined operation 'missing_op'"
+
+  # ================================================================
+  # Validate — mixed_level_bundle
+  # ================================================================
+
+  - name: validate_mixed_level_bundle_warn
+    desc: Case bundling MUST and MAY level assertions produces warning
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/mixed_level_bundle
+      strict: false
+      suppress: []
+      assertions_dir: test/fixtures/validation/assertions
+      check_source: false
+    expected:
+      outcome:
+        Pass:
+          report:
+            warnings: 1
+            findings:
+              - severity: warn
+                check: mixed_level_bundle
+                message: "case 'mixed_case' bundles assertions of mixed levels (must and may)"
+
+  # ================================================================
+  # Validate — 12. Runnable cases must have expected
+  # ================================================================
+
+  - name: validate_no_expected_fail
+    desc: Runnable case without expected or steps produces error
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/no_expected
+      strict: false
+      suppress: []
+      assertions_dir: ""
+      check_source: false
+    expected:
+      outcome:
+        Fail:
+          report:
+            errors: 1
+            findings:
+              - severity: error
+                check: runnable_expected
+                message: "case 'missing_expected' has no expected or steps"
+
+  # ================================================================
+  # Validate — source checks (opt-in with --check-source)
+  # ================================================================
+
+  - name: validate_source_check_pass
+    desc: Source with pub setup functions and pub input fields produces no errors
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/source_check_pass
+      strict: false
+      suppress: []
+      assertions_dir: ""
+      check_source: true
+    expected:
+      outcome:
+        Pass:
+          report:
+            errors: 0
+
+  - name: validate_source_check_setup_not_pub
+    desc: A #[spec_setup] function that is not pub produces an error
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/source_check_fail_setup
+      strict: false
+      suppress: []
+      assertions_dir: ""
+      check_source: true
+    expected:
+      outcome:
+        Fail:
+          report:
+            errors: 1
+            findings:
+              - severity: error
+                check: source_setup_visibility
+                message: "#[spec_setup] function 'make_request' must be declared 'pub fn'"
+
+  - name: validate_source_check_field_not_pub
+    desc: A constructible input-type field that is not pub produces an error
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/source_check_fail_field
+      strict: false
+      suppress: []
+      assertions_dir: ""
+      check_source: true
+    expected:
+      outcome:
+        Fail:
+          report:
+            errors: 1
+            findings:
+              - severity: error
+                check: source_field_visibility
+                message: "field 'x' of input type 'ComputeRequest' must be 'pub'"
 
   # ================================================================
   # Run — all status types

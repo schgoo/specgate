@@ -1,0 +1,30 @@
+spec_version: "0.4.0"
+name: test.negative_coverage_pass
+operations:
+  do_thing:
+    inputs: { input: string }
+    outputs: [do_thing.outcome, result]
+cases:
+  - name: accepts_valid
+    desc: Positive case for a negatable assertion
+    level: must
+    source:
+      assertion_ids: [SPEC-MUST-1]
+      spec: "Test Spec"
+      section: "§1"
+    operation: do_thing
+    inputs: { input: "good" }
+    expected:
+      - result: "ok"
+  - name: rejects_invalid
+    desc: Negative case covering the negatable assertion
+    negative: true
+    level: must
+    source:
+      assertion_ids: [SPEC-MUST-1]
+      spec: "Test Spec"
+      section: "§1"
+    operation: do_thing
+    inputs: { input: "" }
+    expected:
+      - do_thing.outcome: "Error"

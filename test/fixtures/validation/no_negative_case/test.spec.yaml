@@ -9,7 +9,7 @@ cases:
     desc: Valid input parses successfully
     level: must
     source:
-      assertion_ids: [PARSE-1]
+      assertion_ids: [SPEC-MUST-1]
       spec: "Test Spec"
       section: "§2"
     operation: parse

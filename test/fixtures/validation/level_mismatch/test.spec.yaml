@@ -8,7 +8,7 @@ cases:
     desc: Source assertion is MUST but case level is may
     level: may
     source:
-      assertion_ids: [TEST-MUST-1]
+      assertion_ids: [SPEC-REQ-1]
       spec: "Test Spec"
       section: "§1"
     operation: required_feature
