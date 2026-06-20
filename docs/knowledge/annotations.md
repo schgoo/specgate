@@ -19,23 +19,99 @@ before a `Run` for op X are "pre-X"; events after are "post-X". The
 spec author rarely thinks in these terms — they just list events in the
 order they care about.
 
-## The five annotations
+`value` is structured. The runtime preserves scalars and collections as a
+`Value` rather than flattening everything to strings, so specs can match on
+lists, maps, sets, numeric ranges, and nested shapes.
+
+## The annotation surface
 
 | Annotation | Placed on | Purpose | Trace emitted |
 |------------|-----------|---------|---------------|
-| `#[spec_operation("name")]` | Free function or method | Marks the operation a case invokes by `operation:`/`steps[].operation:`. | `Run { operation: name }` at the entry point, plus per-parameter `Event { "<name>.<param>", value }` and `Event { "<name>.result", value }` for the return value (or `<name>.outcome` + `<name>.error` for `Result`). |
+| `#[spec_operation("name")]` | Free function or method | Marks the operation a case invokes by `operation:`/`steps[].operation:`. | `Run { operation: name }` at the entry point, plus per-parameter `Event { "<name>.<param>", value }` and auto-generated result events addressable from specs as `$result` / `$outcome` / `$error`. |
 | `#[spec_setup("name")]` | Free function (no `self`) | Names a factory a case invokes by `setup:`. | `Event { "<name>.<param>", value }` per parameter. |
+| `#[derive(SpecEvent)]` | Struct or enum | Enables generated event emission for returned / observed values. | Structs emit named field values; enums emit the variant name plus named-field payload events. |
 | `#[spec_event]` | Struct field (with `#[derive(SpecEvent)]` on the struct) | Every write to the field emits an event. | `Event { name: "<field>", value: new_value }` on each mutation. Multi-setup cases prefix with the alias (`source.balance`). |
-| `spec_trace!("name", expr)` | Inline expression | Records the value of `expr` at this point in execution. | `Event { name, value: format!("{}", expr) }`. |
+| `spec_trace!("name", expr)` | Inline expression | Records the value of `expr` at this point in execution. | `Event { name, value }` using the structured `Value` representation. |
 | `#[spec_mock("name")]` | Local binding around a method call | Intercepts the call and returns the case-supplied response. | `Event { "<name>.request", input }` then `Event { "<name>.response", mocked_response }`. |
 
 **No `kind` parameter.** Every `#[spec_operation("…")]` in the fixtures
 is name-only. The shape of the operation is expressed entirely by the
 contents of the spec's `expected:` list.
 
-**No `spec_capture` or `spec_checkpoint!()` annotations.** Field capture
-is `#[derive(SpecEvent)]` + `#[spec_event]` on fields; inline capture is
+**No `spec_capture` or `spec_checkpoint!()` annotations.** Field capture is
+`#[derive(SpecEvent)]` + `#[spec_event]` on fields; inline capture is
 `spec_trace!()`. Those two cover every observation pattern.
+
+## `#[derive(SpecEvent)]`
+
+`SpecEvent` derive is how structured values become traceable without writing
+manual serialization code.
+
+### Structs
+
+For structs, derive enables `#[spec_event]` fields and preserves collection
+shape:
+
+```rust
+#[derive(SpecEvent)]
+pub struct EntityType {
+    #[spec_event(name = "entity_name")]
+    pub name: String,
+    #[spec_event(name = "key_properties")]
+    pub key_properties: Vec<String>,
+    #[spec_event(name = "structural_properties")]
+    pub structural_properties: Vec<String>,
+}
+```
+
+This emits structured `List` values, which specs can match directly or with
+operators like `$size` and `$contains`. Canonical fixture:
+`test/rust/crates/specgate-fixtures/src/structured_output.rs`.
+
+### Enums
+
+For enums, derive supports:
+
+- unit variants (`Point`)
+- named-field variants (`Circle { radius }`, `Rectangle { width, height }`)
+
+Example:
+
+```rust
+#[derive(SpecEvent)]
+pub enum Shape {
+    Circle { radius: f64 },
+    Rectangle { width: f64, height: f64 },
+    Point,
+}
+```
+
+The trace emits the variant tag on the base name plus named-field payloads
+on subpaths:
+
+- `shape: "Point"`
+- `shape: "Circle"` and `shape.radius: "5"`
+- `shape: "Rectangle"`, `shape.width: "3"`, `shape.height: "4"`
+
+Canonical fixture: `test/rust/crates/specgate-fixtures/src/enum_event.rs`.
+
+## `spec_trace!()`
+
+Use `spec_trace!()` for inline checkpoints when a value is not naturally
+exposed through a captured field or return value.
+
+```rust
+#[spec_operation("process")]
+pub fn process(data: &str) -> String {
+    let upper = data.to_uppercase();
+    spec_trace!("after_upper", &upper);
+    upper.trim().to_string()
+}
+```
+
+This is the canonical way to emit intermediate structured observations.
+Canonical fixture:
+`test/rust/crates/specgate-fixtures/src/checkpoint_inline.rs`.
 
 ## Rules
 
@@ -46,7 +122,9 @@ is `#[derive(SpecEvent)]` + `#[spec_event]` on fields; inline capture is
 - A `#[spec_mock]` name must be unique within an operation.
 - `#[spec_event]` on a field captures **every** mutation, including the
   initial value set by the setup function. This is why so many fixtures
-  show a leading `count: "0"` (or similar) before the first `run:`.
+  show a leading `count: "0"` (or similar) before the first `$run:`.
+- Use `#[spec_event(name = "...")]` when the emitted field name in the
+  spec should differ from the source field name.
 
 ## How annotations compose
 
@@ -70,7 +148,9 @@ for the full example.
 | `#[spec_operation]` only (no setup) | `stateless_add.rs` |
 | `#[spec_setup]` + `#[spec_event]` + method op | `statemachine_counter.rs` |
 | Multiple `#[spec_event]` fields | `multi_field_capture.rs` |
-| `spec_trace!()` inline | `checkpoint_inline.rs` |
+| `spec_trace!()` inline checkpoint | `checkpoint_inline.rs` |
+| Structured value emission (`Vec`, `BTreeMap`) | `structured_output.rs`, `operators.rs` |
+| Enum `#[derive(SpecEvent)]` | `enum_event.rs` |
 | `#[spec_mock]` | `mock_field.rs`, `mock_multi_response.rs` |
 | Setup with parameters | `setup_with_params.rs` |
 | Multiple setups | `multi_setup.rs` |

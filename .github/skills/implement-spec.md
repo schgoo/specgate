@@ -94,15 +94,14 @@ For each affected spec, classify the changes:
 ### Single-operation specs
 
 - `name` — the component name (use for module/crate naming)
-- `binding` — which binding file(s) to use (`{ name, target }` object or list)
-  - `binding.name` resolves to `bindings/<name>.yaml`
-  - `binding.target` selects the execution target within that binding
+- `binding` — which binding file path(s) to use
+- `target` — which target within the binding to execute by default
 - `depends_on` — specs this spec depends on for shared types
 - `inputs` — what the entry point takes
 - `types` — type definitions (oneof = enum/union, fields = struct)
 - `outcome` — what the operation returns (variants or single type)
 - `outputs` — what's observable per outcome
-- `cases` — concrete test cases (input → expected outcome + outputs)
+- `cases` — concrete, narrative, or property test cases
 
 ### State machine specs
 
@@ -167,6 +166,26 @@ validates trace-level conformance; the direct tests give fast developer feedback
 
 See the language-specific knowledge files for test code examples.
 
+### Property cases
+
+When the spec contains `kind: property` cases:
+
+1. **Keep the normal annotations** — every referenced operation still needs
+   `#[spec_operation("name")]`, and any observed structured outputs still need
+   `#[derive(SpecEvent)]`, `#[spec_event]`, or `spec_trace!()`.
+2. **Make the operations property-testable** — pure where possible, deterministic
+   for the same inputs, and safe across many repeated runs.
+3. **Ensure the runtime test dependency exists** — in Rust, make sure `proptest`
+   is available for direct tests that mirror the property cases.
+4. **Translate generators into direct property tests** — write a matching
+   `proptest!` (or equivalent) test for each property case so developers get
+   fast feedback before running the full harness.
+5. **Preserve named call outputs** — `$assert` expressions refer to named calls
+   like `forward.$result`, so your implementation must expose the same output
+   fields the property case expects.
+6. **Counterexamples matter** — on failure, prefer assertions and helper code
+   that keep the shrunk failing input visible and reproducible.
+
 ## Rules
 
 ### Annotations are required
@@ -183,6 +202,7 @@ execute, and validate them automatically.
 - **Every `spec_mock` needs a `name`** — use the dependency's logical name
 - **Setup functions must not take `self`** — they are free functions
 - **Async operations** (`async: true` in spec) must be `async fn`
+- **Property-case operations** should be deterministic and repeatable across many generated inputs
 
 ### Trust boundary — validation artifacts are off-limits
 
@@ -290,3 +310,5 @@ generate and run the tests deterministically:
 The point: the spec harness should be able to generate and execute the same
 tests you wrote by hand. If it can't, something is missing from the spec,
 binding, or backend.
+
+
