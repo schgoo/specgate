@@ -58,29 +58,29 @@ fn has_receiver(f: &ItemFn) -> bool {
 }
 
 fn is_owned_primitive(ty: &Type) -> bool {
-    if let Type::Path(p) = ty {
-        if let Some(s) = p.path.segments.last() {
-            return matches!(
-                s.ident.to_string().as_str(),
-                "i8" | "i16"
-                    | "i32"
-                    | "i64"
-                    | "i128"
-                    | "isize"
-                    | "u8"
-                    | "u16"
-                    | "u32"
-                    | "u64"
-                    | "u128"
-                    | "usize"
-                    | "f32"
-                    | "f64"
-                    | "bool"
-                    | "char"
-                    | "String"
-                    | "str"
-            );
-        }
+    if let Type::Path(p) = ty
+        && let Some(s) = p.path.segments.last()
+    {
+        return matches!(
+            s.ident.to_string().as_str(),
+            "i8" | "i16"
+                | "i32"
+                | "i64"
+                | "i128"
+                | "isize"
+                | "u8"
+                | "u16"
+                | "u32"
+                | "u64"
+                | "u128"
+                | "usize"
+                | "f32"
+                | "f64"
+                | "bool"
+                | "char"
+                | "String"
+                | "str"
+        );
     }
     false
 }
@@ -104,10 +104,10 @@ fn is_printable_param(ty: &Type) -> bool {
 fn typed_params(f: &ItemFn) -> Vec<(Ident, Type)> {
     let mut out = Vec::new();
     for arg in &f.sig.inputs {
-        if let FnArg::Typed(pt) = arg {
-            if let Pat::Ident(id) = &*pt.pat {
-                out.push((id.ident.clone(), (*pt.ty).clone()));
-            }
+        if let FnArg::Typed(pt) = arg
+            && let Pat::Ident(id) = &*pt.pat
+        {
+            out.push((id.ident.clone(), (*pt.ty).clone()));
         }
     }
     out
@@ -134,11 +134,11 @@ impl VisitMut for BodyInstrumenter {
         for stmt in original {
             match stmt {
                 Stmt::Local(local) => {
-                    if let Some(mock_name) = take_mock_name(&local.attrs) {
-                        if let Some(stmts) = expand_mock_let(&local, &mock_name) {
-                            new.extend(stmts);
-                            continue;
-                        }
+                    if let Some(mock_name) = take_mock_name(&local.attrs)
+                        && let Some(stmts) = expand_mock_let(&local, &mock_name)
+                    {
+                        new.extend(stmts);
+                        continue;
                     }
                     new.push(Stmt::Local(local));
                 }
@@ -158,10 +158,10 @@ impl VisitMut for BodyInstrumenter {
 
 fn take_mock_name(attrs: &[syn::Attribute]) -> Option<String> {
     for a in attrs {
-        if a.path().is_ident("spec_mock") {
-            if let Ok(NameArg(name)) = a.parse_args::<NameArg>() {
-                return Some(name);
-            }
+        if a.path().is_ident("spec_mock")
+            && let Ok(NameArg(name)) = a.parse_args::<NameArg>()
+        {
+            return Some(name);
         }
     }
     None

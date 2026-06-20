@@ -70,13 +70,11 @@ fn parse_cargo_name(toml: &str) -> Option<String> {
         if trimmed.starts_with('[') {
             in_package = false;
         }
-        if in_package {
-            if let Some(rest) = trimmed.strip_prefix("name") {
-                let rest = rest.trim_start_matches([' ', '\t', '=']).trim();
-                let name = rest.trim_matches('"').trim_matches('\'');
-                if !name.is_empty() {
-                    return Some(name.to_string());
-                }
+        if in_package && let Some(rest) = trimmed.strip_prefix("name") {
+            let rest = rest.trim_start_matches([' ', '\t', '=']).trim();
+            let name = rest.trim_matches('"').trim_matches('\'');
+            if !name.is_empty() {
+                return Some(name.to_string());
             }
         }
     }
@@ -361,10 +359,10 @@ fn render_case(out: &mut String, case: &Case, spec: &Spec, annotated: &Annotated
             let args = render_setup_args(sig, &case.inputs);
             let var = sanitize_ident(name);
             writeln!(out, "        let mut {var} = fut::{name}({args});").expect("fmt");
-            if let Some(sig) = sig {
-                if annotated.spec_event_structs.contains(sig.return_type.trim()) {
-                    writeln!(out, "        SpecEvent::emit_fields(&{var}, None);").expect("fmt");
-                }
+            if let Some(sig) = sig
+                && annotated.spec_event_structs.contains(sig.return_type.trim())
+            {
+                writeln!(out, "        SpecEvent::emit_fields(&{var}, None);").expect("fmt");
             }
             setup_vars.push((var, name.clone()));
         }
@@ -374,10 +372,10 @@ fn render_case(out: &mut String, case: &Case, spec: &Spec, annotated: &Annotated
                 let args = render_setup_args(sig, &case.inputs);
                 let var = sanitize_ident(alias);
                 writeln!(out, "        let mut {var} = fut::{fn_name}({args});").expect("fmt");
-                if let Some(sig) = sig {
-                    if annotated.spec_event_structs.contains(sig.return_type.trim()) {
-                        writeln!(out, "        SpecEvent::emit_fields(&{var}, Some({alias:?}));").expect("fmt");
-                    }
+                if let Some(sig) = sig
+                    && annotated.spec_event_structs.contains(sig.return_type.trim())
+                {
+                    writeln!(out, "        SpecEvent::emit_fields(&{var}, Some({alias:?}));").expect("fmt");
                 }
                 setup_vars.push((var, fn_name.clone()));
             }

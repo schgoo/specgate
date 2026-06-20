@@ -255,10 +255,10 @@ fn resolve_outcome_outputs(doc: &SpecDocument, case: &SpecCase) -> Vec<String> {
     let outcome = case.expected.get("outcome").and_then(|v| v.as_str()).unwrap_or("");
 
     let when_key = format!("when {outcome}");
-    if let Some(block) = doc.outputs.get(&when_key) {
-        if let Some(map) = block.as_mapping() {
-            return map.keys().filter_map(|k| k.as_str().map(String::from)).collect();
-        }
+    if let Some(block) = doc.outputs.get(&when_key)
+        && let Some(map) = block.as_mapping()
+    {
+        return map.keys().filter_map(|k| k.as_str().map(String::from)).collect();
     }
 
     doc.outputs

@@ -218,10 +218,10 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
         let p = entry.path();
         if p.is_dir() {
             walk(&p, out);
-        } else if let Some(name) = p.file_name().and_then(|s| s.to_str()) {
-            if name.ends_with(".spec.yaml") {
-                out.push(p);
-            }
+        } else if let Some(name) = p.file_name().and_then(|s| s.to_str())
+            && name.ends_with(".spec.yaml")
+        {
+            out.push(p);
         }
     }
 }
@@ -271,12 +271,12 @@ fn check_file(
         for (k, v) in ops_map {
             let Some(name) = k.as_str() else { continue };
             let mut decl = OpDecl::default();
-            if let Some(body) = v.as_mapping() {
-                if let Some(Value::Mapping(inputs)) = body.get(Value::String("inputs".into())) {
-                    for (ik, _) in inputs {
-                        if let Some(s) = ik.as_str() {
-                            decl.declared_inputs.push(s.to_string());
-                        }
+            if let Some(body) = v.as_mapping()
+                && let Some(Value::Mapping(inputs)) = body.get(Value::String("inputs".into()))
+            {
+                for (ik, _) in inputs {
+                    if let Some(s) = ik.as_str() {
+                        decl.declared_inputs.push(s.to_string());
                     }
                 }
             }
@@ -292,15 +292,15 @@ fn check_file(
             let Some(body) = v.as_mapping() else { continue };
             if let Some(Value::Sequence(deps)) = body.get(Value::String("depends_on".into())) {
                 for dep in deps {
-                    if let Some(dep_name) = dep.as_str() {
-                        if !ops.contains_key(dep_name) {
-                            findings.push(ValidationFinding {
-                                severity: Severity::Error,
-                                check: "dep_consistency".into(),
-                                file: file.into(),
-                                message: format!("operation '{op_name}' depends on undefined operation '{dep_name}'"),
-                            });
-                        }
+                    if let Some(dep_name) = dep.as_str()
+                        && !ops.contains_key(dep_name)
+                    {
+                        findings.push(ValidationFinding {
+                            severity: Severity::Error,
+                            check: "dep_consistency".into(),
+                            file: file.into(),
+                            message: format!("operation '{op_name}' depends on undefined operation '{dep_name}'"),
+                        });
                     }
                 }
             }
@@ -422,16 +422,16 @@ fn check_file(
         // 6. expected_format: each entry must have exactly one key.
         if let Some(Value::Sequence(items)) = cm.get(Value::String("expected".into())) {
             for entry in items {
-                if let Value::Mapping(em) = entry {
-                    if em.len() != 1 {
-                        findings.push(ValidationFinding {
-                            severity: Severity::Error,
-                            check: "expected_format".into(),
-                            file: file.into(),
-                            message: format!("case '{name}' has expected entry with multiple keys"),
-                        });
-                        break;
-                    }
+                if let Value::Mapping(em) = entry
+                    && em.len() != 1
+                {
+                    findings.push(ValidationFinding {
+                        severity: Severity::Error,
+                        check: "expected_format".into(),
+                        file: file.into(),
+                        message: format!("case '{name}' has expected entry with multiple keys"),
+                    });
+                    break;
                 }
             }
         }
@@ -453,23 +453,21 @@ fn check_file(
 
         // level_correctness: a case that declares a level must match the level
         // of each assertion it references.
-        if assertions_active {
-            if let Some(case_level_raw) = level {
-                let case_level = normalize_level(case_level_raw);
-                for aid in &source_ids {
-                    if let Some(a) = assertions.get(aid) {
-                        if a.level != case_level {
-                            findings.push(ValidationFinding {
-                                severity: Severity::Warn,
-                                check: "level_correctness".into(),
-                                file: file.into(),
-                                message: format!(
-                                    "case '{name}' has level '{case_level}' but assertion '{aid}' is level '{}'",
-                                    a.level
-                                ),
-                            });
-                        }
-                    }
+        if assertions_active && let Some(case_level_raw) = level {
+            let case_level = normalize_level(case_level_raw);
+            for aid in &source_ids {
+                if let Some(a) = assertions.get(aid)
+                    && a.level != case_level
+                {
+                    findings.push(ValidationFinding {
+                        severity: Severity::Warn,
+                        check: "level_correctness".into(),
+                        file: file.into(),
+                        message: format!(
+                            "case '{name}' has level '{case_level}' but assertion '{aid}' is level '{}'",
+                            a.level
+                        ),
+                    });
                 }
             }
         }
@@ -528,15 +526,16 @@ fn check_file(
     // negative case is flagged. BTreeMap iteration keeps output sorted by id.
     if assertions_active {
         for (aid, has_negative) in &referenced_ids {
-            if let Some(a) = assertions.get(aid) {
-                if a.negatable && !*has_negative {
-                    findings.push(ValidationFinding {
-                        severity: Severity::Warn,
-                        check: "negative_coverage".into(),
-                        file: file.into(),
-                        message: format!("assertion '{aid}' is negatable but has no negative test case"),
-                    });
-                }
+            if let Some(a) = assertions.get(aid)
+                && a.negatable
+                && !*has_negative
+            {
+                findings.push(ValidationFinding {
+                    severity: Severity::Warn,
+                    check: "negative_coverage".into(),
+                    file: file.into(),
+                    message: format!("assertion '{aid}' is negatable but has no negative test case"),
+                });
             }
         }
     }
@@ -618,10 +617,11 @@ fn run_source_checks(spec: &Value, file: &str, findings: &mut Vec<ValidationFind
             let Some(body) = v.as_mapping() else { continue };
             if let Some(Value::Mapping(inputs)) = body.get(Value::String("inputs".into())) {
                 for (_, tv) in inputs {
-                    if let Some(type_name) = tv.as_str() {
-                        if declared_types.contains(type_name) && !input_types.iter().any(|t| t == type_name) {
-                            input_types.push(type_name.to_string());
-                        }
+                    if let Some(type_name) = tv.as_str()
+                        && declared_types.contains(type_name)
+                        && !input_types.iter().any(|t| t == type_name)
+                    {
+                        input_types.push(type_name.to_string());
                     }
                 }
             }
@@ -661,11 +661,11 @@ fn collect_rs_content(dir: &Path) -> String {
             let p = entry.path();
             if p.is_dir() {
                 stack.push(p);
-            } else if p.extension().and_then(|s| s.to_str()) == Some("rs") {
-                if let Ok(s) = std::fs::read_to_string(&p) {
-                    content.push_str(&s);
-                    content.push('\n');
-                }
+            } else if p.extension().and_then(|s| s.to_str()) == Some("rs")
+                && let Ok(s) = std::fs::read_to_string(&p)
+            {
+                content.push_str(&s);
+                content.push('\n');
             }
         }
     }

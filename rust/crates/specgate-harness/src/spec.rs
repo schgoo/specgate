@@ -74,10 +74,10 @@ fn parse_spec_value(v: &YValue) -> Result<Spec, ParseError> {
         for (k, v) in ops {
             let Some(name) = k.as_str() else { continue };
             let Some(body) = v.as_mapping() else { continue };
-            if let Some(a) = body.get(YValue::String("async".into())) {
-                if a.as_bool() == Some(true) {
-                    async_ops.insert(name.to_string());
-                }
+            if let Some(a) = body.get(YValue::String("async".into()))
+                && a.as_bool() == Some(true)
+            {
+                async_ops.insert(name.to_string());
             }
         }
     }
@@ -294,11 +294,11 @@ fn parse_assert_value(v: &YValue) -> Result<AssertValue, ParseError> {
     if let YValue::Mapping(m) = v {
         let mut has_op = false;
         for (k, _) in m {
-            if let Some(s) = k.as_str() {
-                if s.starts_with('$') {
-                    has_op = true;
-                    break;
-                }
+            if let Some(s) = k.as_str()
+                && s.starts_with('$')
+            {
+                has_op = true;
+                break;
             }
         }
         if has_op {

@@ -498,10 +498,11 @@ fn resolve_fixture_source(package_root: &Path, fixture_basename: &str, cases: &[
             }
         }
         // Light filename-similarity bonus.
-        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-            if fixture_basename.starts_with(stem) && stem.len() > 4 {
-                score += stem.len();
-            }
+        if let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+            && fixture_basename.starts_with(stem)
+            && stem.len() > 4
+        {
+            score += stem.len();
         }
         if best.as_ref().is_none_or(|b| score > b.0) && score > 0 {
             best = Some((score, path));
