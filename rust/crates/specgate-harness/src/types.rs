@@ -36,7 +36,7 @@ impl From<i64> for AssertValue {
 }
 impl From<i32> for AssertValue {
     fn from(i: i32) -> Self {
-        AssertValue::Exact(Value::Integer(i as i64))
+        AssertValue::Exact(Value::Integer(i64::from(i)))
     }
 }
 impl From<bool> for AssertValue {
@@ -85,7 +85,7 @@ pub enum Assertion {
     Anywhere { items: Vec<Assertion> },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CaseStatus {
     Pass,
     Fail,
@@ -95,17 +95,12 @@ pub enum CaseStatus {
 
 /// Normative strength of a case. Affects what happens when the operation
 /// or setup the case references is missing from the source annotations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CaseLevel {
+    #[default]
     Must,
     Should,
     May,
-}
-
-impl Default for CaseLevel {
-    fn default() -> Self {
-        CaseLevel::Must
-    }
 }
 
 /// Free-form provenance metadata threaded through from the spec.
@@ -133,13 +128,15 @@ pub enum RunOutcome {
 }
 
 impl RunOutcome {
+    #[must_use]
     pub fn is_complete(&self) -> bool {
         matches!(self, RunOutcome::Complete { .. })
     }
 }
 
 impl CaseStatus {
-    pub fn as_str(&self) -> &'static str {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
         match self {
             CaseStatus::Pass => "pass",
             CaseStatus::Fail => "fail",
@@ -159,7 +156,8 @@ impl std::fmt::Display for RunOutcome {
 }
 
 impl CaseLevel {
-    pub fn as_str(&self) -> &'static str {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
         match self {
             CaseLevel::Must => "must",
             CaseLevel::Should => "should",

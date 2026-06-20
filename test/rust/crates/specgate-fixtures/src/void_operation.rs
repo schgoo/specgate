@@ -14,7 +14,7 @@ pub struct Logger {
 
 impl Logger {
     #[spec_operation("log")]
-    pub fn log(&mut self, msg: &str) {
+    pub fn log(&mut self, _msg: &str) {
         self.count += 1;
     }
 }

@@ -1,4 +1,4 @@
-//! SpecGate harness — entry point.
+//! `SpecGate` harness — entry point.
 //!
 //! `run_spec(path)` loads a spec, locates the fixture source via the
 //! binding, generates a temporary Cargo project that includes the
@@ -30,16 +30,23 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// Loads and validates the spec at `spec_path`, generates a temporary Cargo
+/// project, compiles and runs it, then matches traces against each case's
+/// `expected:` assertions.
+///
+/// # Panics
+///
+/// Panics only if an internal invariant is violated: all target names in case
+/// groups are validated before any IO work begins, so the `.unwrap()` on
+/// `binding.target(...)` inside the group loop cannot be reached with an
+/// unknown target.
 pub fn run_spec(spec_path: &str) -> RunOutcome {
     let path = PathBuf::from(spec_path);
     let path = std::fs::canonicalize(&path).unwrap_or(path);
-    let raw = match std::fs::read_to_string(&path) {
-        Ok(t) => t,
-        Err(_) => {
-            return RunOutcome::Error {
-                reason: format!("spec file not found: {spec_path}"),
-            };
-        }
+    let Ok(raw) = std::fs::read_to_string(&path) else {
+        return RunOutcome::Error {
+            reason: format!("spec file not found: {spec_path}"),
+        };
     };
 
     // First: pure YAML validity.
@@ -53,13 +60,10 @@ pub fn run_spec(spec_path: &str) -> RunOutcome {
     };
 
     // Then: spec shape parsing.
-    let parsed = match spec::parse_spec(&yaml_value) {
-        Ok(s) => s,
-        Err(_) => {
-            return RunOutcome::Error {
-                reason: "spec file is not valid YAML".into(),
-            };
-        }
+    let Ok(parsed) = spec::parse_spec(&yaml_value) else {
+        return RunOutcome::Error {
+            reason: "spec file is not valid YAML".into(),
+        };
     };
 
     if parsed.cases.is_empty() {
@@ -68,22 +72,16 @@ pub fn run_spec(spec_path: &str) -> RunOutcome {
         };
     }
 
-    let binding_path = match parsed.binding_path.as_deref() {
-        Some(p) => p,
-        None => {
-            return RunOutcome::Error {
-                reason: "spec has no binding".into(),
-            };
-        }
+    let Some(binding_path) = parsed.binding_path.as_deref() else {
+        return RunOutcome::Error {
+            reason: "spec has no binding".into(),
+        };
     };
     let binding_full = spec::binding_path_resolved(&path, binding_path);
-    let binding = match binding::load_binding(&binding_full) {
-        Some(b) => b,
-        None => {
-            return RunOutcome::Error {
-                reason: format!("binding '{binding_path}' not found"),
-            };
-        }
+    let Some(binding) = binding::load_binding(&binding_full) else {
+        return RunOutcome::Error {
+            reason: format!("binding '{binding_path}' not found"),
+        };
     };
 
     // Shape check: spec-level event key validation.
@@ -102,7 +100,7 @@ pub fn run_spec(spec_path: &str) -> RunOutcome {
         for (i, case) in parsed.cases.iter().enumerate() {
             let eff = case.target.clone().or_else(|| parsed.target.clone());
             // Use a sentinel key that can't clash with real target names.
-            let key = eff.as_deref().map(String::from).unwrap_or_else(|| "\x00default\x00".to_string());
+            let key = eff.as_deref().map_or_else(|| "\x00default\x00".to_string(), String::from);
             if let Some(&gidx) = seen.get(&key) {
                 groups[gidx].1.push(i);
             } else {
@@ -138,7 +136,7 @@ pub fn run_spec(spec_path: &str) -> RunOutcome {
 
         match run_group(target, &group_cases, &parsed, &fixture_basename, &workspace_root, &scratch_dir) {
             Ok(group_results) => {
-                for (&case_idx, result) in case_indices.iter().zip(group_results.into_iter()) {
+                for (&case_idx, result) in case_indices.iter().zip(group_results) {
                     results_by_index[case_idx] = Some(result);
                 }
             }
@@ -163,17 +161,14 @@ fn run_group(
     workspace_root: &Path,
     scratch_dir: &Path,
 ) -> Result<Vec<CaseResult>, String> {
-    let fixture_src = match resolve_fixture_source(&target.package_root, fixture_basename, group_cases) {
-        Some(p) => p,
-        None => {
-            if let Some(results) = short_circuit_non_must(group_cases, None) {
-                return Ok(results);
-            }
-            return Err(format!(
-                "source file not found: {}",
-                target.package_root.join("src").join(format!("{fixture_basename}.rs")).display()
-            ));
+    let Some(fixture_src) = resolve_fixture_source(&target.package_root, fixture_basename, group_cases) else {
+        if let Some(results) = short_circuit_non_must(group_cases, None) {
+            return Ok(results);
         }
+        return Err(format!(
+            "source file not found: {}",
+            target.package_root.join("src").join(format!("{fixture_basename}.rs")).display()
+        ));
     };
 
     let src_text =
@@ -252,12 +247,14 @@ fn run_group(
     let proj = codegen::generate(
         scratch_dir,
         &fixture_src,
-        spec,
-        &cases_to_run,
-        &annotated,
-        workspace_root,
-        needs_async,
-        Some(&target.package_root),
+        &codegen::GenerateConfig {
+            spec,
+            cases_to_run: &cases_to_run,
+            annotated: &annotated,
+            workspace_root,
+            needs_async,
+            fixture_pkg_root: Some(&target.package_root),
+        },
     )
     .map_err(|e| format!("failed to scaffold runner: {e}"))?;
 
@@ -281,10 +278,10 @@ fn run_group(
         if stderr.contains("error[E") || stderr.contains("error:") || stderr.contains("could not compile") {
             return Err("source failed to compile".into());
         }
-        return Err(format!("runner failed: {}", stderr));
+        return Err(format!("runner failed: {stderr}"));
     }
 
-    let trace_text = std::fs::read_to_string(&proj.trace_file).map_err(|_| "runner produced no trace output".to_string())?;
+    let trace_text = std::fs::read_to_string(&proj.trace_file).map_err(|e| format!("runner produced no trace output: {e}"))?;
     let trace_map: std::collections::BTreeMap<String, Vec<TraceEvent>> =
         serde_yaml::from_str(&trace_text).map_err(|e| format!("failed to parse traces: {e}"))?;
 
@@ -506,7 +503,7 @@ fn resolve_fixture_source(package_root: &Path, fixture_basename: &str, cases: &[
                 score += stem.len();
             }
         }
-        if best.as_ref().map(|b| score > b.0).unwrap_or(true) && score > 0 {
+        if best.as_ref().is_none_or(|b| score > b.0) && score > 0 {
             best = Some((score, path));
         }
     }
@@ -576,8 +573,7 @@ fn check_shape(spec: &spec::Spec, raw: &serde_yaml::Value) -> Option<String> {
                 let strict_op = case_ops.iter().find(|op| {
                     ops_meta
                         .get(**op)
-                        .map(|m| !m.outputs.is_empty() && m.outputs.iter().all(|o| o.starts_with(&format!("{op}."))))
-                        .unwrap_or(false)
+                        .is_some_and(|m| !m.outputs.is_empty() && m.outputs.iter().all(|o| o.starts_with(&format!("{op}."))))
                 });
                 if let Some(op) = strict_op {
                     return Some(format!("expected event '{k}' is not a declared output of operation '{op}'"));
@@ -608,23 +604,16 @@ struct OpMeta {
 
 fn ops_metadata(raw: &serde_yaml::Value) -> std::collections::BTreeMap<String, OpMeta> {
     let mut out = std::collections::BTreeMap::new();
-    let map = match raw.as_mapping() {
-        Some(m) => m,
-        None => return out,
-    };
-    let ops = match map.get(serde_yaml::Value::String("operations".into())) {
-        Some(serde_yaml::Value::Mapping(m)) => m,
-        _ => return out,
+    let Some(map) = raw.as_mapping() else { return out };
+    let Some(serde_yaml::Value::Mapping(ops)) = map.get(serde_yaml::Value::String("operations".into())) else {
+        return out;
     };
     for (k, v) in ops {
         let name = match k.as_str() {
             Some(s) => s.to_string(),
             None => continue,
         };
-        let body = match v.as_mapping() {
-            Some(m) => m,
-            None => continue,
-        };
+        let Some(body) = v.as_mapping() else { continue };
         let mut meta = OpMeta::default();
         if let Some(serde_yaml::Value::Mapping(inputs)) = body.get(serde_yaml::Value::String("inputs".into())) {
             for (ik, _) in inputs {

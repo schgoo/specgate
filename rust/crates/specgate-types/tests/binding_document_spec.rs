@@ -82,9 +82,9 @@ targets:
 #[test]
 fn missing_language() {
     expect_invalid(
-        r#"
+        r"
 targets: {}
-"#,
+",
         "missing required field 'language'",
     );
 }
@@ -92,9 +92,9 @@ targets: {}
 #[test]
 fn empty_targets() {
     let binding = expect_valid(
-        r#"
+        r"
 language: csharp
-"#,
+",
     );
 
     assert_eq!(binding.language, "csharp");

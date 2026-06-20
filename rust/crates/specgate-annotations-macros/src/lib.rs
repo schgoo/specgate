@@ -1,4 +1,4 @@
-//! Procedural macros for SpecGate annotations.
+//! Procedural macros for `SpecGate` annotations.
 //!
 //! These expand into calls into `::specgate_annotations::__rt` (which
 //! re-exports `specgate-runtime`). The expanded code emits real trace
@@ -10,7 +10,8 @@ use quote::{quote, quote_spanned};
 use syn::parse::{Parse, ParseStream};
 use syn::visit_mut::VisitMut;
 use syn::{
-    BinOp, Block, Data, DeriveInput, Expr, Fields, FnArg, Ident, ItemFn, LitStr, Pat, ReturnType, Stmt, Type, parse_macro_input, parse_quote,
+    BinOp, Block, Data, DeriveInput, Expr, Fields, FnArg, Ident, ItemFn, LitStr, Pat, ReturnType, Stmt, Type, parse_macro_input,
+    parse_quote,
 };
 
 struct NameArg(String);
@@ -206,9 +207,8 @@ fn extract_mock_input(e: &Expr) -> Option<&Expr> {
 }
 
 fn field_mutation_emit(stmt: &Stmt, param_names: &[String]) -> Option<Stmt> {
-    let expr = match stmt {
-        Stmt::Expr(e, Some(_)) => e,
-        _ => return None,
+    let Stmt::Expr(expr, Some(_)) = stmt else {
+        return None;
     };
 
     let lhs = match expr {
@@ -238,14 +238,13 @@ fn field_mutation_emit(stmt: &Stmt, param_names: &[String]) -> Option<Stmt> {
 }
 
 fn field_emit_from_lhs(lhs: &Expr, param_names: &[String]) -> Option<Stmt> {
-    let field = match lhs {
-        Expr::Field(f) => f,
-        _ => return None,
+    let Expr::Field(field) = lhs else {
+        return None;
     };
-    let field_name = match &field.member {
-        syn::Member::Named(id) => id.to_string(),
-        _ => return None,
+    let syn::Member::Named(id) = &field.member else {
+        return None;
     };
+    let field_name = id.to_string();
     let event_name = match &*field.base {
         Expr::Path(p) if p.path.is_ident("self") => field_name.clone(),
         Expr::Path(p) => {
@@ -292,7 +291,7 @@ pub fn spec_operation(attr: TokenStream, item: TokenStream) -> TokenStream {
         #(#pre)*
         #body
     });
-    func.block = Box::new(new_body);
+    *func.block = new_body;
     quote!(#func).into()
 }
 
@@ -307,7 +306,7 @@ fn build_pre_stmts(op_name: &str, params: &[(Ident, Type)], is_method: bool, _ha
         return out;
     }
     for (id, _) in params {
-        let event_name = format!("{op_name}.{}", id);
+        let event_name = format!("{op_name}.{id}");
         out.push(parse_quote!(
             #rt::emit_event(#event_name, &::std::format!("{}", #id));
         ));
@@ -329,7 +328,7 @@ pub fn spec_setup(attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut pre: Vec<Stmt> = Vec::new();
     for (id, ty) in &params {
         if is_owned_primitive(ty) {
-            let name = format!("{setup_name}.{}", id);
+            let name = format!("{setup_name}.{id}");
             pre.push(parse_quote!(
                 #rt::emit_event(#name, &::std::format!("{}", #id));
             ));
@@ -340,7 +339,7 @@ pub fn spec_setup(attr: TokenStream, item: TokenStream) -> TokenStream {
         #(#pre)*
         #body
     });
-    func.block = Box::new(new_body);
+    *func.block = new_body;
     quote!(#func).into()
 }
 
@@ -392,7 +391,7 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
                 }
                 Fields::Named(named) => {
                     let field_idents: Vec<&Ident> = named.named.iter().filter_map(|f| f.ident.as_ref()).collect();
-                    let field_strs: Vec<String> = field_idents.iter().map(|id| id.to_string()).collect();
+                    let field_strs: Vec<String> = field_idents.iter().map(ToString::to_string).collect();
                     arms.push(quote! {
                         #name::#vname { #(#field_idents),* } => {
                             #rt::emit_event_v(

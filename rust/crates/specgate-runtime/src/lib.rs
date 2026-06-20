@@ -1,5 +1,5 @@
-//! SpecGate runtime — thread-local trace buffer + mock table + SpecEvent /
-//! ToSpecValue traits + structured `Value` type.
+//! `SpecGate` runtime — thread-local trace buffer + mock table + `SpecEvent` /
+//! `ToSpecValue` traits + structured `Value` type.
 //!
 //! Companion to the `specgate-annotations` proc-macro crate. The macros
 //! expand into calls into this runtime; user code never references this
@@ -30,6 +30,7 @@ pub enum Value {
 }
 
 impl Value {
+    #[must_use]
     pub fn type_name(&self) -> &'static str {
         match self {
             Value::String(_) => "string",
@@ -56,6 +57,9 @@ fn variant_rank(v: &Value) -> u8 {
 }
 
 impl PartialEq for Value {
+    // i64 → f64 is intentionally lossy: comparing an integer variant against a float
+    // variant uses float semantics, which cannot be made lossless for large i64 values.
+    #[allow(clippy::cast_precision_loss)]
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Value::String(a), Value::String(b)) => a == b,
@@ -97,10 +101,10 @@ impl Ord for Value {
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Value::String(s) => write!(f, "{}", s),
-            Value::Integer(i) => write!(f, "{}", i),
-            Value::Float(x) => write!(f, "{}", x),
-            Value::Bool(b) => write!(f, "{}", b),
+            Value::String(s) => write!(f, "{s}"),
+            Value::Integer(i) => write!(f, "{i}"),
+            Value::Float(x) => write!(f, "{x}"),
+            Value::Bool(b) => write!(f, "{b}"),
             Value::List(items) => {
                 write!(f, "[")?;
                 for (i, v) in items.iter().enumerate() {
@@ -127,7 +131,7 @@ impl std::fmt::Display for Value {
                     if i > 0 {
                         write!(f, ",")?;
                     }
-                    write!(f, "\"{}\":", k)?;
+                    write!(f, "\"{k}\":")?;
                     write_display_atom(f, v)?;
                 }
                 write!(f, "}}")
@@ -138,8 +142,8 @@ impl std::fmt::Display for Value {
 
 fn write_display_atom(f: &mut std::fmt::Formatter<'_>, v: &Value) -> std::fmt::Result {
     match v {
-        Value::String(s) => write!(f, "\"{}\"", s),
-        other => write!(f, "{}", other),
+        Value::String(s) => write!(f, "\"{s}\""),
+        other => write!(f, "{other}"),
     }
 }
 
@@ -167,15 +171,16 @@ impl From<i64> for Value {
 }
 impl From<i32> for Value {
     fn from(i: i32) -> Self {
-        Value::Integer(i as i64)
+        Value::Integer(i64::from(i))
     }
 }
 impl From<u32> for Value {
     fn from(i: u32) -> Self {
-        Value::Integer(i as i64)
+        Value::Integer(i64::from(i))
     }
 }
 impl From<usize> for Value {
+    #[allow(clippy::cast_possible_wrap)] // usize to i64: may wrap for values > i64::MAX on 64-bit; not expected in spec traces
     fn from(i: usize) -> Self {
         Value::Integer(i as i64)
     }
@@ -192,7 +197,7 @@ impl From<f64> for Value {
 }
 impl From<f32> for Value {
     fn from(x: f32) -> Self {
-        Value::Float(x as f64)
+        Value::Float(f64::from(x))
     }
 }
 
@@ -252,6 +257,7 @@ impl<'de> Visitor<'de> for ValueVisitor {
     fn visit_i64<E: de::Error>(self, v: i64) -> Result<Self::Value, E> {
         Ok(Value::Integer(v))
     }
+    #[allow(clippy::cast_possible_wrap)] // u64 YAML integers may exceed i64::MAX; wrap accepted for spec trace values
     fn visit_u64<E: de::Error>(self, v: u64) -> Result<Self::Value, E> {
         Ok(Value::Integer(v as i64))
     }
@@ -301,6 +307,7 @@ pub enum TraceEvent {
 }
 
 impl TraceEvent {
+    #[must_use]
     pub fn name(&self) -> String {
         match self {
             TraceEvent::Event { name, .. } => name.clone(),
@@ -332,7 +339,7 @@ pub fn emit_event_v(name: &str, value: Value) {
         b.borrow_mut().push(TraceEvent::Event {
             name: name.to_string(),
             value,
-        })
+        });
     });
 }
 
@@ -340,10 +347,11 @@ pub fn emit_run(operation: &str) {
     BUFFER.with(|b| {
         b.borrow_mut().push(TraceEvent::Run {
             operation: operation.to_string(),
-        })
+        });
     });
 }
 
+#[must_use]
 pub fn take_traces() -> Vec<TraceEvent> {
     BUFFER.with(|b| std::mem::take(&mut *b.borrow_mut()))
 }
@@ -363,6 +371,7 @@ pub fn set_mock(mock_name: &str, entries: &[(&str, &str)]) {
     });
 }
 
+#[must_use]
 pub fn mock_lookup(mock_name: &str, input: &str) -> Option<String> {
     MOCKS.with(|m| m.borrow().get(mock_name).and_then(|t| t.get(input).cloned()))
 }
@@ -387,19 +396,41 @@ pub trait ToSpecValue {
 macro_rules! to_spec_value_int {
     ($($t:ty),*) => {
         $(impl ToSpecValue for $t {
-            fn to_spec_value(&self) -> Value { Value::Integer(*self as i64) }
+            fn to_spec_value(&self) -> Value { Value::Integer(i64::from(*self)) }
         })*
     };
 }
-to_spec_value_int!(i8, i16, i32, isize, u8, u16, u32, u64, usize);
+to_spec_value_int!(i8, i16, i32, u8, u16, u32);
+
+impl ToSpecValue for isize {
+    fn to_spec_value(&self) -> Value {
+        Value::Integer(*self as i64)
+    }
+}
+
+impl ToSpecValue for u64 {
+    #[allow(clippy::cast_possible_wrap)] // u64 values > i64::MAX are not expected in spec traces; wrap accepted
+    fn to_spec_value(&self) -> Value {
+        Value::Integer(*self as i64)
+    }
+}
+
+impl ToSpecValue for usize {
+    #[allow(clippy::cast_possible_wrap)] // usize to i64 on 64-bit; values > i64::MAX are not expected in spec traces
+    fn to_spec_value(&self) -> Value {
+        Value::Integer(*self as i64)
+    }
+}
 
 impl ToSpecValue for i64 {
-    fn to_spec_value(&self) -> Value { Value::Integer(*self) }
+    fn to_spec_value(&self) -> Value {
+        Value::Integer(*self)
+    }
 }
 
 impl ToSpecValue for f32 {
     fn to_spec_value(&self) -> Value {
-        Value::Float(*self as f64)
+        Value::Float(f64::from(*self))
     }
 }
 impl ToSpecValue for f64 {
@@ -448,7 +479,7 @@ impl<T: ToSpecValue> ToSpecValue for BTreeMap<String, T> {
         Value::Map(self.iter().map(|(k, v)| (k.clone(), v.to_spec_value())).collect())
     }
 }
-impl<T: ToSpecValue> ToSpecValue for HashMap<String, T> {
+impl<T: ToSpecValue, S: std::hash::BuildHasher> ToSpecValue for HashMap<String, T, S> {
     fn to_spec_value(&self) -> Value {
         Value::Map(self.iter().map(|(k, v)| (k.clone(), v.to_spec_value())).collect())
     }
@@ -458,7 +489,7 @@ impl<T: ToSpecValue + Ord> ToSpecValue for BTreeSet<T> {
         Value::Set(self.iter().map(ToSpecValue::to_spec_value).collect())
     }
 }
-impl<T: ToSpecValue + Eq + std::hash::Hash> ToSpecValue for HashSet<T> {
+impl<T: ToSpecValue + Eq + std::hash::Hash, S: std::hash::BuildHasher> ToSpecValue for HashSet<T, S> {
     fn to_spec_value(&self) -> Value {
         let mut v: Vec<Value> = self.iter().map(ToSpecValue::to_spec_value).collect();
         v.sort();

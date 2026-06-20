@@ -1,4 +1,4 @@
-//! SpecGate annotations — public façade.
+//! `SpecGate` annotations — public façade.
 //!
 //! Re-exports the proc-macros from `specgate-annotations-macros` and the
 //! runtime support from `specgate-runtime`. Fixture code typically does

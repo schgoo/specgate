@@ -69,10 +69,6 @@ semicolon_outside_block = "warn"
 # Allow these — too noisy or not applicable
 too_many_lines = "allow"
 cognitive_complexity = "allow"
-missing_errors_doc = "allow"
-missing_panics_doc = "allow"
-module_name_repetitions = "allow"
-must_use_candidate = "allow"
 multiple_crate_versions = "allow"
 
 [workspace.lints.rustdoc]

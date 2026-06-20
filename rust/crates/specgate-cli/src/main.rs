@@ -67,7 +67,7 @@ fn cmd_validate(args: &[String]) -> ExitCode {
                     eprintln!("error: --assertions-dir needs an argument");
                     return ExitCode::from(2);
                 }
-                assertions_dir = args[i + 1].clone();
+                assertions_dir.clone_from(&args[i + 1]);
                 i += 2;
             }
             "--check-source" => {

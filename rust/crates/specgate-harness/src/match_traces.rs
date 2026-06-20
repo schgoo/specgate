@@ -39,7 +39,7 @@ fn find_leaf(a: &Assertion, actual: &[TraceEvent], start: usize) -> Option<usize
     {
         let any = actual.iter().any(|ev| match ev {
             TraceEvent::Event { name: en, .. } => en == name,
-            _ => false,
+            TraceEvent::Run { .. } => false,
         });
         if any == *present {
             // Anchor at `start` so the cursor advances minimally.
@@ -79,8 +79,7 @@ fn values_equal(expected: &Value, actual: &Value) -> bool {
         return true;
     }
     match (expected, actual) {
-        (Value::String(s), other) => string_matches_scalar(s, other),
-        (other, Value::String(s)) => string_matches_scalar(s, other),
+        (Value::String(s), other) | (other, Value::String(s)) => string_matches_scalar(s, other),
         (Value::List(a), Value::List(b)) => a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| values_equal(x, y)),
         (Value::List(a), Value::Set(b)) | (Value::Set(b), Value::List(a)) => {
             a.len() == b.len() && a.iter().all(|x| b.iter().any(|y| values_equal(x, y)))
@@ -91,7 +90,7 @@ fn values_equal(expected: &Value, actual: &Value) -> bool {
             // Extra keys in `actual` are allowed. This matches the spec's
             // `map_subset_match` semantics where an asserted partial map
             // passes against a fuller actual map.
-            a.iter().all(|(k, v)| b.get(k).map(|bv| values_equal(v, bv)).unwrap_or(false))
+            a.iter().all(|(k, v)| b.get(k).is_some_and(|bv| values_equal(v, bv)))
         }
         _ => false,
     }
@@ -102,9 +101,9 @@ fn values_equal(expected: &Value, actual: &Value) -> bool {
 fn string_matches_scalar(s: &str, actual: &Value) -> bool {
     match actual {
         Value::String(a) => a == s,
-        Value::Integer(i) => &i.to_string() == s,
-        Value::Float(f) => &f.to_string() == s,
-        Value::Bool(b) => &b.to_string() == s,
+        Value::Integer(i) => i.to_string() == s,
+        Value::Float(f) => f.to_string() == s,
+        Value::Bool(b) => b.to_string() == s,
         _ => false,
     }
 }
@@ -112,7 +111,7 @@ fn string_matches_scalar(s: &str, actual: &Value) -> bool {
 fn matcher_matches(m: &Matcher, v: &Value) -> bool {
     match m {
         Matcher::Eq(target) => values_equal(target, v),
-        Matcher::Size(n) => length_of(v).map(|l| l == *n).unwrap_or(false),
+        Matcher::Size(n) => length_of(v).is_some_and(|l| l == *n),
         Matcher::Contains(arg) => match v {
             Value::List(xs) => xs.iter().any(|x| match arg.as_ref() {
                 AnyArg::Value(val) => values_equal(val, x),
@@ -135,9 +134,7 @@ fn matcher_matches(m: &Matcher, v: &Value) -> bool {
             .iter()
             .all(|it| !matcher_matches(&Matcher::Contains(Box::new(AnyArg::Value(it.clone()))), v)),
         Matcher::Match(spec) => match v {
-            Value::Map(m) => spec
-                .iter()
-                .all(|(k, val)| m.get(k).map(|av| values_equal(val, av)).unwrap_or(false)),
+            Value::Map(m) => spec.iter().all(|(k, val)| m.get(k).is_some_and(|av| values_equal(val, av))),
             _ => false,
         },
         Matcher::Exists(_) => true, // handled at find_leaf level
@@ -167,17 +164,13 @@ fn matcher_matches(m: &Matcher, v: &Value) -> bool {
             })
         }
         Matcher::Not(inner) => !matcher_matches(inner, v),
-        Matcher::Gt(target) => numeric_compare(v, target).map(|o| o == Ordering::Greater).unwrap_or(false),
-        Matcher::Gte(target) => numeric_compare(v, target)
-            .map(|o| matches!(o, Ordering::Greater | Ordering::Equal))
-            .unwrap_or(false),
-        Matcher::Lt(target) => numeric_compare(v, target).map(|o| o == Ordering::Less).unwrap_or(false),
-        Matcher::Lte(target) => numeric_compare(v, target)
-            .map(|o| matches!(o, Ordering::Less | Ordering::Equal))
-            .unwrap_or(false),
+        Matcher::Gt(target) => numeric_compare(v, target).is_some_and(|o| o == Ordering::Greater),
+        Matcher::Gte(target) => numeric_compare(v, target).is_some_and(|o| matches!(o, Ordering::Greater | Ordering::Equal)),
+        Matcher::Lt(target) => numeric_compare(v, target).is_some_and(|o| o == Ordering::Less),
+        Matcher::Lte(target) => numeric_compare(v, target).is_some_and(|o| matches!(o, Ordering::Less | Ordering::Equal)),
         Matcher::Type(t) => v.type_name() == t.as_str() || (t == "int" && matches!(v, Value::Integer(_))),
         Matcher::Matches(pat) => match v {
-            Value::String(s) => regex::Regex::new(pat).map(|r| r.is_match(s)).unwrap_or(false),
+            Value::String(s) => regex::Regex::new(pat).is_ok_and(|r| r.is_match(s)),
             _ => false,
         },
         Matcher::Composite(parts) => parts.iter().all(|p| matcher_matches(p, v)),
@@ -198,7 +191,9 @@ fn numeric_compare(v: &Value, target: &Value) -> Option<Ordering> {
     match (v, target) {
         (Value::Integer(a), Value::Integer(b)) => Some(a.cmp(b)),
         (Value::Float(a), Value::Float(b)) => a.partial_cmp(b),
+        #[allow(clippy::cast_precision_loss)] // i64→f64 comparison: precision loss is acceptable for ordering
         (Value::Integer(a), Value::Float(b)) => (*a as f64).partial_cmp(b),
+        #[allow(clippy::cast_precision_loss)] // i64→f64 comparison: precision loss is acceptable for ordering
         (Value::Float(a), Value::Integer(b)) => a.partial_cmp(&(*b as f64)),
         _ => None,
     }
@@ -209,7 +204,7 @@ fn match_unordered(items: &[Assertion], actual: &[TraceEvent], cursor: usize) ->
     let mut assignment: Vec<Option<usize>> = vec![None; n];
     if assign_unordered(items, actual, cursor, &mut assignment, 0) {
         let max = assignment.iter().filter_map(|x| *x).max();
-        Some(max.map(|m| m + 1).unwrap_or(cursor))
+        Some(max.map_or(cursor, |m| m + 1))
     } else {
         None
     }
@@ -223,7 +218,7 @@ fn assign_unordered(items: &[Assertion], actual: &[TraceEvent], cursor: usize, a
     match item {
         Assertion::Event { .. } | Assertion::Run { .. } => {
             for i in cursor..actual.len() {
-                if assignment.iter().any(|a| *a == Some(i)) {
+                if assignment.contains(&Some(i)) {
                     continue;
                 }
                 if leaf_matches(item, &actual[i]) {
@@ -259,12 +254,7 @@ fn match_anywhere(items: &[Assertion], actual: &[TraceEvent]) -> bool {
                     return false;
                 }
             }
-            Assertion::Anywhere { items: sub } => {
-                if !match_anywhere(sub, actual) {
-                    return false;
-                }
-            }
-            Assertion::Unordered { items: sub } => {
+            Assertion::Anywhere { items: sub } | Assertion::Unordered { items: sub } => {
                 if !match_anywhere(sub, actual) {
                     return false;
                 }

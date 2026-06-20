@@ -188,10 +188,9 @@ fn parse_case(v: &YValue) -> Result<Case, ParseError> {
     }
 
     let expected = match m.get(YValue::String("expected".into())) {
-        None => Vec::new(),
         Some(YValue::Sequence(seq)) => parse_assertion_list(seq)?,
-        // Legacy / non-list `expected:` shapes are tolerated as empty.
-        Some(_) => Vec::new(),
+        // Legacy / non-list `expected:` shapes and None are tolerated as empty.
+        None | Some(_) => Vec::new(),
     };
 
     let level = match m.get(YValue::String("level".into())) {
@@ -219,10 +218,10 @@ fn parse_case(v: &YValue) -> Result<Case, ParseError> {
                 }
             }
             if let Some(YValue::String(t)) = sm.get(YValue::String("spec".into())) {
-                s.spec = t.clone();
+                s.spec.clone_from(t);
             }
             if let Some(YValue::String(t)) = sm.get(YValue::String("section".into())) {
-                s.section = t.clone();
+                s.section.clone_from(t);
             }
             Some(s)
         }
@@ -317,6 +316,7 @@ pub fn parse_value(v: &YValue) -> Result<Value, ParseError> {
             if let Some(i) = n.as_i64() {
                 Ok(Value::Integer(i))
             } else if let Some(u) = n.as_u64() {
+                #[allow(clippy::cast_possible_wrap)] // u64 YAML integers exceeding i64::MAX are not expected in spec files
                 Ok(Value::Integer(u as i64))
             } else if let Some(f) = n.as_f64() {
                 Ok(Value::Float(f))
@@ -367,11 +367,12 @@ fn parse_single_op(op: &str, v: &YValue) -> Result<Matcher, ParseError> {
         "$eq" => Ok(Matcher::Eq(parse_value(v)?)),
         "$size" => {
             let n = v.as_u64().ok_or_else(|| ParseError::Shape("$size expects an integer".into()))?;
+            #[allow(clippy::cast_possible_truncation)] // $size values in specs are always small; truncation on 32-bit is intentional
             Ok(Matcher::Size(n as usize))
         }
         "$contains" => {
             let arg = if let YValue::Mapping(mp) = v {
-                let has_op = mp.iter().any(|(k, _)| k.as_str().map(|s| s.starts_with('$')).unwrap_or(false));
+                let has_op = mp.iter().any(|(k, _)| k.as_str().is_some_and(|s| s.starts_with('$')));
                 if has_op {
                     AnyArg::Matcher(parse_matcher(mp)?)
                 } else {
@@ -420,7 +421,7 @@ fn parse_single_op(op: &str, v: &YValue) -> Result<Matcher, ParseError> {
         }
         "$any" => {
             let arg = if let YValue::Mapping(mp) = v {
-                let has_op = mp.iter().any(|(k, _)| k.as_str().map(|s| s.starts_with('$')).unwrap_or(false));
+                let has_op = mp.iter().any(|(k, _)| k.as_str().is_some_and(|s| s.starts_with('$')));
                 if has_op {
                     AnyArg::Matcher(parse_matcher(mp)?)
                 } else {
@@ -433,7 +434,7 @@ fn parse_single_op(op: &str, v: &YValue) -> Result<Matcher, ParseError> {
         }
         "$every" => {
             let arg = if let YValue::Mapping(mp) = v {
-                let has_op = mp.iter().any(|(k, _)| k.as_str().map(|s| s.starts_with('$')).unwrap_or(false));
+                let has_op = mp.iter().any(|(k, _)| k.as_str().is_some_and(|s| s.starts_with('$')));
                 if has_op {
                     AnyArg::Matcher(parse_matcher(mp)?)
                 } else {
@@ -446,7 +447,7 @@ fn parse_single_op(op: &str, v: &YValue) -> Result<Matcher, ParseError> {
         }
         "$not" => {
             let inner = if let YValue::Mapping(mp) = v {
-                let has_op = mp.iter().any(|(k, _)| k.as_str().map(|s| s.starts_with('$')).unwrap_or(false));
+                let has_op = mp.iter().any(|(k, _)| k.as_str().is_some_and(|s| s.starts_with('$')));
                 if has_op { parse_matcher(mp)? } else { Matcher::Eq(parse_value(v)?) }
             } else {
                 Matcher::Eq(parse_value(v)?)
@@ -492,7 +493,7 @@ pub fn stringify_value(v: &YValue) -> String {
 }
 
 pub fn binding_path_resolved(spec_path: &Path, binding: &str) -> PathBuf {
-    let parent = spec_path.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
+    let parent = spec_path.parent().map_or_else(|| PathBuf::from("."), Path::to_path_buf);
     // Try spec-relative first.
     let direct = parent.join(binding);
     if direct.exists() {

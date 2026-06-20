@@ -5,6 +5,7 @@ use regex::Regex;
 use serde_yaml::Value;
 use specgate_annotations::spec_operation;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,6 +16,7 @@ pub enum Severity {
 }
 
 impl Severity {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Severity::Error => "error",
@@ -72,10 +74,10 @@ pub fn validate(spec_dir: &str, strict: bool, suppress: &[String], assertions_di
     // 2. Resolve the assertions directory. An explicit dir is used as-is;
     // otherwise default to `<spec_dir>/sources/assertions`. Assertion-aware
     // checks only run when the resolved directory actually exists.
-    let resolved_assertions_dir: PathBuf = if !assertions_dir.is_empty() {
-        PathBuf::from(assertions_dir)
-    } else {
+    let resolved_assertions_dir: PathBuf = if assertions_dir.is_empty() {
         Path::new(spec_dir).join("sources").join("assertions")
+    } else {
+        PathBuf::from(assertions_dir)
     };
     let assertions_active = resolved_assertions_dir.exists();
     let assertions: BTreeMap<String, Assertion> = if assertions_active {
@@ -88,21 +90,15 @@ pub fn validate(spec_dir: &str, strict: bool, suppress: &[String], assertions_di
     for path in files {
         total_files += 1;
         let file_str = path.to_string_lossy().to_string();
-        let raw = match std::fs::read_to_string(&path) {
-            Ok(t) => t,
-            Err(_) => continue,
-        };
-        let value: Value = match serde_yaml::from_str(&raw) {
-            Ok(v) => v,
-            Err(_) => {
-                findings.push(ValidationFinding {
-                    severity: Severity::Error,
-                    check: "schema".into(),
-                    file: file_str.clone(),
-                    message: "spec file is not valid YAML".into(),
-                });
-                continue;
-            }
+        let Ok(raw) = std::fs::read_to_string(&path) else { continue };
+        let Ok(value) = serde_yaml::from_str::<Value>(&raw) else {
+            findings.push(ValidationFinding {
+                severity: Severity::Error,
+                check: "schema".into(),
+                file: file_str.clone(),
+                message: "spec file is not valid YAML".into(),
+            });
+            continue;
         };
         check_file(
             &value,
@@ -118,7 +114,7 @@ pub fn validate(spec_dir: &str, strict: bool, suppress: &[String], assertions_di
     findings.retain(|f| !suppress_set.contains(&f.check));
 
     if strict {
-        for f in findings.iter_mut() {
+        for f in &mut findings {
             if f.severity == Severity::Warn {
                 f.severity = Severity::Error;
             }
@@ -196,7 +192,7 @@ fn load_assertions(dir: &Path) -> BTreeMap<String, Assertion> {
                 continue;
             };
             let level = m.get(Value::String("level".into())).and_then(|v| v.as_str()).unwrap_or("");
-            let negatable = m.get(Value::String("negatable".into())).and_then(|v| v.as_bool()).unwrap_or(false);
+            let negatable = m.get(Value::String("negatable".into())).and_then(Value::as_bool).unwrap_or(false);
             map.insert(
                 id.to_string(),
                 Assertion {
@@ -249,17 +245,14 @@ fn check_file(
     findings: &mut Vec<ValidationFinding>,
 ) {
     let _ = path;
-    let map = match spec.as_mapping() {
-        Some(m) => m,
-        None => {
-            findings.push(ValidationFinding {
-                severity: Severity::Error,
-                check: "schema".into(),
-                file: file.into(),
-                message: "spec top-level is not a mapping".into(),
-            });
-            return;
-        }
+    let Some(map) = spec.as_mapping() else {
+        findings.push(ValidationFinding {
+            severity: Severity::Error,
+            check: "schema".into(),
+            file: file.into(),
+            message: "spec top-level is not a mapping".into(),
+        });
+        return;
     };
 
     // 1. schema: spec_version is required
@@ -336,7 +329,7 @@ fn check_file(
         let operation = cm
             .get(Value::String("operation".into()))
             .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+            .map(ToString::to_string);
 
         // 3. name_uniqueness
         if !name.is_empty() {
@@ -382,14 +375,8 @@ fn check_file(
 
         // 2. operation_reference
         if let Some(op) = operation.as_deref() {
-            if !ops.contains_key(op) {
-                findings.push(ValidationFinding {
-                    severity: Severity::Error,
-                    check: "operation_reference".into(),
-                    file: file.into(),
-                    message: format!("case '{name}' references undefined operation '{op}'"),
-                });
-            } else {
+            if ops.contains_key(op) {
+                // operation exists, proceed
                 // 5. input_completeness: missing and extra inputs
                 let has_setup = cm.get(Value::String("setup".into())).is_some();
                 let provided: BTreeSet<String> = cm
@@ -422,6 +409,13 @@ fn check_file(
                         });
                     }
                 }
+            } else {
+                findings.push(ValidationFinding {
+                    severity: Severity::Error,
+                    check: "operation_reference".into(),
+                    file: file.into(),
+                    message: format!("case '{name}' references undefined operation '{op}'"),
+                });
             }
         }
 
@@ -504,14 +498,12 @@ fn check_file(
         let has_steps_with_expected = cm
             .get(Value::String("steps".into()))
             .and_then(|v| v.as_sequence())
-            .map(|steps| {
+            .is_some_and(|steps| {
                 steps.iter().any(|step| {
                     step.as_mapping()
-                        .map(|sm| sm.get(Value::String("expected".into())).is_some())
-                        .unwrap_or(false)
+                        .is_some_and(|sm| sm.get(Value::String("expected".into())).is_some())
                 })
-            })
-            .unwrap_or(false);
+            });
         if !has_expected && !has_steps_with_expected {
             findings.push(ValidationFinding {
                 severity: Severity::Error,
@@ -523,7 +515,7 @@ fn check_file(
 
         // negative_coverage tracking: record every referenced assertion id and
         // whether any referencing case is a negative case.
-        let is_negative = cm.get(Value::String("negative".into())).and_then(|v| v.as_bool()).unwrap_or(false);
+        let is_negative = cm.get(Value::String("negative".into())).and_then(Value::as_bool).unwrap_or(false);
         for aid in &source_ids {
             let entry = referenced_ids.entry(aid.clone()).or_insert(false);
             if is_negative {
@@ -560,22 +552,17 @@ fn check_file(
 // ---------------------------------------------------------------------------
 
 fn run_source_checks(spec: &Value, file: &str, findings: &mut Vec<ValidationFinding>) {
-    let map = match spec.as_mapping() {
-        Some(m) => m,
-        None => return,
-    };
+    let Some(map) = spec.as_mapping() else { return };
 
-    let binding_rel = match map.get(Value::String("binding".into())).and_then(|v| v.as_str()) {
-        Some(b) => b,
-        None => return,
+    let Some(binding_rel) = map.get(Value::String("binding".into())).and_then(|v| v.as_str()) else {
+        return;
     };
 
     let spec_dir = Path::new(file).parent().unwrap_or(Path::new(""));
     let binding_path = spec_dir.join(binding_rel);
 
-    let binding_raw = match std::fs::read_to_string(&binding_path) {
-        Ok(t) => t,
-        Err(_) => return,
+    let Ok(binding_raw) = std::fs::read_to_string(&binding_path) else {
+        return;
     };
     let binding: Value = match serde_yaml::from_str(&binding_raw) {
         Ok(v) => v,
@@ -689,16 +676,18 @@ fn collect_rs_content(dir: &Path) -> String {
 // Helpers
 // ---------------------------------------------------------------------------
 
+const HINTS: &[&str] = &[
+    "confirm", "returns", "return ", "rejects", "reject ", "should ", "produces", "outputs", "asserts", "must ",
+];
+
 fn looks_testable(s: &str) -> bool {
     let lower = s.to_lowercase();
-    const HINTS: &[&str] = &[
-        "confirm", "returns", "return ", "rejects", "reject ", "should ", "produces", "outputs", "asserts", "must ",
-    ];
     HINTS.iter().any(|h| lower.contains(h))
 }
 
 /// Render a validate outcome to a colored, human-readable string for
 /// terminal display.
+#[must_use]
 pub fn format_outcome(outcome: &ValidateOutcome) -> String {
     let report = match outcome {
         ValidateOutcome::Pass { report } | ValidateOutcome::Fail { report } => report,
@@ -710,18 +699,12 @@ pub fn format_outcome(outcome: &ValidateOutcome) -> String {
             Severity::Warn => "\x1b[33m",
             Severity::Info => "\x1b[36m",
         };
-        s.push_str(&format!(
-            "{}{}\x1b[0m [{}] {}: {}\n",
-            color,
-            f.severity.as_str(),
-            f.check,
-            f.file,
-            f.message
-        ));
+        let _ = writeln!(s, "{}{}\x1b[0m [{}] {}: {}", color, f.severity.as_str(), f.check, f.file, f.message);
     }
-    s.push_str(&format!(
-        "files: {}  errors: {}  warnings: {}\n",
+    let _ = writeln!(
+        s,
+        "files: {}  errors: {}  warnings: {}",
         report.total_files, report.errors, report.warnings
-    ));
+    );
     s
 }

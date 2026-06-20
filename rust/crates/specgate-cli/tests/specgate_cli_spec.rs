@@ -19,12 +19,12 @@ fn vdir(rel: &str) -> String {
 }
 
 fn do_validate(rel: &str, strict: bool, suppress: &[&str]) -> ValidateOutcome {
-    let sup: Vec<String> = suppress.iter().map(|s| s.to_string()).collect();
+    let sup: Vec<String> = suppress.iter().map(ToString::to_string).collect();
     validate::validate(&vdir(rel), strict, &sup, "", false)
 }
 
 fn do_validate_ext(rel: &str, strict: bool, suppress: &[&str], assertions_dir: &str, check_source: bool) -> ValidateOutcome {
-    let sup: Vec<String> = suppress.iter().map(|s| s.to_string()).collect();
+    let sup: Vec<String> = suppress.iter().map(ToString::to_string).collect();
     let adir = if assertions_dir.is_empty() {
         String::new()
     } else {
@@ -37,7 +37,7 @@ fn pass_report(o: ValidateOutcome) -> validate::ValidationReport {
     match o {
         ValidateOutcome::Pass { report } => report,
         ValidateOutcome::Fail { report } => {
-            panic!("expected Pass, got Fail; report={:#?}", report)
+            panic!("expected Pass, got Fail; report={report:#?}")
         }
     }
 }
@@ -46,7 +46,7 @@ fn fail_report(o: ValidateOutcome) -> validate::ValidationReport {
     match o {
         ValidateOutcome::Fail { report } => report,
         ValidateOutcome::Pass { report } => {
-            panic!("expected Fail, got Pass; report={:#?}", report)
+            panic!("expected Fail, got Pass; report={report:#?}")
         }
     }
 }
@@ -64,13 +64,13 @@ fn has_finding(findings: &[ValidationFinding], sev: Severity, check: &str, messa
 #[test]
 fn validate_schema_pass() {
     let r = pass_report(do_validate("test/fixtures/validation/valid_complete", false, &[]));
-    assert_eq!(r.errors, 0, "report={:#?}", r);
+    assert_eq!(r.errors, 0, "report={r:#?}");
 }
 
 #[test]
 fn validate_schema_missing_version() {
     let r = fail_report(do_validate("test/fixtures/validation/missing_version", false, &[]));
-    assert_eq!(r.errors, 1, "report={:#?}", r);
+    assert_eq!(r.errors, 1, "report={r:#?}");
     assert!(
         has_finding(&r.findings, Severity::Error, "schema", "missing required field 'spec_version'"),
         "missing schema finding: {:#?}",
@@ -85,13 +85,13 @@ fn validate_schema_missing_version() {
 #[test]
 fn validate_op_ref_pass() {
     let r = pass_report(do_validate("test/fixtures/validation/valid_complete", false, &[]));
-    assert!(r.findings.is_empty(), "expected no findings: {:#?}", r);
+    assert!(r.findings.is_empty(), "expected no findings: {r:#?}");
 }
 
 #[test]
 fn validate_op_ref_fail() {
     let r = fail_report(do_validate("test/fixtures/validation/bad_op_ref", false, &[]));
-    assert_eq!(r.errors, 1, "report={:#?}", r);
+    assert_eq!(r.errors, 1, "report={r:#?}");
     assert!(
         has_finding(
             &r.findings,
@@ -117,7 +117,7 @@ fn validate_names_unique_pass() {
 #[test]
 fn validate_names_duplicate_fail() {
     let r = fail_report(do_validate("test/fixtures/validation/duplicate_names", false, &[]));
-    assert_eq!(r.errors, 1, "report={:#?}", r);
+    assert_eq!(r.errors, 1, "report={r:#?}");
     assert!(
         has_finding(&r.findings, Severity::Error, "name_uniqueness", "duplicate case name 'my_case'"),
         "{:#?}",
@@ -138,7 +138,7 @@ fn validate_inputs_complete_pass() {
 #[test]
 fn validate_inputs_missing_fail() {
     let r = fail_report(do_validate("test/fixtures/validation/input_mismatch", false, &[]));
-    assert_eq!(r.errors, 1, "report={:#?}", r);
+    assert_eq!(r.errors, 1, "report={r:#?}");
     assert!(
         has_finding(
             &r.findings,
@@ -164,7 +164,7 @@ fn validate_expected_format_pass() {
 #[test]
 fn validate_expected_format_fail() {
     let r = fail_report(do_validate("test/fixtures/validation/bad_expected", false, &[]));
-    assert_eq!(r.errors, 1, "report={:#?}", r);
+    assert_eq!(r.errors, 1, "report={r:#?}");
     assert!(
         has_finding(
             &r.findings,
@@ -190,7 +190,7 @@ fn validate_narrative_proper_pass() {
 #[test]
 fn validate_narrative_misuse_warn() {
     let r = pass_report(do_validate("test/fixtures/validation/narrative_misuse", false, &[]));
-    assert_eq!(r.warnings, 1, "report={:#?}", r);
+    assert_eq!(r.warnings, 1, "report={r:#?}");
     assert!(
         has_finding(
             &r.findings,
@@ -230,7 +230,7 @@ fn validate_level_mismatch_warn() {
         "test/fixtures/validation/assertions",
         false,
     ));
-    assert_eq!(r.warnings, 1, "report={:#?}", r);
+    assert_eq!(r.warnings, 1, "report={r:#?}");
     assert!(
         has_finding(
             &r.findings,
@@ -262,7 +262,7 @@ fn validate_negative_coverage_warn() {
         "test/fixtures/validation/assertions",
         false,
     ));
-    assert_eq!(r.warnings, 1, "report={:#?}", r);
+    assert_eq!(r.warnings, 1, "report={r:#?}");
     assert!(
         has_finding(
             &r.findings,
@@ -285,7 +285,7 @@ fn validate_negative_coverage_pass_with_assertions() {
         false,
     ));
     let neg: Vec<_> = r.findings.iter().filter(|f| f.check == "negative_coverage").collect();
-    assert!(neg.is_empty(), "unexpected negative_coverage findings: {:#?}", neg);
+    assert!(neg.is_empty(), "unexpected negative_coverage findings: {neg:#?}");
 }
 
 // ---------------------------------------------------------------------------
@@ -295,7 +295,7 @@ fn validate_negative_coverage_pass_with_assertions() {
 #[test]
 fn validate_suppress_single_check() {
     let r = pass_report(do_validate("test/fixtures/validation/no_provenance", false, &["provenance"]));
-    assert_eq!(r.warnings, 0, "report={:#?}", r);
+    assert_eq!(r.warnings, 0, "report={r:#?}");
 }
 
 #[test]
@@ -307,7 +307,7 @@ fn validate_suppress_multiple_checks() {
         "test/fixtures/validation/assertions",
         false,
     ));
-    assert_eq!(r.warnings, 0, "report={:#?}", r);
+    assert_eq!(r.warnings, 0, "report={r:#?}");
 }
 
 // ---------------------------------------------------------------------------
@@ -329,7 +329,7 @@ fn complete(o: RunOutcome) -> run::RunReport {
 fn err_reason(o: RunOutcome) -> String {
     match o {
         RunOutcome::Error { reason } => reason,
-        RunOutcome::Complete { report } => panic!("expected Error, got Complete: {:#?}", report),
+        RunOutcome::Complete { report } => panic!("expected Error, got Complete: {report:#?}"),
     }
 }
 
@@ -403,12 +403,11 @@ fn validate_assertion_coverage_pass() {
         "test/fixtures/validation/assertions",
         false,
     ));
-    assert_eq!(r.errors, 0, "report={:#?}", r);
+    assert_eq!(r.errors, 0, "report={r:#?}");
     let assertion_findings: Vec<_> = r.findings.iter().filter(|f| f.check == "assertion_coverage").collect();
     assert!(
         assertion_findings.is_empty(),
-        "unexpected assertion_coverage findings: {:#?}",
-        assertion_findings
+        "unexpected assertion_coverage findings: {assertion_findings:#?}"
     );
 }
 
@@ -440,7 +439,7 @@ fn validate_assertion_coverage_miss() {
 #[test]
 fn validate_extra_inputs_fail() {
     let r = fail_report(do_validate("test/fixtures/validation/extra_inputs", false, &[]));
-    assert_eq!(r.errors, 1, "report={:#?}", r);
+    assert_eq!(r.errors, 1, "report={r:#?}");
     assert!(
         has_finding(
             &r.findings,
@@ -460,13 +459,13 @@ fn validate_extra_inputs_fail() {
 #[test]
 fn validate_dep_consistency_pass() {
     let r = pass_report(do_validate("test/fixtures/validation/dep_consistency_pass", false, &[]));
-    assert_eq!(r.errors, 0, "report={:#?}", r);
+    assert_eq!(r.errors, 0, "report={r:#?}");
 }
 
 #[test]
 fn validate_dep_consistency_fail() {
     let r = fail_report(do_validate("test/fixtures/validation/dep_consistency_fail", false, &[]));
-    assert_eq!(r.errors, 1, "report={:#?}", r);
+    assert_eq!(r.errors, 1, "report={r:#?}");
     assert!(
         has_finding(
             &r.findings,
@@ -492,7 +491,7 @@ fn validate_mixed_level_bundle_warn() {
         "test/fixtures/validation/assertions",
         false,
     ));
-    assert_eq!(r.warnings, 1, "report={:#?}", r);
+    assert_eq!(r.warnings, 1, "report={r:#?}");
     assert!(
         has_finding(
             &r.findings,
@@ -512,7 +511,7 @@ fn validate_mixed_level_bundle_warn() {
 #[test]
 fn validate_no_expected_fail() {
     let r = fail_report(do_validate("test/fixtures/validation/no_expected", false, &[]));
-    assert_eq!(r.errors, 1, "report={:#?}", r);
+    assert_eq!(r.errors, 1, "report={r:#?}");
     assert!(
         has_finding(
             &r.findings,
@@ -532,7 +531,7 @@ fn validate_no_expected_fail() {
 #[test]
 fn validate_source_check_pass() {
     let r = pass_report(do_validate_ext("test/fixtures/validation/source_check_pass", false, &[], "", true));
-    assert_eq!(r.errors, 0, "report={:#?}", r);
+    assert_eq!(r.errors, 0, "report={r:#?}");
 }
 
 #[test]
@@ -544,7 +543,7 @@ fn validate_source_check_setup_not_pub() {
         "",
         true,
     ));
-    assert_eq!(r.errors, 1, "report={:#?}", r);
+    assert_eq!(r.errors, 1, "report={r:#?}");
     assert!(
         has_finding(
             &r.findings,
@@ -566,7 +565,7 @@ fn validate_source_check_field_not_pub() {
         "",
         true,
     ));
-    assert_eq!(r.errors, 1, "report={:#?}", r);
+    assert_eq!(r.errors, 1, "report={r:#?}");
     assert!(
         has_finding(
             &r.findings,
@@ -589,7 +588,7 @@ fn validate_source_checks_skipped_without_flag() {
         false,
     ));
     let src: Vec<_> = r.findings.iter().filter(|f| f.check.starts_with("source_")).collect();
-    assert!(src.is_empty(), "source checks should be skipped: {:#?}", src);
+    assert!(src.is_empty(), "source checks should be skipped: {src:#?}");
 }
 
 // ---------------------------------------------------------------------------

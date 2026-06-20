@@ -204,8 +204,12 @@ pub struct TestStep {
     pub assert_state: BTreeMap<String, Value>,
 }
 
-/// Validates a YAML string as a spec document. Returns `Ok(())` if valid,
-/// `Err(reason)` if invalid.
+/// Validates a YAML string as a spec document. Returns `Ok(SpecDocument)` if valid.
+///
+/// # Errors
+///
+/// Returns `Err(reason)` if the YAML cannot be parsed as a `SpecDocument` or if
+/// case field validation fails (undeclared inputs or expected fields).
 pub fn validate_spec_document(yaml: &str) -> Result<SpecDocument, String> {
     let doc: SpecDocument = serde_yaml::from_str(yaml).map_err(|e| format!("parse error: {e}"))?;
 
@@ -237,7 +241,7 @@ fn validate_case_fields(doc: &SpecDocument) -> Result<(), String> {
                 if key == "outcome" {
                     continue;
                 }
-                if !declared_outputs.contains(&key.to_string()) {
+                if !declared_outputs.contains(&key.clone()) {
                     return Err(format!("case expected field '{key}' is not declared in spec outputs"));
                 }
             }
@@ -323,7 +327,7 @@ mod tests {
     #[test]
     fn rejects_state_machine_case_with_expected_but_no_steps() {
         let error = serde_yaml::from_str::<SpecDocument>(
-            r#"
+            r"
 name: test.machine
 state:
   count: int
@@ -337,7 +341,7 @@ cases:
     desc: Missing steps
     expected:
       outcome: Ok
-"#,
+",
         )
         .expect_err("state machine case without steps should fail");
 

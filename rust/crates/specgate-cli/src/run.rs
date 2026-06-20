@@ -1,5 +1,6 @@
-//! `specgate run <spec>` — wrap the harness and produce a RunReport.
+//! `specgate run <spec>` — wrap the harness and produce a [`RunReport`].
 
+use std::fmt::Write as _;
 use std::path::Path;
 
 use specgate_annotations::spec_operation;
@@ -50,7 +51,7 @@ pub fn run(spec: &str) -> RunOutcome {
         HarnessOutcome::Complete { results } => {
             let mut report = RunReport {
                 spec_name,
-                total_cases: results.len() as i32,
+                total_cases: i32::try_from(results.len()).expect("case count fits i32"),
                 passed: 0,
                 failed: 0,
                 skipped: 0,
@@ -72,23 +73,26 @@ pub fn run(spec: &str) -> RunOutcome {
 fn read_spec_name(spec_path: &str) -> Option<String> {
     let text = std::fs::read_to_string(spec_path).ok()?;
     let v: serde_yaml::Value = serde_yaml::from_str(&text).ok()?;
-    v.get("name")?.as_str().map(|s| s.to_string())
+    v.get("name")?.as_str().map(ToString::to_string)
 }
 
 /// Render a run outcome to a colored, human-readable string for the
 /// terminal (used by the binary).
+#[must_use]
 pub fn format_outcome(outcome: &RunOutcome) -> String {
     let mut s = String::new();
     match outcome {
         RunOutcome::Error { reason } => {
-            s.push_str(&format!("\x1b[31merror:\x1b[0m {reason}\n"));
+            writeln!(s, "\x1b[31merror:\x1b[0m {reason}").unwrap();
         }
         RunOutcome::Complete { report } => {
-            s.push_str(&format!("spec: {}\n", report.spec_name));
-            s.push_str(&format!(
-                "\x1b[32mpassed:\x1b[0m {} \x1b[31mfailed:\x1b[0m {} \x1b[33mwarned:\x1b[0m {} \x1b[36mskipped:\x1b[0m {} (total {})\n",
+            writeln!(s, "spec: {}", report.spec_name).unwrap();
+            writeln!(
+                s,
+                "\x1b[32mpassed:\x1b[0m {} \x1b[31mfailed:\x1b[0m {} \x1b[33mwarned:\x1b[0m {} \x1b[36mskipped:\x1b[0m {} (total {})",
                 report.passed, report.failed, report.warned, report.skipped, report.total_cases
-            ));
+            )
+            .unwrap();
         }
     }
     s

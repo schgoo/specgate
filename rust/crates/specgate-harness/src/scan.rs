@@ -1,7 +1,7 @@
 //! Source-annotation scanning (string-based, NOT interpretation).
 //!
 //! We only extract attribute names, function signatures and which structs
-//! derive SpecEvent. We never evaluate bodies — that is the cargo
+//! derive `SpecEvent`. We never evaluate bodies — that is the cargo
 //! toolchain's job.
 
 use std::collections::BTreeMap;
@@ -64,10 +64,7 @@ pub fn scan(src: &str) -> AnnotatedSource {
     //   #[derive(... SpecEvent ...)] ... struct <NAME>
     for cap in find_iter(&src, "#[derive(") {
         let after = &src[cap..];
-        let close = match after.find(")]") {
-            Some(p) => p,
-            None => continue,
-        };
+        let Some(close) = after.find(")]") else { continue };
         let derive_list = &after[9..close];
         if !derive_list.split(',').any(|t| t.trim() == "SpecEvent") {
             continue;
@@ -87,97 +84,97 @@ pub fn scan(src: &str) -> AnnotatedSource {
     let mut current_impl: Vec<String> = Vec::new();
     let mut depth_to_impl_target: Vec<Option<String>> = vec![None];
 
-    let mut i = 0usize;
+    let mut pos = 0usize;
     let chars: Vec<char> = src.chars().collect();
-    let n = chars.len();
+    let total = chars.len();
 
-    while i < n {
-        let c = chars[i];
-        if c == '{' {
+    while pos < total {
+        let ch = chars[pos];
+        if ch == '{' {
             depth_to_impl_target.push(current_impl.last().cloned());
             current_impl.clear();
-            i += 1;
+            pos += 1;
             continue;
         }
-        if c == '}' {
+        if ch == '}' {
             depth_to_impl_target.pop();
-            i += 1;
+            pos += 1;
             continue;
         }
 
         // Detect `impl <TYPE> {`
-        if starts_word_at(&chars, i, "impl") {
-            let mut j = i + 4;
-            while j < n && chars[j].is_whitespace() {
-                j += 1;
+        if starts_word_at(&chars, pos, "impl") {
+            let mut jj = pos + 4;
+            while jj < total && chars[jj].is_whitespace() {
+                jj += 1;
             }
             // Skip generics like <T>
-            if j < n && chars[j] == '<' {
+            if jj < total && chars[jj] == '<' {
                 let mut depth = 1;
-                j += 1;
-                while j < n && depth > 0 {
-                    if chars[j] == '<' {
+                jj += 1;
+                while jj < total && depth > 0 {
+                    if chars[jj] == '<' {
                         depth += 1;
                     }
-                    if chars[j] == '>' {
+                    if chars[jj] == '>' {
                         depth -= 1;
                     }
-                    j += 1;
+                    jj += 1;
                 }
-                while j < n && chars[j].is_whitespace() {
-                    j += 1;
+                while jj < total && chars[jj].is_whitespace() {
+                    jj += 1;
                 }
             }
             // Read type name (single ident, optionally followed by generics).
-            let start = j;
-            while j < n && (chars[j].is_alphanumeric() || chars[j] == '_') {
-                j += 1;
+            let start = jj;
+            while jj < total && (chars[jj].is_alphanumeric() || chars[jj] == '_') {
+                jj += 1;
             }
-            let ty: String = chars[start..j].iter().collect();
+            let ty: String = chars[start..jj].iter().collect();
             // Skip optional generics on the type
-            while j < n && chars[j].is_whitespace() {
-                j += 1;
+            while jj < total && chars[jj].is_whitespace() {
+                jj += 1;
             }
-            if j < n && chars[j] == '<' {
+            if jj < total && chars[jj] == '<' {
                 let mut depth = 1;
-                j += 1;
-                while j < n && depth > 0 {
-                    if chars[j] == '<' {
+                jj += 1;
+                while jj < total && depth > 0 {
+                    if chars[jj] == '<' {
                         depth += 1;
                     }
-                    if chars[j] == '>' {
+                    if chars[jj] == '>' {
                         depth -= 1;
                     }
-                    j += 1;
+                    jj += 1;
                 }
             }
             // The next `{` belongs to this impl.
-            while j < n && chars[j] != '{' {
-                j += 1;
+            while jj < total && chars[jj] != '{' {
+                jj += 1;
             }
-            if j < n && !ty.is_empty() {
+            if jj < total && !ty.is_empty() {
                 current_impl.clear();
                 current_impl.push(ty);
             }
-            i = j;
+            pos = jj;
             continue;
         }
 
         // Detect attribute: #[spec_setup("NAME")] or #[spec_operation("NAME")]
-        if c == '#' && i + 1 < n && chars[i + 1] == '[' {
+        if ch == '#' && pos + 1 < total && chars[pos + 1] == '[' {
             // Find the closing ].
-            let mut j = i + 2;
+            let mut jj = pos + 2;
             let mut depth = 1;
-            while j < n && depth > 0 {
-                if chars[j] == '[' {
+            while jj < total && depth > 0 {
+                if chars[jj] == '[' {
                     depth += 1;
                 }
-                if chars[j] == ']' {
+                if chars[jj] == ']' {
                     depth -= 1;
                 }
-                j += 1;
+                jj += 1;
             }
-            let attr: String = chars[i + 2..j - 1].iter().collect();
+            let attr: String = chars[pos + 2..jj - 1].iter().collect();
             let attr_trim = attr.trim();
             let (kind, name) = if let Some(n) = attr_inner(attr_trim, "spec_setup") {
                 (Some("setup"), Some(n))
@@ -188,44 +185,44 @@ pub fn scan(src: &str) -> AnnotatedSource {
             };
             if let (Some(k), Some(name)) = (kind, name) {
                 // Find the following `fn ident(...) -> ret`.
-                let mut p = j;
+                let mut pp = jj;
                 // Skip whitespace and other outer attributes / visibility.
                 loop {
-                    while p < n && chars[p].is_whitespace() {
-                        p += 1;
+                    while pp < total && chars[pp].is_whitespace() {
+                        pp += 1;
                     }
-                    if p < n && chars[p] == '#' {
+                    if pp < total && chars[pp] == '#' {
                         // skip another attribute
-                        let mut d = 1;
-                        let mut q = p + 2;
-                        while q < n && d > 0 {
-                            if chars[q] == '[' {
-                                d += 1;
+                        let mut dd = 1;
+                        let mut qq = pp + 2;
+                        while qq < total && dd > 0 {
+                            if chars[qq] == '[' {
+                                dd += 1;
                             }
-                            if chars[q] == ']' {
-                                d -= 1;
+                            if chars[qq] == ']' {
+                                dd -= 1;
                             }
-                            q += 1;
+                            qq += 1;
                         }
-                        p = q;
+                        pp = qq;
                         continue;
                     }
-                    if starts_word_at(&chars, p, "pub") {
-                        p += 3;
-                        while p < n && chars[p].is_whitespace() {
-                            p += 1;
+                    if starts_word_at(&chars, pp, "pub") {
+                        pp += 3;
+                        while pp < total && chars[pp].is_whitespace() {
+                            pp += 1;
                         }
-                        if p < n && chars[p] == '(' {
-                            let mut d = 1;
-                            p += 1;
-                            while p < n && d > 0 {
-                                if chars[p] == '(' {
-                                    d += 1;
+                        if pp < total && chars[pp] == '(' {
+                            let mut dd = 1;
+                            pp += 1;
+                            while pp < total && dd > 0 {
+                                if chars[pp] == '(' {
+                                    dd += 1;
                                 }
-                                if chars[p] == ')' {
-                                    d -= 1;
+                                if chars[pp] == ')' {
+                                    dd -= 1;
                                 }
-                                p += 1;
+                                pp += 1;
                             }
                         }
                         continue;
@@ -233,85 +230,83 @@ pub fn scan(src: &str) -> AnnotatedSource {
                     // Skip leading function qualifiers (`async`, `const`, `unsafe`,
                     // `extern "C"`) so `#[spec_operation] async fn foo` is
                     // recognised.
-                    if starts_word_at(&chars, p, "async") || starts_word_at(&chars, p, "const") || starts_word_at(&chars, p, "unsafe") {
-                        let word_len = if starts_word_at(&chars, p, "async") {
-                            5
-                        } else if starts_word_at(&chars, p, "const") {
+                    if starts_word_at(&chars, pp, "async") || starts_word_at(&chars, pp, "const") || starts_word_at(&chars, pp, "unsafe") {
+                        let word_len = if starts_word_at(&chars, pp, "async") || starts_word_at(&chars, pp, "const") {
                             5
                         } else {
                             6
                         };
-                        p += word_len;
+                        pp += word_len;
                         continue;
                     }
-                    if starts_word_at(&chars, p, "extern") {
-                        p += 6;
-                        while p < n && chars[p].is_whitespace() {
-                            p += 1;
+                    if starts_word_at(&chars, pp, "extern") {
+                        pp += 6;
+                        while pp < total && chars[pp].is_whitespace() {
+                            pp += 1;
                         }
                         // Optional ABI string.
-                        if p < n && chars[p] == '"' {
-                            p += 1;
-                            while p < n && chars[p] != '"' {
-                                p += 1;
+                        if pp < total && chars[pp] == '"' {
+                            pp += 1;
+                            while pp < total && chars[pp] != '"' {
+                                pp += 1;
                             }
-                            if p < n {
-                                p += 1;
+                            if pp < total {
+                                pp += 1;
                             }
                         }
                         continue;
                     }
                     break;
                 }
-                if !starts_word_at(&chars, p, "fn") {
-                    i = j;
+                if !starts_word_at(&chars, pp, "fn") {
+                    pos = jj;
                     continue;
                 }
-                p += 2;
-                while p < n && chars[p].is_whitespace() {
-                    p += 1;
+                pp += 2;
+                while pp < total && chars[pp].is_whitespace() {
+                    pp += 1;
                 }
-                let ident_start = p;
-                while p < n && (chars[p].is_alphanumeric() || chars[p] == '_') {
-                    p += 1;
+                let ident_start = pp;
+                while pp < total && (chars[pp].is_alphanumeric() || chars[pp] == '_') {
+                    pp += 1;
                 }
-                let fn_ident: String = chars[ident_start..p].iter().collect();
-                while p < n && chars[p] != '(' {
-                    p += 1;
+                let fn_ident: String = chars[ident_start..pp].iter().collect();
+                while pp < total && chars[pp] != '(' {
+                    pp += 1;
                 }
-                if p >= n {
-                    i = j;
+                if pp >= total {
+                    pos = jj;
                     continue;
                 }
                 // Collect parens (balanced).
-                let paren_start = p + 1;
-                let mut d = 1;
-                p += 1;
-                while p < n && d > 0 {
-                    if chars[p] == '(' {
-                        d += 1;
+                let paren_start = pp + 1;
+                let mut dd = 1;
+                pp += 1;
+                while pp < total && dd > 0 {
+                    if chars[pp] == '(' {
+                        dd += 1;
                     }
-                    if chars[p] == ')' {
-                        d -= 1;
+                    if chars[pp] == ')' {
+                        dd -= 1;
                     }
-                    p += 1;
+                    pp += 1;
                 }
-                let paren_end = p - 1;
+                let paren_end = pp - 1;
                 let param_text: String = chars[paren_start..paren_end].iter().collect();
                 // Return type.
                 let mut ret_text = String::new();
-                while p < n && chars[p].is_whitespace() {
-                    p += 1;
+                while pp < total && chars[pp].is_whitespace() {
+                    pp += 1;
                 }
-                if p + 1 < n && chars[p] == '-' && chars[p + 1] == '>' {
-                    p += 2;
-                    while p < n && chars[p].is_whitespace() {
-                        p += 1;
+                if pp + 1 < total && chars[pp] == '-' && chars[pp + 1] == '>' {
+                    pp += 2;
+                    while pp < total && chars[pp].is_whitespace() {
+                        pp += 1;
                     }
-                    let r_start = p;
+                    let r_start = pp;
                     let mut depth_ang = 0i32;
-                    while p < n {
-                        let cc = chars[p];
+                    while pp < total {
+                        let cc = chars[pp];
                         if cc == '<' {
                             depth_ang += 1;
                         }
@@ -320,15 +315,15 @@ pub fn scan(src: &str) -> AnnotatedSource {
                         }
                         if depth_ang <= 0 && (cc == '{' || cc == ';' || cc == 'w') {
                             // `w` for "where"
-                            if cc == 'w' && !starts_word_at(&chars, p, "where") {
-                                p += 1;
+                            if cc == 'w' && !starts_word_at(&chars, pp, "where") {
+                                pp += 1;
                                 continue;
                             }
                             break;
                         }
-                        p += 1;
+                        pp += 1;
                     }
-                    ret_text = chars[r_start..p].iter().collect::<String>().trim().to_string();
+                    ret_text = chars[r_start..pp].iter().collect::<String>().trim().to_string();
                 }
 
                 let (params, takes_self) = parse_params(&param_text);
@@ -358,14 +353,14 @@ pub fn scan(src: &str) -> AnnotatedSource {
                     }
                     _ => {}
                 }
-                i = j;
+                pos = jj;
                 continue;
             }
-            i = j;
+            pos = jj;
             continue;
         }
 
-        i += 1;
+        pos += 1;
     }
 
     AnnotatedSource {

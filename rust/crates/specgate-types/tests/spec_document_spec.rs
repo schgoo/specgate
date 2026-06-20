@@ -17,7 +17,7 @@ fn expect_invalid(input: &str, reason: &str) {
 #[test]
 fn single_operation_minimal() {
     let spec = expect_valid(
-        r#"
+        r"
 name: test.component
 binding:
   name: rust
@@ -32,7 +32,7 @@ cases:
     expected:
       outcome: Ok
       result: hello
-"#,
+",
     );
 
     assert_eq!(spec.binding_name().as_deref(), Some("rust"));
@@ -42,7 +42,7 @@ cases:
 #[test]
 fn single_operation_with_inputs_and_types() {
     let spec = expect_valid(
-        r#"
+        r"
 name: test.component
 binding:
   name: rust
@@ -71,7 +71,7 @@ cases:
     expected:
       outcome: Ok
       area: 78.54
-"#,
+",
     );
 
     assert!(spec.inputs.contains_key("shape"));
@@ -81,7 +81,7 @@ cases:
 #[test]
 fn state_machine_minimal() {
     let spec = expect_valid(
-        r#"
+        r"
 name: test.machine
 binding:
   name: rust
@@ -102,7 +102,7 @@ cases:
       - operation: increment
         inputs: { amount: 1 }
         assert_state: { count: 1 }
-"#,
+",
     );
 
     assert_eq!(spec.outcome, Value::Null);
@@ -149,7 +149,7 @@ cases:
 #[test]
 fn reject_inputs_and_operations() {
     expect_invalid(
-        r#"
+        r"
 name: test.invalid
 binding:
   name: rust
@@ -170,7 +170,7 @@ cases:
     expected:
       outcome: Ok
       result: 1
-"#,
+",
         "inputs and operations are mutually exclusive",
     );
 }
@@ -178,7 +178,7 @@ cases:
 #[test]
 fn reject_steps_without_operations() {
     expect_invalid(
-        r#"
+        r"
 name: test.invalid
 binding:
   name: rust
@@ -193,7 +193,7 @@ cases:
     steps:
       - operation: foo
         inputs: { x: 1 }
-"#,
+",
         "steps require operations section",
     );
 }
@@ -201,7 +201,7 @@ cases:
 #[test]
 fn reject_flat_inputs_in_state_machine_case() {
     expect_invalid(
-        r#"
+        r"
 name: test.invalid
 binding:
   name: rust
@@ -220,7 +220,7 @@ cases:
       amount: 1
     expected:
       outcome: Ok
-"#,
+",
         "state machine cases must use steps",
     );
 }
@@ -228,7 +228,7 @@ cases:
 #[test]
 fn depends_on_list() {
     let spec = expect_valid(
-        r#"
+        r"
 name: test.consumer
 binding:
   name: rust
@@ -246,7 +246,7 @@ cases:
     expected:
       outcome: Ok
       result: hello
-"#,
+",
     );
 
     assert_eq!(spec.depends_on, vec!["core.spec_document", "core.types"]);
@@ -255,7 +255,7 @@ cases:
 #[test]
 fn reject_missing_name() {
     expect_invalid(
-        r#"
+        r"
 binding:
   name: rust
   target: test
@@ -269,7 +269,7 @@ cases:
     expected:
       outcome: Ok
       result: hello
-"#,
+",
         "missing required field: name",
     );
 }
@@ -277,7 +277,7 @@ cases:
 #[test]
 fn reject_missing_cases() {
     expect_invalid(
-        r#"
+        r"
 name: test.component
 binding:
   name: rust
@@ -286,7 +286,7 @@ outcome: Ok
 outputs:
   when Ok:
     result: string
-"#,
+",
         "missing required field: cases",
     );
 }
@@ -294,7 +294,7 @@ outputs:
 #[test]
 fn reject_state_without_init() {
     expect_invalid(
-        r#"
+        r"
 name: test.machine
 binding:
   name: rust
@@ -310,7 +310,7 @@ cases:
     steps:
       - operation: increment
         inputs: { amount: 1 }
-"#,
+",
         "state requires init",
     );
 }
@@ -318,7 +318,7 @@ cases:
 #[test]
 fn multi_binding_list() {
     let spec = expect_valid(
-        r#"
+        r"
 name: core.shared_types
 binding:
   - name: rust
@@ -335,7 +335,7 @@ cases:
     expected:
       outcome: Ok
       result: hello
-"#,
+",
     );
 
     assert_eq!(spec.binding_name().as_deref(), Some("rust"));
@@ -349,7 +349,7 @@ cases:
 #[test]
 fn no_binding() {
     let spec = expect_valid(
-        r#"
+        r"
 name: test.component
 outcome: Ok
 outputs:
@@ -361,7 +361,7 @@ cases:
     expected:
       outcome: Ok
       result: hello
-"#,
+",
     );
 
     assert!(spec.binding.is_none());
@@ -443,7 +443,7 @@ cases:
 #[test]
 fn reject_case_with_inputs_and_steps() {
     expect_invalid(
-        r#"
+        r"
 name: test.machine
 binding:
   name: rust
@@ -463,7 +463,7 @@ cases:
     steps:
       - operation: increment
         inputs: { amount: 1 }
-"#,
+",
         "case cannot have both inputs and steps",
     );
 }
@@ -511,12 +511,12 @@ cases:
 #[test]
 fn reject_legacy_binding_without_target() {
     expect_invalid(
-        r#"
+        r"
 name: legacy
 binding: rust
 outcome: Ok
 cases: []
-"#,
+",
         "missing field `target`",
     );
 }

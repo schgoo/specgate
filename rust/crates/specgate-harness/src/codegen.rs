@@ -5,11 +5,22 @@ use crate::scan::{AnnotatedSource, OpDecl};
 use crate::spec::{Case, Setup, Spec};
 use serde_yaml::Value;
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 pub struct GeneratedProject {
     pub crate_dir: PathBuf,
     pub trace_file: PathBuf,
+}
+
+/// Configuration for code generation.
+pub struct GenerateConfig<'a> {
+    pub spec: &'a Spec,
+    pub cases_to_run: &'a [&'a Case],
+    pub annotated: &'a AnnotatedSource,
+    pub workspace_root: &'a Path,
+    pub needs_async: bool,
+    pub fixture_pkg_root: Option<&'a Path>,
 }
 
 /// Information about the fixture crate for use as a Cargo dependency.
@@ -80,29 +91,20 @@ fn to_cargo_path(p: &Path) -> String {
     s.replace('\\', "/")
 }
 
-pub fn generate(
-    scratch_dir: &Path,
-    fixture_src: &Path,
-    spec: &Spec,
-    cases_to_run: &[&Case],
-    annotated: &AnnotatedSource,
-    workspace_root: &Path,
-    needs_async: bool,
-    fixture_pkg_root: Option<&Path>,
-) -> std::io::Result<GeneratedProject> {
+pub fn generate(scratch_dir: &Path, fixture_src: &Path, config: &GenerateConfig) -> std::io::Result<GeneratedProject> {
     std::fs::create_dir_all(scratch_dir.join("src"))?;
     let trace_file = scratch_dir.join("traces.json");
 
-    let annotations_path = workspace_root.join("crates/specgate-annotations");
-    let runtime_path = workspace_root.join("crates/specgate-runtime");
-    let macros_path = workspace_root.join("crates/specgate-annotations-macros");
-    let harness_path = workspace_root.join("crates/specgate-harness");
+    let annotations_path = config.workspace_root.join("crates/specgate-annotations");
+    let runtime_path = config.workspace_root.join("crates/specgate-runtime");
+    let macros_path = config.workspace_root.join("crates/specgate-annotations-macros");
+    let harness_path = config.workspace_root.join("crates/specgate-harness");
 
     // Determine the fixture module name from the source file stem.
     let module_name = fixture_src.file_stem().and_then(|s| s.to_str()).unwrap_or("fixture").to_string();
 
     // Try to use the fixture crate as a path dependency when possible.
-    let fixture_crate = fixture_pkg_root.and_then(|root| resolve_fixture_crate(root, &module_name));
+    let fixture_crate = config.fixture_pkg_root.and_then(|root| resolve_fixture_crate(root, &module_name));
 
     let fixture_dep = if let Some(ref fc) = fixture_crate {
         format!("\n{} = {{ path = \"{}\" }}", fc.cargo_name, to_cargo_path(&fc.path))
@@ -136,7 +138,7 @@ serde_yaml = "0.9"{fixture_dep}
 
     // Seed the tmp project's Cargo.lock from the parent workspace so cargo
     // doesn't need to consult crates.io (the env may have it blocked).
-    let parent_lock = workspace_root.join("Cargo.lock");
+    let parent_lock = config.workspace_root.join("Cargo.lock");
     let tmp_lock = scratch_dir.join("Cargo.lock");
     if parent_lock.exists() {
         let _ = std::fs::copy(&parent_lock, &tmp_lock);
@@ -144,11 +146,11 @@ serde_yaml = "0.9"{fixture_dep}
 
     let main_rs = render_main(
         fixture_src,
-        spec,
-        cases_to_run,
-        annotated,
+        config.spec,
+        config.cases_to_run,
+        config.annotated,
         &trace_file,
-        needs_async,
+        config.needs_async,
         fixture_crate.as_ref(),
     )?;
     std::fs::write(scratch_dir.join("src").join("main.rs"), main_rs)?;
@@ -175,15 +177,15 @@ fn render_main(
 
     if let Some(fc) = fixture_crate {
         // Alias the fixture module as `fut` so call sites work uniformly.
-        out.push_str(&format!("use {}::{} as fut;\n", fc.rust_ident, fc.module_name));
+        writeln!(out, "use {}::{} as fut;", fc.rust_ident, fc.module_name).expect("fmt");
     } else {
         let abs = std::fs::canonicalize(fixture_src)?;
         let abs_str = abs.display().to_string();
         let abs_str = abs_str.strip_prefix(r"\\?\").unwrap_or(&abs_str);
-        out.push_str(&format!("#[path = \"{}\"] mod fut;\n", abs_str.replace('\\', "\\\\")));
+        writeln!(out, "#[path = \"{}\"] mod fut;", abs_str.replace('\\', "\\\\")).expect("fmt");
     }
     out.push_str("use fut::*;\n");
-    out.push_str("\n");
+    out.push('\n');
     out.push_str("fn panic_msg(e: &Box<dyn std::any::Any + Send>) -> String {\n");
     out.push_str("    if let Some(s) = e.downcast_ref::<String>() { return s.clone(); }\n");
     out.push_str("    if let Some(s) = e.downcast_ref::<&'static str>() { return s.to_string(); }\n");
@@ -199,18 +201,20 @@ fn render_main(
     out.push_str("    let mut all: std::collections::BTreeMap<String, Vec<TraceEvent>> = std::collections::BTreeMap::new();\n");
 
     for case in cases_to_run {
-        out.push_str(&format!("    // ---- case: {} ----\n", case.name));
+        writeln!(out, "    // ---- case: {} ----", case.name).expect("fmt");
         out.push_str("    {\n");
         out.push_str("        reset();\n");
         render_case(&mut out, case, spec, annotated);
-        out.push_str(&format!("        all.insert({:?}.to_string(), take_traces());\n", case.name));
+        writeln!(out, "        all.insert({:?}.to_string(), take_traces());", case.name).expect("fmt");
         out.push_str("    }\n");
     }
 
-    out.push_str(&format!(
+    write!(
+        out,
         "    let s = serde_json_lite_to_string(&all);\n    std::fs::write({:?}, s).expect(\"write traces\");\n",
         trace_out.display().to_string()
-    ));
+    )
+    .expect("fmt");
     out.push_str("}\n\n");
 
     // Inline a tiny JSON serializer to avoid pulling serde_json into the
@@ -220,9 +224,9 @@ fn render_main(
     Ok(out)
 }
 
-/// A minimal no-op-waker block_on. Sufficient for fixture async fns that
+/// A minimal no-op-waker `block_on`. Sufficient for fixture async fns that
 /// don't yield to a real reactor — they complete on the first poll.
-const ASYNC_BLOCK_ON: &str = r#"
+const ASYNC_BLOCK_ON: &str = r"
 fn sg_block_on<F: ::std::future::Future>(fut: F) -> F::Output {
     use ::std::pin::pin;
     use ::std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
@@ -242,7 +246,7 @@ fn sg_block_on<F: ::std::future::Future>(fut: F) -> F::Output {
         }
     }
 }
-"#;
+";
 
 const JSON_HELPER: &str = r#"
 fn esc_str(s: &str, o: &mut String) {
@@ -338,10 +342,10 @@ fn render_case(out: &mut String, case: &Case, spec: &Spec, annotated: &Annotated
     // named after the key. (Convention from fixtures.)
     for (k, v) in &case.inputs {
         if let Value::Mapping(m) = v {
-            out.push_str(&format!("        set_mock({:?}, &[\n", k));
+            writeln!(out, "        set_mock({k:?}, &[").expect("fmt");
             for (mk, mv) in m {
                 if let (Some(ks), Some(vs)) = (mk.as_str(), mv.as_str()) {
-                    out.push_str(&format!("            ({:?}, {:?}),\n", ks, vs));
+                    writeln!(out, "            ({ks:?}, {vs:?}),").expect("fmt");
                 }
             }
             out.push_str("        ]);\n");
@@ -356,10 +360,10 @@ fn render_case(out: &mut String, case: &Case, spec: &Spec, annotated: &Annotated
             let sig = annotated.setups.get(name);
             let args = render_setup_args(sig, &case.inputs);
             let var = sanitize_ident(name);
-            out.push_str(&format!("        let mut {var} = fut::{name}({args});\n"));
+            writeln!(out, "        let mut {var} = fut::{name}({args});").expect("fmt");
             if let Some(sig) = sig {
                 if annotated.spec_event_structs.contains(sig.return_type.trim()) {
-                    out.push_str(&format!("        SpecEvent::emit_fields(&{var}, None);\n"));
+                    writeln!(out, "        SpecEvent::emit_fields(&{var}, None);").expect("fmt");
                 }
             }
             setup_vars.push((var, name.clone()));
@@ -369,10 +373,10 @@ fn render_case(out: &mut String, case: &Case, spec: &Spec, annotated: &Annotated
                 let sig = annotated.setups.get(fn_name);
                 let args = render_setup_args(sig, &case.inputs);
                 let var = sanitize_ident(alias);
-                out.push_str(&format!("        let mut {var} = fut::{fn_name}({args});\n"));
+                writeln!(out, "        let mut {var} = fut::{fn_name}({args});").expect("fmt");
                 if let Some(sig) = sig {
                     if annotated.spec_event_structs.contains(sig.return_type.trim()) {
-                        out.push_str(&format!("        SpecEvent::emit_fields(&{var}, Some({:?}));\n", alias));
+                        writeln!(out, "        SpecEvent::emit_fields(&{var}, Some({alias:?}));").expect("fmt");
                     }
                 }
                 setup_vars.push((var, fn_name.clone()));
@@ -398,9 +402,9 @@ fn render_case(out: &mut String, case: &Case, spec: &Spec, annotated: &Annotated
         let return_type = decl.map(|d| d.sig.return_type.trim().to_string()).unwrap_or_default();
         let post_emit = build_post_emit(&return_type, &annotated.spec_event_structs);
         out.push_str("        {\n");
-        out.push_str(&format!(
+        write!(out,
             "            let __r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {{\n                let __sg_ret = {call};\n                {post_emit}\n            }}));\n"
-        ));
+        ).expect("fmt");
         out.push_str("            if let Err(__e) = __r {\n");
         out.push_str(
             "                let msg = panic_msg(&__e);\n                specgate_annotations::emit_event(\"$outcome\", \"Unrecoverable\");\n                specgate_annotations::emit_event(\"$error\", &msg);\n"
@@ -514,12 +518,11 @@ fn render_op_call(
                 annotated
                     .setups
                     .get(fn_name)
-                    .map(|s| decl.method_of.as_deref() == Some(s.return_type.trim()))
-                    .unwrap_or(false)
+                    .is_some_and(|s| decl.method_of.as_deref() == Some(s.return_type.trim()))
             })
             .or_else(|| setup_vars.first())
             .cloned();
-        let recv_var = recv.map(|(v, _)| v).unwrap_or_else(|| "/* missing receiver */".to_string());
+        let recv_var = recv.map_or_else(|| "/* missing receiver */".to_string(), |(v, _)| v);
         let args = render_op_args(decl, inputs, setup_vars);
         return format!("{recv_var}.{}({args})", decl.sig.fn_ident);
     }
@@ -584,10 +587,8 @@ fn value_to_rust(v: Option<&Value>, ty: &str) -> String {
     match v {
         Value::Number(n) => {
             // Suffix int with type.
-            if ty_norm.starts_with('i') || ty_norm.starts_with('u') {
-                format!("{}{}", n, ty_norm)
-            } else if ty_norm == "f32" || ty_norm == "f64" {
-                format!("{}{}", n, ty_norm)
+            if ty_norm.starts_with('i') || ty_norm.starts_with('u') || ty_norm == "f32" || ty_norm == "f64" {
+                format!("{n}{ty_norm}")
             } else {
                 n.to_string()
             }
@@ -595,9 +596,9 @@ fn value_to_rust(v: Option<&Value>, ty: &str) -> String {
         Value::Bool(b) => b.to_string(),
         Value::String(s) => {
             if ty_norm == "String" {
-                format!("{:?}.to_string()", s)
+                format!("{s:?}.to_string()")
             } else if ty_norm == "&str" || ty_norm == "str" {
-                format!("{:?}", s)
+                format!("{s:?}")
             } else {
                 // Named type passed as a string scalar (e.g. "Point") → serde_yaml
                 yaml_deser(v, ty_norm)
@@ -613,14 +614,14 @@ fn value_to_rust(v: Option<&Value>, ty: &str) -> String {
 /// Emit a `serde_yaml::from_str::<Type>(r#"..."#).unwrap()` expression.
 fn yaml_deser(v: &Value, ty: &str) -> String {
     let yaml_str = serde_yaml::to_string(v).unwrap_or_else(|_| "~\n".to_string());
-    format!("serde_yaml::from_str::<{}>({}).unwrap()", ty, format!("{:?}", yaml_str))
+    format!("serde_yaml::from_str::<{ty}>({yaml_str:?}).unwrap()")
 }
 
 /// Extract the inner type from `Option<T>`.
 fn strip_option(ty: &str) -> Option<&str> {
     for prefix in &["Option<", "::std::option::Option<", "std::option::Option<"] {
         if let Some(rest) = ty.strip_prefix(prefix) {
-            return rest.strip_suffix('>').map(|s| s.trim());
+            return rest.strip_suffix('>').map(str::trim);
         }
     }
     None

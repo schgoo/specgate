@@ -8,7 +8,7 @@ pub fn make_service() -> UserService {
 
 pub struct RealDb {}
 impl RealDb {
-    pub fn find(&self, id: &str) -> String {
+    pub fn find(&self, _id: &str) -> String {
         panic!("real db not available in test")
     }
 }

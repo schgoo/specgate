@@ -28,7 +28,7 @@ impl Binding {
         }
     }
 
-    /// Get the package_root for a target (convenience for backward compat).
+    /// Get the `package_root` for a target (convenience for backward compat).
     #[allow(dead_code)]
     pub fn package_root(&self, target_name: Option<&str>) -> Option<&Path> {
         self.target(target_name).map(|t| t.package_root.as_path())
@@ -46,12 +46,12 @@ pub fn load_binding(path: &Path) -> Option<Binding> {
     let mut targets = BTreeMap::new();
     for (k, v) in targets_map {
         let name = k.as_str()?;
-        let target_map = v.as_mapping()?;
-        let pkg = target_map
+        let entry_map = v.as_mapping()?;
+        let pkg = entry_map
             .get(Value::String("package_root".into()))
             .and_then(|v| v.as_str())
             .unwrap_or(".");
-        let command = target_map
+        let command = entry_map
             .get(Value::String("command".into()))
             .and_then(|v| v.as_str())
             .map(String::from);

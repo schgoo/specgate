@@ -1,0 +1,24 @@
+[package]
+name = "specgate"
+version.workspace = true
+edition.workspace = true
+description = "Deterministic spec-based verification for LLM-implemented code"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "../../README.md"
+keywords = ["specgate", "testing", "verification", "spec", "tdd"]
+categories = ["development-tools::testing"]
+rust-version.workspace = true
+
+[features]
+default = []
+harness = ["dep:specgate-harness"]
+trace = ["specgate-annotations/specgate-trace"]
+
+[dependencies]
+specgate-annotations = { workspace = true }
+specgate-harness = { workspace = true, optional = true }
+
+[lints]
+workspace = true
