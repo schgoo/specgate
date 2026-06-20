@@ -1,9 +1,9 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "SpecGate Binding File",
-  "description": "Schema for SpecGate binding files — connects a spec to a language-specific implementation project.",
+  "description": "Schema for SpecGate binding files (v0.4.0). Connects a spec to a language-specific implementation. All paths are relative to the binding file's location.",
   "type": "object",
-  "required": ["language"],
+  "required": ["language", "targets"],
   "additionalProperties": false,
   "properties": {
     "language": {
@@ -13,45 +13,57 @@
     },
     "targets": {
       "type": "object",
-      "description": "Named execution targets. Each key is a target name referenced by specs via the 'target' field.",
+      "description": "Named execution targets. Each key is a target name. Specs select targets via the 'target' field. When omitted, the harness uses the first target.",
       "additionalProperties": {
         "$ref": "#/definitions/targetDefinition"
-      }
+      },
+      "minProperties": 1
     }
   },
   "definitions": {
     "targetDefinition": {
       "type": "object",
-      "description": "An execution target. All paths are relative to the binding file location.",
+      "description": "An execution target pointing to a package/crate with execution instructions.",
       "required": ["package_root"],
+      "additionalProperties": false,
       "properties": {
         "package_root": {
           "type": "string",
-          "description": "Path to the package/crate/project root, relative to the binding file. Commands run from here."
+          "description": "Path to the package/crate/project root, relative to the binding file. The harness runs builds and resolves source from here."
         },
         "test_root": {
           "type": "string",
-          "description": "Path to the directory where generated test files are written, relative to the binding file."
+          "description": "Path where generated test files are written, relative to the binding file. Defaults to package_root/tests if omitted."
         },
-        "build": {
+        "module": {
           "type": "string",
-          "description": "Optional build command to run before execution."
-        },
-        "command": {
-          "type": "string",
-          "description": "Shell command to execute the generated tests. Supports {spec_path} and {workdir} templates."
+          "description": "Module path within the package that contains the annotated operations. Used in generated code as 'use <module> as fut;'. Defaults to the crate root."
         },
         "function": {
           "type": "string",
-          "description": "Fully qualified function to call, e.g. 'specgate_harness::Harness::run_spec'."
+          "description": "Fully qualified function to call for API-style targets. E.g. 'specgate_harness::run_spec'. Mutually exclusive with 'command'."
+        },
+        "command": {
+          "type": "string",
+          "description": "Shell command to execute for command-style targets. Exit 0 = pass. Supports {spec_path} and {workdir} templates. Mutually exclusive with 'function'."
         },
         "constructor": {
           "type": "string",
-          "description": "Fully qualified constructor for the receiver type (for api targets with methods)."
+          "description": "Fully qualified constructor for the receiver type (for targets where operations are methods on an object)."
+        },
+        "env": {
+          "type": "object",
+          "description": "Environment variables to set when running this target. Keys are variable names, values are strings.",
+          "additionalProperties": { "type": "string" }
+        },
+        "build": {
+          "type": "string",
+          "description": "Optional build command to run before execution. Runs from package_root."
         },
         "outputs": {
           "type": "object",
-          "description": "Where to read output from.",
+          "description": "Where to read structured output from after execution.",
+          "additionalProperties": false,
           "properties": {
             "file": {
               "type": "string",
@@ -59,11 +71,31 @@
             },
             "stdout": {
               "type": "string",
-              "description": "Parse stdout as this format (e.g. 'json')."
+              "description": "Parse stdout as this format.",
+              "enum": ["json", "yaml"]
             }
           }
         }
-      }
+      },
+      "oneOf": [
+        {
+          "description": "API target — invokes a function directly.",
+          "required": ["function"]
+        },
+        {
+          "description": "Command target — runs a shell command.",
+          "required": ["command"]
+        },
+        {
+          "description": "Package-only target — used for build/check validation. Neither function nor command.",
+          "not": {
+            "anyOf": [
+              { "required": ["function"] },
+              { "required": ["command"] }
+            ]
+          }
+        }
+      ]
     }
   }
 }

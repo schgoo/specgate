@@ -1,14 +1,14 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "SpecGate Component Spec",
-  "description": "Schema for SpecGate .spec.yaml files. Specs declare operations (each with their own inputs/outputs) and test cases that exercise them. The harness resolves the binding, compiles annotated code, runs operations, and compares actual traces against expected.",
+  "description": "Schema for SpecGate .spec.yaml files (v0.4.0). Specs declare types, operations (each with their own inputs/outputs), and test cases that exercise them.",
   "type": "object",
   "required": ["name", "spec_version", "operations", "cases"],
   "properties": {
     "spec_version": {
       "type": "string",
-      "description": "Schema version. Current version is '0.3.0'.",
-      "enum": ["0.3.0", "0.4.0"]
+      "description": "Schema version. Current version is '0.4.0'.",
+      "const": "0.4.0"
     },
     "name": {
       "type": "string",
@@ -26,7 +26,7 @@
     },
     "target": {
       "type": "string",
-      "description": "Which target in the binding to use. Defaults to the first target if omitted. Useful for multi-crate workspaces where one binding has targets for each crate."
+      "description": "Which target in the binding to use. Defaults to the first target if omitted."
     },
     "depends_on": {
       "type": "array",
@@ -35,7 +35,8 @@
     },
     "types": {
       "type": "object",
-      "description": "Named type definitions shared across operations."
+      "description": "Named type definitions shared across operations. Each key is a type name, value is a type definition.",
+      "additionalProperties": { "$ref": "#/definitions/namedType" }
     },
     "operations": {
       "type": "object",
@@ -49,6 +50,59 @@
     }
   },
   "definitions": {
+    "namedType": {
+      "description": "A named type definition. Either a struct (fields) or an enum (oneof).",
+      "type": "object",
+      "properties": {
+        "fields": {
+          "type": "object",
+          "description": "Struct type: keys are field names, values are type references (string for scalars/named types, object for inline complex types)."
+        },
+        "oneof": {
+          "type": "object",
+          "description": "Enum type: keys are variant names, values are objects with the variant's fields (empty object for unit variants)."
+        }
+      },
+      "oneOf": [
+        { "required": ["fields"] },
+        { "required": ["oneof"] }
+      ]
+    },
+    "typeReference": {
+      "description": "A type reference: either a scalar type name (string), a named type reference (string), or an inline complex type definition (object).",
+      "oneOf": [
+        { "type": "string" },
+        { "$ref": "#/definitions/typeDefinition" }
+      ]
+    },
+    "typeDefinition": {
+      "description": "Inline type definition for complex/collection types.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Type kind: list, map, set, optional, or a scalar (string, i32, i64, f64, bool).",
+          "enum": ["string", "i32", "i64", "f64", "bool", "list", "map", "set", "optional"]
+        },
+        "items": {
+          "description": "Element type for list, set, and optional. A string (type name) or inline type definition.",
+          "$ref": "#/definitions/typeReference"
+        },
+        "fields": {
+          "type": "object",
+          "description": "For inline struct definitions. Keys are field names, values are type references."
+        },
+        "keys": {
+          "description": "Key type for map types.",
+          "$ref": "#/definitions/typeReference"
+        },
+        "values": {
+          "description": "Value type for map types.",
+          "$ref": "#/definitions/typeReference"
+        }
+      },
+      "required": ["type"]
+    },
     "operation": {
       "type": "object",
       "properties": {
@@ -59,7 +113,7 @@
         },
         "async": {
           "type": "boolean",
-          "description": "Whether this operation is async. The harness validates this against annotations — mismatch is an error. The generated runner uses an async runtime when true.",
+          "description": "Whether this operation is async.",
           "default": false
         },
         "desc": {
@@ -68,11 +122,12 @@
         },
         "inputs": {
           "type": "object",
-          "description": "Named input declarations for this operation."
+          "description": "Named input declarations. Values are type references (string for scalar, object for complex types).",
+          "additionalProperties": { "$ref": "#/definitions/typeReference" }
         },
         "outputs": {
           "type": "array",
-          "description": "List of observable outputs this operation can produce. Each item is either a bare event name (string), a name with scalar type (name: type), or a name with structured type definition.",
+          "description": "Observable outputs. Each item is a bare event name (string) or an object mapping event name to type reference.",
           "items": {
             "oneOf": [
               { "type": "string" },
@@ -82,35 +137,11 @@
         }
       }
     },
-    "typeDefinition": {
-      "description": "Inline type definition for structured outputs. Used when an output is a collection or complex type.",
-      "type": "object",
-      "properties": {
-        "type": {
-          "type": "string",
-          "description": "Type kind: string, i32, i64, f64, bool, list, map, set, or a reference to a named type.",
-          "enum": ["string", "i32", "i64", "f64", "bool", "list", "map", "set"]
-        },
-        "fields": {
-          "type": "object",
-          "description": "For list element types or inline struct definitions. Keys are field names, values are types."
-        },
-        "items": {
-          "description": "Element type for set types. A string (type name) or inline type definition."
-        },
-        "keys": {
-          "type": "string",
-          "description": "Key type for map types."
-        },
-        "values": {
-          "description": "Value type for map types. A string (type name) or inline type definition."
-        }
-      }
-    },
     "testCase": {
       "oneOf": [
         { "$ref": "#/definitions/narrativeCase" },
-        { "$ref": "#/definitions/runnableCase" }
+        { "$ref": "#/definitions/runnableCase" },
+        { "$ref": "#/definitions/propertyCase" }
       ]
     },
     "narrativeCase": {
@@ -120,21 +151,68 @@
       "properties": {
         "name": {
           "type": "string",
-          "description": "Unique snake_case name.",
           "pattern": "^[a-z][a-z0-9_]*$"
         },
         "kind": {
           "type": "string",
-          "enum": ["narrative"]
+          "const": "narrative"
         },
         "desc": {
-          "type": "string",
-          "description": "Implementation constraint or design intent in plain language."
+          "type": "string"
         },
         "verify": {
           "type": "array",
-          "description": "Steps to manually verify this constraint is met.",
           "items": { "type": "string" }
+        }
+      }
+    },
+    "propertyCase": {
+      "type": "object",
+      "required": ["name", "kind", "runs", "generators", "calls", "expected"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "kind": {
+          "type": "string",
+          "const": "property"
+        },
+        "desc": {
+          "type": "string"
+        },
+        "runs": {
+          "type": "integer",
+          "description": "Number of random iterations to run.",
+          "minimum": 1
+        },
+        "generators": {
+          "type": "object",
+          "description": "Named generators. Values are generator expressions (e.g. 'i32[-1000, 1000]', 'bool', 'string[1, 50]').",
+          "additionalProperties": { "type": "string" }
+        },
+        "calls": {
+          "type": "object",
+          "description": "Named calls. Each maps to an operation invocation with inputs referencing generators via {name}.",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["operation"],
+            "properties": {
+              "operation": { "type": "string" },
+              "inputs": { "type": "object" }
+            }
+          }
+        },
+        "expected": {
+          "type": "array",
+          "description": "List of $assert expressions comparing call results and generator values.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "$assert": { "type": "string" }
+            },
+            "required": ["$assert"]
+          }
         }
       }
     },
@@ -144,40 +222,38 @@
       "properties": {
         "name": {
           "type": "string",
-          "description": "Unique snake_case test name.",
           "pattern": "^[a-z][a-z0-9_]*$"
         },
         "desc": {
+          "type": "string"
+        },
+        "kind": {
           "type": "string",
-          "description": "Human-readable description."
+          "description": "Omit for standard runnable cases.",
+          "not": {
+            "enum": ["narrative", "property"]
+          }
         },
         "target": {
           "type": "string",
-          "description": "Override the spec-level target for this case. Useful when a case exercises a different binding target (e.g. command targets for mechanism proofs)."
+          "description": "Override the spec-level target for this case."
         },
         "level": {
           "type": "string",
-          "description": "Normative strength. Affects what happens when the annotation is missing: must=error, should=warn, may=skip. If implemented, case must pass regardless of level.",
+          "description": "Normative strength: must=error, should=warn, may=skip.",
           "enum": ["must", "should", "may"],
           "default": "must"
         },
         "source": {
           "type": "object",
-          "description": "Provenance metadata linking this case to source specification assertions. Opaque to the harness, consumed by reporting tools.",
+          "description": "Provenance metadata linking this case to source specification assertions.",
           "properties": {
             "assertion_ids": {
               "type": "array",
-              "description": "IDs of source spec assertions this case verifies.",
               "items": { "type": "string" }
             },
-            "spec": {
-              "type": "string",
-              "description": "Name of the source specification."
-            },
-            "section": {
-              "type": "string",
-              "description": "Section reference in the source specification."
-            }
+            "spec": { "type": "string" },
+            "section": { "type": "string" }
           }
         },
         "operation": {
@@ -193,10 +269,10 @@
         },
         "inputs": {
           "type": "object",
-          "description": "Input values for this case (validated against the operation's declared inputs)."
+          "description": "Input values for this case."
         },
         "expected": {
-          "description": "Expected results. A list of trace assertions using $-prefixed directives ($run, $unordered, $anywhere) and bare event assertions (name: value). Or an object with structured output for function operations.",
+          "description": "Expected trace assertions or structured outcome.",
           "oneOf": [
             {
               "type": "array",
@@ -209,7 +285,7 @@
         },
         "steps": {
           "type": "array",
-          "description": "Ordered step sequence. Each item is a sequential operation or a concurrent block of parallel operations.",
+          "description": "Ordered step sequence for multi-step cases.",
           "items": {
             "oneOf": [
               { "$ref": "#/definitions/testStep" },
@@ -226,7 +302,7 @@
       "properties": {
         "concurrent": {
           "type": "array",
-          "description": "Operations that run in parallel. The block completes (barrier) before the next sequential step.",
+          "description": "Operations that run in parallel.",
           "items": { "$ref": "#/definitions/testStep" },
           "minItems": 1
         }
@@ -236,16 +312,9 @@
       "type": "object",
       "required": ["operation"],
       "properties": {
-        "operation": {
-          "type": "string",
-          "description": "Operation name (must match a key in the operations block)."
-        },
-        "inputs": {
-          "type": "object",
-          "description": "Input values for this step."
-        },
+        "operation": { "type": "string" },
+        "inputs": { "type": "object" },
         "expected": {
-          "description": "Per-step expected trace assertions. Optional — if omitted, the case-level expected covers the whole sequence.",
           "type": "array",
           "items": { "type": "object" }
         }

@@ -1,0 +1,358 @@
+spec_version: "0.4.0"
+name: fixture.complex_inputs
+binding: binding.yaml
+
+types:
+  EnumMemberInput:
+    fields:
+      name: string
+      value: string
+  Point:
+    fields:
+      x: i32
+      y: i32
+  AppConfig:
+    fields:
+      name: string
+      max_retries: i32
+      verbose: bool
+  Shape:
+    oneof:
+      Circle:
+        radius: i32
+      Rectangle:
+        width: i32
+        height: i32
+      Point: {}
+  Address:
+    fields:
+      street: string
+      city: string
+  Person:
+    fields:
+      name: string
+      age: i32
+      address: Address
+
+operations:
+  # Struct input/output
+  create_enum_type:
+    inputs:
+      name: string
+      members:
+        type: list
+        items: EnumMemberInput
+    outputs:
+      - member_count: i32
+      - first_member: string
+      - $result: string
+
+  sum_points:
+    inputs:
+      points:
+        type: list
+        items: Point
+    outputs:
+      - $result: Point
+
+  describe_config:
+    inputs:
+      config: AppConfig
+    outputs:
+      - $result: string
+      - retry_info: string
+
+  # Enum input/output
+  area_of_shape:
+    inputs:
+      shape: Shape
+    outputs:
+      - $result: i32
+
+  classify:
+    inputs:
+      sides: i32
+    outputs:
+      - $result: Shape
+
+  # List of structs output
+  get_points_on_line:
+    inputs:
+      count: i32
+    outputs:
+      - $result:
+          type: list
+          items: Point
+
+  # Map input/output
+  lookup:
+    inputs:
+      table:
+        type: map
+        keys: string
+        values: i32
+      key: string
+    outputs:
+      - $result: i32
+
+  invert_map:
+    inputs:
+      table:
+        type: map
+        keys: string
+        values: i32
+    outputs:
+      - $result:
+          type: map
+          keys: i32
+          values: string
+
+  # Optional input/output
+  greet_optional:
+    inputs:
+      name:
+        type: optional
+        items: string
+    outputs:
+      - $result: string
+
+  find_point:
+    inputs:
+      points:
+        type: list
+        items: Point
+      target_x: i32
+    outputs:
+      - $result:
+          type: optional
+          items: Point
+
+  # Nested struct input/output
+  describe_person:
+    inputs:
+      person: Person
+    outputs:
+      - $result: string
+      - city: string
+
+  create_person:
+    inputs:
+      name: string
+      age: i32
+      street: string
+      city: string
+    outputs:
+      - $result: Person
+
+cases:
+  # --- Struct round-trip ---
+  - name: create_enum_with_members
+    desc: Complex list input deserialized, operation extracts info from members
+    operation: create_enum_type
+    inputs:
+      name: "Colors"
+      members:
+        - { name: Red, value: "0" }
+        - { name: Green, value: "1" }
+        - { name: Blue, value: "2" }
+    expected:
+      - member_count: "3"
+      - first_member: "Red"
+      - $result: "Colors"
+
+  - name: sum_two_points
+    desc: Array of Points summed into a single Point
+    operation: sum_points
+    inputs:
+      points:
+        - { x: 1, y: 2 }
+        - { x: 3, y: 4 }
+    expected:
+      - $result:
+          $match: { x: "4", y: "6" }
+
+  - name: sum_three_points
+    desc: Three points summed
+    operation: sum_points
+    inputs:
+      points:
+        - { x: 10, y: 0 }
+        - { x: 0, y: 10 }
+        - { x: 5, y: 5 }
+    expected:
+      - $result:
+          $match: { x: "15", y: "15" }
+
+  - name: nested_config_object
+    desc: Nested mapping input deserialized into struct, operation formats it
+    operation: describe_config
+    inputs:
+      config:
+        name: "my-app"
+        max_retries: 3
+        verbose: true
+    expected:
+      - $result: "my-app"
+      - retry_info: "retries=3, verbose=true"
+
+  # --- Enum deserialization (input) ---
+  - name: area_of_circle
+    desc: Enum variant with data deserialized from YAML mapping
+    operation: area_of_shape
+    inputs:
+      shape:
+        Circle:
+          radius: 5
+    expected:
+      - $result: "78"
+
+  - name: area_of_rectangle
+    desc: Different enum variant deserialized
+    operation: area_of_shape
+    inputs:
+      shape:
+        Rectangle:
+          width: 3
+          height: 4
+    expected:
+      - $result: "12"
+
+  - name: area_of_point
+    desc: Unit enum variant deserialized
+    operation: area_of_shape
+    inputs:
+      shape: Point
+    expected:
+      - $result: "0"
+
+  # --- Enum serialization (output) ---
+  - name: classify_circle
+    desc: Operation returns enum variant, serialized as structured Value
+    operation: classify
+    inputs: { sides: 0 }
+    expected:
+      - $result:
+          $match: { Circle: { radius: "5" } }
+
+  - name: classify_rectangle
+    desc: Multi-field enum variant serialized
+    operation: classify
+    inputs: { sides: 4 }
+    expected:
+      - $result:
+          $match: { Rectangle: { width: "3", height: "4" } }
+
+  - name: classify_point
+    desc: Unit enum variant serialized
+    operation: classify
+    inputs: { sides: 1 }
+    expected:
+      - $result: "Point"
+
+  # --- List of structs (output) ---
+  - name: get_three_points
+    desc: Returns a list of structs, matched with operators
+    operation: get_points_on_line
+    inputs: { count: 3 }
+    expected:
+      - $result:
+          $size: 3
+          $any: { $match: { x: "0", y: "0" } }
+          $any: { $match: { x: "2", y: "2" } }
+
+  # --- Map deserialization (input) ---
+  - name: lookup_in_map
+    desc: Map input deserialized, key looked up
+    operation: lookup
+    inputs:
+      table:
+        alpha: 1
+        beta: 2
+        gamma: 3
+      key: "beta"
+    expected:
+      - $result: "2"
+
+  # --- Map serialization (output) ---
+  - name: invert_string_int_map
+    desc: Map output serialized as structured Value
+    operation: invert_map
+    inputs:
+      table:
+        alpha: 1
+        beta: 2
+    expected:
+      - $result:
+          $match: { "1": "alpha", "2": "beta" }
+
+  # --- Optional deserialization (input) ---
+  - name: greet_with_name
+    desc: Optional input with Some value
+    operation: greet_optional
+    inputs:
+      name: "World"
+    expected:
+      - $result: "Hello, World!"
+
+  - name: greet_without_name
+    desc: Optional input with None (null)
+    operation: greet_optional
+    inputs:
+      name: null
+    expected:
+      - $result: "Hello, stranger!"
+
+  # --- Optional serialization (output) ---
+  - name: find_point_exists
+    desc: Returns Some(Point) when found
+    operation: find_point
+    inputs:
+      points:
+        - { x: 1, y: 2 }
+        - { x: 3, y: 4 }
+      target_x: 3
+    expected:
+      - $result:
+          $match: { x: "3", y: "4" }
+
+  - name: find_point_missing
+    desc: Returns None when not found
+    operation: find_point
+    inputs:
+      points:
+        - { x: 1, y: 2 }
+      target_x: 99
+    expected:
+      - $result: null
+
+  # --- Nested struct deserialization (input) ---
+  - name: describe_person_with_address
+    desc: Nested struct (Person contains Address) deserialized from YAML
+    operation: describe_person
+    inputs:
+      person:
+        name: "Alice"
+        age: 30
+        address:
+          street: "123 Main St"
+          city: "Portland"
+    expected:
+      - $result: "Alice, age 30"
+      - city: "Portland"
+
+  # --- Nested struct serialization (output) ---
+  - name: create_person_struct
+    desc: Returns nested struct (Person with Address) as structured Value
+    operation: create_person
+    inputs:
+      name: "Bob"
+      age: 25
+      street: "456 Oak Ave"
+      city: "Seattle"
+    expected:
+      - $result:
+          $match:
+            name: "Bob"
+            age: "25"
+            address:
+              $match: { street: "456 Oak Ave", city: "Seattle" }

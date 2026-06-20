@@ -1600,6 +1600,64 @@ cases:
                 - Event: { name: shape.height, value: "4" }
 
   # ================================================================
+  # Complex inputs — structured YAML deserialized into typed params
+  # ================================================================
+
+  - name: complex_input_deserialization
+    desc: >
+      When a spec case input is a YAML Mapping or Sequence, and the
+      operation's parameter type derives SpecEvent (which implies
+      Deserialize), the harness deserializes the YAML directly into
+      the typed parameter. Operations transform the input to prove
+      deserialization worked. Covers: struct, enum, list, map,
+      optional, and nested struct — both input and output directions.
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/complex_inputs.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: create_enum_with_members
+              status: pass
+            - name: sum_two_points
+              status: pass
+            - name: sum_three_points
+              status: pass
+            - name: nested_config_object
+              status: pass
+            - name: area_of_circle
+              status: pass
+            - name: area_of_rectangle
+              status: pass
+            - name: area_of_point
+              status: pass
+            - name: classify_circle
+              status: pass
+            - name: classify_rectangle
+              status: pass
+            - name: classify_point
+              status: pass
+            - name: get_three_points
+              status: pass
+            - name: lookup_in_map
+              status: pass
+            - name: invert_string_int_map
+              status: pass
+            - name: greet_with_name
+              status: pass
+            - name: greet_without_name
+              status: pass
+            - name: find_point_exists
+              status: pass
+            - name: find_point_missing
+              status: pass
+            - name: describe_person_with_address
+              status: pass
+            - name: create_person_struct
+              status: pass
+
+  # ================================================================
   # Property tests — generators, calls, $assert
   # ================================================================
 
