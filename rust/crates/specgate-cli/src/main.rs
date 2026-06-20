@@ -88,7 +88,7 @@ fn cmd_validate(args: &[String]) -> ExitCode {
         eprintln!("error: validate requires a spec directory");
         return ExitCode::from(2);
     };
-    let outcome = validate::validate(&dir, strict, &suppress, &assertions_dir, check_source);
+    let outcome = validate(&dir, strict, &suppress, &assertions_dir, check_source);
     print!("{}", validate::format_outcome(&outcome));
     match outcome {
         validate::ValidateOutcome::Pass { .. } => ExitCode::from(0),
@@ -101,7 +101,7 @@ fn cmd_run(args: &[String]) -> ExitCode {
         eprintln!("error: run requires exactly one spec file argument");
         return ExitCode::from(2);
     }
-    let outcome = run::run(&args[0]);
+    let outcome = run(&args[0]);
     print!("{}", run::format_outcome(&outcome));
     match &outcome {
         run::RunOutcome::Error { .. } => ExitCode::from(1),

@@ -334,7 +334,7 @@ pub fn parse_value(v: &YValue) -> Result<Value, ParseError> {
             Ok(Value::List(out))
         }
         YValue::Mapping(m) => {
-            let mut out = std::collections::BTreeMap::new();
+            let mut out = BTreeMap::new();
             for (k, v) in m {
                 let key = k
                     .as_str()
@@ -404,7 +404,7 @@ fn parse_single_op(op: &str, v: &YValue) -> Result<Matcher, ParseError> {
         }
         "$match" => {
             let mp = v.as_mapping().ok_or_else(|| ParseError::Shape("$match expects a mapping".into()))?;
-            let mut out = std::collections::BTreeMap::new();
+            let mut out = BTreeMap::new();
             for (k, v) in mp {
                 let key = k
                     .as_str()

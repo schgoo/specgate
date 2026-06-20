@@ -155,6 +155,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "specgate"
+version = "0.1.0"
+dependencies = [
+ "specgate-annotations",
+ "specgate-harness",
+]
+
+[[package]]
 name = "specgate-annotations"
 version = "0.1.0"
 dependencies = [

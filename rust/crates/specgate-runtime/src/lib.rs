@@ -391,7 +391,11 @@ macro_rules! to_spec_value_int {
         })*
     };
 }
-to_spec_value_int!(i8, i16, i32, i64, isize, u8, u16, u32, u64, usize);
+to_spec_value_int!(i8, i16, i32, isize, u8, u16, u32, u64, usize);
+
+impl ToSpecValue for i64 {
+    fn to_spec_value(&self) -> Value { Value::Integer(*self) }
+}
 
 impl ToSpecValue for f32 {
     fn to_spec_value(&self) -> Value {
@@ -488,6 +492,7 @@ impl<T: ToSpecValue + ?Sized> ToSpecValue for Box<T> {
 // `#[spec_operation]` ends with `(&ReturnEmit(&__sg_ret)).emit("$result");`.
 // ---------------------------------------------------------------------------
 
+#[derive(Debug)]
 pub struct ReturnEmit<'a, T: ?Sized>(pub &'a T);
 
 // More-specific inherent impl: chosen first by method lookup when `T: SpecEvent`.

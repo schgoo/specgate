@@ -10,7 +10,7 @@ use quote::{quote, quote_spanned};
 use syn::parse::{Parse, ParseStream};
 use syn::visit_mut::VisitMut;
 use syn::{
-    BinOp, Block, Data, DeriveInput, Expr, Fields, FnArg, ItemFn, LitStr, Pat, ReturnType, Stmt, Type, parse_macro_input, parse_quote,
+    BinOp, Block, Data, DeriveInput, Expr, Fields, FnArg, Ident, ItemFn, LitStr, Pat, ReturnType, Stmt, Type, parse_macro_input, parse_quote,
 };
 
 struct NameArg(String);
@@ -100,7 +100,7 @@ fn is_printable_param(ty: &Type) -> bool {
     false
 }
 
-fn typed_params(f: &ItemFn) -> Vec<(syn::Ident, syn::Type)> {
+fn typed_params(f: &ItemFn) -> Vec<(Ident, Type)> {
     let mut out = Vec::new();
     for arg in &f.sig.inputs {
         if let FnArg::Typed(pt) = arg {
@@ -296,7 +296,7 @@ pub fn spec_operation(attr: TokenStream, item: TokenStream) -> TokenStream {
     quote!(#func).into()
 }
 
-fn build_pre_stmts(op_name: &str, params: &[(syn::Ident, syn::Type)], is_method: bool, _has_ref_param: bool) -> Vec<Stmt> {
+fn build_pre_stmts(op_name: &str, params: &[(Ident, Type)], is_method: bool, _has_ref_param: bool) -> Vec<Stmt> {
     let rt = rt();
     let mut out: Vec<Stmt> = vec![parse_quote!(#rt::emit_run(#op_name);)];
     if is_method {
@@ -391,7 +391,7 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
                     });
                 }
                 Fields::Named(named) => {
-                    let field_idents: Vec<&syn::Ident> = named.named.iter().filter_map(|f| f.ident.as_ref()).collect();
+                    let field_idents: Vec<&Ident> = named.named.iter().filter_map(|f| f.ident.as_ref()).collect();
                     let field_strs: Vec<String> = field_idents.iter().map(|id| id.to_string()).collect();
                     arms.push(quote! {
                         #name::#vname { #(#field_idents),* } => {

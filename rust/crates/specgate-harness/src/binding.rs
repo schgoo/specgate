@@ -7,11 +7,13 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone)]
 pub struct Target {
     pub package_root: PathBuf,
+    #[allow(dead_code)]
     pub command: Option<String>,
 }
 
 #[derive(Debug)]
 pub struct Binding {
+    #[allow(dead_code)]
     pub language: String,
     pub targets: BTreeMap<String, Target>,
 }
@@ -27,6 +29,7 @@ impl Binding {
     }
 
     /// Get the package_root for a target (convenience for backward compat).
+    #[allow(dead_code)]
     pub fn package_root(&self, target_name: Option<&str>) -> Option<&Path> {
         self.target(target_name).map(|t| t.package_root.as_path())
     }

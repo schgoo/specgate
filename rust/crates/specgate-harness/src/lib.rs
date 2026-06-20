@@ -435,10 +435,6 @@ fn workspace_root() -> PathBuf {
     p
 }
 
-fn env_or(name: &str, default: &str) -> String {
-    std::env::var(name).unwrap_or_else(|_| default.to_string())
-}
-
 fn scratch_for(stem: &str) -> PathBuf {
     let mut p = workspace_root();
     p.push("target");
@@ -592,11 +588,11 @@ fn check_shape(spec: &spec::Spec, raw: &serde_yaml::Value) -> Option<String> {
     None
 }
 
-fn collect_event_names(a: &types::Assertion, out: &mut Vec<String>) {
+fn collect_event_names(a: &Assertion, out: &mut Vec<String>) {
     match a {
-        types::Assertion::Event { name, .. } => out.push(name.clone()),
-        types::Assertion::Run { .. } => {}
-        types::Assertion::Unordered { items } | types::Assertion::Anywhere { items } => {
+        Assertion::Event { name, .. } => out.push(name.clone()),
+        Assertion::Run { .. } => {}
+        Assertion::Unordered { items } | Assertion::Anywhere { items } => {
             for it in items {
                 collect_event_names(it, out);
             }
