@@ -17,9 +17,7 @@ pub fn matches(expected: &[Assertion], actual: &[TraceEvent]) -> bool {
 fn match_ordered(expected: &[Assertion], actual: &[TraceEvent], mut cursor: usize) -> Option<usize> {
     for a in expected {
         cursor = match a {
-            Assertion::Event { .. } | Assertion::Run { .. } => {
-                find_leaf(a, actual, cursor)? + 1
-            }
+            Assertion::Event { .. } | Assertion::Run { .. } => find_leaf(a, actual, cursor)? + 1,
             Assertion::Unordered { items } => match_unordered(items, actual, cursor)?,
             Assertion::Anywhere { items } => {
                 if !match_anywhere(items, actual) {
@@ -34,7 +32,11 @@ fn match_ordered(expected: &[Assertion], actual: &[TraceEvent], mut cursor: usiz
 
 fn find_leaf(a: &Assertion, actual: &[TraceEvent], start: usize) -> Option<usize> {
     // Special-case $exists: scan the whole stream.
-    if let Assertion::Event { name, value: AssertValue::Matcher(Matcher::Exists(present)) } = a {
+    if let Assertion::Event {
+        name,
+        value: AssertValue::Matcher(Matcher::Exists(present)),
+    } = a
+    {
         let any = actual.iter().any(|ev| match ev {
             TraceEvent::Event { name: en, .. } => en == name,
             _ => false,
@@ -55,19 +57,16 @@ fn find_leaf(a: &Assertion, actual: &[TraceEvent], start: usize) -> Option<usize
 
 fn leaf_matches(a: &Assertion, ev: &TraceEvent) -> bool {
     match (a, ev) {
-        (
-            Assertion::Event { name, value },
-            TraceEvent::Event { name: en, value: ev_val },
-        ) => {
-            if name != en { return false; }
+        (Assertion::Event { name, value }, TraceEvent::Event { name: en, value: ev_val }) => {
+            if name != en {
+                return false;
+            }
             match value {
                 AssertValue::Exact(v) => values_equal(v, ev_val),
                 AssertValue::Matcher(m) => matcher_matches(m, ev_val),
             }
         }
-        (Assertion::Run { operation }, TraceEvent::Run { operation: actual_op }) => {
-            operation == actual_op
-        }
+        (Assertion::Run { operation }, TraceEvent::Run { operation: actual_op }) => operation == actual_op,
         _ => false,
     }
 }
@@ -76,13 +75,13 @@ fn leaf_matches(a: &Assertion, ev: &TraceEvent) -> bool {
 /// Integer/Float coerce when compared to String numerics (so YAML `value: 4`
 /// matches a trace `Value::Integer(4)`).
 fn values_equal(expected: &Value, actual: &Value) -> bool {
-    if expected == actual { return true; }
+    if expected == actual {
+        return true;
+    }
     match (expected, actual) {
         (Value::String(s), other) => string_matches_scalar(s, other),
         (other, Value::String(s)) => string_matches_scalar(s, other),
-        (Value::List(a), Value::List(b)) => {
-            a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| values_equal(x, y))
-        }
+        (Value::List(a), Value::List(b)) => a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| values_equal(x, y)),
         (Value::List(a), Value::Set(b)) | (Value::Set(b), Value::List(a)) => {
             a.len() == b.len() && a.iter().all(|x| b.iter().any(|y| values_equal(x, y)))
         }
@@ -168,23 +167,17 @@ fn matcher_matches(m: &Matcher, v: &Value) -> bool {
             })
         }
         Matcher::Not(inner) => !matcher_matches(inner, v),
-        Matcher::Gt(target) => numeric_compare(v, target)
-            .map(|o| o == Ordering::Greater)
-            .unwrap_or(false),
+        Matcher::Gt(target) => numeric_compare(v, target).map(|o| o == Ordering::Greater).unwrap_or(false),
         Matcher::Gte(target) => numeric_compare(v, target)
             .map(|o| matches!(o, Ordering::Greater | Ordering::Equal))
             .unwrap_or(false),
-        Matcher::Lt(target) => numeric_compare(v, target)
-            .map(|o| o == Ordering::Less)
-            .unwrap_or(false),
+        Matcher::Lt(target) => numeric_compare(v, target).map(|o| o == Ordering::Less).unwrap_or(false),
         Matcher::Lte(target) => numeric_compare(v, target)
             .map(|o| matches!(o, Ordering::Less | Ordering::Equal))
             .unwrap_or(false),
         Matcher::Type(t) => v.type_name() == t.as_str() || (t == "int" && matches!(v, Value::Integer(_))),
         Matcher::Matches(pat) => match v {
-            Value::String(s) => regex::Regex::new(pat)
-                .map(|r| r.is_match(s))
-                .unwrap_or(false),
+            Value::String(s) => regex::Regex::new(pat).map(|r| r.is_match(s)).unwrap_or(false),
             _ => false,
         },
         Matcher::Composite(parts) => parts.iter().all(|p| matcher_matches(p, v)),
@@ -222,13 +215,7 @@ fn match_unordered(items: &[Assertion], actual: &[TraceEvent], cursor: usize) ->
     }
 }
 
-fn assign_unordered(
-    items: &[Assertion],
-    actual: &[TraceEvent],
-    cursor: usize,
-    assignment: &mut [Option<usize>],
-    idx: usize,
-) -> bool {
+fn assign_unordered(items: &[Assertion], actual: &[TraceEvent], cursor: usize, assignment: &mut [Option<usize>], idx: usize) -> bool {
     if idx == items.len() {
         return true;
     }

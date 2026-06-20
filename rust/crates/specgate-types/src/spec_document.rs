@@ -91,17 +91,11 @@ impl<'de> Deserialize<'de> for SpecDocument {
         }
 
         let raw = RawSpecDocument::deserialize(deserializer)?;
-        let name = raw
-            .name
-            .ok_or_else(|| de::Error::custom("missing required field: name"))?;
-        let cases = raw
-            .cases
-            .ok_or_else(|| de::Error::custom("missing required field: cases"))?;
+        let name = raw.name.ok_or_else(|| de::Error::custom("missing required field: name"))?;
+        let cases = raw.cases.ok_or_else(|| de::Error::custom("missing required field: cases"))?;
 
         if raw.inputs.is_some() && raw.operations.is_some() {
-            return Err(de::Error::custom(
-                "inputs and operations are mutually exclusive",
-            ));
+            return Err(de::Error::custom("inputs and operations are mutually exclusive"));
         }
 
         if raw.state.is_some() && raw.init.is_none() {
@@ -126,9 +120,7 @@ impl<'de> Deserialize<'de> for SpecDocument {
 
         let binding = match raw.binding {
             Some(RawBindingDecl::Legacy(name)) => {
-                let target = raw
-                    .target
-                    .ok_or_else(|| de::Error::missing_field("target"))?;
+                let target = raw.target.ok_or_else(|| de::Error::missing_field("target"))?;
                 Some(BindingDecl::Single(BindingEntry { name, target }))
             }
             Some(RawBindingDecl::Single(binding)) => Some(BindingDecl::Single(binding)),
@@ -215,8 +207,7 @@ pub struct TestStep {
 /// Validates a YAML string as a spec document. Returns `Ok(())` if valid,
 /// `Err(reason)` if invalid.
 pub fn validate_spec_document(yaml: &str) -> Result<SpecDocument, String> {
-    let doc: SpecDocument =
-        serde_yaml::from_str(yaml).map_err(|e| format!("parse error: {e}"))?;
+    let doc: SpecDocument = serde_yaml::from_str(yaml).map_err(|e| format!("parse error: {e}"))?;
 
     validate_case_fields(&doc)?;
 
@@ -235,9 +226,7 @@ fn validate_case_fields(doc: &SpecDocument) -> Result<(), String> {
                     continue;
                 }
                 if !doc.inputs.contains_key(key) {
-                    return Err(format!(
-                        "case input '{key}' is not declared in spec inputs"
-                    ));
+                    return Err(format!("case input '{key}' is not declared in spec inputs"));
                 }
             }
         }
@@ -249,9 +238,7 @@ fn validate_case_fields(doc: &SpecDocument) -> Result<(), String> {
                     continue;
                 }
                 if !declared_outputs.contains(&key.to_string()) {
-                    return Err(format!(
-                        "case expected field '{key}' is not declared in spec outputs"
-                    ));
+                    return Err(format!("case expected field '{key}' is not declared in spec outputs"));
                 }
             }
         }
@@ -261,19 +248,12 @@ fn validate_case_fields(doc: &SpecDocument) -> Result<(), String> {
 }
 
 fn resolve_outcome_outputs(doc: &SpecDocument, case: &SpecCase) -> Vec<String> {
-    let outcome = case
-        .expected
-        .get("outcome")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let outcome = case.expected.get("outcome").and_then(|v| v.as_str()).unwrap_or("");
 
     let when_key = format!("when {outcome}");
     if let Some(block) = doc.outputs.get(&when_key) {
         if let Some(map) = block.as_mapping() {
-            return map
-                .keys()
-                .filter_map(|k| k.as_str().map(String::from))
-                .collect();
+            return map.keys().filter_map(|k| k.as_str().map(String::from)).collect();
         }
     }
 
@@ -317,10 +297,8 @@ mod tests {
 
     #[test]
     fn deserializes_legacy_binding_format() {
-        let spec: SpecDocument = serde_yaml::from_str(
-            "name: legacy\nbinding: rust\ntarget: test\noutcome: Ok\ncases: []\n",
-        )
-        .expect("legacy spec should deserialize");
+        let spec: SpecDocument = serde_yaml::from_str("name: legacy\nbinding: rust\ntarget: test\noutcome: Ok\ncases: []\n")
+            .expect("legacy spec should deserialize");
 
         assert_eq!(
             spec.binding,
@@ -335,10 +313,8 @@ mod tests {
 
     #[test]
     fn deserializes_new_binding_format() {
-        let spec: SpecDocument = serde_yaml::from_str(
-            "name: modern\nbinding:\n  - name: rust\n    target: test\noutcome: Ok\ncases: []\n",
-        )
-        .expect("new spec should deserialize");
+        let spec: SpecDocument = serde_yaml::from_str("name: modern\nbinding:\n  - name: rust\n    target: test\noutcome: Ok\ncases: []\n")
+            .expect("new spec should deserialize");
 
         assert_eq!(spec.binding_name().as_deref(), Some("rust"));
         assert_eq!(spec.target().as_deref(), Some("test"));
@@ -398,19 +374,13 @@ cases:
         )
         .expect("spec with postconditions should deserialize");
 
-        let postconditions = spec.cases[0]
-            .postconditions
-            .as_ref()
-            .expect("case should include postconditions");
+        let postconditions = spec.cases[0].postconditions.as_ref().expect("case should include postconditions");
         assert_eq!(postconditions.len(), 1);
         assert_eq!(postconditions[0].target, "assert-file-absent");
         assert_eq!(
             postconditions[0].inputs.get("path").map(String::as_str),
             Some("{generated_test_path}")
         );
-        assert_eq!(
-            postconditions[0].desc.as_deref(),
-            Some("generated file removed")
-        );
+        assert_eq!(postconditions[0].desc.as_deref(), Some("generated file removed"));
     }
 }

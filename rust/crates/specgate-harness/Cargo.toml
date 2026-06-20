@@ -2,6 +2,14 @@
 name = "specgate-harness"
 version.workspace = true
 edition.workspace = true
+description = "Test harness for SpecGate spec-based verification"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
@@ -13,3 +21,6 @@ regex = { workspace = true }
 [dev-dependencies]
 specgate-annotations = { workspace = true }
 specgate-fixtures = { path = "../../../test/rust/crates/specgate-fixtures" }
+
+[lints]
+workspace = true

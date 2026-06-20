@@ -41,9 +41,7 @@ impl<'de> Deserialize<'de> for BindingFile {
         }
 
         let raw = RawBindingFile::deserialize(deserializer)?;
-        let language = raw
-            .language
-            .ok_or_else(|| de::Error::custom("missing required field 'language'"))?;
+        let language = raw.language.ok_or_else(|| de::Error::custom("missing required field 'language'"))?;
         let mut targets = BTreeMap::new();
 
         for (name, target) in raw.targets.unwrap_or_default() {
@@ -52,9 +50,7 @@ impl<'de> Deserialize<'de> for BindingFile {
                 .ok_or_else(|| de::Error::custom("missing required field 'package_root'"))?;
 
             if target.command.is_some() && target.function.is_some() {
-                return Err(de::Error::custom(
-                    "target cannot have both command and function",
-                ));
+                return Err(de::Error::custom("target cannot have both command and function"));
             }
 
             targets.insert(
@@ -133,20 +129,11 @@ targets:
         )
         .expect("binding should deserialize");
 
-        assert_eq!(
-            binding.targets["test"].package_root,
-            "../rust/crates/my-app"
-        );
-        assert_eq!(
-            binding.targets["test"].test_root.as_deref(),
-            Some("../rust/crates/my-app/tests")
-        );
+        assert_eq!(binding.targets["test"].package_root, "../rust/crates/my-app");
+        assert_eq!(binding.targets["test"].test_root.as_deref(), Some("../rust/crates/my-app/tests"));
         assert!(binding.targets["test"].is_command());
         assert!(!binding.targets["test"].is_api());
-        assert_eq!(
-            binding.targets["generate"].package_root,
-            "../rust/crates/my-backend"
-        );
+        assert_eq!(binding.targets["generate"].package_root, "../rust/crates/my-backend");
         assert!(binding.targets["generate"].is_api());
         assert!(!binding.targets["generate"].is_command());
     }

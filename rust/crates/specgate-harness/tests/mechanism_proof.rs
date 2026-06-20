@@ -18,10 +18,10 @@
 //! A no-op annotation crate produces empty traces → test failure.
 //! An interpreter bypass never reaches this code path at all.
 
-use specgate_fixtures::statemachine_counter;
-use specgate_fixtures::stateless_add;
-use specgate_fixtures::multi_field_capture;
 use specgate_fixtures::checkpoint_inline;
+use specgate_fixtures::multi_field_capture;
+use specgate_fixtures::stateless_add;
+use specgate_fixtures::statemachine_counter;
 
 // The annotations system must provide a way to retrieve collected traces.
 // This import path may be specgate_annotations::take_traces, a runtime crate,

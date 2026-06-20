@@ -65,15 +65,9 @@ fn parse_spec_value(v: &YValue) -> Result<Spec, ParseError> {
         .as_mapping()
         .ok_or_else(|| ParseError::Shape("top-level is not a mapping".into()))?;
 
-    let binding_path = map
-        .get(YValue::String("binding".into()))
-        .and_then(|b| b.as_str())
-        .map(String::from);
+    let binding_path = map.get(YValue::String("binding".into())).and_then(|b| b.as_str()).map(String::from);
 
-    let target = map
-        .get(YValue::String("target".into()))
-        .and_then(|t| t.as_str())
-        .map(String::from);
+    let target = map.get(YValue::String("target".into())).and_then(|t| t.as_str()).map(String::from);
 
     let mut async_ops = BTreeSet::new();
     if let Some(YValue::Mapping(ops)) = map.get(YValue::String("operations".into())) {
@@ -108,19 +102,14 @@ fn parse_spec_value(v: &YValue) -> Result<Spec, ParseError> {
 }
 
 fn parse_case(v: &YValue) -> Result<Case, ParseError> {
-    let m = v
-        .as_mapping()
-        .ok_or_else(|| ParseError::Shape("case is not a mapping".into()))?;
+    let m = v.as_mapping().ok_or_else(|| ParseError::Shape("case is not a mapping".into()))?;
     let name = m
         .get(YValue::String("name".into()))
         .and_then(|x| x.as_str())
         .ok_or_else(|| ParseError::Shape("case missing name".into()))?
         .to_string();
 
-    let target = m
-        .get(YValue::String("target".into()))
-        .and_then(|t| t.as_str())
-        .map(String::from);
+    let target = m.get(YValue::String("target".into())).and_then(|t| t.as_str()).map(String::from);
 
     let mut extra_inputs: BTreeMap<String, YValue> = BTreeMap::new();
     let setup = match m.get(YValue::String("setup".into())) {
@@ -140,10 +129,7 @@ fn parse_case(v: &YValue) -> Result<Case, ParseError> {
                 }
                 Setup::Multi(entries)
             } else {
-                let (k, v) = mp
-                    .iter()
-                    .next()
-                    .ok_or_else(|| ParseError::Shape("empty setup mapping".into()))?;
+                let (k, v) = mp.iter().next().ok_or_else(|| ParseError::Shape("empty setup mapping".into()))?;
                 let fn_name = k
                     .as_str()
                     .ok_or_else(|| ParseError::Shape("setup name not str".into()))?
@@ -161,19 +147,14 @@ fn parse_case(v: &YValue) -> Result<Case, ParseError> {
         Some(_) => return Err(ParseError::Shape("setup has invalid shape".into())),
     };
 
-    let operation = m
-        .get(YValue::String("operation".into()))
-        .and_then(|x| x.as_str())
-        .map(String::from);
+    let operation = m.get(YValue::String("operation".into())).and_then(|x| x.as_str()).map(String::from);
 
     let steps = match m.get(YValue::String("steps".into())) {
         None => Vec::new(),
         Some(YValue::Sequence(seq)) => {
             let mut out = Vec::new();
             for s in seq {
-                let m = s
-                    .as_mapping()
-                    .ok_or_else(|| ParseError::Shape("step not a mapping".into()))?;
+                let m = s.as_mapping().ok_or_else(|| ParseError::Shape("step not a mapping".into()))?;
                 let op = m
                     .get(YValue::String("operation".into()))
                     .and_then(|x| x.as_str())
@@ -274,14 +255,10 @@ fn parse_assertion(v: &YValue) -> Result<Assertion, ParseError> {
         .as_mapping()
         .ok_or_else(|| ParseError::Shape("assertion is not a mapping".into()))?;
     if m.len() != 1 {
-        return Err(ParseError::Shape(
-            "assertion entry must be a single-key mapping".into(),
-        ));
+        return Err(ParseError::Shape("assertion entry must be a single-key mapping".into()));
     }
     let (k, val) = m.iter().next().unwrap();
-    let key = k
-        .as_str()
-        .ok_or_else(|| ParseError::Shape("assertion key not string".into()))?;
+    let key = k.as_str().ok_or_else(|| ParseError::Shape("assertion key not string".into()))?;
     match key {
         "$run" => {
             let op = val
@@ -374,9 +351,7 @@ pub fn parse_value(v: &YValue) -> Result<Value, ParseError> {
 fn parse_matcher(m: &serde_yaml::Mapping) -> Result<Matcher, ParseError> {
     let mut parts = Vec::new();
     for (k, v) in m {
-        let key = k
-            .as_str()
-            .ok_or_else(|| ParseError::Shape("matcher key not string".into()))?;
+        let key = k.as_str().ok_or_else(|| ParseError::Shape("matcher key not string".into()))?;
         let m = parse_single_op(key, v)?;
         parts.push(m);
     }
@@ -391,16 +366,12 @@ fn parse_single_op(op: &str, v: &YValue) -> Result<Matcher, ParseError> {
     match op {
         "$eq" => Ok(Matcher::Eq(parse_value(v)?)),
         "$size" => {
-            let n = v
-                .as_u64()
-                .ok_or_else(|| ParseError::Shape("$size expects an integer".into()))?;
+            let n = v.as_u64().ok_or_else(|| ParseError::Shape("$size expects an integer".into()))?;
             Ok(Matcher::Size(n as usize))
         }
         "$contains" => {
             let arg = if let YValue::Mapping(mp) = v {
-                let has_op = mp.iter().any(|(k, _)| {
-                    k.as_str().map(|s| s.starts_with('$')).unwrap_or(false)
-                });
+                let has_op = mp.iter().any(|(k, _)| k.as_str().map(|s| s.starts_with('$')).unwrap_or(false));
                 if has_op {
                     AnyArg::Matcher(parse_matcher(mp)?)
                 } else {
@@ -432,9 +403,7 @@ fn parse_single_op(op: &str, v: &YValue) -> Result<Matcher, ParseError> {
             Ok(Matcher::Excludes(items))
         }
         "$match" => {
-            let mp = v
-                .as_mapping()
-                .ok_or_else(|| ParseError::Shape("$match expects a mapping".into()))?;
+            let mp = v.as_mapping().ok_or_else(|| ParseError::Shape("$match expects a mapping".into()))?;
             let mut out = std::collections::BTreeMap::new();
             for (k, v) in mp {
                 let key = k
@@ -446,16 +415,12 @@ fn parse_single_op(op: &str, v: &YValue) -> Result<Matcher, ParseError> {
             Ok(Matcher::Match(out))
         }
         "$exists" => {
-            let b = v
-                .as_bool()
-                .ok_or_else(|| ParseError::Shape("$exists expects a bool".into()))?;
+            let b = v.as_bool().ok_or_else(|| ParseError::Shape("$exists expects a bool".into()))?;
             Ok(Matcher::Exists(b))
         }
         "$any" => {
             let arg = if let YValue::Mapping(mp) = v {
-                let has_op = mp.iter().any(|(k, _)| {
-                    k.as_str().map(|s| s.starts_with('$')).unwrap_or(false)
-                });
+                let has_op = mp.iter().any(|(k, _)| k.as_str().map(|s| s.starts_with('$')).unwrap_or(false));
                 if has_op {
                     AnyArg::Matcher(parse_matcher(mp)?)
                 } else {
@@ -468,9 +433,7 @@ fn parse_single_op(op: &str, v: &YValue) -> Result<Matcher, ParseError> {
         }
         "$every" => {
             let arg = if let YValue::Mapping(mp) = v {
-                let has_op = mp.iter().any(|(k, _)| {
-                    k.as_str().map(|s| s.starts_with('$')).unwrap_or(false)
-                });
+                let has_op = mp.iter().any(|(k, _)| k.as_str().map(|s| s.starts_with('$')).unwrap_or(false));
                 if has_op {
                     AnyArg::Matcher(parse_matcher(mp)?)
                 } else {
@@ -483,14 +446,8 @@ fn parse_single_op(op: &str, v: &YValue) -> Result<Matcher, ParseError> {
         }
         "$not" => {
             let inner = if let YValue::Mapping(mp) = v {
-                let has_op = mp.iter().any(|(k, _)| {
-                    k.as_str().map(|s| s.starts_with('$')).unwrap_or(false)
-                });
-                if has_op {
-                    parse_matcher(mp)?
-                } else {
-                    Matcher::Eq(parse_value(v)?)
-                }
+                let has_op = mp.iter().any(|(k, _)| k.as_str().map(|s| s.starts_with('$')).unwrap_or(false));
+                if has_op { parse_matcher(mp)? } else { Matcher::Eq(parse_value(v)?) }
             } else {
                 Matcher::Eq(parse_value(v)?)
             };
@@ -535,10 +492,7 @@ pub fn stringify_value(v: &YValue) -> String {
 }
 
 pub fn binding_path_resolved(spec_path: &Path, binding: &str) -> PathBuf {
-    let parent = spec_path
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."));
+    let parent = spec_path.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
     // Try spec-relative first.
     let direct = parent.join(binding);
     if direct.exists() {

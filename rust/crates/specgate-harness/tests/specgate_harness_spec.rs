@@ -5,7 +5,7 @@
 //! development. The harness also tests itself via `harness_self_test.rs`
 //! which runs the full harness pipeline (codegen → compile → traces).
 
-use specgate_harness::{run_spec, Assertion, CaseLevel, CaseResult, CaseStatus, RunOutcome, TraceEvent};
+use specgate_harness::{Assertion, CaseLevel, CaseResult, CaseStatus, RunOutcome, TraceEvent, run_spec};
 
 fn repo_root() -> std::path::PathBuf {
     let mut p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -42,9 +42,7 @@ fn ev<V: Into<specgate_harness::Value>>(name: &str, value: V) -> TraceEvent {
 }
 
 fn run_op(op: &str) -> TraceEvent {
-    TraceEvent::Run {
-        operation: op.into(),
-    }
+    TraceEvent::Run { operation: op.into() }
 }
 
 fn aev<V: Into<specgate_harness::AssertValue>>(name: &str, value: V) -> Assertion {
@@ -55,9 +53,7 @@ fn aev<V: Into<specgate_harness::AssertValue>>(name: &str, value: V) -> Assertio
 }
 
 fn arun(op: &str) -> Assertion {
-    Assertion::Run {
-        operation: op.into(),
-    }
+    Assertion::Run { operation: op.into() }
 }
 
 fn check_case(c: &CaseResult, name: &str, status: CaseStatus) {
@@ -75,40 +71,26 @@ fn check_case(c: &CaseResult, name: &str, status: CaseStatus) {
 
 #[test]
 fn stateless_return_value() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/stateless_add.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/stateless_add.spec.yaml"));
     assert_eq!(r.len(), 1);
     check_case(&r[0], "add_2_3", CaseStatus::Pass);
     assert_eq!(r[0].expected, vec![aev("$result", "5")]);
     assert_eq!(
         r[0].traces,
-        vec![
-            run_op("add"),
-            ev("add.a", "2"),
-            ev("add.b", "3"),
-            ev("$result", "5"),
-        ]
+        vec![run_op("add"), ev("add.a", "2"), ev("add.b", "3"), ev("$result", "5"),]
     );
 }
 
 #[test]
 fn statemachine_before_after() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/statemachine_counter.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/statemachine_counter.spec.yaml"));
     check_case(&r[0], "increment_once", CaseStatus::Pass);
-    assert_eq!(
-        r[0].traces,
-        vec![ev("count", 0i64), run_op("increment"), ev("count", 1i64)]
-    );
+    assert_eq!(r[0].traces, vec![ev("count", 0i64), run_op("increment"), ev("count", 1i64)]);
 }
 
 #[test]
 fn multi_field_capture() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/multi_field_capture.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/multi_field_capture.spec.yaml"));
     check_case(&r[0], "withdraw_50", CaseStatus::Pass);
     assert_eq!(
         r[0].traces,
@@ -124,9 +106,7 @@ fn multi_field_capture() {
 
 #[test]
 fn inline_checkpoint() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/checkpoint_inline.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/checkpoint_inline.spec.yaml"));
     check_case(&r[0], "process_hello", CaseStatus::Pass);
     // Macro echoes `&str` params, so `process.data` appears alongside the
     // inline `after_upper` checkpoint and the `process.result` event.
@@ -143,26 +123,17 @@ fn inline_checkpoint() {
 
 #[test]
 fn multi_mutation() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/multi_mutation.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/multi_mutation.spec.yaml"));
     check_case(&r[0], "double_increment", CaseStatus::Pass);
     assert_eq!(
         r[0].traces,
-        vec![
-            ev("count", 0i64),
-            run_op("increment_twice"),
-            ev("count", 1i64),
-            ev("count", 2i64),
-        ]
+        vec![ev("count", 0i64), run_op("increment_twice"), ev("count", 1i64), ev("count", 2i64),]
     );
 }
 
 #[test]
 fn nested_operations() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/nested_operations.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/nested_operations.spec.yaml"));
     check_case(&r[0], "transfer_50", CaseStatus::Pass);
     assert_eq!(
         r[0].traces,
@@ -183,9 +154,7 @@ fn nested_operations() {
 
 #[test]
 fn setup_with_input_params() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/setup_with_params.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/setup_with_params.spec.yaml"));
     check_case(&r[0], "start_at_10", CaseStatus::Pass);
     assert_eq!(
         r[0].traces,
@@ -200,9 +169,7 @@ fn setup_with_input_params() {
 
 #[test]
 fn multiple_setups() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/multi_setup.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/multi_setup.spec.yaml"));
     check_case(&r[0], "transfer_between_accounts", CaseStatus::Pass);
     assert_eq!(
         r[0].traces,
@@ -222,9 +189,7 @@ fn multiple_setups() {
 
 #[test]
 fn multiple_cases_one_spec() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/multi_case.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/multi_case.spec.yaml"));
     assert_eq!(r.len(), 2);
     check_case(&r[0], "add_2_3", CaseStatus::Pass);
     check_case(&r[1], "add_10_20", CaseStatus::Pass);
@@ -232,9 +197,7 @@ fn multiple_cases_one_spec() {
 
 #[test]
 fn multi_step_sequence() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/multi_step.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/multi_step.spec.yaml"));
     check_case(&r[0], "increment_then_decrement", CaseStatus::Pass);
     assert_eq!(
         r[0].traces,
@@ -254,9 +217,7 @@ fn multi_step_sequence() {
 
 #[test]
 fn mock_call_site() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/mock_field.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/mock_field.spec.yaml"));
     check_case(&r[0], "find_user_1", CaseStatus::Pass);
     assert_eq!(
         r[0].traces,
@@ -271,9 +232,7 @@ fn mock_call_site() {
 
 #[test]
 fn mock_multi_response() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/mock_multi_response.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/mock_multi_response.spec.yaml"));
     check_case(&r[0], "get_two_different_users", CaseStatus::Pass);
     assert_eq!(
         r[0].traces,
@@ -290,9 +249,7 @@ fn mock_multi_response() {
 
 #[test]
 fn mock_input_not_in_table() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/mock_not_found.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/mock_not_found.spec.yaml"));
     check_case(&r[0], "query_unknown_user", CaseStatus::Pass);
 }
 
@@ -302,9 +259,7 @@ fn mock_input_not_in_table() {
 
 #[test]
 fn result_ok_path() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/result_ok.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/result_ok.spec.yaml"));
     check_case(&r[0], "divide_10_by_2", CaseStatus::Pass);
     assert_eq!(
         r[0].traces,
@@ -320,9 +275,7 @@ fn result_ok_path() {
 
 #[test]
 fn result_err_path() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/result_err.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/result_err.spec.yaml"));
     check_case(&r[0], "divide_by_zero", CaseStatus::Pass);
     assert_eq!(
         r[0].traces,
@@ -338,29 +291,20 @@ fn result_err_path() {
 
 #[test]
 fn unrecoverable_panic() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/unrecoverable.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/unrecoverable.spec.yaml"));
     check_case(&r[0], "divide_by_zero_panics", CaseStatus::Pass);
 }
 
 #[test]
 fn void_operation() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/void_operation.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/void_operation.spec.yaml"));
     check_case(&r[0], "log_a_message", CaseStatus::Pass);
-    assert_eq!(
-        r[0].traces,
-        vec![ev("count", 0i64), run_op("log"), ev("count", 1i64)]
-    );
+    assert_eq!(r[0].traces, vec![ev("count", 0i64), run_op("log"), ev("count", 1i64)]);
 }
 
 #[test]
 fn readonly_operation() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/readonly_operation.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/readonly_operation.spec.yaml"));
     check_case(&r[0], "read_count", CaseStatus::Pass);
 }
 
@@ -378,17 +322,13 @@ fn event_order_between_runs() {
 
 #[test]
 fn subsequence_with_gaps() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/subsequence_with_gaps.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/subsequence_with_gaps.spec.yaml"));
     check_case(&r[0], "double_increment", CaseStatus::Pass);
 }
 
 #[test]
 fn subsequence_wrong_order() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/subsequence_wrong_order.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/subsequence_wrong_order.spec.yaml"));
     check_case(&r[0], "increment_once", CaseStatus::Fail);
 }
 
@@ -398,33 +338,25 @@ fn subsequence_wrong_order() {
 
 #[test]
 fn mismatch_wrong_value() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/statemachine_counter_wrong.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/statemachine_counter_wrong.spec.yaml"));
     check_case(&r[0], "increment_once", CaseStatus::Fail);
 }
 
 #[test]
 fn mismatch_missing_field() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/mismatch_missing_event.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/mismatch_missing_event.spec.yaml"));
     check_case(&r[0], "add_2_3", CaseStatus::Fail);
 }
 
 #[test]
 fn mismatch_wrong_field_name() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/mismatch_wrong_field.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/mismatch_wrong_field.spec.yaml"));
     check_case(&r[0], "increment_once", CaseStatus::Fail);
 }
 
 #[test]
 fn mismatch_second_step() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/mismatch_second_step.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/mismatch_second_step.spec.yaml"));
     check_case(&r[0], "increment_then_decrement", CaseStatus::Fail);
 }
 
@@ -434,49 +366,37 @@ fn mismatch_second_step() {
 
 #[test]
 fn error_bad_yaml() {
-    let reason = err_reason(run(
-        "test/rust/crates/specgate-fixtures/specs/bad_yaml.spec.yaml",
-    ));
+    let reason = err_reason(run("test/rust/crates/specgate-fixtures/specs/bad_yaml.spec.yaml"));
     assert_eq!(reason, "spec file is not valid YAML");
 }
 
 #[test]
 fn error_bad_binding() {
-    let reason = err_reason(run(
-        "test/rust/crates/specgate-fixtures/specs/bad_binding.spec.yaml",
-    ));
+    let reason = err_reason(run("test/rust/crates/specgate-fixtures/specs/bad_binding.spec.yaml"));
     assert_eq!(reason, "binding 'nonexistent' not found");
 }
 
 #[test]
 fn error_missing_setup() {
-    let reason = err_reason(run(
-        "test/rust/crates/specgate-fixtures/specs/missing_setup.spec.yaml",
-    ));
+    let reason = err_reason(run("test/rust/crates/specgate-fixtures/specs/missing_setup.spec.yaml"));
     assert_eq!(reason, "setup 'make_counter' not found in source annotations");
 }
 
 #[test]
 fn error_missing_operation() {
-    let reason = err_reason(run(
-        "test/rust/crates/specgate-fixtures/specs/missing_operation.spec.yaml",
-    ));
+    let reason = err_reason(run("test/rust/crates/specgate-fixtures/specs/missing_operation.spec.yaml"));
     assert_eq!(reason, "operation 'increment' not found in source annotations");
 }
 
 #[test]
 fn error_compile_failure() {
-    let reason = err_reason(run(
-        "test/rust/crates/specgate-fixtures/specs/compile_error.spec.yaml",
-    ));
+    let reason = err_reason(run("test/rust/crates/specgate-fixtures/specs/compile_error.spec.yaml"));
     assert_eq!(reason, "source failed to compile");
 }
 
 #[test]
 fn error_no_cases() {
-    let reason = err_reason(run(
-        "test/rust/crates/specgate-fixtures/specs/no_cases.spec.yaml",
-    ));
+    let reason = err_reason(run("test/rust/crates/specgate-fixtures/specs/no_cases.spec.yaml"));
     assert_eq!(reason, "spec has no test cases");
 }
 
@@ -486,9 +406,7 @@ fn error_no_cases() {
 
 #[test]
 fn async_operation() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/async_fetch.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/async_fetch.spec.yaml"));
     check_case(&r[0], "fetch_returns_response", CaseStatus::Pass);
     assert_eq!(
         r[0].traces,
@@ -502,21 +420,14 @@ fn async_operation() {
 
 #[test]
 fn keyword_collision_operation_named_run() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/keyword_collision.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/keyword_collision.spec.yaml"));
     check_case(&r[0], "operation_named_run", CaseStatus::Pass);
-    assert_eq!(
-        r[0].expected,
-        vec![arun("run"), aev("$result", "executed: test")]
-    );
+    assert_eq!(r[0].expected, vec![arun("run"), aev("$result", "executed: test")]);
 }
 
 #[test]
 fn unordered_field_matching() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/unordered_fields.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/unordered_fields.spec.yaml"));
     assert_eq!(r.len(), 4);
     check_case(&r[0], "unordered_both_present", CaseStatus::Pass);
     check_case(&r[1], "unordered_reversed_still_passes", CaseStatus::Pass);
@@ -526,9 +437,7 @@ fn unordered_field_matching() {
 
 #[test]
 fn anywhere_event_matching() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/anywhere_event.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/anywhere_event.spec.yaml"));
     assert_eq!(r.len(), 5);
     check_case(&r[0], "anywhere_matches_early_event", CaseStatus::Pass);
     check_case(&r[1], "anywhere_matches_late_event", CaseStatus::Pass);
@@ -543,9 +452,7 @@ fn anywhere_event_matching() {
 
 #[test]
 fn provenance_passes_through() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/provenance_example.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/provenance_example.spec.yaml"));
     check_case(&r[0], "add_with_provenance", CaseStatus::Pass);
     assert_eq!(r[0].level, CaseLevel::Must);
     let src = r[0].source.as_ref().expect("source missing");
@@ -556,9 +463,7 @@ fn provenance_passes_through() {
 
 #[test]
 fn level_may_missing_skips() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/level_may_missing.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/level_may_missing.spec.yaml"));
     assert_eq!(r.len(), 1);
     check_case(&r[0], "optional_not_implemented", CaseStatus::Skip);
     assert_eq!(r[0].level, CaseLevel::May);
@@ -568,9 +473,7 @@ fn level_may_missing_skips() {
 
 #[test]
 fn level_should_missing_warns() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/level_should_missing.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/level_should_missing.spec.yaml"));
     assert_eq!(r.len(), 1);
     check_case(&r[0], "recommended_not_implemented", CaseStatus::Warn);
     assert_eq!(r[0].level, CaseLevel::Should);
@@ -584,9 +487,7 @@ fn level_should_missing_warns() {
 
 #[test]
 fn no_vacuous_match() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/vacuous_match.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/vacuous_match.spec.yaml"));
     assert_eq!(r.len(), 2);
     // Wrong value — must fail, not pass
     check_case(&r[0], "wrong_value_fails", CaseStatus::Fail);
@@ -602,19 +503,12 @@ fn no_vacuous_match() {
 
 #[test]
 fn paths_resolve_from_nested_spec() {
-    let r = complete(run(
-        "test/fixtures/nested/deep/path/nested_path.spec.yaml",
-    ));
+    let r = complete(run("test/fixtures/nested/deep/path/nested_path.spec.yaml"));
     assert_eq!(r.len(), 1);
     check_case(&r[0], "add_from_nested_path", CaseStatus::Pass);
     assert_eq!(
         r[0].traces,
-        vec![
-            run_op("add"),
-            ev("add.a", "10"),
-            ev("add.b", "20"),
-            ev("$result", "30"),
-        ]
+        vec![run_op("add"), ev("add.a", "10"), ev("add.b", "20"), ev("$result", "30"),]
     );
 }
 
@@ -624,40 +518,38 @@ fn paths_resolve_from_nested_spec() {
 
 #[test]
 fn target_selection() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/target_selection.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/target_selection.spec.yaml"));
     assert_eq!(r.len(), 1);
     check_case(&r[0], "greet_world", CaseStatus::Pass);
     assert_eq!(
         r[0].traces,
-        vec![
-            run_op("greet"),
-            ev("greet.name", "World"),
-            ev("$result", "Hello, World!"),
-        ]
+        vec![run_op("greet"), ev("greet.name", "World"), ev("$result", "Hello, World!"),]
     );
 }
 
 #[test]
 fn per_case_target_override() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/per_case_target.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/per_case_target.spec.yaml"));
     assert_eq!(r.len(), 2);
     // First case uses default target (add from specgate-fixtures)
     check_case(&r[0], "add_from_default", CaseStatus::Pass);
-    assert!(r[0].traces.iter().any(|t| matches!(t, TraceEvent::Run { operation, .. } if operation == "add")));
+    assert!(
+        r[0].traces
+            .iter()
+            .any(|t| matches!(t, TraceEvent::Run { operation, .. } if operation == "add"))
+    );
     // Second case uses alt target (greet from specgate-fixtures-alt)
     check_case(&r[1], "greet_from_alt", CaseStatus::Pass);
-    assert!(r[1].traces.iter().any(|t| matches!(t, TraceEvent::Run { operation, .. } if operation == "greet")));
+    assert!(
+        r[1].traces
+            .iter()
+            .any(|t| matches!(t, TraceEvent::Run { operation, .. } if operation == "greet"))
+    );
 }
 
 #[test]
 fn missing_target_error() {
-    let reason = err_reason(run(
-        "test/rust/crates/specgate-fixtures/specs/missing_target.spec.yaml",
-    ));
+    let reason = err_reason(run("test/rust/crates/specgate-fixtures/specs/missing_target.spec.yaml"));
     assert_eq!(reason, "target 'nonexistent' not found in binding");
 }
 
@@ -667,9 +559,7 @@ fn missing_target_error() {
 
 #[test]
 fn structured_output_spec() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/structured_output.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/structured_output.spec.yaml"));
     assert_eq!(r.len(), 5);
     check_case(&r[0], "list_exact_match", CaseStatus::Pass);
     check_case(&r[1], "list_contains_check", CaseStatus::Pass);
@@ -680,9 +570,7 @@ fn structured_output_spec() {
 
 #[test]
 fn structured_map_spec() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/structured_map.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/structured_map.spec.yaml"));
     assert_eq!(r.len(), 4);
     check_case(&r[0], "map_key_value_match", CaseStatus::Pass);
     check_case(&r[1], "map_subset_match", CaseStatus::Pass);
@@ -692,9 +580,7 @@ fn structured_map_spec() {
 
 #[test]
 fn structured_set_spec() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/structured_set.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/structured_set.spec.yaml"));
     assert_eq!(r.len(), 5);
     check_case(&r[0], "set_presence_match", CaseStatus::Pass);
     check_case(&r[1], "set_all_items", CaseStatus::Pass);
@@ -705,9 +591,7 @@ fn structured_set_spec() {
 
 #[test]
 fn operators_spec() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/operators.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/operators.spec.yaml"));
     assert_eq!(r.len(), 12);
     check_case(&r[0], "eq_scalar", CaseStatus::Pass);
     check_case(&r[1], "size_list", CaseStatus::Pass);
@@ -725,9 +609,7 @@ fn operators_spec() {
 
 #[test]
 fn scalar_operators_spec() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/scalar_operators.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/scalar_operators.spec.yaml"));
     assert_eq!(r.len(), 13);
     check_case(&r[0], "regex_match", CaseStatus::Pass);
     check_case(&r[1], "regex_no_match_fails", CaseStatus::Fail);
@@ -746,9 +628,7 @@ fn scalar_operators_spec() {
 
 #[test]
 fn nested_structured_spec() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/nested_structured.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/nested_structured.spec.yaml"));
     assert_eq!(r.len(), 4);
     check_case(&r[0], "nested_list_of_maps_exact", CaseStatus::Pass);
     check_case(&r[1], "nested_any_with_match", CaseStatus::Pass);
@@ -758,9 +638,7 @@ fn nested_structured_spec() {
 
 #[test]
 fn cross_dep_spec() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/cross_dep.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/cross_dep.spec.yaml"));
     assert_eq!(r.len(), 1);
     check_case(&r[0], "extract_yaml_value", CaseStatus::Pass);
 }
@@ -771,9 +649,7 @@ fn cross_dep_spec() {
 
 #[test]
 fn enum_event_spec() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/enum_event.spec.yaml",
-    ));
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/enum_event.spec.yaml"));
     assert_eq!(r.len(), 3);
     check_case(&r[0], "unit_variant", CaseStatus::Pass);
     check_case(&r[1], "single_field_variant", CaseStatus::Pass);

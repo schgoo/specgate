@@ -15,22 +15,34 @@ pub enum AssertValue {
 }
 
 impl From<Value> for AssertValue {
-    fn from(v: Value) -> Self { AssertValue::Exact(v) }
+    fn from(v: Value) -> Self {
+        AssertValue::Exact(v)
+    }
 }
 impl From<&str> for AssertValue {
-    fn from(s: &str) -> Self { AssertValue::Exact(Value::String(s.to_string())) }
+    fn from(s: &str) -> Self {
+        AssertValue::Exact(Value::String(s.to_string()))
+    }
 }
 impl From<String> for AssertValue {
-    fn from(s: String) -> Self { AssertValue::Exact(Value::String(s)) }
+    fn from(s: String) -> Self {
+        AssertValue::Exact(Value::String(s))
+    }
 }
 impl From<i64> for AssertValue {
-    fn from(i: i64) -> Self { AssertValue::Exact(Value::Integer(i)) }
+    fn from(i: i64) -> Self {
+        AssertValue::Exact(Value::Integer(i))
+    }
 }
 impl From<i32> for AssertValue {
-    fn from(i: i32) -> Self { AssertValue::Exact(Value::Integer(i as i64)) }
+    fn from(i: i32) -> Self {
+        AssertValue::Exact(Value::Integer(i as i64))
+    }
 }
 impl From<bool> for AssertValue {
-    fn from(b: bool) -> Self { AssertValue::Exact(Value::Bool(b)) }
+    fn from(b: bool) -> Self {
+        AssertValue::Exact(Value::Bool(b))
+    }
 }
 
 /// Structured matcher for assertion values. Composite is used when a single
@@ -155,4 +167,3 @@ impl CaseLevel {
         }
     }
 }
-

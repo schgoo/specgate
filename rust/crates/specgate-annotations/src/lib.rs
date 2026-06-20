@@ -4,19 +4,16 @@
 //! runtime support from `specgate-runtime`. Fixture code typically does
 //! `use specgate_annotations::*;` to pull in everything in one shot.
 
-pub use specgate_annotations_macros::{
-    spec_mock, spec_operation, spec_setup, spec_trace, SpecEvent,
-};
+pub use specgate_annotations_macros::{SpecEvent, spec_mock, spec_operation, spec_setup, spec_trace};
 // Re-export the SpecEvent trait under the same name — traits live in the
 // type namespace while the derive macro lives in the macro namespace, so
 // they coexist without conflict.
-pub use specgate_runtime::{take_traces, SpecEvent, ToSpecValue, TraceEvent, Value};
+pub use specgate_runtime::{SpecEvent, ToSpecValue, TraceEvent, Value, take_traces};
 
 #[doc(hidden)]
 pub mod __rt {
     pub use specgate_runtime::{
-        emit_event, emit_event_v, emit_run, mock_lookup, reset, set_mock,
-        take_traces, SpecEvent, ToSpecValue, TraceEvent, Value,
+        SpecEvent, ToSpecValue, TraceEvent, Value, emit_event, emit_event_v, emit_run, mock_lookup, reset, set_mock, take_traces,
     };
 }
 

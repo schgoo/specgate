@@ -22,10 +22,7 @@ impl Binding {
     pub fn target(&self, name: Option<&str>) -> Option<&Target> {
         match name {
             Some(n) => self.targets.get(n),
-            None => self
-                .targets
-                .get("default")
-                .or_else(|| self.targets.values().next()),
+            None => self.targets.get("default").or_else(|| self.targets.values().next()),
         }
     }
 
@@ -39,10 +36,7 @@ pub fn load_binding(path: &Path) -> Option<Binding> {
     let text = std::fs::read_to_string(path).ok()?;
     let v: Value = serde_yaml::from_str(&text).ok()?;
     let map = v.as_mapping()?;
-    let language = map
-        .get(Value::String("language".into()))?
-        .as_str()?
-        .to_string();
+    let language = map.get(Value::String("language".into()))?.as_str()?.to_string();
     let targets_map = map.get(Value::String("targets".into()))?.as_mapping()?;
     let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
 

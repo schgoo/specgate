@@ -10,8 +10,7 @@ use quote::{quote, quote_spanned};
 use syn::parse::{Parse, ParseStream};
 use syn::visit_mut::VisitMut;
 use syn::{
-    parse_macro_input, parse_quote, BinOp, Block, Data, DeriveInput, Expr, FnArg, Fields, ItemFn,
-    LitStr, Pat, ReturnType, Stmt, Type,
+    BinOp, Block, Data, DeriveInput, Expr, Fields, FnArg, ItemFn, LitStr, Pat, ReturnType, Stmt, Type, parse_macro_input, parse_quote,
 };
 
 struct NameArg(String);
@@ -297,12 +296,7 @@ pub fn spec_operation(attr: TokenStream, item: TokenStream) -> TokenStream {
     quote!(#func).into()
 }
 
-fn build_pre_stmts(
-    op_name: &str,
-    params: &[(syn::Ident, syn::Type)],
-    is_method: bool,
-    _has_ref_param: bool,
-) -> Vec<Stmt> {
+fn build_pre_stmts(op_name: &str, params: &[(syn::Ident, syn::Type)], is_method: bool, _has_ref_param: bool) -> Vec<Stmt> {
     let rt = rt();
     let mut out: Vec<Stmt> = vec![parse_quote!(#rt::emit_run(#op_name);)];
     if is_method {
@@ -397,13 +391,8 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
                     });
                 }
                 Fields::Named(named) => {
-                    let field_idents: Vec<&syn::Ident> = named
-                        .named
-                        .iter()
-                        .filter_map(|f| f.ident.as_ref())
-                        .collect();
-                    let field_strs: Vec<String> =
-                        field_idents.iter().map(|id| id.to_string()).collect();
+                    let field_idents: Vec<&syn::Ident> = named.named.iter().filter_map(|f| f.ident.as_ref()).collect();
+                    let field_strs: Vec<String> = field_idents.iter().map(|id| id.to_string()).collect();
                     arms.push(quote! {
                         #name::#vname { #(#field_idents),* } => {
                             #rt::emit_event_v(
@@ -509,7 +498,9 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
                     Ok(())
                 });
             }
-            if !marked { continue; }
+            if !marked {
+                continue;
+            }
             if let Some(id) = &field.ident {
                 let fname = override_name.unwrap_or_else(|| id.to_string());
                 emits.push(quote! {

@@ -4,5 +4,5 @@
 pub mod run;
 pub mod validate;
 
-pub use run::{run, RunOutcome, RunReport};
-pub use validate::{validate, ValidateOutcome, ValidationFinding, ValidationReport, Severity};
+pub use run::{RunOutcome, RunReport, run};
+pub use validate::{Severity, ValidateOutcome, ValidationFinding, ValidationReport, validate};

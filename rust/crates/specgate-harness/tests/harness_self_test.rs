@@ -43,14 +43,8 @@ fn self_test_stateless_add_produces_real_traces() {
                     specgate_harness::TraceEvent::Run { operation, .. } => operation.as_str(),
                 })
                 .collect();
-            assert!(
-                trace_names.contains(&"add"),
-                "must contain Run event for 'add'"
-            );
-            assert!(
-                trace_names.contains(&"$result"),
-                "must contain Event for '$result'"
-            );
+            assert!(trace_names.contains(&"add"), "must contain Run event for 'add'");
+            assert!(trace_names.contains(&"$result"), "must contain Event for '$result'");
         }
         RunOutcome::Error { reason } => {
             panic!("self-test failed: {reason}");
@@ -60,8 +54,7 @@ fn self_test_stateless_add_produces_real_traces() {
 
 #[test]
 fn self_test_failing_spec_actually_fails() {
-    let spec = repo_root()
-        .join("test/rust/crates/specgate-fixtures/specs/statemachine_counter_wrong.spec.yaml");
+    let spec = repo_root().join("test/rust/crates/specgate-fixtures/specs/statemachine_counter_wrong.spec.yaml");
     let result = run_spec(spec.to_str().unwrap());
     match result {
         RunOutcome::Complete { results } => {

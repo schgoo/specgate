@@ -116,11 +116,17 @@ pub fn scan(src: &str) -> AnnotatedSource {
                 let mut depth = 1;
                 j += 1;
                 while j < n && depth > 0 {
-                    if chars[j] == '<' { depth += 1; }
-                    if chars[j] == '>' { depth -= 1; }
+                    if chars[j] == '<' {
+                        depth += 1;
+                    }
+                    if chars[j] == '>' {
+                        depth -= 1;
+                    }
                     j += 1;
                 }
-                while j < n && chars[j].is_whitespace() { j += 1; }
+                while j < n && chars[j].is_whitespace() {
+                    j += 1;
+                }
             }
             // Read type name (single ident, optionally followed by generics).
             let start = j;
@@ -129,13 +135,19 @@ pub fn scan(src: &str) -> AnnotatedSource {
             }
             let ty: String = chars[start..j].iter().collect();
             // Skip optional generics on the type
-            while j < n && chars[j].is_whitespace() { j += 1; }
+            while j < n && chars[j].is_whitespace() {
+                j += 1;
+            }
             if j < n && chars[j] == '<' {
                 let mut depth = 1;
                 j += 1;
                 while j < n && depth > 0 {
-                    if chars[j] == '<' { depth += 1; }
-                    if chars[j] == '>' { depth -= 1; }
+                    if chars[j] == '<' {
+                        depth += 1;
+                    }
+                    if chars[j] == '>' {
+                        depth -= 1;
+                    }
                     j += 1;
                 }
             }
@@ -157,8 +169,12 @@ pub fn scan(src: &str) -> AnnotatedSource {
             let mut j = i + 2;
             let mut depth = 1;
             while j < n && depth > 0 {
-                if chars[j] == '[' { depth += 1; }
-                if chars[j] == ']' { depth -= 1; }
+                if chars[j] == '[' {
+                    depth += 1;
+                }
+                if chars[j] == ']' {
+                    depth -= 1;
+                }
                 j += 1;
             }
             let attr: String = chars[i + 2..j - 1].iter().collect();
@@ -183,8 +199,12 @@ pub fn scan(src: &str) -> AnnotatedSource {
                         let mut d = 1;
                         let mut q = p + 2;
                         while q < n && d > 0 {
-                            if chars[q] == '[' { d += 1; }
-                            if chars[q] == ']' { d -= 1; }
+                            if chars[q] == '[' {
+                                d += 1;
+                            }
+                            if chars[q] == ']' {
+                                d -= 1;
+                            }
                             q += 1;
                         }
                         p = q;
@@ -192,13 +212,19 @@ pub fn scan(src: &str) -> AnnotatedSource {
                     }
                     if starts_word_at(&chars, p, "pub") {
                         p += 3;
-                        while p < n && chars[p].is_whitespace() { p += 1; }
+                        while p < n && chars[p].is_whitespace() {
+                            p += 1;
+                        }
                         if p < n && chars[p] == '(' {
                             let mut d = 1;
                             p += 1;
                             while p < n && d > 0 {
-                                if chars[p] == '(' { d += 1; }
-                                if chars[p] == ')' { d -= 1; }
+                                if chars[p] == '(' {
+                                    d += 1;
+                                }
+                                if chars[p] == ')' {
+                                    d -= 1;
+                                }
                                 p += 1;
                             }
                         }
@@ -207,10 +233,7 @@ pub fn scan(src: &str) -> AnnotatedSource {
                     // Skip leading function qualifiers (`async`, `const`, `unsafe`,
                     // `extern "C"`) so `#[spec_operation] async fn foo` is
                     // recognised.
-                    if starts_word_at(&chars, p, "async")
-                        || starts_word_at(&chars, p, "const")
-                        || starts_word_at(&chars, p, "unsafe")
-                    {
+                    if starts_word_at(&chars, p, "async") || starts_word_at(&chars, p, "const") || starts_word_at(&chars, p, "unsafe") {
                         let word_len = if starts_word_at(&chars, p, "async") {
                             5
                         } else if starts_word_at(&chars, p, "const") {
@@ -223,12 +246,18 @@ pub fn scan(src: &str) -> AnnotatedSource {
                     }
                     if starts_word_at(&chars, p, "extern") {
                         p += 6;
-                        while p < n && chars[p].is_whitespace() { p += 1; }
+                        while p < n && chars[p].is_whitespace() {
+                            p += 1;
+                        }
                         // Optional ABI string.
                         if p < n && chars[p] == '"' {
                             p += 1;
-                            while p < n && chars[p] != '"' { p += 1; }
-                            if p < n { p += 1; }
+                            while p < n && chars[p] != '"' {
+                                p += 1;
+                            }
+                            if p < n {
+                                p += 1;
+                            }
                         }
                         continue;
                     }
@@ -239,13 +268,17 @@ pub fn scan(src: &str) -> AnnotatedSource {
                     continue;
                 }
                 p += 2;
-                while p < n && chars[p].is_whitespace() { p += 1; }
+                while p < n && chars[p].is_whitespace() {
+                    p += 1;
+                }
                 let ident_start = p;
                 while p < n && (chars[p].is_alphanumeric() || chars[p] == '_') {
                     p += 1;
                 }
                 let fn_ident: String = chars[ident_start..p].iter().collect();
-                while p < n && chars[p] != '(' { p += 1; }
+                while p < n && chars[p] != '(' {
+                    p += 1;
+                }
                 if p >= n {
                     i = j;
                     continue;
@@ -255,24 +288,36 @@ pub fn scan(src: &str) -> AnnotatedSource {
                 let mut d = 1;
                 p += 1;
                 while p < n && d > 0 {
-                    if chars[p] == '(' { d += 1; }
-                    if chars[p] == ')' { d -= 1; }
+                    if chars[p] == '(' {
+                        d += 1;
+                    }
+                    if chars[p] == ')' {
+                        d -= 1;
+                    }
                     p += 1;
                 }
                 let paren_end = p - 1;
                 let param_text: String = chars[paren_start..paren_end].iter().collect();
                 // Return type.
                 let mut ret_text = String::new();
-                while p < n && chars[p].is_whitespace() { p += 1; }
+                while p < n && chars[p].is_whitespace() {
+                    p += 1;
+                }
                 if p + 1 < n && chars[p] == '-' && chars[p + 1] == '>' {
                     p += 2;
-                    while p < n && chars[p].is_whitespace() { p += 1; }
+                    while p < n && chars[p].is_whitespace() {
+                        p += 1;
+                    }
                     let r_start = p;
                     let mut depth_ang = 0i32;
                     while p < n {
                         let cc = chars[p];
-                        if cc == '<' { depth_ang += 1; }
-                        if cc == '>' { depth_ang -= 1; }
+                        if cc == '<' {
+                            depth_ang += 1;
+                        }
+                        if cc == '>' {
+                            depth_ang -= 1;
+                        }
                         if depth_ang <= 0 && (cc == '{' || cc == ';' || cc == 'w') {
                             // `w` for "where"
                             if cc == 'w' && !starts_word_at(&chars, p, "where") {
@@ -288,11 +333,7 @@ pub fn scan(src: &str) -> AnnotatedSource {
 
                 let (params, takes_self) = parse_params(&param_text);
                 let method_of = if takes_self {
-                    depth_to_impl_target
-                        .last()
-                        .cloned()
-                        .flatten()
-                        .filter(|s| !s.is_empty())
+                    depth_to_impl_target.last().cloned().flatten().filter(|s| !s.is_empty())
                 } else {
                     None
                 };
@@ -410,9 +451,7 @@ fn scan_struct_name(rest: &str) -> Option<String> {
     };
     let s = s.strip_prefix("struct").or_else(|| s.strip_prefix("enum"))?;
     let s = s.trim_start();
-    let end = s
-        .find(|c: char| !(c.is_alphanumeric() || c == '_'))
-        .unwrap_or(s.len());
+    let end = s.find(|c: char| !(c.is_alphanumeric() || c == '_')).unwrap_or(s.len());
     Some(s[..end].to_string())
 }
 

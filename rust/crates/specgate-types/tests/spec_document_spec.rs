@@ -141,9 +141,7 @@ cases:
     );
 
     assert_eq!(
-        spec.invariants
-            .get("never_empty_after_add")
-            .map(String::as_str),
+        spec.invariants.get("never_empty_after_add").map(String::as_str),
         Some("items.size() >= 1")
     );
 }
@@ -500,10 +498,7 @@ cases:
 "#,
     );
 
-    let postconditions = spec.cases[0]
-        .postconditions
-        .as_ref()
-        .expect("postconditions should deserialize");
+    let postconditions = spec.cases[0].postconditions.as_ref().expect("postconditions should deserialize");
     assert_eq!(postconditions.len(), 1);
     assert_eq!(postconditions[0].target, "assert-file-absent");
     assert_eq!(
@@ -539,9 +534,7 @@ fn binding_decl_first_returns_first_multiple_binding() {
         },
     ]);
 
-    let first = binding
-        .first()
-        .expect("multiple binding should have first entry");
+    let first = binding.first().expect("multiple binding should have first entry");
     assert_eq!(first.name, "rust");
     assert_eq!(first.target, "test");
 }

@@ -61,17 +61,13 @@ impl PartialEq for Value {
             (Value::String(a), Value::String(b)) => a == b,
             (Value::Integer(a), Value::Integer(b)) => a == b,
             (Value::Float(a), Value::Float(b)) => a.to_bits() == b.to_bits(),
-            (Value::Integer(a), Value::Float(b)) | (Value::Float(b), Value::Integer(a)) => {
-                (*a as f64).to_bits() == b.to_bits()
-            }
+            (Value::Integer(a), Value::Float(b)) | (Value::Float(b), Value::Integer(a)) => (*a as f64).to_bits() == b.to_bits(),
             (Value::Bool(a), Value::Bool(b)) => a == b,
             (Value::List(a), Value::List(b)) => a == b,
             (Value::Map(a), Value::Map(b)) => a == b,
             (Value::Set(a), Value::Set(b)) => a == b,
             // Treat List and Set as equal if their contents match as sets.
-            (Value::List(a), Value::Set(b)) | (Value::Set(b), Value::List(a)) => {
-                a.len() == b.len() && a.iter().all(|x| b.contains(x))
-            }
+            (Value::List(a), Value::Set(b)) | (Value::Set(b), Value::List(a)) => a.len() == b.len() && a.iter().all(|x| b.contains(x)),
             _ => false,
         }
     }
@@ -108,7 +104,9 @@ impl std::fmt::Display for Value {
             Value::List(items) => {
                 write!(f, "[")?;
                 for (i, v) in items.iter().enumerate() {
-                    if i > 0 { write!(f, ",")?; }
+                    if i > 0 {
+                        write!(f, ",")?;
+                    }
                     write_display_atom(f, v)?;
                 }
                 write!(f, "]")
@@ -116,7 +114,9 @@ impl std::fmt::Display for Value {
             Value::Set(items) => {
                 write!(f, "[")?;
                 for (i, v) in items.iter().enumerate() {
-                    if i > 0 { write!(f, ",")?; }
+                    if i > 0 {
+                        write!(f, ",")?;
+                    }
                     write_display_atom(f, v)?;
                 }
                 write!(f, "]")
@@ -124,7 +124,9 @@ impl std::fmt::Display for Value {
             Value::Map(map) => {
                 write!(f, "{{")?;
                 for (i, (k, v)) in map.iter().enumerate() {
-                    if i > 0 { write!(f, ",")?; }
+                    if i > 0 {
+                        write!(f, ",")?;
+                    }
                     write!(f, "\"{}\":", k)?;
                     write_display_atom(f, v)?;
                 }
@@ -144,34 +146,54 @@ fn write_display_atom(f: &mut std::fmt::Formatter<'_>, v: &Value) -> std::fmt::R
 // --- conversions used by tests and macro-generated code -------------------
 
 impl From<&str> for Value {
-    fn from(s: &str) -> Self { Value::String(s.to_string()) }
+    fn from(s: &str) -> Self {
+        Value::String(s.to_string())
+    }
 }
 impl From<String> for Value {
-    fn from(s: String) -> Self { Value::String(s) }
+    fn from(s: String) -> Self {
+        Value::String(s)
+    }
 }
 impl From<&String> for Value {
-    fn from(s: &String) -> Self { Value::String(s.clone()) }
+    fn from(s: &String) -> Self {
+        Value::String(s.clone())
+    }
 }
 impl From<i64> for Value {
-    fn from(i: i64) -> Self { Value::Integer(i) }
+    fn from(i: i64) -> Self {
+        Value::Integer(i)
+    }
 }
 impl From<i32> for Value {
-    fn from(i: i32) -> Self { Value::Integer(i as i64) }
+    fn from(i: i32) -> Self {
+        Value::Integer(i as i64)
+    }
 }
 impl From<u32> for Value {
-    fn from(i: u32) -> Self { Value::Integer(i as i64) }
+    fn from(i: u32) -> Self {
+        Value::Integer(i as i64)
+    }
 }
 impl From<usize> for Value {
-    fn from(i: usize) -> Self { Value::Integer(i as i64) }
+    fn from(i: usize) -> Self {
+        Value::Integer(i as i64)
+    }
 }
 impl From<bool> for Value {
-    fn from(b: bool) -> Self { Value::Bool(b) }
+    fn from(b: bool) -> Self {
+        Value::Bool(b)
+    }
 }
 impl From<f64> for Value {
-    fn from(x: f64) -> Self { Value::Float(x) }
+    fn from(x: f64) -> Self {
+        Value::Float(x)
+    }
 }
 impl From<f32> for Value {
-    fn from(x: f32) -> Self { Value::Float(x as f64) }
+    fn from(x: f32) -> Self {
+        Value::Float(x as f64)
+    }
 }
 
 // --- Serialize ------------------------------------------------------------
@@ -185,19 +207,25 @@ impl Serialize for Value {
             Value::Bool(v) => s.serialize_bool(*v),
             Value::List(items) => {
                 let mut seq = s.serialize_seq(Some(items.len()))?;
-                for it in items { seq.serialize_element(it)?; }
+                for it in items {
+                    seq.serialize_element(it)?;
+                }
                 seq.end()
             }
             Value::Set(items) => {
                 // Sets are emitted as ordered arrays; round-trip turns them
                 // back into Value::List, which the matcher treats fungibly.
                 let mut seq = s.serialize_seq(Some(items.len()))?;
-                for it in items { seq.serialize_element(it)?; }
+                for it in items {
+                    seq.serialize_element(it)?;
+                }
                 seq.end()
             }
             Value::Map(map) => {
                 let mut m = s.serialize_map(Some(map.len()))?;
-                for (k, v) in map { m.serialize_entry(k, v)?; }
+                for (k, v) in map {
+                    m.serialize_entry(k, v)?;
+                }
                 m.end()
             }
         }
@@ -218,25 +246,45 @@ impl<'de> Visitor<'de> for ValueVisitor {
     fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("any JSON/YAML value")
     }
-    fn visit_bool<E: de::Error>(self, v: bool) -> Result<Self::Value, E> { Ok(Value::Bool(v)) }
-    fn visit_i64<E: de::Error>(self, v: i64) -> Result<Self::Value, E> { Ok(Value::Integer(v)) }
-    fn visit_u64<E: de::Error>(self, v: u64) -> Result<Self::Value, E> { Ok(Value::Integer(v as i64)) }
-    fn visit_f64<E: de::Error>(self, v: f64) -> Result<Self::Value, E> { Ok(Value::Float(v)) }
-    fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> { Ok(Value::String(v.to_string())) }
-    fn visit_string<E: de::Error>(self, v: String) -> Result<Self::Value, E> { Ok(Value::String(v)) }
-    fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> { Ok(Value::String(String::new())) }
-    fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> { Ok(Value::String(String::new())) }
+    fn visit_bool<E: de::Error>(self, v: bool) -> Result<Self::Value, E> {
+        Ok(Value::Bool(v))
+    }
+    fn visit_i64<E: de::Error>(self, v: i64) -> Result<Self::Value, E> {
+        Ok(Value::Integer(v))
+    }
+    fn visit_u64<E: de::Error>(self, v: u64) -> Result<Self::Value, E> {
+        Ok(Value::Integer(v as i64))
+    }
+    fn visit_f64<E: de::Error>(self, v: f64) -> Result<Self::Value, E> {
+        Ok(Value::Float(v))
+    }
+    fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+        Ok(Value::String(v.to_string()))
+    }
+    fn visit_string<E: de::Error>(self, v: String) -> Result<Self::Value, E> {
+        Ok(Value::String(v))
+    }
+    fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+        Ok(Value::String(String::new()))
+    }
+    fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+        Ok(Value::String(String::new()))
+    }
     fn visit_some<D: Deserializer<'de>>(self, d: D) -> Result<Self::Value, D::Error> {
         Deserialize::deserialize(d)
     }
     fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
         let mut out = Vec::new();
-        while let Some(v) = seq.next_element()? { out.push(v); }
+        while let Some(v) = seq.next_element()? {
+            out.push(v);
+        }
         Ok(Value::List(out))
     }
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
         let mut out = BTreeMap::new();
-        while let Some((k, v)) = map.next_entry::<String, Value>()? { out.insert(k, v); }
+        while let Some((k, v)) = map.next_entry::<String, Value>()? {
+            out.insert(k, v);
+        }
         Ok(Value::Map(out))
     }
 }
@@ -316,11 +364,7 @@ pub fn set_mock(mock_name: &str, entries: &[(&str, &str)]) {
 }
 
 pub fn mock_lookup(mock_name: &str, input: &str) -> Option<String> {
-    MOCKS.with(|m| {
-        m.borrow()
-            .get(mock_name)
-            .and_then(|t| t.get(input).cloned())
-    })
+    MOCKS.with(|m| m.borrow().get(mock_name).and_then(|t| t.get(input).cloned()))
 }
 
 // ---------------------------------------------------------------------------
@@ -350,22 +394,34 @@ macro_rules! to_spec_value_int {
 to_spec_value_int!(i8, i16, i32, i64, isize, u8, u16, u32, u64, usize);
 
 impl ToSpecValue for f32 {
-    fn to_spec_value(&self) -> Value { Value::Float(*self as f64) }
+    fn to_spec_value(&self) -> Value {
+        Value::Float(*self as f64)
+    }
 }
 impl ToSpecValue for f64 {
-    fn to_spec_value(&self) -> Value { Value::Float(*self) }
+    fn to_spec_value(&self) -> Value {
+        Value::Float(*self)
+    }
 }
 impl ToSpecValue for bool {
-    fn to_spec_value(&self) -> Value { Value::Bool(*self) }
+    fn to_spec_value(&self) -> Value {
+        Value::Bool(*self)
+    }
 }
 impl ToSpecValue for char {
-    fn to_spec_value(&self) -> Value { Value::String(self.to_string()) }
+    fn to_spec_value(&self) -> Value {
+        Value::String(self.to_string())
+    }
 }
 impl ToSpecValue for str {
-    fn to_spec_value(&self) -> Value { Value::String(self.to_string()) }
+    fn to_spec_value(&self) -> Value {
+        Value::String(self.to_string())
+    }
 }
 impl ToSpecValue for String {
-    fn to_spec_value(&self) -> Value { Value::String(self.clone()) }
+    fn to_spec_value(&self) -> Value {
+        Value::String(self.clone())
+    }
 }
 
 impl<T: ToSpecValue> ToSpecValue for Vec<T> {
@@ -416,10 +472,14 @@ impl<T: ToSpecValue> ToSpecValue for Option<T> {
 }
 
 impl<T: ToSpecValue + ?Sized> ToSpecValue for &T {
-    fn to_spec_value(&self) -> Value { (**self).to_spec_value() }
+    fn to_spec_value(&self) -> Value {
+        (**self).to_spec_value()
+    }
 }
 impl<T: ToSpecValue + ?Sized> ToSpecValue for Box<T> {
-    fn to_spec_value(&self) -> Value { (**self).to_spec_value() }
+    fn to_spec_value(&self) -> Value {
+        (**self).to_spec_value()
+    }
 }
 
 // ---------------------------------------------------------------------------

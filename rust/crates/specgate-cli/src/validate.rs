@@ -64,13 +64,7 @@ impl std::fmt::Display for ValidateOutcome {
 }
 
 #[spec_operation("validate")]
-pub fn validate(
-    spec_dir: &str,
-    strict: bool,
-    suppress: &[String],
-    assertions_dir: &str,
-    check_source: bool,
-) -> ValidateOutcome {
+pub fn validate(spec_dir: &str, strict: bool, suppress: &[String], assertions_dir: &str, check_source: bool) -> ValidateOutcome {
     let suppress_set: HashSet<String> = suppress.iter().cloned().collect();
     let mut findings: Vec<ValidationFinding> = Vec::new();
     let mut total_files = 0;
@@ -198,20 +192,11 @@ fn load_assertions(dir: &Path) -> BTreeMap<String, Assertion> {
                 continue;
             };
             let Some(m) = val.as_mapping() else { continue };
-            let Some(id) = m
-                .get(Value::String("id".into()))
-                .and_then(|v| v.as_str())
-            else {
+            let Some(id) = m.get(Value::String("id".into())).and_then(|v| v.as_str()) else {
                 continue;
             };
-            let level = m
-                .get(Value::String("level".into()))
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let negatable = m
-                .get(Value::String("negatable".into()))
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
+            let level = m.get(Value::String("level".into())).and_then(|v| v.as_str()).unwrap_or("");
+            let negatable = m.get(Value::String("negatable".into())).and_then(|v| v.as_bool()).unwrap_or(false);
             map.insert(
                 id.to_string(),
                 Assertion {
@@ -320,9 +305,7 @@ fn check_file(
                                 severity: Severity::Error,
                                 check: "dep_consistency".into(),
                                 file: file.into(),
-                                message: format!(
-                                    "operation '{op_name}' depends on undefined operation '{dep_name}'"
-                                ),
+                                message: format!("operation '{op_name}' depends on undefined operation '{dep_name}'"),
                             });
                         }
                     }
@@ -347,14 +330,9 @@ fn check_file(
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        let kind = cm
-            .get(Value::String("kind".into()))
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let kind = cm.get(Value::String("kind".into())).and_then(|v| v.as_str()).unwrap_or("");
         let is_narrative = kind == "narrative";
-        let level = cm
-            .get(Value::String("level".into()))
-            .and_then(|v| v.as_str());
+        let level = cm.get(Value::String("level".into())).and_then(|v| v.as_str());
         let operation = cm
             .get(Value::String("operation".into()))
             .and_then(|v| v.as_str())
@@ -380,34 +358,22 @@ fn check_file(
             .and_then(|v| v.as_mapping())
             .and_then(|m| m.get(Value::String("assertion_ids".into())))
             .and_then(|v| v.as_sequence())
-            .map(|s| {
-                s.iter()
-                    .filter_map(|x| x.as_str().map(String::from))
-                    .collect()
-            })
+            .map(|s| s.iter().filter_map(|x| x.as_str().map(String::from)).collect())
             .unwrap_or_default();
 
         if is_narrative {
             // 7. narrative_misuse: if verify steps look testable, warn.
-            let verify = cm
-                .get(Value::String("verify".into()))
-                .and_then(|v| v.as_sequence());
+            let verify = cm.get(Value::String("verify".into())).and_then(|v| v.as_sequence());
             if let Some(verify) = verify {
-                let any_testable = verify.iter().any(|step| {
-                    if let Some(s) = step.as_str() {
-                        looks_testable(s)
-                    } else {
-                        false
-                    }
-                });
+                let any_testable = verify
+                    .iter()
+                    .any(|step| if let Some(s) = step.as_str() { looks_testable(s) } else { false });
                 if any_testable {
                     findings.push(ValidationFinding {
                         severity: Severity::Warn,
                         check: "narrative_misuse".into(),
                         file: file.into(),
-                        message: format!(
-                            "narrative case '{name}' has verify steps that look testable"
-                        ),
+                        message: format!("narrative case '{name}' has verify steps that look testable"),
                     });
                 }
             }
@@ -421,9 +387,7 @@ fn check_file(
                     severity: Severity::Error,
                     check: "operation_reference".into(),
                     file: file.into(),
-                    message: format!(
-                        "case '{name}' references undefined operation '{op}'"
-                    ),
+                    message: format!("case '{name}' references undefined operation '{op}'"),
                 });
             } else {
                 // 5. input_completeness: missing and extra inputs
@@ -431,15 +395,10 @@ fn check_file(
                 let provided: BTreeSet<String> = cm
                     .get(Value::String("inputs".into()))
                     .and_then(|v| v.as_mapping())
-                    .map(|m| {
-                        m.iter()
-                            .filter_map(|(k, _)| k.as_str().map(String::from))
-                            .collect()
-                    })
+                    .map(|m| m.iter().filter_map(|(k, _)| k.as_str().map(String::from)).collect())
                     .unwrap_or_default();
                 let decl = &ops[op];
-                let declared_set: BTreeSet<String> =
-                    decl.declared_inputs.iter().cloned().collect();
+                let declared_set: BTreeSet<String> = decl.declared_inputs.iter().cloned().collect();
 
                 for required in &decl.declared_inputs {
                     if !provided.contains(required) {
@@ -447,9 +406,7 @@ fn check_file(
                             severity: Severity::Error,
                             check: "input_completeness".into(),
                             file: file.into(),
-                            message: format!(
-                                "case '{name}' missing required input '{required}' for operation '{op}'"
-                            ),
+                            message: format!("case '{name}' missing required input '{required}' for operation '{op}'"),
                         });
                     }
                 }
@@ -461,9 +418,7 @@ fn check_file(
                             severity: Severity::Error,
                             check: "input_completeness".into(),
                             file: file.into(),
-                            message: format!(
-                                "case '{name}' has extra input '{extra}' not declared in operation '{op}'"
-                            ),
+                            message: format!("case '{name}' has extra input '{extra}' not declared in operation '{op}'"),
                         });
                     }
                 }
@@ -479,9 +434,7 @@ fn check_file(
                             severity: Severity::Error,
                             check: "expected_format".into(),
                             file: file.into(),
-                            message: format!(
-                                "case '{name}' has expected entry with multiple keys"
-                            ),
+                            message: format!("case '{name}' has expected entry with multiple keys"),
                         });
                         break;
                     }
@@ -498,9 +451,7 @@ fn check_file(
                         severity: Severity::Error,
                         check: "assertion_coverage".into(),
                         file: file.into(),
-                        message: format!(
-                            "assertion '{aid}' referenced in case '{name}' not found in assertions dir"
-                        ),
+                        message: format!("assertion '{aid}' referenced in case '{name}' not found in assertions dir"),
                     });
                 }
             }
@@ -543,9 +494,7 @@ fn check_file(
                     severity: Severity::Warn,
                     check: "mixed_level_bundle".into(),
                     file: file.into(),
-                    message: format!(
-                        "case '{name}' bundles assertions of mixed levels (must and may)"
-                    ),
+                    message: format!("case '{name}' bundles assertions of mixed levels (must and may)"),
                 });
             }
         }
@@ -574,10 +523,7 @@ fn check_file(
 
         // negative_coverage tracking: record every referenced assertion id and
         // whether any referencing case is a negative case.
-        let is_negative = cm
-            .get(Value::String("negative".into()))
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+        let is_negative = cm.get(Value::String("negative".into())).and_then(|v| v.as_bool()).unwrap_or(false);
         for aid in &source_ids {
             let entry = referenced_ids.entry(aid.clone()).or_insert(false);
             if is_negative {
@@ -596,9 +542,7 @@ fn check_file(
                         severity: Severity::Warn,
                         check: "negative_coverage".into(),
                         file: file.into(),
-                        message: format!(
-                            "assertion '{aid}' is negatable but has no negative test case"
-                        ),
+                        message: format!("assertion '{aid}' is negatable but has no negative test case"),
                     });
                 }
             }
@@ -621,10 +565,7 @@ fn run_source_checks(spec: &Value, file: &str, findings: &mut Vec<ValidationFind
         None => return,
     };
 
-    let binding_rel = match map
-        .get(Value::String("binding".into()))
-        .and_then(|v| v.as_str())
-    {
+    let binding_rel = match map.get(Value::String("binding".into())).and_then(|v| v.as_str()) {
         Some(b) => b,
         None => return,
     };
@@ -681,11 +622,7 @@ fn run_source_checks(spec: &Value, file: &str, findings: &mut Vec<ValidationFind
     let declared_types: BTreeSet<String> = map
         .get(Value::String("types".into()))
         .and_then(|v| v.as_mapping())
-        .map(|tm| {
-            tm.iter()
-                .filter_map(|(k, _)| k.as_str().map(String::from))
-                .collect()
-        })
+        .map(|tm| tm.iter().filter_map(|(k, _)| k.as_str().map(String::from)).collect())
         .unwrap_or_default();
 
     let mut input_types: Vec<String> = Vec::new();
@@ -695,9 +632,7 @@ fn run_source_checks(spec: &Value, file: &str, findings: &mut Vec<ValidationFind
             if let Some(Value::Mapping(inputs)) = body.get(Value::String("inputs".into())) {
                 for (_, tv) in inputs {
                     if let Some(type_name) = tv.as_str() {
-                        if declared_types.contains(type_name)
-                            && !input_types.iter().any(|t| t == type_name)
-                        {
+                        if declared_types.contains(type_name) && !input_types.iter().any(|t| t == type_name) {
                             input_types.push(type_name.to_string());
                         }
                     }
@@ -722,9 +657,7 @@ fn run_source_checks(spec: &Value, file: &str, findings: &mut Vec<ValidationFind
                         severity: Severity::Error,
                         check: "source_field_visibility".into(),
                         file: file.into(),
-                        message: format!(
-                            "field '{fname}' of input type '{type_name}' must be 'pub'"
-                        ),
+                        message: format!("field '{fname}' of input type '{type_name}' must be 'pub'"),
                     });
                 }
             }
@@ -759,8 +692,7 @@ fn collect_rs_content(dir: &Path) -> String {
 fn looks_testable(s: &str) -> bool {
     let lower = s.to_lowercase();
     const HINTS: &[&str] = &[
-        "confirm", "returns", "return ", "rejects", "reject ", "should ",
-        "produces", "outputs", "asserts", "must ",
+        "confirm", "returns", "return ", "rejects", "reject ", "should ", "produces", "outputs", "asserts", "must ",
     ];
     HINTS.iter().any(|h| lower.contains(h))
 }

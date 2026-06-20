@@ -27,12 +27,7 @@ impl std::fmt::Display for RunOutcome {
             RunOutcome::Complete { report } => write!(
                 f,
                 "Complete(spec={}, total={}, passed={}, failed={}, skipped={}, warned={})",
-                report.spec_name,
-                report.total_cases,
-                report.passed,
-                report.failed,
-                report.skipped,
-                report.warned
+                report.spec_name, report.total_cases, report.passed, report.failed, report.skipped, report.warned
             ),
             RunOutcome::Error { reason } => write!(f, "Error({reason})"),
         }

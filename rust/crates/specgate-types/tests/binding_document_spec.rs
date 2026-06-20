@@ -31,14 +31,8 @@ targets:
 
     assert_eq!(binding.language, "rust");
     assert_eq!(binding.targets.len(), 1);
-    assert_eq!(
-        binding.targets["test"].package_root,
-        "../rust/crates/my-app"
-    );
-    assert_eq!(
-        binding.targets["test"].test_root.as_deref(),
-        Some("../rust/crates/my-app/tests")
-    );
+    assert_eq!(binding.targets["test"].package_root, "../rust/crates/my-app");
+    assert_eq!(binding.targets["test"].test_root.as_deref(), Some("../rust/crates/my-app/tests"));
     assert!(binding.targets["test"].is_command());
     assert!(!binding.targets["test"].is_api());
 }
@@ -58,10 +52,7 @@ targets:
 
     assert_eq!(binding.language, "rust");
     assert_eq!(binding.targets.len(), 1);
-    assert_eq!(
-        binding.targets["generate"].package_root,
-        "../rust/crates/my-backend"
-    );
+    assert_eq!(binding.targets["generate"].package_root, "../rust/crates/my-backend");
     assert_eq!(binding.targets["generate"].test_root, None);
     assert!(binding.targets["generate"].is_api());
     assert!(!binding.targets["generate"].is_command());
@@ -84,14 +75,8 @@ targets:
 
     assert_eq!(binding.language, "rust");
     assert_eq!(binding.targets.len(), 2);
-    assert_eq!(
-        binding.targets["test"].package_root,
-        "../rust/crates/my-app"
-    );
-    assert_eq!(
-        binding.targets["generate"].package_root,
-        "../rust/crates/my-backend"
-    );
+    assert_eq!(binding.targets["test"].package_root, "../rust/crates/my-app");
+    assert_eq!(binding.targets["generate"].package_root, "../rust/crates/my-backend");
 }
 
 #[test]
@@ -162,14 +147,8 @@ targets:
 
     assert_eq!(binding.language, "rust");
     assert_eq!(binding.targets.len(), 1);
-    assert_eq!(
-        binding.targets["test"].package_root,
-        "../rust/crates/my-app"
-    );
-    assert_eq!(
-        binding.targets["test"].outputs.file.as_deref(),
-        Some("{workdir}/results.json")
-    );
+    assert_eq!(binding.targets["test"].package_root, "../rust/crates/my-app");
+    assert_eq!(binding.targets["test"].outputs.file.as_deref(), Some("{workdir}/results.json"));
 }
 
 #[test]

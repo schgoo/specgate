@@ -2,9 +2,20 @@
 name = "specgate-runtime"
 version.workspace = true
 edition.workspace = true
+description = "Runtime trace buffer and Value types for SpecGate annotations"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
 
 [features]
 specgate-trace = []
+
+[lints]
+workspace = true

@@ -12,6 +12,9 @@ coverage*.json
 # IDE
 .idea/
 *.swp
+*.swo
+.DS_Store
+Thumbs.db
 
 # AI Session Data
 .copilot/

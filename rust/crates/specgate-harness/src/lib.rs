@@ -102,10 +102,7 @@ pub fn run_spec(spec_path: &str) -> RunOutcome {
         for (i, case) in parsed.cases.iter().enumerate() {
             let eff = case.target.clone().or_else(|| parsed.target.clone());
             // Use a sentinel key that can't clash with real target names.
-            let key = eff
-                .as_deref()
-                .map(String::from)
-                .unwrap_or_else(|| "\x00default\x00".to_string());
+            let key = eff.as_deref().map(String::from).unwrap_or_else(|| "\x00default\x00".to_string());
             if let Some(&gidx) = seen.get(&key) {
                 groups[gidx].1.push(i);
             } else {
@@ -120,10 +117,7 @@ pub fn run_spec(spec_path: &str) -> RunOutcome {
         let target_name = eff_target.as_deref();
         if binding.target(target_name).is_none() {
             return RunOutcome::Error {
-                reason: format!(
-                    "target '{}' not found in binding",
-                    target_name.unwrap_or("<default>")
-                ),
+                reason: format!("target '{}' not found in binding", target_name.unwrap_or("<default>")),
             };
         }
     }
@@ -133,8 +127,7 @@ pub fn run_spec(spec_path: &str) -> RunOutcome {
 
     for (eff_target, case_indices) in &groups {
         let target = binding.target(eff_target.as_deref()).unwrap();
-        let group_cases: Vec<&spec::Case> =
-            case_indices.iter().map(|&i| &parsed.cases[i]).collect();
+        let group_cases: Vec<&spec::Case> = case_indices.iter().map(|&i| &parsed.cases[i]).collect();
 
         // Give each target group a distinct scratch directory.
         let scratch_suffix = match eff_target.as_deref() {
@@ -143,14 +136,7 @@ pub fn run_spec(spec_path: &str) -> RunOutcome {
         };
         let scratch_dir = scratch_for(&scratch_suffix);
 
-        match run_group(
-            target,
-            &group_cases,
-            &parsed,
-            &fixture_basename,
-            &workspace_root,
-            &scratch_dir,
-        ) {
+        match run_group(target, &group_cases, &parsed, &fixture_basename, &workspace_root, &scratch_dir) {
             Ok(group_results) => {
                 for (&case_idx, result) in case_indices.iter().zip(group_results.into_iter()) {
                     results_by_index[case_idx] = Some(result);
@@ -177,11 +163,7 @@ fn run_group(
     workspace_root: &Path,
     scratch_dir: &Path,
 ) -> Result<Vec<CaseResult>, String> {
-    let fixture_src = match resolve_fixture_source(
-        &target.package_root,
-        fixture_basename,
-        group_cases,
-    ) {
+    let fixture_src = match resolve_fixture_source(&target.package_root, fixture_basename, group_cases) {
         Some(p) => p,
         None => {
             if let Some(results) = short_circuit_non_must(group_cases, None) {
@@ -189,17 +171,13 @@ fn run_group(
             }
             return Err(format!(
                 "source file not found: {}",
-                target
-                    .package_root
-                    .join("src")
-                    .join(format!("{fixture_basename}.rs"))
-                    .display()
+                target.package_root.join("src").join(format!("{fixture_basename}.rs")).display()
             ));
         }
     };
 
-    let src_text = std::fs::read_to_string(&fixture_src)
-        .map_err(|e| format!("source file unreadable: {} ({})", fixture_src.display(), e))?;
+    let src_text =
+        std::fs::read_to_string(&fixture_src).map_err(|e| format!("source file unreadable: {} ({})", fixture_src.display(), e))?;
 
     let annotated = scan::scan(&src_text);
 
@@ -294,31 +272,21 @@ fn run_group(
     cmd.env_remove("RUSTC_WORKSPACE_WRAPPER");
     cmd.env_remove("CARGO");
     cmd.env_remove("CARGO_MANIFEST_DIR");
-    cmd.env(
-        "CARGO_TARGET_DIR",
-        proj.crate_dir.join("target").as_os_str(),
-    );
+    cmd.env("CARGO_TARGET_DIR", proj.crate_dir.join("target").as_os_str());
 
-    let output = cmd
-        .output()
-        .map_err(|e| format!("failed to invoke cargo: {e}"))?;
+    let output = cmd.output().map_err(|e| format!("failed to invoke cargo: {e}"))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        if stderr.contains("error[E")
-            || stderr.contains("error:")
-            || stderr.contains("could not compile")
-        {
+        if stderr.contains("error[E") || stderr.contains("error:") || stderr.contains("could not compile") {
             return Err("source failed to compile".into());
         }
         return Err(format!("runner failed: {}", stderr));
     }
 
-    let trace_text = std::fs::read_to_string(&proj.trace_file)
-        .map_err(|_| "runner produced no trace output".to_string())?;
+    let trace_text = std::fs::read_to_string(&proj.trace_file).map_err(|_| "runner produced no trace output".to_string())?;
     let trace_map: std::collections::BTreeMap<String, Vec<TraceEvent>> =
-        serde_yaml::from_str(&trace_text)
-            .map_err(|e| format!("failed to parse traces: {e}"))?;
+        serde_yaml::from_str(&trace_text).map_err(|e| format!("failed to parse traces: {e}"))?;
 
     let mut results = Vec::with_capacity(group_cases.len());
     for (case, disp) in group_cases.iter().zip(case_disposition.iter()) {
@@ -393,10 +361,7 @@ fn case_pieces_available(case: &spec::Case, annotated: &scan::AnnotatedSource) -
 }
 
 /// If every case has level != MUST, return per-case warn/skip results.
-fn short_circuit_non_must(
-    cases: &[&spec::Case],
-    _annotated: Option<&scan::AnnotatedSource>,
-) -> Option<Vec<CaseResult>> {
+fn short_circuit_non_must(cases: &[&spec::Case], _annotated: Option<&scan::AnnotatedSource>) -> Option<Vec<CaseResult>> {
     if cases.iter().any(|c| c.level == CaseLevel::Must) {
         return None;
     }
@@ -419,10 +384,7 @@ fn short_circuit_non_must(
     Some(out)
 }
 
-fn build_short_circuit_results(
-    cases: &[&spec::Case],
-    disp: &[CaseDisposition],
-) -> Vec<CaseResult> {
+fn build_short_circuit_results(cases: &[&spec::Case], disp: &[CaseDisposition]) -> Vec<CaseResult> {
     cases
         .iter()
         .zip(disp.iter())
@@ -492,11 +454,7 @@ fn cargo_bin() -> String {
 /// Try to find the fixture source file for a spec. Prefer `<basename>.rs`;
 /// otherwise pick the .rs file under src/ whose annotations contain the
 /// most setups + operations the cases need.
-fn resolve_fixture_source(
-    package_root: &Path,
-    fixture_basename: &str,
-    cases: &[&spec::Case],
-) -> Option<PathBuf> {
+fn resolve_fixture_source(package_root: &Path, fixture_basename: &str, cases: &[&spec::Case]) -> Option<PathBuf> {
     let direct = package_root.join("src").join(format!("{fixture_basename}.rs"));
     if direct.exists() {
         return Some(direct);
@@ -622,16 +580,11 @@ fn check_shape(spec: &spec::Spec, raw: &serde_yaml::Value) -> Option<String> {
                 let strict_op = case_ops.iter().find(|op| {
                     ops_meta
                         .get(**op)
-                        .map(|m| {
-                            !m.outputs.is_empty()
-                                && m.outputs.iter().all(|o| o.starts_with(&format!("{op}.")))
-                        })
+                        .map(|m| !m.outputs.is_empty() && m.outputs.iter().all(|o| o.starts_with(&format!("{op}."))))
                         .unwrap_or(false)
                 });
                 if let Some(op) = strict_op {
-                    return Some(format!(
-                        "expected event '{k}' is not a declared output of operation '{op}'"
-                    ));
+                    return Some(format!("expected event '{k}' is not a declared output of operation '{op}'"));
                 }
             }
         }
@@ -677,18 +630,14 @@ fn ops_metadata(raw: &serde_yaml::Value) -> std::collections::BTreeMap<String, O
             None => continue,
         };
         let mut meta = OpMeta::default();
-        if let Some(serde_yaml::Value::Mapping(inputs)) =
-            body.get(serde_yaml::Value::String("inputs".into()))
-        {
+        if let Some(serde_yaml::Value::Mapping(inputs)) = body.get(serde_yaml::Value::String("inputs".into())) {
             for (ik, _) in inputs {
                 if let Some(s) = ik.as_str() {
                     meta.inputs.push(s.to_string());
                 }
             }
         }
-        if let Some(serde_yaml::Value::Sequence(outs)) =
-            body.get(serde_yaml::Value::String("outputs".into()))
-        {
+        if let Some(serde_yaml::Value::Sequence(outs)) = body.get(serde_yaml::Value::String("outputs".into())) {
             for o in outs {
                 if let Some(s) = o.as_str() {
                     meta.outputs.push(s.to_string());

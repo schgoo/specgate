@@ -2,6 +2,14 @@
 name = "specgate-annotations"
 version.workspace = true
 edition.workspace = true
+description = "Annotation macros for spec-based verification with SpecGate"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 specgate-runtime = { workspace = true }
@@ -9,3 +17,6 @@ specgate-annotations-macros = { workspace = true }
 
 [features]
 specgate-trace = ["specgate-runtime/specgate-trace"]
+
+[lints]
+workspace = true

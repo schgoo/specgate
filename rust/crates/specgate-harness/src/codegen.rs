@@ -27,10 +27,7 @@ struct FixtureCrateInfo {
 /// Try to resolve the fixture crate dependency info. Returns `Some` only when:
 /// 1. `fixture_pkg_root` has a `Cargo.toml` with a `[package] name`
 /// 2. `fixture_pkg_root/src/lib.rs` contains `pub mod <module_name>;`
-fn resolve_fixture_crate(
-    fixture_pkg_root: &Path,
-    module_name: &str,
-) -> Option<FixtureCrateInfo> {
+fn resolve_fixture_crate(fixture_pkg_root: &Path, module_name: &str) -> Option<FixtureCrateInfo> {
     let cargo_toml = fixture_pkg_root.join("Cargo.toml");
     let text = std::fs::read_to_string(&cargo_toml).ok()?;
     let cargo_name = parse_cargo_name(&text)?;
@@ -102,22 +99,13 @@ pub fn generate(
     let harness_path = workspace_root.join("crates/specgate-harness");
 
     // Determine the fixture module name from the source file stem.
-    let module_name = fixture_src
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("fixture")
-        .to_string();
+    let module_name = fixture_src.file_stem().and_then(|s| s.to_str()).unwrap_or("fixture").to_string();
 
     // Try to use the fixture crate as a path dependency when possible.
-    let fixture_crate = fixture_pkg_root
-        .and_then(|root| resolve_fixture_crate(root, &module_name));
+    let fixture_crate = fixture_pkg_root.and_then(|root| resolve_fixture_crate(root, &module_name));
 
     let fixture_dep = if let Some(ref fc) = fixture_crate {
-        format!(
-            "\n{} = {{ path = \"{}\" }}",
-            fc.cargo_name,
-            to_cargo_path(&fc.path)
-        )
+        format!("\n{} = {{ path = \"{}\" }}", fc.cargo_name, to_cargo_path(&fc.path))
     } else {
         String::new()
     };
@@ -154,7 +142,15 @@ serde_yaml = "0.9"{fixture_dep}
         let _ = std::fs::copy(&parent_lock, &tmp_lock);
     }
 
-    let main_rs = render_main(fixture_src, spec, cases_to_run, annotated, &trace_file, needs_async, fixture_crate.as_ref())?;
+    let main_rs = render_main(
+        fixture_src,
+        spec,
+        cases_to_run,
+        annotated,
+        &trace_file,
+        needs_async,
+        fixture_crate.as_ref(),
+    )?;
     std::fs::write(scratch_dir.join("src").join("main.rs"), main_rs)?;
 
     Ok(GeneratedProject {
@@ -179,18 +175,12 @@ fn render_main(
 
     if let Some(fc) = fixture_crate {
         // Alias the fixture module as `fut` so call sites work uniformly.
-        out.push_str(&format!(
-            "use {}::{} as fut;\n",
-            fc.rust_ident, fc.module_name
-        ));
+        out.push_str(&format!("use {}::{} as fut;\n", fc.rust_ident, fc.module_name));
     } else {
         let abs = std::fs::canonicalize(fixture_src)?;
         let abs_str = abs.display().to_string();
         let abs_str = abs_str.strip_prefix(r"\\?\").unwrap_or(&abs_str);
-        out.push_str(&format!(
-            "#[path = \"{}\"] mod fut;\n",
-            abs_str.replace('\\', "\\\\")
-        ));
+        out.push_str(&format!("#[path = \"{}\"] mod fut;\n", abs_str.replace('\\', "\\\\")));
     }
     out.push_str("use fut::*;\n");
     out.push_str("\n");
@@ -205,9 +195,7 @@ fn render_main(
     }
 
     out.push_str("fn main() {\n");
-    out.push_str(
-        "    let out_path = std::env::args().nth(1).expect(\"missing output path\");\n",
-    );
+    out.push_str("    let out_path = std::env::args().nth(1).expect(\"missing output path\");\n");
     out.push_str("    let mut all: std::collections::BTreeMap<String, Vec<TraceEvent>> = std::collections::BTreeMap::new();\n");
 
     for case in cases_to_run {
@@ -215,10 +203,7 @@ fn render_main(
         out.push_str("    {\n");
         out.push_str("        reset();\n");
         render_case(&mut out, case, spec, annotated);
-        out.push_str(&format!(
-            "        all.insert({:?}.to_string(), take_traces());\n",
-            case.name
-        ));
+        out.push_str(&format!("        all.insert({:?}.to_string(), take_traces());\n", case.name));
         out.push_str("    }\n");
     }
 
@@ -258,7 +243,6 @@ fn sg_block_on<F: ::std::future::Future>(fut: F) -> F::Output {
     }
 }
 "#;
-
 
 const JSON_HELPER: &str = r#"
 fn esc_str(s: &str, o: &mut String) {
@@ -372,14 +356,10 @@ fn render_case(out: &mut String, case: &Case, spec: &Spec, annotated: &Annotated
             let sig = annotated.setups.get(name);
             let args = render_setup_args(sig, &case.inputs);
             let var = sanitize_ident(name);
-            out.push_str(&format!(
-                "        let mut {var} = fut::{name}({args});\n"
-            ));
+            out.push_str(&format!("        let mut {var} = fut::{name}({args});\n"));
             if let Some(sig) = sig {
                 if annotated.spec_event_structs.contains(sig.return_type.trim()) {
-                    out.push_str(&format!(
-                        "        SpecEvent::emit_fields(&{var}, None);\n"
-                    ));
+                    out.push_str(&format!("        SpecEvent::emit_fields(&{var}, None);\n"));
                 }
             }
             setup_vars.push((var, name.clone()));
@@ -389,15 +369,10 @@ fn render_case(out: &mut String, case: &Case, spec: &Spec, annotated: &Annotated
                 let sig = annotated.setups.get(fn_name);
                 let args = render_setup_args(sig, &case.inputs);
                 let var = sanitize_ident(alias);
-                out.push_str(&format!(
-                    "        let mut {var} = fut::{fn_name}({args});\n"
-                ));
+                out.push_str(&format!("        let mut {var} = fut::{fn_name}({args});\n"));
                 if let Some(sig) = sig {
                     if annotated.spec_event_structs.contains(sig.return_type.trim()) {
-                        out.push_str(&format!(
-                            "        SpecEvent::emit_fields(&{var}, Some({:?}));\n",
-                            alias
-                        ));
+                        out.push_str(&format!("        SpecEvent::emit_fields(&{var}, Some({:?}));\n", alias));
                     }
                 }
                 setup_vars.push((var, fn_name.clone()));
@@ -420,9 +395,7 @@ fn render_case(out: &mut String, case: &Case, spec: &Spec, annotated: &Annotated
         if spec.async_ops.contains(op) {
             call = format!("sg_block_on({call})");
         }
-        let return_type = decl
-            .map(|d| d.sig.return_type.trim().to_string())
-            .unwrap_or_default();
+        let return_type = decl.map(|d| d.sig.return_type.trim().to_string()).unwrap_or_default();
         let post_emit = build_post_emit(&return_type, &annotated.spec_event_structs);
         out.push_str("        {\n");
         out.push_str(&format!(
@@ -439,10 +412,7 @@ fn render_case(out: &mut String, case: &Case, spec: &Spec, annotated: &Annotated
 
 /// Emit Rust source for post-call return handling based on the operation's
 /// declared return type. Produces statements that consume `__sg_ret`.
-fn build_post_emit(
-    return_type: &str,
-    spec_event_structs: &std::collections::BTreeSet<String>,
-) -> String {
+fn build_post_emit(return_type: &str, spec_event_structs: &std::collections::BTreeSet<String>) -> String {
     let rt = return_type.trim();
     if rt.is_empty() || rt == "()" {
         return "let _ = __sg_ret;".to_string();
@@ -496,10 +466,7 @@ fn build_post_emit(
         .to_string();
     }
     // Known collection types → use ToSpecValue for structured emission.
-    let is_collection = matches!(
-        head,
-        "Vec" | "BTreeMap" | "HashMap" | "BTreeSet" | "HashSet"
-    ) || bare.starts_with('[');
+    let is_collection = matches!(head, "Vec" | "BTreeMap" | "HashMap" | "BTreeSet" | "HashSet") || bare.starts_with('[');
     if is_collection {
         return r#"
             specgate_annotations::emit_event_v(
@@ -518,10 +485,7 @@ fn build_post_emit(
     .to_string()
 }
 
-fn render_setup_args(
-    sig: Option<&crate::scan::FnSig>,
-    inputs: &BTreeMap<String, Value>,
-) -> String {
+fn render_setup_args(sig: Option<&crate::scan::FnSig>, inputs: &BTreeMap<String, Value>) -> String {
     let Some(sig) = sig else { return String::new() };
     let mut parts = Vec::new();
     for (p, ty) in &sig.params {
@@ -555,9 +519,7 @@ fn render_op_call(
             })
             .or_else(|| setup_vars.first())
             .cloned();
-        let recv_var = recv
-            .map(|(v, _)| v)
-            .unwrap_or_else(|| "/* missing receiver */".to_string());
+        let recv_var = recv.map(|(v, _)| v).unwrap_or_else(|| "/* missing receiver */".to_string());
         let args = render_op_args(decl, inputs, setup_vars);
         return format!("{recv_var}.{}({args})", decl.sig.fn_ident);
     }
@@ -566,11 +528,7 @@ fn render_op_call(
     format!("fut::{}({args})", decl.sig.fn_ident)
 }
 
-fn render_op_args(
-    decl: &OpDecl,
-    inputs: &BTreeMap<String, Value>,
-    setup_vars: &[(String, String)],
-) -> String {
+fn render_op_args(decl: &OpDecl, inputs: &BTreeMap<String, Value>, setup_vars: &[(String, String)]) -> String {
     let mut parts = Vec::new();
     for (p, ty) in &decl.sig.params {
         // If the param name matches a setup alias, pass that variable.
