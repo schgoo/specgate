@@ -86,11 +86,12 @@
 //! - **`harness`** — enables `run_spec()` and the test harness (add to `[dev-dependencies]`)
 //! - **`trace`** — enables runtime trace collection (required for harness, zero-cost when off)
 
-// Re-export annotations (always available)
-pub use specgate_annotations::{
-    SpecEvent, ToSpecValue, TraceEvent, Value, emit_event, emit_event_v, emit_run, mock_lookup, reset, set_mock, spec_mock, spec_operation,
-    spec_setup, spec_trace, take_traces,
-};
+// Public API — annotations
+pub use specgate_annotations::{SpecEvent, emit_event, spec_mock, spec_operation, spec_setup, spec_trace};
+
+// Internal — needed by macro expansions but not user-facing
+#[doc(hidden)]
+pub use specgate_annotations::{ToSpecValue, TraceEvent, Value, emit_event_v, emit_run, mock_lookup, reset, set_mock, take_traces};
 
 // The proc macros expand to `::specgate::__rt::...` so this module must exist.
 #[doc(hidden)]
@@ -98,6 +99,6 @@ pub mod __rt {
     pub use specgate_annotations::__rt::*;
 }
 
-// Re-export harness (behind "harness" feature)
+// Public API — harness (behind "harness" feature)
 #[cfg(feature = "harness")]
-pub use specgate_harness::{CaseLevel, CaseResult, CaseStatus, RunOutcome, Source, run_spec};
+pub use specgate_harness::{CaseStatus, RunOutcome, run_spec};
