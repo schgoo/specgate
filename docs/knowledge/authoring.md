@@ -107,7 +107,93 @@ cases:
 
 ## Defining types
 
-For complex inputs/outputs, declare types in the `types` block:
+**Prefer decomposed primitives over structured types.** A spec describes
+a behavioral contract, not an implementation's internal type system. Use
+primitives when possible; reserve structured types for genuine collections
+or multi-instance data.
+
+### When to use primitives (decomposition)
+
+```yaml
+# GOOD — decomposed, minimal contract surface
+operations:
+  create_property:
+    inputs:
+      name: string
+      type_name: string
+      nullable: bool
+    outputs: [$result]
+```
+
+The implementation can internally use a `Property` struct, but the spec
+doesn't prescribe that. The harness passes individual values.
+
+### When to use structured types
+
+Use `types:` only when:
+- You have a **collection** of structured items (e.g., a list of members)
+- The same shape appears in **multiple operations** (shared via `depends_on`)
+- The type has **real semantic identity** beyond grouping fields
+
+```yaml
+# GOOD — genuinely need a list of structured items
+types:
+  EnumMember:
+    fields:
+      name: string
+      value: string
+
+operations:
+  create_enum_type:
+    inputs:
+      type_name: string
+      members:
+        type: list
+        items: EnumMember
+    outputs: [$result]
+```
+
+### Anti-patterns
+
+```yaml
+# BAD — wrapping two strings in a struct for a single-instance input
+types:
+  PropertyInput:
+    fields:
+      name: string
+      type_name: string
+
+operations:
+  create_property:
+    inputs:
+      property: PropertyInput  # unnecessary indirection
+```
+
+```yaml
+# BAD — encoding internal structure the implementation should decide
+types:
+  EntityTypeDefinition:
+    fields:
+      name: string
+      namespace: string
+      base_type: string
+      properties: list
+      navigation_properties: list
+      # ... 10 more fields
+
+# This over-constrains the implementation. Use decomposed primitives
+# for what the operation actually needs as input.
+```
+
+### Rule of thumb
+
+If an input has only 1-3 scalar fields and appears in only one operation,
+decompose it into named primitives. If it appears in multiple operations
+or is part of a collection, define it as a type.
+
+---
+
+For complex inputs/outputs that DO need structured types:
 
 ```yaml
 types:

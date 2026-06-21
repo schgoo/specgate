@@ -68,6 +68,19 @@ cases:
 - User-defined event names are bare (no `$` prefix)
 - All values in expected are strings (stringified comparison)
 - Type references use `{ type: list, items: T }` syntax, not `T[]`
+
+### Primitives vs structured types
+
+**Default to decomposed primitives.** The spec is a behavioral contract,
+not a type system. Do NOT wrap inputs in structured types unless necessary.
+
+- **Use primitives** when an operation takes 1-5 scalar values
+- **Use structured types** ONLY for collections (list of items) or when
+  the same shape is shared across multiple operations via `depends_on`
+- A single-instance input with only scalar fields should be decomposed:
+  `name: string, value: string` — not `member: EnumMember`
+- The implementation decides its internal type structure; the spec
+  describes what data flows in and out
 - For Option returns: Some emits `$result` with the value, None emits
   `$result: "None"`
 - For Result returns: Ok emits `$outcome: "Ok"` + `$result`, Err emits
