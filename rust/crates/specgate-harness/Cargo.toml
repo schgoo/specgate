@@ -10,7 +10,7 @@ readme = "README.md"
 keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
-exclude = ["tests/mechanism_proof.rs"]
+exclude = ["tests/mechanism_proof.rs", "tests/discovery_registry_spec.rs"]
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
@@ -20,7 +20,7 @@ specgate-runtime = { workspace = true }
 regex = { workspace = true }
 
 [dev-dependencies]
-specgate = { workspace = true }
+specgate = { path = "../specgate" }
 specgate-fixtures = { path = "../../../test/rust/crates/specgate-fixtures" }
 tempfile = "3"
 
