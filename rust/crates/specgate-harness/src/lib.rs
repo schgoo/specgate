@@ -254,6 +254,7 @@ fn run_group(
             workspace_root,
             needs_async,
             fixture_pkg_root: Some(&target.package_root),
+            is_local: is_local_workspace(),
         },
     )
     .map_err(|e| format!("failed to scaffold runner: {e}"))?;
@@ -430,6 +431,17 @@ fn workspace_root() -> PathBuf {
     p.pop(); // specgate-harness
     p.pop(); // crates
     p
+}
+
+/// Returns true if specgate-harness is being used from a local workspace
+/// (path dependency) rather than from crates.io.
+fn is_local_workspace() -> bool {
+    let workspace = workspace_root();
+    // If the workspace has a Cargo.toml with [workspace], we're local.
+    // From crates.io, CARGO_MANIFEST_DIR is inside ~/.cargo/registry/src/...
+    workspace.join("Cargo.toml").exists()
+        && !workspace.to_string_lossy().contains(".cargo/registry")
+        && !workspace.to_string_lossy().contains(".cargo\\registry")
 }
 
 fn scratch_for(stem: &str) -> PathBuf {

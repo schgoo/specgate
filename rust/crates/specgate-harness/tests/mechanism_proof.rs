@@ -24,9 +24,9 @@ use specgate_fixtures::stateless_add;
 use specgate_fixtures::statemachine_counter;
 
 // The annotations system must provide a way to retrieve collected traces.
-// This import path may be specgate_annotations::take_traces, a runtime crate,
+// This import path may be specgate::take_traces, a runtime crate,
 // or any other public API — as long as it drains the trace buffer.
-use specgate_annotations::take_traces;
+use specgate::take_traces;
 
 #[test]
 fn stateless_operation_emits_traces() {
@@ -46,7 +46,7 @@ fn statemachine_operation_emits_field_events() {
     assert!(!traces.is_empty(), "annotations must emit real trace events");
 
     // Must contain field captures for 'count'.
-    let trace_names: Vec<_> = traces.iter().map(specgate_annotations::TraceEvent::name).collect();
+    let trace_names: Vec<_> = traces.iter().map(specgate::TraceEvent::name).collect();
     assert!(
         trace_names.iter().any(|n| n == "count"),
         "must capture the 'count' field via SpecEvent derive, got: {trace_names:?}",
@@ -61,7 +61,7 @@ fn multi_field_captures_all_annotated_fields() {
     let traces = take_traces();
     assert!(!traces.is_empty());
 
-    let trace_names: Vec<_> = traces.iter().map(specgate_annotations::TraceEvent::name).collect();
+    let trace_names: Vec<_> = traces.iter().map(specgate::TraceEvent::name).collect();
     assert!(
         trace_names.iter().any(|n| n == "balance"),
         "must capture 'balance' field, got: {trace_names:?}",
@@ -80,7 +80,7 @@ fn inline_checkpoint_emits_event() {
     let traces = take_traces();
     assert!(!traces.is_empty());
 
-    let trace_names: Vec<_> = traces.iter().map(specgate_annotations::TraceEvent::name).collect();
+    let trace_names: Vec<_> = traces.iter().map(specgate::TraceEvent::name).collect();
     assert!(
         trace_names.iter().any(|n| n == "after_upper"),
         "spec_trace! must emit a named event, got: {trace_names:?}",

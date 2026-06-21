@@ -1,5 +1,5 @@
 // Inline checkpoint during an operation.
-use specgate_annotations::*;
+use specgate::*;
 
 #[spec_operation("process")]
 pub fn process(data: &str) -> String {

@@ -1,5 +1,5 @@
 // List of maps — like OData entity properties.
-use specgate_annotations::*;
+use specgate::*;
 use std::collections::BTreeMap;
 
 #[spec_operation("get_properties")]

@@ -1,5 +1,5 @@
 // Operation returns Result — Ok path.
-use specgate_annotations::*;
+use specgate::*;
 
 #[spec_operation("divide")]
 pub fn divide(a: i32, b: i32) -> Result<i32, String> {

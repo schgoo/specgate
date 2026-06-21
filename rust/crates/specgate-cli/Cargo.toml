@@ -22,7 +22,7 @@ path = "src/main.rs"
 regex = { workspace = true }
 serde = { workspace = true }
 serde_yaml = { workspace = true }
-specgate-annotations = { workspace = true }
+specgate = { workspace = true }
 specgate-harness = { workspace = true }
 
 [lints]

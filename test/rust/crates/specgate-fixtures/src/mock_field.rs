@@ -1,5 +1,5 @@
 // Mock via call-site interception — on input X return Y.
-use specgate_annotations::*;
+use specgate::*;
 
 #[spec_setup("make_service")]
 pub fn make_service() -> UserService {

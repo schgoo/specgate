@@ -21,6 +21,7 @@ pub struct GenerateConfig<'a> {
     pub workspace_root: &'a Path,
     pub needs_async: bool,
     pub fixture_pkg_root: Option<&'a Path>,
+    pub is_local: bool,
 }
 
 /// Information about the fixture crate for use as a Cargo dependency.
@@ -93,9 +94,9 @@ pub fn generate(scratch_dir: &Path, fixture_src: &Path, config: &GenerateConfig)
     std::fs::create_dir_all(scratch_dir.join("src"))?;
     let trace_file = scratch_dir.join("traces.json");
 
-    let annotations_path = config.workspace_root.join("crates/specgate-annotations");
+    let annotations_path = config.workspace_root.join("crates/specgate");
     let runtime_path = config.workspace_root.join("crates/specgate-runtime");
-    let macros_path = config.workspace_root.join("crates/specgate-annotations-macros");
+    let macros_path = config.workspace_root.join("crates/specgate-macros");
     let harness_path = config.workspace_root.join("crates/specgate-harness");
 
     // Determine the fixture module name from the source file stem.
@@ -110,6 +111,19 @@ pub fn generate(scratch_dir: &Path, fixture_src: &Path, config: &GenerateConfig)
         String::new()
     };
 
+    let specgate_deps = if config.is_local {
+        format!(
+            "specgate = {{ path = \"{ann}\" }}\nspecgate-harness = {{ path = \"{harness}\" }}",
+            ann = to_cargo_path(&annotations_path),
+            harness = to_cargo_path(&harness_path),
+        )
+    } else {
+        format!(
+            "specgate = \"{ver}\"\nspecgate-harness = \"{ver}\"",
+            ver = env!("CARGO_PKG_VERSION"),
+        )
+    };
+
     let manifest = format!(
         r#"[package]
 name = "sg-runner"
@@ -121,14 +135,11 @@ name = "sg-runner"
 path = "src/main.rs"
 
 [dependencies]
-specgate-annotations = {{ path = "{ann}" }}
-specgate-harness = {{ path = "{harness}" }}
+{specgate_deps}
 serde_yaml = "0.9"{fixture_dep}
 
 [workspace]
 "#,
-        ann = to_cargo_path(&annotations_path),
-        harness = to_cargo_path(&harness_path),
     );
     let _ = runtime_path;
     let _ = macros_path;
@@ -170,7 +181,7 @@ fn render_main(
 ) -> std::io::Result<String> {
     let mut out = String::new();
     out.push_str("#![allow(unused, unused_mut, unused_variables, dead_code, clippy::all)]\n");
-    out.push_str("use specgate_annotations::{TraceEvent, Value, take_traces, reset, set_mock, SpecEvent};\n");
+    out.push_str("use specgate::{TraceEvent, Value, take_traces, reset, set_mock, SpecEvent};\n");
     out.push_str("use std::collections::HashMap;\n");
 
     if let Some(fc) = fixture_crate {
@@ -405,7 +416,7 @@ fn render_case(out: &mut String, case: &Case, spec: &Spec, annotated: &Annotated
         ).expect("fmt");
         out.push_str("            if let Err(__e) = __r {\n");
         out.push_str(
-            "                let msg = panic_msg(&__e);\n                specgate_annotations::emit_event(\"$outcome\", \"Unrecoverable\");\n                specgate_annotations::emit_event(\"$error\", &msg);\n"
+            "                let msg = panic_msg(&__e);\n                specgate::emit_event(\"$outcome\", \"Unrecoverable\");\n                specgate::emit_event(\"$error\", &msg);\n"
         );
         out.push_str("            }\n");
         out.push_str("        }\n");
@@ -423,12 +434,12 @@ fn build_post_emit(return_type: &str, spec_event_structs: &std::collections::BTr
         return r#"
             match &__sg_ret {
                 Ok(__sg_v) => {
-                    specgate_annotations::emit_event("$outcome", "Ok");
-                    specgate_annotations::emit_event("$result", &format!("{}", __sg_v));
+                    specgate::emit_event("$outcome", "Ok");
+                    specgate::emit_event("$result", &format!("{}", __sg_v));
                 }
                 Err(__sg_e) => {
-                    specgate_annotations::emit_event("$outcome", "Error");
-                    specgate_annotations::emit_event("$error", &format!("{}", __sg_e));
+                    specgate::emit_event("$outcome", "Error");
+                    specgate::emit_event("$error", &format!("{}", __sg_e));
                 }
             }
             let _ = __sg_ret;
@@ -439,13 +450,13 @@ fn build_post_emit(return_type: &str, spec_event_structs: &std::collections::BTr
         return r#"
             match &__sg_ret {
                 Some(__sg_v) => {
-                    specgate_annotations::emit_event_v(
+                    specgate::emit_event_v(
                         "$result",
-                        specgate_annotations::__rt::ToSpecValue::to_spec_value(__sg_v),
+                        specgate::__rt::ToSpecValue::to_spec_value(__sg_v),
                     );
                 }
                 None => {
-                    specgate_annotations::emit_event("$result", "None");
+                    specgate::emit_event("$result", "None");
                 }
             }
             let _ = __sg_ret;
@@ -458,10 +469,10 @@ fn build_post_emit(return_type: &str, spec_event_structs: &std::collections::BTr
     let head = bare.split(['<', ' ']).next().unwrap_or(bare);
     if spec_event_structs.contains(head) {
         return r#"
-            specgate_annotations::SpecEvent::emit_fields(&__sg_ret, None);
-            specgate_annotations::emit_event_v(
+            specgate::SpecEvent::emit_fields(&__sg_ret, None);
+            specgate::emit_event_v(
                 "$result",
-                specgate_annotations::__rt::ToSpecValue::to_spec_value(&__sg_ret),
+                specgate::__rt::ToSpecValue::to_spec_value(&__sg_ret),
             );
             let _ = __sg_ret;
         "#
@@ -471,9 +482,9 @@ fn build_post_emit(return_type: &str, spec_event_structs: &std::collections::BTr
     let is_collection = matches!(head, "Vec" | "BTreeMap" | "HashMap" | "BTreeSet" | "HashSet") || bare.starts_with('[');
     if is_collection {
         return r#"
-            specgate_annotations::emit_event_v(
+            specgate::emit_event_v(
                 "$result",
-                specgate_annotations::__rt::ToSpecValue::to_spec_value(&__sg_ret),
+                specgate::__rt::ToSpecValue::to_spec_value(&__sg_ret),
             );
             let _ = __sg_ret;
         "#
@@ -481,7 +492,7 @@ fn build_post_emit(return_type: &str, spec_event_structs: &std::collections::BTr
     }
     // Default: emit $result via Display.
     r#"
-            specgate_annotations::emit_event("$result", &format!("{}", __sg_ret));
+            specgate::emit_event("$result", &format!("{}", __sg_ret));
             let _ = __sg_ret;
         "#
     .to_string()
@@ -635,4 +646,97 @@ fn inner_ty(ty: &str) -> Option<String> {
         return rest.strip_suffix('>').map(|s| s.trim().to_string());
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    fn empty_spec() -> Spec {
+        Spec {
+            binding_path: None,
+            target: None,
+            cases: vec![],
+            async_ops: BTreeSet::new(),
+        }
+    }
+
+    fn empty_annotated() -> AnnotatedSource {
+        AnnotatedSource {
+            setups: BTreeMap::new(),
+            operations: BTreeMap::new(),
+            spec_event_structs: BTreeSet::new(),
+        }
+    }
+
+    #[test]
+    fn generated_manifest_uses_version_deps_when_not_local() {
+        let scratch = tempfile::tempdir().unwrap();
+        let spec = empty_spec();
+        let annotated = empty_annotated();
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf();
+
+        let config = GenerateConfig {
+            spec: &spec,
+            cases_to_run: &[],
+            annotated: &annotated,
+            workspace_root: &workspace_root,
+            needs_async: false,
+            fixture_pkg_root: None,
+            is_local: false,
+        };
+
+        let fixture_src = workspace_root.join("crates/specgate-harness/src/lib.rs");
+        let result = generate(scratch.path(), &fixture_src, &config);
+        assert!(result.is_ok(), "generate failed: {:?}", result.err());
+
+        let manifest = std::fs::read_to_string(scratch.path().join("Cargo.toml")).unwrap();
+        assert!(
+            manifest.contains(&format!("specgate = \"{}\"", env!("CARGO_PKG_VERSION"))),
+            "manifest should contain version dep for specgate, got:\n{manifest}"
+        );
+        assert!(
+            !manifest.contains("{ path ="),
+            "manifest should NOT contain path deps when is_local=false, got:\n{manifest}"
+        );
+    }
+
+    #[test]
+    fn generated_manifest_uses_path_deps_when_local() {
+        let scratch = tempfile::tempdir().unwrap();
+        let spec = empty_spec();
+        let annotated = empty_annotated();
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf();
+
+        let config = GenerateConfig {
+            spec: &spec,
+            cases_to_run: &[],
+            annotated: &annotated,
+            workspace_root: &workspace_root,
+            needs_async: false,
+            fixture_pkg_root: None,
+            is_local: true,
+        };
+
+        let fixture_src = workspace_root.join("crates/specgate-harness/src/lib.rs");
+        let result = generate(scratch.path(), &fixture_src, &config);
+        assert!(result.is_ok(), "generate failed: {:?}", result.err());
+
+        let manifest = std::fs::read_to_string(scratch.path().join("Cargo.toml")).unwrap();
+        assert!(
+            manifest.contains("path ="),
+            "manifest should contain path deps when is_local=true, got:\n{manifest}"
+        );
+    }
 }

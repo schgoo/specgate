@@ -1,7 +1,7 @@
 // Operation that depends on an external crate (serde_yaml).
 // This cannot be #[path] included — the generated runner must
 // depend on specgate-fixtures as a Cargo dependency.
-use specgate_annotations::*;
+use specgate::*;
 
 #[spec_operation("parse_yaml_key")]
 pub fn parse_yaml_key(input: &str, key: &str) -> String {

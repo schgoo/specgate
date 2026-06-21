@@ -1,5 +1,5 @@
 // Mock with multiple responses — different inputs get different outputs.
-use specgate_annotations::*;
+use specgate::*;
 
 #[spec_setup("make_service")]
 pub fn make_service() -> UserService {

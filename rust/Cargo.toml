@@ -28,6 +28,7 @@ syn = { version = "2.0.118", features = ["full", "extra-traits"] }
 quote = "1.0.45"
 proc-macro2 = "1.0.106"
 regex = "1.12"
+linkme = "0.3"
 specgate = { path = "crates/specgate", version = "0.1.1" }
 specgate-types = { path = "crates/specgate-types", version = "0.1.1" }
 specgate-annotations = { path = "crates/specgate-annotations", version = "0.1.1" }

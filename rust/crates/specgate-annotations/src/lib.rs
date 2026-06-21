@@ -12,8 +12,10 @@ pub use specgate_runtime::{SpecEvent, ToSpecValue, TraceEvent, Value, take_trace
 
 #[doc(hidden)]
 pub mod __rt {
+    pub use specgate_runtime::linkme;
     pub use specgate_runtime::{
-        SpecEvent, ToSpecValue, TraceEvent, Value, emit_event, emit_event_v, emit_run, mock_lookup, reset, set_mock, take_traces,
+        OpMeta, SPECGATE_OPS, SPECGATE_TYPES, SpecEvent, ToSpecValue, TraceEvent, TypeMeta, Value, discovery_json, emit_event,
+        emit_event_v, emit_run, mock_lookup, reset, set_mock, take_traces,
     };
 }
 

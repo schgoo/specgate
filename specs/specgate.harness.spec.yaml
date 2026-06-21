@@ -132,6 +132,19 @@ cases:
       outcome:
         Complete: {}
 
+  - name: discovery_registry_handles_methods_and_duplicates
+    kind: narrative
+    desc: >
+      Annotation metadata discovery must register free functions, method
+      operations, and setups without compile failures, even when multiple
+      source files reuse the same operation name. The discovery JSON exposed
+      by the runtime must stay valid and include those registered entries.
+    verify:
+      - Method operations annotated inside impl blocks compile successfully and register metadata
+      - #[spec_setup] functions register metadata with is_setup: true
+      - Reusing the same operation name in different source files does not cause registry symbol collisions
+      - specgate_runtime::discovery_json() returns valid JSON listing the registered operations
+
   - name: no_source_interpretation
     kind: narrative
     desc: >
@@ -182,6 +195,33 @@ cases:
       - Run operators.spec.yaml — $size on a list Value works
       - Run scalar_operators.spec.yaml — $gt on an integer Value works
       - A string value "3" does not satisfy $size: 3 (type mismatch)
+
+  - name: generated_runner_uses_version_deps_from_crates_io
+    kind: narrative
+    desc: >
+      When specgate-harness is installed from crates.io (not a path
+      dependency), the generated runner Cargo.toml must use version
+      dependencies (e.g. specgate-annotations = "0.1.1") instead of
+      path dependencies. Path deps point to the registry cache which
+      has no workspace structure. The harness detects whether it is
+      running from a local workspace or from crates.io and adjusts
+      the generated manifest accordingly.
+    verify:
+      - codegen with is_local=false produces version deps in the manifest
+      - The version matches the harness crate's own version
+
+  - name: umbrella_crate_re_exports_annotations_path
+    kind: narrative
+    desc: >
+      The specgate umbrella crate must re-export specgate_annotations
+      such that the path ::specgate_annotations resolves for any crate
+      depending on specgate. The proc macros expand to
+      ::specgate_annotations::__rt::emit_event(...) and this path must
+      compile whether the user depends on specgate or specgate-annotations
+      directly.
+    verify:
+      - specgate/src/lib.rs contains pub extern crate specgate_annotations
+      - A crate depending only on specgate compiles with spec_operation
 
   - name: paths_resolve_relative_to_spec
     desc: >

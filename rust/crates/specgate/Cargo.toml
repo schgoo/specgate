@@ -17,7 +17,7 @@ harness = ["dep:specgate-harness"]
 trace = ["specgate-annotations/specgate-trace"]
 
 [dependencies]
-specgate-annotations = { workspace = true }
+specgate-annotations = { workspace = true, public = true }
 specgate-harness = { workspace = true, optional = true }
 
 [lints]

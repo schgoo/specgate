@@ -1,5 +1,5 @@
 // Mock called with input not present in the configured response table.
-use specgate_annotations::*;
+use specgate::*;
 
 #[spec_setup("make_service")]
 pub fn make_service() -> UserService {

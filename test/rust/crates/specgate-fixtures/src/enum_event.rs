@@ -1,5 +1,5 @@
 // Enum with SpecEvent — unit, tuple, and struct variants.
-use specgate_annotations::*;
+use specgate::*;
 
 #[derive(SpecEvent)]
 pub enum Shape {

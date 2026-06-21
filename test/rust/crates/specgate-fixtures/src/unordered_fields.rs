@@ -1,7 +1,7 @@
 // Fixture used by unordered_fields.spec.yaml — must expose make_account +
 // withdraw with the same two-field Account so $unordered can match both
 // balance and transaction_count events.
-use specgate_annotations::*;
+use specgate::*;
 
 #[spec_setup("make_account")]
 pub fn make_account() -> Account {

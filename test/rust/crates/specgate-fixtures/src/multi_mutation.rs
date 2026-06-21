@@ -1,6 +1,6 @@
 // Multiple mutations within a single operation.
 // The system must capture every mutation of count, not just boundaries.
-use specgate_annotations::*;
+use specgate::*;
 
 #[spec_setup("make_counter")]
 pub fn make_counter() -> Counter {

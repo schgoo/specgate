@@ -1,5 +1,5 @@
 // Nested operations: transfer calls withdraw and deposit.
-use specgate_annotations::*;
+use specgate::*;
 
 #[spec_setup("make_account")]
 pub fn make_account() -> Account {

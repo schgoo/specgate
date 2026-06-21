@@ -24,7 +24,7 @@ impl Parse for NameArg {
 }
 
 fn rt() -> TokenStream2 {
-    quote! { ::specgate_annotations::__rt }
+    quote! { ::specgate::__rt }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -275,6 +275,7 @@ pub fn spec_operation(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let return_kind = classify_return(&func.sig.output);
     let is_method = has_receiver(&func);
+    let is_async = func.sig.asyncness.is_some();
     let params = typed_params(&func);
     let param_names: Vec<String> = params.iter().map(|(i, _)| i.to_string()).collect();
     let has_ref_param = params.iter().any(|(_, t)| is_reference(t));
@@ -292,7 +293,49 @@ pub fn spec_operation(attr: TokenStream, item: TokenStream) -> TokenStream {
         #body
     });
     *func.block = new_body;
-    quote!(#func).into()
+
+    // Registry entry for discovery.
+    // We wrap the distributed_slice static in a named const so it compiles
+    // correctly whether the annotated function is a free function (module-level)
+    // or a method inside an `impl` block.  A bare `static` at item level is
+    // forbidden as an associated item; a named `const` containing inner items
+    // is allowed in both positions.
+    let rt = rt();
+    let fn_name = func.sig.ident.to_string();
+    let const_ident = Ident::new(&format!("_SPECGATE_REG_{}", fn_name.to_uppercase()), func.sig.ident.span());
+    let static_ident = Ident::new(&format!("_SPECGATE_STATIC_{}", fn_name.to_uppercase()), func.sig.ident.span());
+    let param_entries: Vec<TokenStream2> = params
+        .iter()
+        .map(|(id, ty)| {
+            let name_str = id.to_string();
+            let ty_str = quote!(#ty).to_string();
+            quote! { (#name_str, #ty_str) }
+        })
+        .collect();
+    let ret_str = match &func.sig.output {
+        ReturnType::Default => String::from("()"),
+        ReturnType::Type(_, ty) => quote!(#ty).to_string(),
+    };
+
+    quote! {
+        #func
+
+        #[allow(dead_code, non_upper_case_globals)]
+        const #const_ident: () = {
+            #[#rt::linkme::distributed_slice(#rt::SPECGATE_OPS)]
+            #[linkme(crate = #rt::linkme)]
+            static #static_ident: #rt::OpMeta = #rt::OpMeta {
+                name: #op_name,
+                module_path: ::core::module_path!(),
+                fn_name: #fn_name,
+                is_setup: false,
+                is_async: #is_async,
+                params: &[#(#param_entries),*],
+                return_type: #ret_str,
+            };
+        };
+    }
+    .into()
 }
 
 fn build_pre_stmts(op_name: &str, params: &[(Ident, Type)], is_method: bool, _has_ref_param: bool) -> Vec<Stmt> {
@@ -340,7 +383,45 @@ pub fn spec_setup(attr: TokenStream, item: TokenStream) -> TokenStream {
         #body
     });
     *func.block = new_body;
-    quote!(#func).into()
+
+    // Registry entry — same const-wrapping trick as spec_operation so this
+    // compiles whether the function is at module scope or inside an impl block.
+    let fn_name = func.sig.ident.to_string();
+    let is_async = func.sig.asyncness.is_some();
+    let const_ident = Ident::new(&format!("_SPECGATE_SETUP_REG_{}", fn_name.to_uppercase()), func.sig.ident.span());
+    let static_ident = Ident::new(&format!("_SPECGATE_SETUP_S_{}", fn_name.to_uppercase()), func.sig.ident.span());
+    let param_entries: Vec<TokenStream2> = params
+        .iter()
+        .map(|(id, ty)| {
+            let name_str = id.to_string();
+            let ty_str = quote!(#ty).to_string();
+            quote! { (#name_str, #ty_str) }
+        })
+        .collect();
+    let ret_str = match &func.sig.output {
+        ReturnType::Default => String::from("()"),
+        ReturnType::Type(_, ty) => quote!(#ty).to_string(),
+    };
+
+    quote! {
+        #func
+
+        #[allow(dead_code, non_upper_case_globals)]
+        const #const_ident: () = {
+            #[#rt::linkme::distributed_slice(#rt::SPECGATE_OPS)]
+            #[linkme(crate = #rt::linkme)]
+            static #static_ident: #rt::OpMeta = #rt::OpMeta {
+                name: #setup_name,
+                module_path: ::core::module_path!(),
+                fn_name: #fn_name,
+                is_setup: true,
+                is_async: #is_async,
+                params: &[#(#param_entries),*],
+                return_type: #ret_str,
+            };
+        };
+    }
+    .into()
 }
 
 // ---------------------------------------------------------------------------

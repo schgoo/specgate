@@ -5,10 +5,9 @@ edition = "2024"
 publish = false
 
 [dependencies]
-# The annotations crate provides proc macros that expand into trace-emitting
-# code at compile time. This crate MUST compile successfully — it is a
-# dev-dependency of specgate-harness, so `cargo test` in the main workspace
-# forces compilation.
-specgate-annotations = { path = "../../../../rust/crates/specgate-annotations" }
+# The specgate crate provides proc macros + runtime. This crate MUST compile
+# successfully — it is a dev-dependency of specgate-harness, so `cargo test`
+# in the main workspace forces compilation.
+specgate = { path = "../../../../rust/crates/specgate" }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"

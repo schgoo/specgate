@@ -3,7 +3,7 @@
 
 use regex::Regex;
 use serde_yaml::Value;
-use specgate_annotations::spec_operation;
+use specgate::spec_operation;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fmt::Write;
 use std::path::{Path, PathBuf};

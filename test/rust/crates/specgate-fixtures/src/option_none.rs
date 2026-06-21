@@ -1,5 +1,5 @@
 // Operation returning Option — None path.
-use specgate_annotations::*;
+use specgate::*;
 
 #[spec_operation("find")]
 pub fn find(items: &[i32], target: i32) -> Option<usize> {

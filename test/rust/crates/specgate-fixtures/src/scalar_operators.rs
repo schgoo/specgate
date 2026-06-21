@@ -1,5 +1,5 @@
 // Scalar operators — numeric comparisons, regex, negation.
-use specgate_annotations::*;
+use specgate::*;
 
 #[derive(SpecEvent)]
 pub struct Measurement {

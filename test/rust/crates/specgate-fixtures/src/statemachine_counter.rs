@@ -1,5 +1,5 @@
 // StateMachine operation with before/after field capture.
-use specgate_annotations::*;
+use specgate::*;
 
 #[spec_setup("make_counter")]
 pub fn make_counter() -> Counter {

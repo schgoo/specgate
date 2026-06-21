@@ -1,5 +1,5 @@
 // Operation that panics — unrecoverable outcome.
-use specgate_annotations::*;
+use specgate::*;
 
 #[spec_operation("divide")]
 pub fn divide(a: i32, b: i32) -> i32 {

@@ -13,6 +13,7 @@ rust-version.workspace = true
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
+linkme = { workspace = true }
 
 [features]
 specgate-trace = []

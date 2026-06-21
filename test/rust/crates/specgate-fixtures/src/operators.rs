@@ -1,5 +1,5 @@
 // Fixture for testing assertion operators.
-use specgate_annotations::*;
+use specgate::*;
 use std::collections::BTreeMap;
 
 #[derive(SpecEvent)]

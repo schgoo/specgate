@@ -1,5 +1,5 @@
 // Operation returning a map.
-use specgate_annotations::*;
+use specgate::*;
 use std::collections::BTreeMap;
 
 #[spec_operation("get_entity_values")]

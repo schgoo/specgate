@@ -1,5 +1,5 @@
 // Operation with no return value (unit type).
-use specgate_annotations::*;
+use specgate::*;
 
 #[spec_setup("make_logger")]
 pub fn make_logger() -> Logger {

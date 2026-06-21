@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](../../LICENSE-MIT)
 
 `SpecGate` runtime — thread-local trace buffer + mock table + `SpecEvent` /
-`ToSpecValue` traits + structured `Value` type.
+`ToSpecValue` traits + structured `Value` type + operation registry.
 
 Companion to the `specgate-annotations` proc-macro crate. The macros
 expand into calls into this runtime; user code never references this

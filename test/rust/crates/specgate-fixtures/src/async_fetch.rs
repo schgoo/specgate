@@ -1,5 +1,5 @@
 // Async operation — tests that harness generates async runner.
-use specgate_annotations::*;
+use specgate::*;
 
 #[spec_operation("fetch")]
 pub async fn fetch(url: &str) -> String {

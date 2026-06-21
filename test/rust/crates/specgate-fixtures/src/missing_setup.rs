@@ -1,5 +1,5 @@
 // Missing setup — operation references a setup that doesn't exist.
-use specgate_annotations::*;
+use specgate::*;
 
 #[derive(SpecEvent)]
 pub struct Counter {

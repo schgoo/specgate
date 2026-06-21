@@ -1,5 +1,5 @@
 //! `SpecGate` runtime — thread-local trace buffer + mock table + `SpecEvent` /
-//! `ToSpecValue` traits + structured `Value` type.
+//! `ToSpecValue` traits + structured `Value` type + operation registry.
 //!
 //! Companion to the `specgate-annotations` proc-macro crate. The macros
 //! expand into calls into this runtime; user code never references this
@@ -11,6 +11,64 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::fmt::Write as _;
+
+pub use linkme;
+
+// ---------------------------------------------------------------------------
+// Operation registry — populated at link time via #[distributed_slice].
+// The harness discovery binary iterates this to find all annotated operations.
+// ---------------------------------------------------------------------------
+
+/// Metadata about one annotated operation or setup.
+#[derive(Debug, Clone)]
+pub struct OpMeta {
+    pub name: &'static str,
+    pub module_path: &'static str,
+    pub fn_name: &'static str,
+    pub is_setup: bool,
+    pub is_async: bool,
+    pub params: &'static [(&'static str, &'static str)],
+    pub return_type: &'static str,
+}
+
+/// Metadata about a struct/enum that derives `SpecEvent`.
+#[derive(Debug, Clone)]
+pub struct TypeMeta {
+    pub name: &'static str,
+    pub module_path: &'static str,
+}
+
+#[linkme::distributed_slice]
+pub static SPECGATE_OPS: [OpMeta];
+
+#[linkme::distributed_slice]
+pub static SPECGATE_TYPES: [TypeMeta];
+
+/// Collect all registered metadata as JSON (used by the discovery binary).
+#[must_use]
+pub fn discovery_json() -> String {
+    let mut out = String::from("{\"operations\":[");
+    for (i, op) in SPECGATE_OPS.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        let _ = write!(
+            out,
+            "{{\"name\":\"{}\",\"module_path\":\"{}\",\"fn_name\":\"{}\",\"is_setup\":{},\"is_async\":{},\"return_type\":\"{}\"}}",
+            op.name, op.module_path, op.fn_name, op.is_setup, op.is_async, op.return_type
+        );
+    }
+    out.push_str("],\"types\":[");
+    for (i, ty) in SPECGATE_TYPES.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        let _ = write!(out, "{{\"name\":\"{}\",\"module_path\":\"{}\"}}", ty.name, ty.module_path);
+    }
+    out.push_str("]}");
+    out
+}
 
 // ---------------------------------------------------------------------------
 // Value — structured trace event payload.

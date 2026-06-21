@@ -1,5 +1,5 @@
 // Complex input/output types: structs, enums, lists, maps, and optionals.
-use specgate_annotations::*;
+use specgate::*;
 use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 

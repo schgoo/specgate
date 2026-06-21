@@ -56,11 +56,18 @@ types:
     name: string
     status:
       oneof: [pass, fail, skip, warn]
+    kind:
+      oneof: [standard, property]
+      default: standard
     level:
       oneof: [must, should, may]
     source: Source  # optional
+    # Standard case fields
     expected: List<Assertion>
     traces: List<TraceEvent>
+    # Property case fields (only when kind: property)
+    counterexample: Map<string, Value>  # generator values that caused failure (only on fail)
+    # traces: included on property fail — the trace from the counterexample run
 
 operations:
   run_spec:
@@ -125,6 +132,19 @@ cases:
       outcome:
         Complete: {}
 
+  - name: discovery_registry_handles_methods_and_duplicates
+    kind: narrative
+    desc: >
+      Annotation metadata discovery must register free functions, method
+      operations, and setups without compile failures, even when multiple
+      source files reuse the same operation name. The discovery JSON exposed
+      by the runtime must stay valid and include those registered entries.
+    verify:
+      - Method operations annotated inside impl blocks compile successfully and register metadata
+      - #[spec_setup] functions register metadata with is_setup: true
+      - Reusing the same operation name in different source files does not cause registry symbol collisions
+      - specgate_runtime::discovery_json() returns valid JSON listing the registered operations
+
   - name: no_source_interpretation
     kind: narrative
     desc: >
@@ -133,8 +153,48 @@ cases:
       used source interpretation as a shortcut — it passed all spec-driven
       tests but could not handle real-world code.
     verify:
-      - Confirm no syn-based expression evaluation in harness source
-      - The harness should invoke cargo build/test, not evaluate Rust in-process
+      - No syn-based expression evaluation exists in harness source
+      - The harness invokes cargo build/test, never evaluates Rust in-process
+
+  - name: structured_values_not_stringified
+    kind: narrative
+    desc: >
+      Collection fields (Vec, BTreeMap, BTreeSet) annotated with #[spec_event]
+      must emit structured Value events (Value::List, Value::Map, Value::Set),
+      not stringified representations. The codegen must use emit_event_v (or
+      equivalent structured emission) for these types. Using format!("{}", x)
+      to stringify a Vec into "["a", "b"]" is incorrect — the matcher cannot
+      apply $size, $contains, $any operators on a plain string.
+    verify:
+      - 'Run structured_output.spec.yaml — list_exact_match expects value: ["ID"]'
+      - 'If the trace contains value: "[\"ID\"]" (a string), matching will fail'
+
+  - name: crate_dependency_not_path_include
+    kind: narrative
+    desc: >
+      The generated runner must depend on the fixture crate as a Cargo
+      dependency (in [dependencies] of the generated Cargo.toml), not use
+      #[path = "..."] mod inclusion. #[path] inclusion breaks when the
+      fixture uses external crate dependencies, cross-module imports, or
+      build script generated code. The cross_dep fixture uses serde_yaml
+      which is impossible to resolve via #[path] inclusion.
+    verify:
+      - Run cross_dep.spec.yaml — it uses serde_yaml
+      - Check generated Cargo.toml has specgate-fixtures in [dependencies]
+      - Generated main.rs uses "use specgate_fixtures::..." not "#[path]"
+
+  - name: operators_work_on_structured_values
+    kind: narrative
+    desc: >
+      Assertion operators ($size, $contains, $containsAll, $any, $every,
+      $match, $excludes) operate on structured Value types, not strings.
+      The matcher must parse the expected operator syntax and apply it
+      against the actual Value in the trace event. String equality is
+      only the default for scalar values without operators.
+    verify:
+      - Run operators.spec.yaml — $size on a list Value works
+      - Run scalar_operators.spec.yaml — $gt on an integer Value works
+      - A string value "3" does not satisfy $size: 3 (type mismatch)
 
   - name: paths_resolve_relative_to_spec
     desc: >
@@ -158,6 +218,66 @@ cases:
                 - Event: { name: add.a, value: "10" }
                 - Event: { name: add.b, value: "20" }
                 - Event: { name: $result, value: "30" }
+
+  - name: target_selection
+    desc: >
+      Spec with target: alt selects a different crate than the default.
+      Proves the harness dispatches to the correct binding target.
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/target_selection.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: greet_world
+              status: pass
+              expected:
+                - $result: "Hello, World!"
+              traces:
+                - Run: { operation: greet }
+                - Event: { name: greet.name, value: "World" }
+                - Event: { name: $result, value: "Hello, World!" }
+
+  - name: per_case_target_override
+    desc: >
+      One spec with two cases using different targets. First case uses
+      default target (add from fixtures), second overrides to alt (greet
+      from fixtures-alt).
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/per_case_target.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: add_from_default
+              status: pass
+              expected:
+                - $result: "3"
+              traces:
+                - Run: { operation: add }
+                - Event: { name: add.a, value: "1" }
+                - Event: { name: add.b, value: "2" }
+                - Event: { name: $result, value: "3" }
+            - name: greet_from_alt
+              status: pass
+              expected:
+                - $result: "Hello, Test!"
+              traces:
+                - Run: { operation: greet }
+                - Event: { name: greet.name, value: "Test" }
+                - Event: { name: $result, value: "Hello, Test!" }
+
+  - name: missing_target_error
+    desc: Spec references a target that doesn't exist in the binding
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/missing_target.spec.yaml
+    expected:
+      outcome:
+        Error:
+          reason: "target 'nonexistent' not found in binding"
 
   - name: no_vacuous_match
     desc: >
@@ -201,6 +321,33 @@ cases:
                 - Event: { name: add.a, value: "2" }
                 - Event: { name: add.b, value: "3" }
                 - Event: { name: $result, value: "5" }
+
+  # ================================================================
+  # Crate dependency — #[path] inclusion cannot work (#7)
+  # ================================================================
+
+  - name: cross_crate_dependency
+    desc: >
+      Operation uses an external crate (serde_yaml). The harness must
+      depend on the fixture crate as a Cargo dependency, not #[path]
+      include the source file. This proves the harness handles real
+      crate structures with external dependencies.
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/cross_dep.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: extract_yaml_value
+              status: pass
+              expected:
+                - $result: "Customer"
+              traces:
+                - Run: { operation: parse_yaml_key }
+                - Event: { name: parse_yaml_key.input, value: "name: Customer\nid: 42" }
+                - Event: { name: parse_yaml_key.key, value: "name" }
+                - Event: { name: $result, value: "Customer" }
 
   # ================================================================
   # Structured values — lists, maps, sets, $-operators
@@ -479,6 +626,153 @@ cases:
               traces:
                 - Run: { operation: get_navigation_properties }
                 - Event: { name: $result, value: ["Address", "Contacts", "Orders"] }
+
+  - name: nested_structured_matching
+    desc: List of maps — nested operators ($any with $match, $contains with $match)
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/nested_structured.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: nested_list_of_maps_exact
+              status: pass
+            - name: nested_any_with_match
+              status: pass
+            - name: nested_size
+              status: pass
+            - name: nested_contains_element
+              status: pass
+
+  - name: scalar_operators_matching
+    desc: Regex, negation, numeric comparisons, empty, $every, multi-field
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/scalar_operators.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: regex_match
+              status: pass
+              expected:
+                - label: { $matches: "^sensor-[A-Z]\\d+-\\w+$" }
+              traces:
+                - Run: { operation: get_measurement }
+                - Event: { name: temperature, value: 72 }
+                - Event: { name: label, value: "sensor-A3-north" }
+                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
+            - name: regex_no_match_fails
+              status: fail
+              expected:
+                - label: { $matches: "^invalid" }
+              traces:
+                - Run: { operation: get_measurement }
+                - Event: { name: temperature, value: 72 }
+                - Event: { name: label, value: "sensor-A3-north" }
+                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
+            - name: not_value
+              status: pass
+              expected:
+                - temperature: { $not: 100 }
+              traces:
+                - Run: { operation: get_measurement }
+                - Event: { name: temperature, value: 72 }
+                - Event: { name: label, value: "sensor-A3-north" }
+                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
+            - name: not_fails_when_equal
+              status: fail
+              expected:
+                - temperature: { $not: 72 }
+              traces:
+                - Run: { operation: get_measurement }
+                - Event: { name: temperature, value: 72 }
+                - Event: { name: label, value: "sensor-A3-north" }
+                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
+            - name: gt_passes
+              status: pass
+              expected:
+                - temperature: { $gt: 70 }
+              traces:
+                - Run: { operation: get_measurement }
+                - Event: { name: temperature, value: 72 }
+                - Event: { name: label, value: "sensor-A3-north" }
+                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
+            - name: gte_passes_equal
+              status: pass
+              expected:
+                - temperature: { $gte: 72 }
+              traces:
+                - Run: { operation: get_measurement }
+                - Event: { name: temperature, value: 72 }
+                - Event: { name: label, value: "sensor-A3-north" }
+                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
+            - name: lt_passes
+              status: pass
+              expected:
+                - temperature: { $lt: 100 }
+              traces:
+                - Run: { operation: get_measurement }
+                - Event: { name: temperature, value: 72 }
+                - Event: { name: label, value: "sensor-A3-north" }
+                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
+            - name: lte_fails
+              status: fail
+              expected:
+                - temperature: { $lte: 50 }
+              traces:
+                - Run: { operation: get_measurement }
+                - Event: { name: temperature, value: 72 }
+                - Event: { name: label, value: "sensor-A3-north" }
+                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
+            - name: empty_list
+              status: pass
+              expected:
+                - $result: { $size: 0 }
+              traces:
+                - Run: { operation: get_empty }
+                - Event: { name: $result, value: [] }
+            - name: every_element
+              status: pass
+              expected:
+                - readings: { $every: { $gt: 60 } }
+              traces:
+                - Run: { operation: get_measurement }
+                - Event: { name: temperature, value: 72 }
+                - Event: { name: label, value: "sensor-A3-north" }
+                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
+            - name: every_fails
+              status: fail
+              expected:
+                - readings: { $every: { $gt: 71 } }
+              traces:
+                - Run: { operation: get_measurement }
+                - Event: { name: temperature, value: 72 }
+                - Event: { name: label, value: "sensor-A3-north" }
+                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
+            - name: combined_multi_field
+              status: pass
+              expected:
+                - temperature: { $gt: 60, $lt: 100 }
+                - label: { $matches: "^sensor-[A-Z]" }
+                - readings: { $size: 5, $every: { $gte: 60 } }
+              traces:
+                - Run: { operation: get_measurement }
+                - Event: { name: temperature, value: 72 }
+                - Event: { name: label, value: "sensor-A3-north" }
+                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
+            - name: combined_multi_field_one_fails
+              status: fail
+              expected:
+                - temperature: { $gt: 60 }
+                - label: { $matches: "^invalid" }
+                - readings: { $size: 5 }
+              traces:
+                - Run: { operation: get_measurement }
+                - Event: { name: temperature, value: 72 }
+                - Event: { name: label, value: "sensor-A3-north" }
+                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
 
   # ================================================================
   # Happy path — basic operations
@@ -852,7 +1146,7 @@ cases:
                 - $error: "attempt to divide by zero"
 
   - name: option_some_path
-    desc: Operation returning Some produces outcome Some with value
+    desc: Operation returning Some produces $result with the value
     operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/option_some.spec.yaml
@@ -863,14 +1157,12 @@ cases:
             - name: find_existing
               status: pass
               expected:
-                - $outcome: "Some"
                 - $result: "1"
               traces:
-                - Event: { name: $outcome, value: "Some" }
                 - Event: { name: $result, value: "1" }
 
   - name: option_none_path
-    desc: Operation returning None produces outcome None
+    desc: Operation returning None produces $result "None"
     operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/option_none.spec.yaml
@@ -881,9 +1173,9 @@ cases:
             - name: find_missing
               status: pass
               expected:
-                - $outcome: "None"
+                - $result: "None"
               traces:
-                - Event: { name: $outcome, value: "None" }
+                - Event: { name: $result, value: "None" }
 
   - name: void_operation
     desc: Void operation produces no result event
@@ -1273,6 +1565,330 @@ cases:
               status: warn
               expected: []
               traces: []
+
+  # ================================================================
+  # Enum SpecEvent support (#19)
+  # ================================================================
+
+  - name: enum_event_matching
+    desc: derive(SpecEvent) on enum emits variant name + associated fields
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/enum_event.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: unit_variant
+              status: pass
+              expected:
+                - shape: "Point"
+              traces:
+                - Run: { operation: classify }
+                - Event: { name: classify.sides, value: "0" }
+                - Event: { name: shape, value: "Point" }
+            - name: single_field_variant
+              status: pass
+              expected:
+                - shape: "Circle"
+                - shape.radius: "5"
+              traces:
+                - Run: { operation: classify }
+                - Event: { name: classify.sides, value: "1" }
+                - Event: { name: shape, value: "Circle" }
+                - Event: { name: shape.radius, value: "5" }
+            - name: multi_field_variant
+              status: pass
+              expected:
+                - shape: "Rectangle"
+                - shape.width: "3"
+                - shape.height: "4"
+              traces:
+                - Run: { operation: classify }
+                - Event: { name: classify.sides, value: "4" }
+                - Event: { name: shape, value: "Rectangle" }
+                - Event: { name: shape.width, value: "3" }
+                - Event: { name: shape.height, value: "4" }
+
+  # ================================================================
+  # Complex inputs — structured YAML deserialized into typed params
+  # ================================================================
+
+  - name: complex_input_deserialization
+    desc: >
+      When a spec case input is a YAML Mapping or Sequence, and the
+      operation's parameter type derives SpecEvent (which implies
+      Deserialize), the harness deserializes the YAML directly into
+      the typed parameter. Operations transform the input to prove
+      deserialization worked. Covers: struct, enum, list, map,
+      optional, and nested struct — both input and output directions.
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/complex_inputs.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: create_enum_with_members
+              status: pass
+            - name: sum_two_points
+              status: pass
+            - name: sum_three_points
+              status: pass
+            - name: nested_config_object
+              status: pass
+            - name: area_of_circle
+              status: pass
+            - name: area_of_rectangle
+              status: pass
+            - name: area_of_point
+              status: pass
+            - name: classify_circle
+              status: pass
+            - name: classify_rectangle
+              status: pass
+            - name: classify_point
+              status: pass
+            - name: get_three_points
+              status: pass
+            - name: lookup_in_map
+              status: pass
+            - name: invert_string_int_map
+              status: pass
+            - name: greet_with_name
+              status: pass
+            - name: greet_without_name
+              status: pass
+            - name: find_point_exists
+              status: pass
+            - name: find_point_missing
+              status: pass
+            - name: describe_person_with_address
+              status: pass
+            - name: create_person_struct
+              status: pass
+
+  # ================================================================
+  # Property tests — generators, calls, $assert
+  # ================================================================
+
+  - name: property_test_commutative
+    desc: Property test with random generators proves commutativity
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/property_add.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: add_commutative
+              status: pass
+              kind: property
+            - name: add_identity
+              status: pass
+              kind: property
+
+  - name: property_all_generator_types
+    desc: All generator types produce valid values and pass assertions
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/property_types.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: i32_range
+              status: pass
+              kind: property
+            - name: i32_positive_only
+              status: pass
+              kind: property
+            - name: i32_negative_only
+              status: pass
+              kind: property
+            - name: i32_single_value
+              status: pass
+              kind: property
+            - name: f64_range
+              status: pass
+              kind: property
+            - name: f64_positive
+              status: pass
+              kind: property
+            - name: bool_identity
+              status: pass
+              kind: property
+            - name: string_length_bounded
+              status: pass
+              kind: property
+            - name: string_with_pattern
+              status: pass
+              kind: property
+            - name: string_exact_length
+              status: pass
+              kind: property
+            - name: oneof_strings
+              status: pass
+              kind: property
+            - name: list_i32
+              status: pass
+              kind: property
+            - name: set_i32
+              status: pass
+              kind: property
+            - name: map_string_i32
+              status: pass
+              kind: property
+            - name: multi_generator_concat
+              status: pass
+              kind: property
+            - name: optional_i32
+              status: pass
+              kind: property
+
+  # ================================================================
+  # Property tests — counterexamples (should fail with shrunk values)
+  # ================================================================
+
+  - name: property_counterexamples
+    desc: >
+      Each case has a broken assertion so proptest finds a counterexample.
+      We assert status: fail and counterexample contains the generator keys.
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/property_counterexamples.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: counter_i32
+              status: fail
+              kind: property
+              counterexample:
+                x: { $exists: true }
+              traces:
+                - Run: { operation: identity_i32 }
+                - Event: { name: $result, value: { $exists: true } }
+            - name: counter_f64
+              status: fail
+              kind: property
+              counterexample:
+                x: { $exists: true }
+              traces:
+                - Run: { operation: identity_f64 }
+                - Event: { name: $result, value: { $exists: true } }
+            - name: counter_bool
+              status: fail
+              kind: property
+              counterexample:
+                x: { $exists: true }
+              traces:
+                - Run: { operation: identity_bool }
+                - Event: { name: $result, value: { $exists: true } }
+            - name: counter_string
+              status: fail
+              kind: property
+              counterexample:
+                s: { $exists: true }
+              traces:
+                - Run: { operation: identity_string }
+                - Event: { name: $result, value: { $exists: true } }
+            - name: counter_oneof
+              status: fail
+              kind: property
+              counterexample:
+                choice: { $exists: true }
+              traces:
+                - Run: { operation: identity_string }
+                - Event: { name: $result, value: { $exists: true } }
+            - name: counter_list
+              status: fail
+              kind: property
+              counterexample:
+                items: { $exists: true }
+              traces:
+                - Run: { operation: sum_list }
+                - Event: { name: $result, value: { $exists: true } }
+            - name: counter_set
+              status: fail
+              kind: property
+              counterexample:
+                items: { $exists: true }
+              traces:
+                - Run: { operation: set_size }
+                - Event: { name: $result, value: { $exists: true } }
+            - name: counter_map
+              status: fail
+              kind: property
+              counterexample:
+                data: { $exists: true }
+              traces:
+                - Run: { operation: map_keys }
+                - Event: { name: $result, value: { $exists: true } }
+
+  # ================================================================
+  # Property tests — invalid specs (should fail)
+  # ================================================================
+
+  - name: property_error_unknown_type
+    desc: Unknown generator type is rejected at parse time
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/property_invalid.spec.yaml
+    expected:
+      outcome:
+        Error:
+          reason: "unknown generator type 'unknown_type'"
+
+  - name: property_error_inverted_range
+    desc: Generator range where min > max is rejected
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/property_invalid_range.spec.yaml
+    expected:
+      outcome:
+        Error:
+          reason: "generator range is inverted: min (1000) > max (-1000)"
+
+  - name: property_error_no_generators
+    desc: Property case without generators is rejected
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/property_no_generators.spec.yaml
+    expected:
+      outcome:
+        Error:
+          reason: "property case 'missing_generators' has no generators"
+
+  - name: property_error_no_calls
+    desc: Property case without calls is rejected
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/property_no_calls.spec.yaml
+    expected:
+      outcome:
+        Error:
+          reason: "property case 'missing_calls' has no calls"
+
+  - name: property_error_no_assert
+    desc: Property case expected block must use $assert (not literal values)
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/property_no_assert.spec.yaml
+    expected:
+      outcome:
+        Error:
+          reason: "property case 'missing_assert' expected must use $assert expressions"
+
+  - name: property_error_undefined_ref
+    desc: Reference to undefined generator in call inputs is rejected
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/property_bad_ref.spec.yaml
+    expected:
+      outcome:
+        Error:
+          reason: "undefined generator reference '{undefined_gen}' in case 'undefined_generator_ref'"
 
   # ================================================================
   # Error cases

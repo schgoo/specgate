@@ -1,5 +1,5 @@
 // Operation returning a set.
-use specgate_annotations::*;
+use specgate::*;
 use std::collections::BTreeSet;
 
 #[spec_operation("get_navigation_properties")]

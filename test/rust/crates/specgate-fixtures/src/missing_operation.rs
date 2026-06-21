@@ -1,5 +1,5 @@
 // Missing operation annotation — no spec_operation on any function.
-use specgate_annotations::*;
+use specgate::*;
 
 #[spec_setup("make_counter")]
 pub fn make_counter() -> Counter {

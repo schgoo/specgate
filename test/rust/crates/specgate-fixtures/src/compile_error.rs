@@ -1,5 +1,5 @@
 // Source that doesn't compile — syntax error.
-use specgate_annotations::*;
+use specgate::*;
 
 #[spec_operation("broken")]
 fn broken() -> i32 {

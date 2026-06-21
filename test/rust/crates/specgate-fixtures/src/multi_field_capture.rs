@@ -1,5 +1,5 @@
 // StateMachine with multiple captured fields.
-use specgate_annotations::*;
+use specgate::*;
 
 #[spec_setup("make_account")]
 pub fn make_account() -> Account {

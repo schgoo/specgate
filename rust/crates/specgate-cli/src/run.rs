@@ -3,7 +3,7 @@
 use std::fmt::Write as _;
 use std::path::Path;
 
-use specgate_annotations::spec_operation;
+use specgate::spec_operation;
 use specgate_harness::{CaseStatus, RunOutcome as HarnessOutcome};
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1,5 +1,5 @@
 // Read-only operation — no state changes.
-use specgate_annotations::*;
+use specgate::*;
 
 #[spec_setup("make_counter")]
 pub fn make_counter() -> Counter {

@@ -20,8 +20,9 @@ specgate-runtime = { workspace = true }
 regex = { workspace = true }
 
 [dev-dependencies]
-specgate-annotations = { workspace = true }
+specgate = { workspace = true }
 specgate-fixtures = { path = "../../../test/rust/crates/specgate-fixtures" }
+tempfile = "3"
 
 [lints]
 workspace = true

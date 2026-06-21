@@ -1,5 +1,5 @@
 // Multiple setup functions — setting up two objects for one operation.
-use specgate_annotations::*;
+use specgate::*;
 
 #[spec_setup("make_source")]
 pub fn make_source() -> Account {

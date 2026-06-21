@@ -92,6 +92,12 @@ pub use specgate_annotations::{
     spec_setup, spec_trace, take_traces,
 };
 
+// The proc macros expand to `::specgate::__rt::...` so this module must exist.
+#[doc(hidden)]
+pub mod __rt {
+    pub use specgate_annotations::__rt::*;
+}
+
 // Re-export harness (behind "harness" feature)
 #[cfg(feature = "harness")]
 pub use specgate_harness::{CaseLevel, CaseResult, CaseStatus, RunOutcome, Source, run_spec};

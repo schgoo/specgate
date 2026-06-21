@@ -1,6 +1,6 @@
 // Fixture used by anywhere_event.spec.yaml — make_counter + increment_twice
 // with a single count field, so $anywhere can match count=0/1/2.
-use specgate_annotations::*;
+use specgate::*;
 
 #[spec_setup("make_counter")]
 pub fn make_counter() -> Counter {

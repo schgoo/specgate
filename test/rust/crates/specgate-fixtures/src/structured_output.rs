@@ -1,5 +1,5 @@
 // Operation returning structured data — list and map outputs.
-use specgate_annotations::*;
+use specgate::*;
 
 #[derive(SpecEvent)]
 pub struct EntityType {
