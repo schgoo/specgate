@@ -1,17 +1,18 @@
-spec_version: "0.4.0"
+spec_version: 0.4.0
 name: fixture.target_selection
 binding: binding_multi.yaml
 target: alt
-
 operations:
   greet:
-    inputs: { name: string }
-    outputs: [$result]
-
+    inputs:
+      name: string
+    outputs:
+    - $result: string
 cases:
-  - name: greet_world
-    desc: Uses alt target — different crate, different function
-    operation: greet
-    inputs: { name: "World" }
-    expected:
-      - $result: "Hello, World!"
+- name: greet_world
+  desc: Uses alt target — different crate, different function
+  operation: greet
+  inputs:
+    name: World
+  expected:
+  - $result: Hello, World!

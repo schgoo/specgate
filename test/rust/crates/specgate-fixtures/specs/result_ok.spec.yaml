@@ -1,17 +1,20 @@
-spec_version: "0.4.0"
+spec_version: 0.4.0
 name: fixture.result_ok
 binding: binding.yaml
-
 operations:
   divide:
-    inputs: { a: i32, b: i32 }
-    outputs: [$outcome, $result]
-
+    inputs:
+      a: i32
+      b: i32
+    outputs:
+    - $result: "Result<i32, string>"
 cases:
-  - name: divide_10_by_2
-    desc: Successful division
-    operation: divide
-    inputs: { a: 10, b: 2 }
-    expected:
-      - $outcome: "Ok"
-      - $result: "5"
+- name: divide_10_by_2
+  desc: Successful division returns Ok variant
+  operation: divide
+  inputs:
+    a: 10
+    b: 2
+  expected:
+  - $result:
+      Ok: '5'

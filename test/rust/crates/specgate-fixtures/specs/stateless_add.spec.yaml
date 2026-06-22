@@ -1,16 +1,19 @@
-spec_version: "0.4.0"
+spec_version: 0.4.0
 name: fixture.stateless_add
 binding: binding.yaml
-
 operations:
   add:
-    inputs: { a: i32, b: i32 }
-    outputs: [$result]
-
+    inputs:
+      a: i32
+      b: i32
+    outputs:
+    - $result: i32
 cases:
-  - name: add_2_3
-    desc: Adding 2 + 3 returns 5
-    operation: add
-    inputs: { a: 2, b: 3 }
-    expected:
-      - $result: "5"
+- name: add_2_3
+  desc: Adding 2 + 3 returns 5
+  operation: add
+  inputs:
+    a: 2
+    b: 3
+  expected:
+  - $result: '5'

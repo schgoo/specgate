@@ -5,7 +5,8 @@ binding: binding.yaml
 operations:
   parse_yaml_key:
     inputs: { input: string, key: string }
-    outputs: [$result]
+    outputs:
+      - $result: string
 
 cases:
   - name: extract_yaml_value

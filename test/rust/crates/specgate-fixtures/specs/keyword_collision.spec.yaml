@@ -1,17 +1,18 @@
-spec_version: "0.4.0"
+spec_version: 0.4.0
 name: fixture.keyword_collision
 binding: binding.yaml
-
 operations:
   run:
-    inputs: { input: string }
-    outputs: [$result]
-
+    inputs:
+      input: string
+    outputs:
+    - $result: string
 cases:
-  - name: operation_named_run
-    desc: An operation literally named "run" works with $run prefix
-    operation: run
-    inputs: { input: "test" }
-    expected:
-      - $run: run
-      - $result: "executed: test"
+- name: operation_named_run
+  desc: An operation literally named "run" works with $run prefix
+  operation: run
+  inputs:
+    input: test
+  expected:
+  - $run: run
+  - $result: 'executed: test'

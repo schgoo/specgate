@@ -1,26 +1,29 @@
-spec_version: "0.4.0"
+spec_version: 0.4.0
 name: fixture.multi_file
 binding: binding.yaml
-
 operations:
   greet:
-    inputs: { name: string }
-    outputs: [$result]
+    inputs:
+      name: string
+    outputs:
+    - $result: string
   farewell:
-    inputs: { name: string }
-    outputs: [$result]
-
+    inputs:
+      name: string
+    outputs:
+    - $result: string
 cases:
-  - name: greet_from_separate_file
-    desc: Operation in greet.rs is discovered
-    operation: greet
-    inputs: { name: "World" }
-    expected:
-      - $result: "Hello, World!"
-
-  - name: farewell_from_separate_file
-    desc: Operation in farewell.rs is discovered
-    operation: farewell
-    inputs: { name: "World" }
-    expected:
-      - $result: "Goodbye, World!"
+- name: greet_from_separate_file
+  desc: Operation in greet.rs is discovered
+  operation: greet
+  inputs:
+    name: World
+  expected:
+  - $result: Hello, World!
+- name: farewell_from_separate_file
+  desc: Operation in farewell.rs is discovered
+  operation: farewell
+  inputs:
+    name: World
+  expected:
+  - $result: Goodbye, World!

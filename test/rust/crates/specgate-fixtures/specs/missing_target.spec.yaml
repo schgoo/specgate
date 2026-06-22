@@ -6,7 +6,7 @@ target: nonexistent
 operations:
   add:
     inputs: { a: i32, b: i32 }
-    outputs: [$result]
+    outputs: [{ $result: string }]
 
 cases:
   - name: should_error

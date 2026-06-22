@@ -1,18 +1,19 @@
-spec_version: "0.4.0"
+spec_version: 0.4.0
 name: fixture.async_fetch
 binding: binding.yaml
-
 operations:
   fetch:
     async: true
-    inputs: { url: string }
-    outputs: [$result]
-
+    inputs:
+      url: string
+    outputs:
+    - $result: string
 cases:
-  - name: fetch_returns_response
-    desc: Async operation produces result trace
-    operation: fetch
-    inputs: { url: "https://example.com" }
-    expected:
-      - $run: fetch
-      - $result: "response from https://example.com"
+- name: fetch_returns_response
+  desc: Async operation produces result trace
+  operation: fetch
+  inputs:
+    url: https://example.com
+  expected:
+  - $run: fetch
+  - $result: response from https://example.com

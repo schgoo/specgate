@@ -1,17 +1,16 @@
-spec_version: "0.4.0"
+spec_version: 0.4.0
 name: fixture.readonly_operation
 binding: binding.yaml
-
 operations:
   make_counter:
     kind: setup
   get_count:
-    outputs: [$result]
-
+    outputs:
+    - $result: i32
 cases:
-  - name: read_count
-    desc: Read-only operation returns value without state change
-    setup: make_counter
-    operation: get_count
-    expected:
-      - $result: "42"
+- name: read_count
+  desc: Read-only operation returns value without state change
+  setup: make_counter
+  operation: get_count
+  expected:
+  - $result: '42'

@@ -1,16 +1,23 @@
-spec_version: "0.4.0"
+spec_version: 0.4.0
 name: fixture.option_some
 binding: binding.yaml
-
 operations:
   find:
-    inputs: { items: "List<i32>", target: i32 }
-    outputs: [$result]
-
+    inputs:
+      items: List<i32>
+      target: i32
+    outputs:
+    - $result: "Option<i32>"
 cases:
-  - name: find_existing
-    desc: Finding an existing element returns Some with index
-    operation: find
-    inputs: { items: [10, 20, 30], target: 20 }
-    expected:
-      - $result: "1"
+- name: find_existing
+  desc: Finding an existing element returns Some with index
+  operation: find
+  inputs:
+    items:
+    - 10
+    - 20
+    - 30
+    target: 20
+  expected:
+  - $result:
+      Some: '1'

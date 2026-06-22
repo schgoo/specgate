@@ -5,7 +5,7 @@ binding: binding.yaml
 operations:
   add:
     inputs: { a: i32, b: i32 }
-    outputs: [$result]
+    outputs: [{ $result: i32 }]
 
 cases:
   - name: wrong_output_name
