@@ -31,4 +31,5 @@ pub mod nested_structured;
 pub mod scalar_operators;
 pub mod enum_event;
 pub mod complex_inputs;
+pub mod multi_file;
 // pub mod compile_error;  // intentionally broken — syntax error

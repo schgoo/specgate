@@ -145,6 +145,17 @@ cases:
       - Reusing the same operation name in different source files does not cause registry symbol collisions
       - specgate_runtime::discovery_json() returns valid JSON listing the registered operations
 
+  - name: multi_file_operations
+    kind: narrative
+    desc: >
+      A single spec may define operations that live in different source
+      files. The harness must discover and run every operation the spec
+      references, regardless of which file each one is defined in.
+    verify:
+      - The multi_file fixture spec completes with all cases passing
+      - Operations greet and farewell, defined in separate files, are both invoked
+      - No case is skipped for a missing-source reason
+
   - name: no_source_interpretation
     kind: narrative
     desc: >

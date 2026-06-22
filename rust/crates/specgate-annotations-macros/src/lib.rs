@@ -467,7 +467,14 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
                         }
                     });
                     to_spec_value_arms.push(quote! {
-                        #name::#vname => #rt::Value::String(#vname_str.to_string()),
+                        #name::#vname => {
+                            let mut __sg_outer = ::std::collections::BTreeMap::new();
+                            __sg_outer.insert(
+                                #vname_str.to_string(),
+                                #rt::Value::Map(::std::collections::BTreeMap::new()),
+                            );
+                            #rt::Value::Map(__sg_outer)
+                        }
                     });
                 }
                 Fields::Named(named) => {
@@ -516,7 +523,14 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
                         }
                     });
                     to_spec_value_arms.push(quote! {
-                        #name::#vname(..) => #rt::Value::String(#vname_str.to_string()),
+                        #name::#vname(..) => {
+                            let mut __sg_outer = ::std::collections::BTreeMap::new();
+                            __sg_outer.insert(
+                                #vname_str.to_string(),
+                                #rt::Value::Map(::std::collections::BTreeMap::new()),
+                            );
+                            #rt::Value::Map(__sg_outer)
+                        }
                     });
                 }
             }

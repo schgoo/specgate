@@ -58,8 +58,6 @@ fn all_fixture_specs_complete() {
         "property_no_calls",
         "property_no_assert",
         "property_bad_ref",
-        // Multi-file scan not yet implemented
-        "multi_file",
         // Complex inputs codegen not fully wired
         "complex_inputs",
         // Command target (not a source fixture)
@@ -73,14 +71,13 @@ fn all_fixture_specs_complete() {
             continue;
         }
         let stem = path.file_stem().unwrap().to_str().unwrap();
-        if !stem.ends_with(".spec") {
+        let Some(name) = stem.strip_suffix(".spec") else {
+            continue;
+        };
+        if skip.contains(&name) {
             continue;
         }
-        let name = stem.strip_suffix(".spec").unwrap_or(stem);
-        if skip.iter().any(|&s| name == s) {
-            continue;
-        }
-        if expected_errors.iter().any(|&e| name == e) {
+        if expected_errors.contains(&name) {
             // These should return Error — verify that
             total += 1;
             let result = run_spec(path.to_str().unwrap());
@@ -102,18 +99,17 @@ fn all_fixture_specs_complete() {
         }
     }
 
-    if !failures.is_empty() {
-        panic!(
-            "{} fixture spec failures (of {} tested):\n{}",
-            failures.len(),
-            total,
-            failures
-                .iter()
-                .map(|(spec, msg)| format!("  {spec}: {msg}"))
-                .collect::<Vec<_>>()
-                .join("\n")
-        );
-    }
+    assert!(
+        failures.is_empty(),
+        "{} fixture spec failures (of {} tested):\n{}",
+        failures.len(),
+        total,
+        failures
+            .iter()
+            .map(|(spec, msg)| format!("  {spec}: {msg}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
     assert!(total > 30, "expected 30+ fixture specs, got {total}");
 }
 

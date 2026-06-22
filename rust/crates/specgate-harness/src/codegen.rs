@@ -409,15 +409,13 @@ fn render_case(out: &mut String, case: &Case, spec: &Spec, annotated: &Annotated
             call = format!("sg_block_on({call})");
         }
         let return_type = decl.map(|d| d.sig.return_type.trim().to_string()).unwrap_or_default();
-        let post_emit = build_post_emit(&return_type, &annotated.spec_event_structs);
+        let post_emit = build_post_emit(&return_type, &annotated.spec_event_structs, &annotated.spec_event_enums);
         out.push_str("        {\n");
         write!(out,
             "            let __r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {{\n                let __sg_ret = {call};\n                {post_emit}\n            }}));\n"
         ).expect("fmt");
         out.push_str("            if let Err(__e) = __r {\n");
-        out.push_str(
-            "                let msg = panic_msg(&__e);\n                specgate::emit_event(\"$outcome\", \"Unrecoverable\");\n                specgate::emit_event(\"$error\", &msg);\n"
-        );
+        out.push_str("                let msg = panic_msg(&__e);\n                specgate::emit_event(\"$fault\", &msg);\n");
         out.push_str("            }\n");
         out.push_str("        }\n");
     }
@@ -425,7 +423,11 @@ fn render_case(out: &mut String, case: &Case, spec: &Spec, annotated: &Annotated
 
 /// Emit Rust source for post-call return handling based on the operation's
 /// declared return type. Produces statements that consume `__sg_ret`.
-fn build_post_emit(return_type: &str, spec_event_structs: &std::collections::BTreeSet<String>) -> String {
+fn build_post_emit(
+    return_type: &str,
+    spec_event_structs: &std::collections::BTreeSet<String>,
+    spec_event_enums: &std::collections::BTreeSet<String>,
+) -> String {
     let rt = return_type.trim();
     if rt.is_empty() || rt == "()" {
         return "let _ = __sg_ret;".to_string();
@@ -434,12 +436,14 @@ fn build_post_emit(return_type: &str, spec_event_structs: &std::collections::BTr
         return r#"
             match &__sg_ret {
                 Ok(__sg_v) => {
-                    specgate::emit_event("$outcome", "Ok");
-                    specgate::emit_event("$result", &format!("{}", __sg_v));
+                    let mut __sg_m = ::std::collections::BTreeMap::new();
+                    __sg_m.insert("Ok".to_string(), specgate::__rt::ToSpecValue::to_spec_value(__sg_v));
+                    specgate::emit_event_v("$result", specgate::Value::Map(__sg_m));
                 }
                 Err(__sg_e) => {
-                    specgate::emit_event("$outcome", "Error");
-                    specgate::emit_event("$error", &format!("{}", __sg_e));
+                    let mut __sg_m = ::std::collections::BTreeMap::new();
+                    __sg_m.insert("Err".to_string(), specgate::Value::String(format!("{}", __sg_e)));
+                    specgate::emit_event_v("$result", specgate::Value::Map(__sg_m));
                 }
             }
             let _ = __sg_ret;
@@ -450,13 +454,14 @@ fn build_post_emit(return_type: &str, spec_event_structs: &std::collections::BTr
         return r#"
             match &__sg_ret {
                 Some(__sg_v) => {
-                    specgate::emit_event_v(
-                        "$result",
-                        specgate::__rt::ToSpecValue::to_spec_value(__sg_v),
-                    );
+                    let mut __sg_m = ::std::collections::BTreeMap::new();
+                    __sg_m.insert("Some".to_string(), specgate::__rt::ToSpecValue::to_spec_value(__sg_v));
+                    specgate::emit_event_v("$result", specgate::Value::Map(__sg_m));
                 }
                 None => {
-                    specgate::emit_event("$result", "None");
+                    let mut __sg_m = ::std::collections::BTreeMap::new();
+                    __sg_m.insert("None".to_string(), specgate::Value::Map(::std::collections::BTreeMap::new()));
+                    specgate::emit_event_v("$result", specgate::Value::Map(__sg_m));
                 }
             }
             let _ = __sg_ret;
@@ -467,6 +472,18 @@ fn build_post_emit(return_type: &str, spec_event_structs: &std::collections::BTr
     // structured $result via ToSpecValue.
     let bare = rt.trim_start_matches('&').trim_start_matches("mut ").trim();
     let head = bare.split(['<', ' ']).next().unwrap_or(bare);
+    // Enum returns: emit ONLY the structured $result (tagged variant map),
+    // no dotted field events.
+    if spec_event_enums.contains(head) {
+        return r#"
+            specgate::emit_event_v(
+                "$result",
+                specgate::__rt::ToSpecValue::to_spec_value(&__sg_ret),
+            );
+            let _ = __sg_ret;
+        "#
+        .to_string();
+    }
     if spec_event_structs.contains(head) {
         return r#"
             specgate::SpecEvent::emit_fields(&__sg_ret, None);
@@ -667,6 +684,7 @@ mod tests {
             setups: BTreeMap::new(),
             operations: BTreeMap::new(),
             spec_event_structs: BTreeSet::new(),
+            spec_event_enums: BTreeSet::new(),
         }
     }
 

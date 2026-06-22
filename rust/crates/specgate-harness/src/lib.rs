@@ -171,8 +171,7 @@ fn run_group(
         ));
     };
 
-    let src_text =
-        std::fs::read_to_string(&fixture_src).map_err(|e| format!("source file unreadable: {} ({})", fixture_src.display(), e))?;
+    let src_text = load_fixture_text(&fixture_src)?;
 
     let annotated = scan::scan(&src_text);
 
@@ -457,8 +456,8 @@ fn cargo_bin() -> String {
 }
 
 /// Try to find the fixture source file for a spec. Prefer `<basename>.rs`;
-/// otherwise pick the .rs file under src/ whose annotations contain the
-/// most setups + operations the cases need.
+/// otherwise pick the .rs file (or directory module) under src/ whose
+/// annotations contain the most setups + operations the cases need.
 fn resolve_fixture_source(package_root: &Path, fixture_basename: &str, cases: &[&spec::Case]) -> Option<PathBuf> {
     let direct = package_root.join("src").join(format!("{fixture_basename}.rs"));
     if direct.exists() {
@@ -488,16 +487,8 @@ fn resolve_fixture_source(package_root: &Path, fixture_basename: &str, cases: &[
         }
     }
 
-    let src_dir = package_root.join("src");
-    let entries = std::fs::read_dir(&src_dir).ok()?;
-    let mut best: Option<(usize, PathBuf)> = None;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("rs") {
-            continue;
-        }
-        let Ok(text) = std::fs::read_to_string(&path) else { continue };
-        let annotated = scan::scan(&text);
+    let score_text = |text: &str, stem: Option<&str>| -> usize {
+        let annotated = scan::scan(text);
         let mut score = 0usize;
         for o in &req_ops {
             if annotated.operations.contains_key(o) {
@@ -509,18 +500,79 @@ fn resolve_fixture_source(package_root: &Path, fixture_basename: &str, cases: &[
                 score += 1;
             }
         }
-        // Light filename-similarity bonus.
-        if let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+        if let Some(stem) = stem
             && fixture_basename.starts_with(stem)
             && stem.len() > 4
         {
             score += stem.len();
         }
+        score
+    };
+
+    let src_dir = package_root.join("src");
+    let entries = std::fs::read_dir(&src_dir).ok()?;
+    let mut best: Option<(usize, PathBuf)> = None;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let stem = path.file_stem().and_then(|s| s.to_str()).map(ToString::to_string);
+        // Directory module: merge all .rs files it contains and score together.
+        // The representative path is the synthetic `src/<dirname>.rs`, whose
+        // file stem drives the module name used during codegen.
+        let (text, repr) = if path.is_dir() {
+            let Some(text) = merge_module_dir(&path) else { continue };
+            let Some(dir_name) = stem.clone() else { continue };
+            (text, src_dir.join(format!("{dir_name}.rs")))
+        } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+            let Ok(text) = std::fs::read_to_string(&path) else { continue };
+            (text, path.clone())
+        } else {
+            continue;
+        };
+        let score = score_text(&text, stem.as_deref());
         if best.as_ref().is_none_or(|b| score > b.0) && score > 0 {
-            best = Some((score, path));
+            best = Some((score, repr));
         }
     }
     best.map(|(_, p)| p)
+}
+
+/// Concatenate the source text of every `.rs` file under a module directory
+/// (recursively), so that operations split across files are scanned together.
+fn merge_module_dir(dir: &Path) -> Option<String> {
+    let mut merged = String::new();
+    let mut stack = vec![dir.to_path_buf()];
+    let mut found = false;
+    while let Some(d) = stack.pop() {
+        let entries = std::fs::read_dir(&d).ok()?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("rs")
+                && let Ok(text) = std::fs::read_to_string(&path)
+            {
+                merged.push_str(&text);
+                merged.push('\n');
+                found = true;
+            }
+        }
+    }
+    found.then_some(merged)
+}
+
+/// Load the merged source text for a resolved fixture path. If the path is a
+/// physical file, read it directly. Otherwise treat it as a synthetic module
+/// file (`src/<name>.rs`) backed by a directory module (`src/<name>/`) and
+/// merge all `.rs` files in that directory.
+fn load_fixture_text(fixture_src: &Path) -> Result<String, String> {
+    if fixture_src.exists() {
+        return std::fs::read_to_string(fixture_src).map_err(|e| format!("source file unreadable: {} ({})", fixture_src.display(), e));
+    }
+    let dir = fixture_src.with_extension("");
+    if dir.is_dir() {
+        return merge_module_dir(&dir).ok_or_else(|| format!("module directory empty: {}", dir.display()));
+    }
+    Err(format!("source file not found: {}", fixture_src.display()))
 }
 
 // ---------------------------------------------------------------------------

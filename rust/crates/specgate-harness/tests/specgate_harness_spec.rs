@@ -45,6 +45,18 @@ fn run_op(op: &str) -> TraceEvent {
     TraceEvent::Run { operation: op.into() }
 }
 
+fn ev_map(name: &str, entries: Vec<(&str, specgate_harness::Value)>) -> TraceEvent {
+    let map = entries.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+    TraceEvent::Event {
+        name: name.into(),
+        value: specgate_harness::Value::Map(map),
+    }
+}
+
+fn vmap(entries: Vec<(&str, specgate_harness::Value)>) -> specgate_harness::Value {
+    specgate_harness::Value::Map(entries.into_iter().map(|(k, v)| (k.to_string(), v)).collect())
+}
+
 fn aev<V: Into<specgate_harness::AssertValue>>(name: &str, value: V) -> Assertion {
     Assertion::Event {
         name: name.into(),
@@ -267,8 +279,7 @@ fn result_ok_path() {
             run_op("divide"),
             ev("divide.a", "10"),
             ev("divide.b", "2"),
-            ev("$outcome", "Ok"),
-            ev("$result", "5"),
+            ev_map("$result", vec![("Ok", specgate_harness::Value::Integer(5))]),
         ]
     );
 }
@@ -283,8 +294,7 @@ fn result_err_path() {
             run_op("divide"),
             ev("divide.a", "10"),
             ev("divide.b", "0"),
-            ev("$outcome", "Error"),
-            ev("$error", "division by zero"),
+            ev_map("$result", vec![("Err", specgate_harness::Value::String("division by zero".into()))]),
         ]
     );
 }
@@ -654,8 +664,20 @@ fn enum_event_spec() {
     check_case(&r[0], "unit_variant", CaseStatus::Pass);
     check_case(&r[1], "single_field_variant", CaseStatus::Pass);
     check_case(&r[2], "multi_field_variant", CaseStatus::Pass);
-    // Spot-check that enum variant name events appear in traces.
-    assert!(r[0].traces.contains(&ev("shape", "Point")));
-    assert!(r[1].traces.contains(&ev("shape", "Circle")));
-    assert!(r[2].traces.contains(&ev("shape", "Rectangle")));
+    // Spot-check that the structured `$result` enum events appear in traces.
+    assert!(r[0].traces.contains(&ev_map("$result", vec![("Point", vmap(vec![]))])));
+    assert!(r[1].traces.contains(&ev_map(
+        "$result",
+        vec![("Circle", vmap(vec![("radius", specgate_harness::Value::Float(5.0))]))]
+    )));
+    assert!(r[2].traces.contains(&ev_map(
+        "$result",
+        vec![(
+            "Rectangle",
+            vmap(vec![
+                ("width", specgate_harness::Value::Float(3.0)),
+                ("height", specgate_harness::Value::Float(4.0)),
+            ])
+        )]
+    )));
 }

@@ -12,6 +12,8 @@ pub struct AnnotatedSource {
     pub operations: BTreeMap<String, OpDecl>,
     /// Structs that have `#[derive(... SpecEvent ...)]`.
     pub spec_event_structs: std::collections::BTreeSet<String>,
+    /// Enums that have `#[derive(... SpecEvent ...)]`.
+    pub spec_event_enums: std::collections::BTreeSet<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -59,9 +61,10 @@ pub fn scan(src: &str) -> AnnotatedSource {
     let mut setups = BTreeMap::new();
     let mut operations = BTreeMap::new();
     let mut spec_event_structs = std::collections::BTreeSet::new();
+    let mut spec_event_enums = std::collections::BTreeSet::new();
 
-    // SpecEvent-derived structs:
-    //   #[derive(... SpecEvent ...)] ... struct <NAME>
+    // SpecEvent-derived structs/enums:
+    //   #[derive(... SpecEvent ...)] ... struct|enum <NAME>
     for cap in find_iter(&src, "#[derive(") {
         let after = &src[cap..];
         let Some(close) = after.find(")]") else { continue };
@@ -70,8 +73,12 @@ pub fn scan(src: &str) -> AnnotatedSource {
             continue;
         }
         let rest = &after[close + 2..];
-        if let Some(struct_name) = scan_struct_name(rest) {
-            spec_event_structs.insert(struct_name);
+        if let Some((name, is_enum)) = scan_type_name(rest) {
+            if is_enum {
+                spec_event_enums.insert(name);
+            } else {
+                spec_event_structs.insert(name);
+            }
         }
     }
 
@@ -367,6 +374,7 @@ pub fn scan(src: &str) -> AnnotatedSource {
         setups,
         operations,
         spec_event_structs,
+        spec_event_enums,
     }
 }
 
@@ -429,7 +437,7 @@ fn push_param(p: &str, out: &mut Vec<(String, String)>, takes_self: &mut bool) {
     out.push((name, ty));
 }
 
-fn scan_struct_name(rest: &str) -> Option<String> {
+fn scan_type_name(rest: &str) -> Option<(String, bool)> {
     // Skip whitespace, attributes, pub.
     let s = rest.trim_start();
     let s = match s.strip_prefix("pub") {
@@ -444,10 +452,16 @@ fn scan_struct_name(rest: &str) -> Option<String> {
         }
         None => s,
     };
-    let s = s.strip_prefix("struct").or_else(|| s.strip_prefix("enum"))?;
+    let (s, is_enum) = if let Some(r) = s.strip_prefix("struct") {
+        (r, false)
+    } else if let Some(r) = s.strip_prefix("enum") {
+        (r, true)
+    } else {
+        return None;
+    };
     let s = s.trim_start();
     let end = s.find(|c: char| !(c.is_alphanumeric() || c == '_')).unwrap_or(s.len());
-    Some(s[..end].to_string())
+    Some((s[..end].to_string(), is_enum))
 }
 
 fn find_iter(src: &str, needle: &str) -> Vec<usize> {
