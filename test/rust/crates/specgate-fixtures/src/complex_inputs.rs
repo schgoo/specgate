@@ -9,20 +9,27 @@ use std::collections::HashMap;
 
 #[derive(Serialize, Deserialize, SpecEvent)]
 pub struct EnumMemberInput {
+    #[spec_event]
     pub name: String,
+    #[spec_event]
     pub value: String,
 }
 
 #[derive(Serialize, Deserialize, SpecEvent)]
 pub struct Point {
+    #[spec_event]
     pub x: i32,
+    #[spec_event]
     pub y: i32,
 }
 
 #[derive(Serialize, Deserialize, SpecEvent)]
 pub struct AppConfig {
+    #[spec_event]
     pub name: String,
+    #[spec_event]
     pub max_retries: i32,
+    #[spec_event]
     pub verbose: bool,
 }
 
@@ -35,14 +42,19 @@ pub enum Shape {
 
 #[derive(Serialize, Deserialize, SpecEvent)]
 pub struct Address {
+    #[spec_event]
     pub street: String,
+    #[spec_event]
     pub city: String,
 }
 
 #[derive(Serialize, Deserialize, SpecEvent)]
 pub struct Person {
+    #[spec_event]
     pub name: String,
+    #[spec_event]
     pub age: i32,
+    #[spec_event]
     pub address: Address,
 }
 

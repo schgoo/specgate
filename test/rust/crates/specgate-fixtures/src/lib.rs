@@ -33,6 +33,7 @@ pub mod enum_event;
 pub mod complex_inputs;
 pub mod multi_file;
 pub mod named_inputs;
+pub mod selfhost;
 pub mod side_effect_setup;
 pub mod simple_output_setup;
 pub mod shared_setup;

@@ -630,22 +630,15 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
     }
 
     // --- Struct: emit each field annotated with #[spec_event] ---
+    // Opt-in model: a field is part of the spec surface ONLY when tagged
+    // `#[spec_event]`. The same tag governs BOTH `emit_fields` (per-field
+    // events) and `to_spec_value` (the structured `$result` map). Untagged
+    // fields are internal and excluded from both.
     let mut emits = Vec::new();
     let mut to_spec_value_inserts = Vec::new();
     if let Data::Struct(s) = &input.data {
         for field in &s.fields {
-            // Build ToSpecValue insert for every named field.
-            if let Some(id) = &field.ident {
-                let fname = id.to_string();
-                to_spec_value_inserts.push(quote! {
-                    __sg_m.insert(
-                        #fname.to_string(),
-                        #rt::ToSpecValue::to_spec_value(&self.#id),
-                    );
-                });
-            }
-
-            // emit_fields only covers #[spec_event]-annotated fields.
+            // Determine whether this field opts into the spec surface.
             let mut marked = false;
             let mut override_name: Option<String> = None;
             for a in &field.attrs {
@@ -665,19 +658,32 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
             if !marked {
                 continue;
             }
-            if let Some(id) = &field.ident {
-                let fname = override_name.unwrap_or_else(|| id.to_string());
-                emits.push(quote! {
-                    let __sg_name = match __sg_prefix {
-                        ::std::option::Option::Some(p) => ::std::format!("{}.{}", p, #fname),
-                        ::std::option::Option::None => #fname.to_string(),
-                    };
-                    #rt::emit_event_v(
-                        &__sg_name,
-                        #rt::ToSpecValue::to_spec_value(&self.#id),
-                    );
-                });
-            }
+            let Some(id) = &field.ident else { continue };
+
+            // The spec name: the `name = "X"` override if present, else the
+            // field ident. Used as the key EVERYWHERE the field is exposed —
+            // both the `to_spec_value` map key and the `emit_fields` event.
+            let fname = override_name.unwrap_or_else(|| id.to_string());
+
+            // ToSpecValue insert for each tagged field, keyed by spec name.
+            to_spec_value_inserts.push(quote! {
+                __sg_m.insert(
+                    #fname.to_string(),
+                    #rt::ToSpecValue::to_spec_value(&self.#id),
+                );
+            });
+
+            // Per-field event for `emit_fields`, keyed by the same spec name.
+            emits.push(quote! {
+                let __sg_name = match __sg_prefix {
+                    ::std::option::Option::Some(p) => ::std::format!("{}.{}", p, #fname),
+                    ::std::option::Option::None => #fname.to_string(),
+                };
+                #rt::emit_event_v(
+                    &__sg_name,
+                    #rt::ToSpecValue::to_spec_value(&self.#id),
+                );
+            });
         }
     }
 

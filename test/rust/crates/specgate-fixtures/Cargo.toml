@@ -9,5 +9,8 @@ publish = false
 # successfully — it is a dev-dependency of specgate-harness, so `cargo test`
 # in the main workspace forces compilation.
 specgate = { path = "../../../../rust/crates/specgate" }
+# Self-host wrapper: lets a spec drive specgate_harness::run_spec as an
+# operation, so the harness can validate itself through its own pipeline.
+specgate-harness = { path = "../../../../rust/crates/specgate-harness" }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"

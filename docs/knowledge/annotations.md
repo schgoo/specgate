@@ -50,8 +50,10 @@ manual serialization code.
 
 ### Structs
 
-For structs, derive enables `#[spec_event]` fields and preserves collection
-shape:
+Struct fields are **opt-in**: a field is part of the spec surface only when
+tagged `#[spec_event]`. The same tag governs both per-field events *and* the
+structured `$result` value (`to_spec_value`). Untagged fields are internal and
+appear in neither.
 
 ```rust
 #[derive(SpecEvent)]
@@ -132,11 +134,17 @@ Canonical fixture:
   source file. Naming-lookup is scoped per source file (so two fixtures
   can share an operation name without colliding).
 - A `#[spec_mock]` name must be unique within an operation.
+- `#[spec_event]` on a struct field is **opt-in**: only tagged fields appear in
+  the spec surface (both per-field events and the structured `$result`).
+  Untagged struct fields are excluded from both. Enum variant payloads are
+  intrinsic and always included.
 - `#[spec_event]` on a field captures **every** mutation, including the
   initial value set by the setup function. This is why so many fixtures
   show a leading `count: "0"` (or similar) before the first `$run:`.
 - Use `#[spec_event(name = "...")]` when the emitted field name in the
-  spec should differ from the source field name.
+  spec should differ from the source field name. The override applies
+  everywhere the field is exposed — both the per-field event name and the
+  `$result` map key.
 
 ## How annotations compose
 
