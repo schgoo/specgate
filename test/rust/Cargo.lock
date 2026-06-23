@@ -114,14 +114,14 @@ dependencies = [
 
 [[package]]
 name = "specgate"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "specgate-annotations",
 ]
 
 [[package]]
 name = "specgate-annotations"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "specgate-annotations-macros",
  "specgate-runtime",
@@ -129,7 +129,7 @@ dependencies = [
 
 [[package]]
 name = "specgate-annotations-macros"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -147,7 +147,7 @@ dependencies = [
 
 [[package]]
 name = "specgate-runtime"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "linkme",
  "serde",
