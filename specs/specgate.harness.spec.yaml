@@ -145,6 +145,34 @@ cases:
       - Reusing the same operation name in different source files does not cause registry symbol collisions
       - specgate_runtime::discovery_json() returns valid JSON listing the registered operations
 
+  - name: command_target_executes_binding_command
+    kind: narrative
+    desc: >
+      A spec whose binding selects a command target is verified by running that
+      shell command and checking its exit status (exit 0 = pass), not by
+      compiling and tracing a source file. The command_target fixture
+      (binding_command.yaml, target: check, operation kind: command) covers
+      this path. Note: run_spec resolves a source file and therefore does not
+      execute command targets — they are exercised through the CLI run path.
+    verify:
+      - The command_target fixture's check operation is declared kind:command
+      - A command target passes when its shell command exits 0
+      - run_spec is source-oriented and does not execute command targets
+
+  - name: language_neutral_input_names
+    kind: narrative
+    desc: >
+      A spec names operation and setup inputs in its own language-neutral
+      vocabulary, independent of the implementation's parameter names. Code
+      annotates a parameter with #[spec_input("name")] to bind it to the spec
+      name; the harness binds case inputs and emits `op.<name>` events using
+      that name. Without the attribute the spec name defaults to the code
+      parameter name.
+    verify:
+      - named_inputs completes — divide's params a/b are addressed as numerator/denominator
+      - The echoed input events use the spec names (divide.numerator, divide.denominator)
+      - A setup param renamed with #[spec_input] binds its construction input by the spec name
+
   - name: invisible_setups
     kind: narrative
     desc: >
@@ -1046,6 +1074,106 @@ cases:
                 - Event: { name: transfer.amount, value: "50" }
                 - Event: { name: source.balance, value: "50" }
                 - Event: { name: target.balance, value: "50" }
+
+  # ================================================================
+  # Happy path — multi-file ops, shared / side-effect setups,
+  # language-neutral input names
+  # ================================================================
+
+  - name: operations_across_files
+    desc: Operations defined in separate source files are all discovered and run
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/multi_file.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: greet_from_separate_file
+              status: pass
+              expected:
+                - $run: greet
+                - $result: "Hello, World!"
+            - name: farewell_from_separate_file
+              status: pass
+              expected:
+                - $run: farewell
+                - $result: "Goodbye, World!"
+
+  - name: language_neutral_input_names_run
+    desc: Parameters renamed via #[spec_input] are addressed by their spec names
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/named_inputs.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: divide_10_by_2
+              status: pass
+              expected:
+                - divide.numerator: "10"
+                - divide.denominator: "2"
+                - $result: "5"
+            - name: scale_3_by_4
+              status: pass
+              expected:
+                - factor: "3"
+                - $run: scale
+                - $result: "12"
+
+  - name: shared_setup_fills_many_params
+    desc: One stacked-fills setup builds several same-typed parameters
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/shared_setup.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: one_setup_fills_two_params
+              status: pass
+              expected:
+                - left.value: "10"
+                - right.value: "5"
+                - $run: combine
+                - $result: "15"
+            - name: one_setup_fills_three_params
+              status: pass
+              expected:
+                - a.value: "1"
+                - b.value: "1"
+                - c.value: "1"
+                - $run: combine_three
+                - $result: "3"
+
+  - name: side_effect_setup_runs
+    desc: A setup whose return value is not consumed is still invoked before the operation
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/side_effect_setup.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: setup_side_effect_runs
+              status: pass
+              expected:
+                - $result: "1"
+
+  - name: simple_output_setup_fills_param
+    desc: A setup returning a primitive fills an operation parameter by type
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/simple_output_setup.spec.yaml
+    expected:
+      outcome:
+        Complete:
+          results:
+            - name: setup_fills_primitive_param
+              status: pass
+              expected:
+                - $result: "42"
 
   # ================================================================
   # Happy path — multi-case and multi-step

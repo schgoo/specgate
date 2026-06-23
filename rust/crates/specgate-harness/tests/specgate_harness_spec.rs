@@ -193,6 +193,28 @@ fn multiple_setups() {
 // ---------------------------------------------------------------------------
 
 #[test]
+fn renamed_inputs_via_spec_input() {
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/named_inputs.spec.yaml"));
+    // Operation params a/b are renamed to numerator/denominator: the echoed
+    // input events use the language-neutral spec names.
+    check_case(&r[0], "divide_10_by_2", CaseStatus::Pass);
+    assert_eq!(
+        r[0].traces,
+        vec![
+            run_op("divide"),
+            ev("divide.numerator", "10"),
+            ev("divide.denominator", "2"),
+            ev("$result", "5"),
+        ]
+    );
+    // A setup param renamed via #[spec_input] ("factor") binds the construction
+    // input by its spec name; the method input ("value") binds too (3 * 4 = 12).
+    check_case(&r[1], "scale_3_by_4", CaseStatus::Pass);
+    assert!(r[1].traces.contains(&ev("factor", 3i64)));
+    assert!(r[1].traces.contains(&ev("$result", "12")));
+}
+
+#[test]
 fn multiple_cases_one_spec() {
     let r = complete(run("test/rust/crates/specgate-fixtures/specs/multi_case.spec.yaml"));
     assert_eq!(r.len(), 2);

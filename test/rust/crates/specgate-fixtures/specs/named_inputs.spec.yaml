@@ -1,0 +1,33 @@
+spec_version: "0.4.0"
+name: fixture.named_inputs
+binding: binding.yaml
+
+operations:
+  divide:
+    inputs: { numerator: i32, denominator: i32 }
+    outputs:
+    - $result: i32
+  scale:
+    inputs: { factor: i32, value: i32 }
+    outputs:
+    - factor
+    - $result: i32
+
+cases:
+  - name: divide_10_by_2
+    desc: Operation params renamed to language-neutral spec names
+    operation: divide
+    inputs: { numerator: 10, denominator: 2 }
+    expected:
+      - divide.numerator: "10"
+      - divide.denominator: "2"
+      - $result: "5"
+
+  - name: scale_3_by_4
+    desc: A setup param and an operation param both renamed via spec_input
+    operation: scale
+    inputs: { factor: 3, value: 4 }
+    expected:
+      - factor: "3"
+      - $run: scale
+      - $result: "12"

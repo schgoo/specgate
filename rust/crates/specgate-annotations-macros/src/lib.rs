@@ -139,16 +139,39 @@ fn is_printable_param(ty: &Type) -> bool {
     false
 }
 
-fn typed_params(f: &ItemFn) -> Vec<(Ident, Type)> {
+/// Extract `(code_ident, type, spec_name)` for each typed parameter, consuming
+/// and removing any `#[spec_input("name")]` attribute. The spec name (when
+/// present) is the language-neutral name the spec uses for the input; the code
+/// parameter name is irrelevant to the spec.
+fn extract_param_renames(f: &mut ItemFn) -> Vec<(Ident, Type, Option<String>)> {
     let mut out = Vec::new();
-    for arg in &f.sig.inputs {
+    for arg in &mut f.sig.inputs {
         if let FnArg::Typed(pt) = arg
             && let Pat::Ident(id) = &*pt.pat
         {
-            out.push((id.ident.clone(), (*pt.ty).clone()));
+            let ident = id.ident.clone();
+            let ty = (*pt.ty).clone();
+            let mut spec_name = None;
+            pt.attrs.retain(|a| {
+                if a.path().is_ident("spec_input") {
+                    if let Ok(s) = a.parse_args::<LitStr>() {
+                        spec_name = Some(s.value());
+                    }
+                    false
+                } else {
+                    true
+                }
+            });
+            out.push((ident, ty, spec_name));
         }
     }
     out
+}
+
+/// The spec-facing name of a parameter: its `#[spec_input]` override, else the
+/// code identifier.
+fn spec_param_name(ident: &Ident, spec_name: Option<&String>) -> String {
+    spec_name.cloned().unwrap_or_else(|| ident.to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -314,9 +337,9 @@ pub fn spec_operation(attr: TokenStream, item: TokenStream) -> TokenStream {
     let return_kind = classify_return(&func.sig.output);
     let is_method = has_receiver(&func);
     let is_async = func.sig.asyncness.is_some();
-    let params = typed_params(&func);
-    let param_names: Vec<String> = params.iter().map(|(i, _)| i.to_string()).collect();
-    let has_ref_param = params.iter().any(|(_, t)| is_reference(t));
+    let params = extract_param_renames(&mut func);
+    let param_names: Vec<String> = params.iter().map(|(i, _, _)| i.to_string()).collect();
+    let has_ref_param = params.iter().any(|(_, t, _)| is_reference(t));
 
     let mut visitor = BodyInstrumenter {
         param_names: param_names.clone(),
@@ -344,8 +367,8 @@ pub fn spec_operation(attr: TokenStream, item: TokenStream) -> TokenStream {
     let static_ident = Ident::new(&format!("_SPECGATE_STATIC_{}", fn_name.to_uppercase()), func.sig.ident.span());
     let param_entries: Vec<TokenStream2> = params
         .iter()
-        .map(|(id, ty)| {
-            let name_str = id.to_string();
+        .map(|(id, ty, spec_name)| {
+            let name_str = spec_param_name(id, spec_name.as_ref());
             let ty_str = quote!(#ty).to_string();
             quote! { (#name_str, #ty_str) }
         })
@@ -377,18 +400,20 @@ pub fn spec_operation(attr: TokenStream, item: TokenStream) -> TokenStream {
     .into()
 }
 
-fn build_pre_stmts(op_name: &str, params: &[(Ident, Type)], is_method: bool, _has_ref_param: bool) -> Vec<Stmt> {
+fn build_pre_stmts(op_name: &str, params: &[(Ident, Type, Option<String>)], is_method: bool, _has_ref_param: bool) -> Vec<Stmt> {
     let rt = rt();
     let mut out: Vec<Stmt> = vec![parse_quote!(#rt::emit_run(#op_name);)];
     if is_method {
         return out;
     }
-    // Emit every parameter as an `op.param` event. Printable primitives go
-    // through Display; complex types (structs, enums, collections) emit a
+    // Emit every parameter as an `op.<spec_name>` event. Printable primitives
+    // go through Display; complex types (structs, enums, collections) emit a
     // structured Value via ToSpecValue. A single complex parameter must not
-    // suppress emission of its primitive siblings.
-    for (id, ty) in params {
-        let event_name = format!("{op_name}.{id}");
+    // suppress emission of its primitive siblings. The event uses the
+    // language-neutral `#[spec_input]` name when present.
+    for (id, ty, spec_name) in params {
+        let name = spec_param_name(id, spec_name.as_ref());
+        let event_name = format!("{op_name}.{name}");
         if is_printable_param(ty) {
             out.push(parse_quote!(
                 #rt::emit_event(#event_name, &::std::format!("{}", #id));
@@ -409,12 +434,13 @@ fn build_pre_stmts(op_name: &str, params: &[(Ident, Type)], is_method: bool, _ha
 #[proc_macro_attribute]
 pub fn spec_setup(attr: TokenStream, item: TokenStream) -> TokenStream {
     let SetupArg { op_name, fills } = parse_macro_input!(attr as SetupArg);
-    let func = parse_macro_input!(item as ItemFn);
-    let params = typed_params(&func);
+    let mut func = parse_macro_input!(item as ItemFn);
+    let params = extract_param_renames(&mut func);
     let rt = rt();
 
     // Setups are invisible to the spec: they emit no input-echo events. The
     // function body is left unchanged — it just constructs/prepares state.
+    // `#[spec_input]` attributes on parameters are consumed (stripped) here.
 
     // Registry entry — same const-wrapping trick as spec_operation so this
     // compiles whether the function is at module scope or inside an impl block.
@@ -428,8 +454,8 @@ pub fn spec_setup(attr: TokenStream, item: TokenStream) -> TokenStream {
     let static_ident = Ident::new(&format!("_SPECGATE_SETUP_S_{suffix}"), func.sig.ident.span());
     let param_entries: Vec<TokenStream2> = params
         .iter()
-        .map(|(id, ty)| {
-            let name_str = id.to_string();
+        .map(|(id, ty, spec_name)| {
+            let name_str = spec_param_name(id, spec_name.as_ref());
             let ty_str = quote!(#ty).to_string();
             quote! { (#name_str, #ty_str) }
         })

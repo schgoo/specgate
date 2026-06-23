@@ -32,6 +32,7 @@ lists, maps, sets, numeric ranges, and nested shapes.
 | `#[derive(SpecEvent)]` | Struct or enum | Enables generated event emission for returned / observed values. | Structs emit named field values; enums emit the variant name plus named-field payload events. |
 | `#[spec_event]` | Struct field (with `#[derive(SpecEvent)]` on the struct) | Every write to the field emits an event. | `Event { name: "<field>", value: new_value }` on each mutation. Setup-filled parameters prefix with the parameter role (`source.balance`). |
 | `spec_trace!("name", expr)` | Inline expression | Records the value of `expr` at this point in execution. | `Event { name, value }` using the structured `Value` representation. |
+| `#[spec_input("name")]` | Function parameter (of a `#[spec_operation]` / `#[spec_setup]` fn) | Gives the parameter a language-neutral spec name, decoupled from the code parameter name. | The case binds inputs and `op.<name>` events use this name instead of the code identifier. |
 | `#[spec_mock("name")]` | Local binding around a method call | Intercepts the call and returns the case-supplied response. | `Event { "<name>.request", input }` then `Event { "<name>.response", mocked_response }`. |
 
 **No `kind` parameter.** Every `#[spec_operation("…")]` in the fixtures
@@ -116,6 +117,10 @@ Canonical fixture:
 ## Rules
 
 - `#[spec_setup]` functions must **not** take `self` / `this`.
+- `#[spec_input("name")]` on a parameter of a `#[spec_operation]` / `#[spec_setup]`
+  function renames that input to a language-neutral spec name. The spec and case
+  use `name`; the code keeps its own parameter name. Without it, the spec name
+  defaults to the code parameter name.
 - `#[spec_setup("operation")]` takes the **operation** name it prepares, not
   its own name. Setups never appear in a spec.
 - A setup's return value fills the operation's method receiver or a parameter
@@ -163,6 +168,7 @@ for the full example.
 | Multiple setups, same type (`fills`) | `multi_setup.rs` |
 | One setup filling several params (stacked `fills`) | `shared_setup.rs` |
 | Side-effect / simple-output setup | `side_effect_setup.rs`, `simple_output_setup.rs` |
+| Language-neutral input names (`#[spec_input]`) | `named_inputs.rs` |
 | `Result` return | `result_ok.rs`, `result_err.rs` |
 | `Option` return | `option_some.rs` |
 | Panic / unrecoverable | `unrecoverable.rs` |

@@ -665,7 +665,18 @@ fn parse_params(text: &str) -> (Vec<(String, String)>, bool) {
 }
 
 fn push_param(p: &str, out: &mut Vec<(String, String)>, takes_self: &mut bool) {
-    let s = p.trim();
+    let mut s = p.trim();
+    // Consume any leading attributes, capturing a `#[spec_input("name")]`
+    // rename so the param is recorded under its language-neutral spec name.
+    let mut spec_name: Option<String> = None;
+    while let Some(rest) = s.strip_prefix("#[") {
+        let Some(close) = rest.find(']') else { break };
+        let attr = rest[..close].trim();
+        if let Some(n) = attr_inner(attr, "spec_input") {
+            spec_name = Some(n);
+        }
+        s = rest[close + 1..].trim_start();
+    }
     if s.is_empty() {
         return;
     }
@@ -679,7 +690,7 @@ fn push_param(p: &str, out: &mut Vec<(String, String)>, takes_self: &mut bool) {
     };
     // Strip leading `mut ` etc. on name.
     let name = name.trim_start_matches("mut ").trim().to_string();
-    out.push((name, ty));
+    out.push((spec_name.unwrap_or(name), ty));
 }
 
 fn scan_type_name(rest: &str) -> Option<(String, bool)> {
