@@ -1,7 +1,7 @@
 // Mock called with input not present in the configured response table.
 use specgate::*;
 
-#[spec_setup("make_service")]
+#[spec_setup("get_user")]
 pub fn make_service() -> UserService {
     UserService { db: RealDb {} }
 }

@@ -23,20 +23,12 @@ pub struct Case {
     pub name: String,
     /// Case-level target override (overrides the spec-level `target`).
     pub target: Option<String>,
-    pub setup: Setup,
     pub operation: Option<String>,
     pub steps: Vec<String>,
     pub inputs: BTreeMap<String, YValue>,
     pub expected: Vec<Assertion>,
     pub level: CaseLevel,
     pub source: Option<Source>,
-}
-
-#[derive(Debug, Clone)]
-pub enum Setup {
-    None,
-    Single(String),
-    Multi(Vec<(String, String)>), // alias → setup_fn
 }
 
 #[derive(Debug)]
@@ -111,42 +103,6 @@ fn parse_case(v: &YValue) -> Result<Case, ParseError> {
 
     let target = m.get(YValue::String("target".into())).and_then(|t| t.as_str()).map(String::from);
 
-    let mut extra_inputs: BTreeMap<String, YValue> = BTreeMap::new();
-    let setup = match m.get(YValue::String("setup".into())) {
-        None => Setup::None,
-        Some(YValue::String(s)) => Setup::Single(s.clone()),
-        Some(YValue::Mapping(mp)) => {
-            let all_strings = mp.iter().all(|(_, v)| v.as_str().is_some());
-            if all_strings {
-                let mut entries = Vec::new();
-                for (k, val) in mp {
-                    let alias = k
-                        .as_str()
-                        .ok_or_else(|| ParseError::Shape("setup alias not str".into()))?
-                        .to_string();
-                    let fn_name = val.as_str().unwrap().to_string();
-                    entries.push((alias, fn_name));
-                }
-                Setup::Multi(entries)
-            } else {
-                let (k, v) = mp.iter().next().ok_or_else(|| ParseError::Shape("empty setup mapping".into()))?;
-                let fn_name = k
-                    .as_str()
-                    .ok_or_else(|| ParseError::Shape("setup name not str".into()))?
-                    .to_string();
-                if let YValue::Mapping(pm) = v {
-                    for (pk, pv) in pm {
-                        if let Some(pks) = pk.as_str() {
-                            extra_inputs.insert(pks.to_string(), pv.clone());
-                        }
-                    }
-                }
-                Setup::Single(fn_name)
-            }
-        }
-        Some(_) => return Err(ParseError::Shape("setup has invalid shape".into())),
-    };
-
     let operation = m.get(YValue::String("operation".into())).and_then(|x| x.as_str()).map(String::from);
 
     let steps = match m.get(YValue::String("steps".into())) {
@@ -182,10 +138,6 @@ fn parse_case(v: &YValue) -> Result<Case, ParseError> {
         }
         Some(_) => return Err(ParseError::Shape("inputs has invalid shape".into())),
     };
-    let mut inputs = inputs;
-    for (k, v) in extra_inputs {
-        inputs.entry(k).or_insert(v);
-    }
 
     let expected = match m.get(YValue::String("expected".into())) {
         Some(YValue::Sequence(seq)) => parse_assertion_list(seq)?,
@@ -231,7 +183,6 @@ fn parse_case(v: &YValue) -> Result<Case, ParseError> {
     Ok(Case {
         name,
         target,
-        setup,
         operation,
         steps,
         inputs,

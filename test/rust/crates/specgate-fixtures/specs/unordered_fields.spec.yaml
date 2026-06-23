@@ -3,8 +3,6 @@ name: fixture.unordered_fields
 binding: binding.yaml
 
 operations:
-  make_account:
-    kind: setup
   withdraw:
     inputs: { amount: i32 }
     outputs: [balance, transaction_count]
@@ -12,7 +10,6 @@ operations:
 cases:
   - name: unordered_both_present
     desc: Both fields matched in any order
-    setup: make_account
     operation: withdraw
     inputs: { amount: 50 }
     expected:
@@ -23,7 +20,6 @@ cases:
 
   - name: unordered_reversed_still_passes
     desc: Fields listed in reverse of emission order still pass
-    setup: make_account
     operation: withdraw
     inputs: { amount: 50 }
     expected:
@@ -34,7 +30,6 @@ cases:
 
   - name: unordered_wrong_value_fails
     desc: One field has wrong value — should fail
-    setup: make_account
     operation: withdraw
     inputs: { amount: 50 }
     expected:
@@ -45,7 +40,6 @@ cases:
 
   - name: unordered_multiple_blocks
     desc: Two separate unordered blocks in one case
-    setup: make_account
     operation: withdraw
     inputs: { amount: 50 }
     expected:

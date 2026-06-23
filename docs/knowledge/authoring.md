@@ -52,7 +52,8 @@ operations:
 
 - `$result` — the return value of the function
 - Named outputs (like `user_id`) — values emitted via `spec_trace!` or `#[spec_event]`
-- Use `kind: setup` for factory functions that construct state
+- Setups are invisible to the spec — never declare them; link a constructor in
+  code with `#[spec_setup("operation")]` (see annotations.md)
 
 ## Writing test cases
 
@@ -87,13 +88,13 @@ expected:
 
 ### Multi-step cases
 
-For stateful components, use `setup` and `steps`:
+For stateful components, use `steps:` — the setup that builds the state runs
+once and is shared across the steps:
 
 ```yaml
 cases:
   - name: increment_twice
     desc: Counter goes from 0 to 2
-    setup: make_counter
     steps:
       - operation: increment
       - operation: increment

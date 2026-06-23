@@ -1,7 +1,7 @@
 // Multi-step state machine — two operations in sequence.
 use specgate::*;
 
-#[spec_setup("make_counter")]
+#[spec_setup("increment")]
 pub fn make_counter() -> Counter {
     Counter { count: 0 }
 }

@@ -3,20 +3,13 @@ name: fixture.multi_setup
 binding: binding.yaml
 
 operations:
-  make_source:
-    kind: setup
-  make_target:
-    kind: setup
   transfer:
     inputs: { amount: i32 }
     outputs: [source.balance, target.balance]
 
 cases:
   - name: transfer_between_accounts
-    desc: Two setups create source and target
-    setup:
-      source: make_source
-      target: make_target
+    desc: Two setups create source and target accounts
     operation: transfer
     inputs: { amount: 50 }
     expected:

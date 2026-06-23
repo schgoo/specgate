@@ -1,7 +1,7 @@
 // Read-only operation — no state changes.
 use specgate::*;
 
-#[spec_setup("make_counter")]
+#[spec_setup("get_count")]
 pub fn make_counter() -> Counter {
     Counter { count: 42 }
 }

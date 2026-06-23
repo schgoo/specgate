@@ -168,15 +168,7 @@ fn nested_operations() {
 fn setup_with_input_params() {
     let r = complete(run("test/rust/crates/specgate-fixtures/specs/setup_with_params.spec.yaml"));
     check_case(&r[0], "start_at_10", CaseStatus::Pass);
-    assert_eq!(
-        r[0].traces,
-        vec![
-            ev("make_counter.initial", "10"),
-            ev("count", 10i64),
-            run_op("increment"),
-            ev("count", 11i64),
-        ]
-    );
+    assert_eq!(r[0].traces, vec![ev("count", 10i64), run_op("increment"), ev("count", 11i64),]);
 }
 
 #[test]
@@ -390,7 +382,10 @@ fn error_bad_binding() {
 #[test]
 fn error_missing_setup() {
     let reason = err_reason(run("test/rust/crates/specgate-fixtures/specs/missing_setup.spec.yaml"));
-    assert_eq!(reason, "setup 'make_counter' not found in source annotations");
+    assert_eq!(
+        reason,
+        "case 'increment_once': operation 'increment' is a method on 'Counter' but no #[spec_setup(\"increment\")] returns 'Counter' to construct the receiver"
+    );
 }
 
 #[test]

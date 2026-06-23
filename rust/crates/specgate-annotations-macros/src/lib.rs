@@ -23,6 +23,37 @@ impl Parse for NameArg {
     }
 }
 
+/// Arguments to `#[spec_setup("operation", fills = "param")]`.
+/// The first positional string is the OPERATION this setup prepares (not the
+/// setup's own name — setups are invisible to the spec). The optional
+/// `fills = "param"` pins this setup to a specific operation parameter when
+/// several params share the setup's output type.
+struct SetupArg {
+    op_name: String,
+    fills: Option<String>,
+}
+
+impl Parse for SetupArg {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let lit: LitStr = input.parse()?;
+        let mut fills = None;
+        if input.peek(syn::Token![,]) {
+            let _: syn::Token![,] = input.parse()?;
+            let key: Ident = input.parse()?;
+            if key != "fills" {
+                return Err(syn::Error::new(key.span(), "expected `fills`"));
+            }
+            let _: syn::Token![=] = input.parse()?;
+            let val: LitStr = input.parse()?;
+            fills = Some(val.value());
+        }
+        Ok(SetupArg {
+            op_name: lit.value(),
+            fills,
+        })
+    }
+}
+
 fn rt() -> TokenStream2 {
     quote! { ::specgate::__rt }
 }
@@ -339,6 +370,7 @@ pub fn spec_operation(attr: TokenStream, item: TokenStream) -> TokenStream {
                 is_async: #is_async,
                 params: &[#(#param_entries),*],
                 return_type: #ret_str,
+                fills: "",
             };
         };
     }
@@ -376,33 +408,24 @@ fn build_pre_stmts(op_name: &str, params: &[(Ident, Type)], is_method: bool, _ha
 
 #[proc_macro_attribute]
 pub fn spec_setup(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let NameArg(setup_name) = parse_macro_input!(attr as NameArg);
-    let mut func = parse_macro_input!(item as ItemFn);
+    let SetupArg { op_name, fills } = parse_macro_input!(attr as SetupArg);
+    let func = parse_macro_input!(item as ItemFn);
     let params = typed_params(&func);
     let rt = rt();
 
-    let mut pre: Vec<Stmt> = Vec::new();
-    for (id, ty) in &params {
-        if is_owned_primitive(ty) {
-            let name = format!("{setup_name}.{id}");
-            pre.push(parse_quote!(
-                #rt::emit_event(#name, &::std::format!("{}", #id));
-            ));
-        }
-    }
-    let body = &func.block;
-    let new_body: Block = parse_quote!({
-        #(#pre)*
-        #body
-    });
-    *func.block = new_body;
+    // Setups are invisible to the spec: they emit no input-echo events. The
+    // function body is left unchanged — it just constructs/prepares state.
 
     // Registry entry — same const-wrapping trick as spec_operation so this
     // compiles whether the function is at module scope or inside an impl block.
+    // The const/static idents include the operation + fills so that multiple
+    // #[spec_setup] attributes can stack on one function without colliding.
     let fn_name = func.sig.ident.to_string();
     let is_async = func.sig.asyncness.is_some();
-    let const_ident = Ident::new(&format!("_SPECGATE_SETUP_REG_{}", fn_name.to_uppercase()), func.sig.ident.span());
-    let static_ident = Ident::new(&format!("_SPECGATE_SETUP_S_{}", fn_name.to_uppercase()), func.sig.ident.span());
+    let fills_str = fills.clone().unwrap_or_default();
+    let suffix = sanitize_ident(&format!("{fn_name}_{op_name}_{fills_str}"));
+    let const_ident = Ident::new(&format!("_SPECGATE_SETUP_REG_{suffix}"), func.sig.ident.span());
+    let static_ident = Ident::new(&format!("_SPECGATE_SETUP_S_{suffix}"), func.sig.ident.span());
     let param_entries: Vec<TokenStream2> = params
         .iter()
         .map(|(id, ty)| {
@@ -424,17 +447,25 @@ pub fn spec_setup(attr: TokenStream, item: TokenStream) -> TokenStream {
             #[#rt::linkme::distributed_slice(#rt::SPECGATE_OPS)]
             #[linkme(crate = #rt::linkme)]
             static #static_ident: #rt::OpMeta = #rt::OpMeta {
-                name: #setup_name,
+                name: #op_name,
                 module_path: ::core::module_path!(),
                 fn_name: #fn_name,
                 is_setup: true,
                 is_async: #is_async,
                 params: &[#(#param_entries),*],
                 return_type: #ret_str,
+                fills: #fills_str,
             };
         };
     }
     .into()
+}
+
+/// Turn an arbitrary string into a valid uppercase identifier suffix.
+fn sanitize_ident(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_uppercase() } else { '_' })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------

@@ -3,8 +3,6 @@ name: fixture.mismatch_second_step
 binding: binding.yaml
 
 operations:
-  make_counter:
-    kind: setup
   increment:
     outputs: [count]
   decrement:
@@ -13,7 +11,6 @@ operations:
 cases:
   - name: increment_then_decrement
     desc: Wrong value after second step
-    setup: make_counter
     steps:
       - operation: increment
       - operation: decrement

@@ -1,7 +1,7 @@
 // Missing operation annotation — no spec_operation on any function.
 use specgate::*;
 
-#[spec_setup("make_counter")]
+#[spec_setup("increment")]
 pub fn make_counter() -> Counter {
     Counter { count: 0 }
 }

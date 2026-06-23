@@ -3,15 +3,12 @@ name: fixture.missing_setup
 binding: binding.yaml
 
 operations:
-  make_counter:
-    kind: setup
   increment:
     outputs: [count]
 
 cases:
   - name: increment_once
-    desc: References a setup that doesn't exist in source
-    setup: make_counter
+    desc: A method operation whose receiver type has no linked setup
     operation: increment
     expected:
       - count: "1"

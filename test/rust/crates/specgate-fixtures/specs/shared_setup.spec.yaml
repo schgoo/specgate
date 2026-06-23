@@ -1,0 +1,38 @@
+spec_version: "0.4.0"
+name: fixture.shared_setup
+binding: binding.yaml
+
+operations:
+  combine:
+    inputs: { start_left: i32, start_right: i32 }
+    outputs:
+    - left.value
+    - right.value
+    - $result: i32
+  combine_three:
+    outputs:
+    - a.value
+    - b.value
+    - c.value
+    - $result: i32
+
+cases:
+  - name: one_setup_fills_two_params
+    desc: One reusable setup, stacked with fills, builds two params from per-fill flat inputs
+    operation: combine
+    inputs: { start_left: 10, start_right: 5 }
+    expected:
+      - left.value: "10"
+      - right.value: "5"
+      - $run: combine
+      - $result: "15"
+
+  - name: one_setup_fills_three_params
+    desc: A single parameterless setup, stacked with fills, builds three params
+    operation: combine_three
+    expected:
+      - a.value: "1"
+      - b.value: "1"
+      - c.value: "1"
+      - $run: combine_three
+      - $result: "3"

@@ -1,7 +1,7 @@
 // Mock with multiple responses — different inputs get different outputs.
 use specgate::*;
 
-#[spec_setup("make_service")]
+#[spec_setup("get_users")]
 pub fn make_service() -> UserService {
     UserService { db: RealDb {} }
 }

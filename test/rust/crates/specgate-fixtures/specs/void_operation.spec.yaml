@@ -3,8 +3,6 @@ name: fixture.void_operation
 binding: binding.yaml
 
 operations:
-  make_logger:
-    kind: setup
   log:
     inputs: { msg: string }
     outputs: [count]
@@ -12,7 +10,6 @@ operations:
 cases:
   - name: log_a_message
     desc: Logging increments count with no return value
-    setup: make_logger
     operation: log
     inputs: { msg: "hello" }
     expected:

@@ -1,7 +1,7 @@
 // Setup with input parameter — initial count is configurable.
 use specgate::*;
 
-#[spec_setup("make_counter")]
+#[spec_setup("increment")]
 pub fn make_counter(initial: i32) -> Counter {
     Counter { count: initial }
 }

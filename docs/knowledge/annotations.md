@@ -28,9 +28,9 @@ lists, maps, sets, numeric ranges, and nested shapes.
 | Annotation | Placed on | Purpose | Trace emitted |
 |------------|-----------|---------|---------------|
 | `#[spec_operation("name")]` | Free function or method | Marks the operation a case invokes by `operation:`/`steps[].operation:`. | `Run { operation: name }` at the entry point, plus per-parameter `Event { "<name>.<param>", value }` and auto-generated result events addressable from specs as `$result` / `$outcome` / `$error`. |
-| `#[spec_setup("name")]` | Free function (no `self`) | Names a factory a case invokes by `setup:`. | `Event { "<name>.<param>", value }` per parameter. |
+| `#[spec_setup("operation"[, fills = "param"])]` | Free function (no `self`) | Links a constructor to the **operation** it prepares. Setups are invisible to the spec. The return value fills the operation's method receiver or a parameter, matched by type; `fills` pins the target param when several share that type or several setups produce it (stackable). | None — setups emit no events of their own; the constructed value's `#[spec_event]` fields are emitted before the operation runs. |
 | `#[derive(SpecEvent)]` | Struct or enum | Enables generated event emission for returned / observed values. | Structs emit named field values; enums emit the variant name plus named-field payload events. |
-| `#[spec_event]` | Struct field (with `#[derive(SpecEvent)]` on the struct) | Every write to the field emits an event. | `Event { name: "<field>", value: new_value }` on each mutation. Multi-setup cases prefix with the alias (`source.balance`). |
+| `#[spec_event]` | Struct field (with `#[derive(SpecEvent)]` on the struct) | Every write to the field emits an event. | `Event { name: "<field>", value: new_value }` on each mutation. Setup-filled parameters prefix with the parameter role (`source.balance`). |
 | `spec_trace!("name", expr)` | Inline expression | Records the value of `expr` at this point in execution. | `Event { name, value }` using the structured `Value` representation. |
 | `#[spec_mock("name")]` | Local binding around a method call | Intercepts the call and returns the case-supplied response. | `Event { "<name>.request", input }` then `Event { "<name>.response", mocked_response }`. |
 
@@ -116,6 +116,13 @@ Canonical fixture:
 ## Rules
 
 - `#[spec_setup]` functions must **not** take `self` / `this`.
+- `#[spec_setup("operation")]` takes the **operation** name it prepares, not
+  its own name. Setups never appear in a spec.
+- A setup's return value fills the operation's method receiver or a parameter
+  **by type**. When several parameters share that type, or several setups
+  produce it, each setup must pin its target with `fills = "<param>"`.
+- Several `#[spec_setup(..., fills = ...)]` attributes may be stacked on one
+  function to build several same-typed parameters.
 - An operation name may have at most one `#[spec_operation]` in a given
   source file. Naming-lookup is scoped per source file (so two fixtures
   can share an operation name without colliding).
@@ -132,7 +139,7 @@ A single operation typically uses several annotations across one source
 file. They are joined at runtime by name and source-file scope.
 
 ```
-#[spec_setup("make_counter")]                      ─┐
+#[spec_setup("increment")]  on make_counter        ─┐
 #[derive(SpecEvent)] on Counter                     │
   #[spec_event] on Counter.count                   ─┼─► one operation, "increment"
 #[spec_operation("increment")] on Counter::incr    ─┘
@@ -152,8 +159,10 @@ for the full example.
 | Structured value emission (`Vec`, `BTreeMap`) | `structured_output.rs`, `operators.rs` |
 | Enum `#[derive(SpecEvent)]` | `enum_event.rs` |
 | `#[spec_mock]` | `mock_field.rs`, `mock_multi_response.rs` |
-| Setup with parameters | `setup_with_params.rs` |
-| Multiple setups | `multi_setup.rs` |
+| Setup with a construction input | `setup_with_params.rs` |
+| Multiple setups, same type (`fills`) | `multi_setup.rs` |
+| One setup filling several params (stacked `fills`) | `shared_setup.rs` |
+| Side-effect / simple-output setup | `side_effect_setup.rs`, `simple_output_setup.rs` |
 | `Result` return | `result_ok.rs`, `result_err.rs` |
 | `Option` return | `option_some.rs` |
 | Panic / unrecoverable | `unrecoverable.rs` |

@@ -3,8 +3,6 @@ name: fixture.multi_field_capture_reordered
 binding: binding.yaml
 
 operations:
-  make_account:
-    kind: setup
   withdraw:
     inputs: { amount: i32 }
     outputs: [balance, transaction_count]
@@ -12,7 +10,6 @@ operations:
 cases:
   - name: withdraw_50
     desc: Just assert final values
-    setup: make_account
     operation: withdraw
     inputs: { amount: 50 }
     expected:

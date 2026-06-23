@@ -1,7 +1,7 @@
 // Nested operations: transfer calls withdraw and deposit.
 use specgate::*;
 
-#[spec_setup("make_account")]
+#[spec_setup("transfer")]
 pub fn make_account() -> Account {
     Account { balance: 100 }
 }

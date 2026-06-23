@@ -1,7 +1,7 @@
 // Operation with no return value (unit type).
 use specgate::*;
 
-#[spec_setup("make_logger")]
+#[spec_setup("log")]
 pub fn make_logger() -> Logger {
     Logger { count: 0 }
 }

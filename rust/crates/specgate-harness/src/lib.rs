@@ -175,23 +175,13 @@ fn run_group(
 
     let annotated = scan::scan(&src_text);
 
-    // Required setups + ops across all MUST cases in this group.
-    let mut required_setups: BTreeSet<String> = BTreeSet::new();
+    // Required ops across all MUST cases in this group, plus a pre-flight
+    // check that every operation's setups resolve (precise diagnostics rather
+    // than a generic compile failure).
     let mut required_ops: BTreeSet<String> = BTreeSet::new();
     for case in group_cases {
         if case.level != CaseLevel::Must && !case_pieces_available(case, &annotated) {
             continue;
-        }
-        match &case.setup {
-            spec::Setup::None => {}
-            spec::Setup::Single(name) => {
-                required_setups.insert(name.clone());
-            }
-            spec::Setup::Multi(entries) => {
-                for (_, fn_name) in entries {
-                    required_setups.insert(fn_name.clone());
-                }
-            }
         }
         if !case.steps.is_empty() {
             for s in &case.steps {
@@ -201,14 +191,26 @@ fn run_group(
             required_ops.insert(op.to_string());
         }
     }
-    for s in &required_setups {
-        if !annotated.setups.contains_key(s) {
-            return Err(format!("setup '{s}' not found in source annotations"));
-        }
-    }
     for o in &required_ops {
         if !annotated.operations.contains_key(o) {
             return Err(format!("operation '{o}' not found in source annotations"));
+        }
+    }
+    // Pre-flight setup resolution: surface wiring problems (missing/ambiguous
+    // setups) with a clear message before generating and compiling code.
+    for case in group_cases {
+        if case.level != CaseLevel::Must && !case_pieces_available(case, &annotated) {
+            continue;
+        }
+        let case_ops: Vec<&str> = if !case.steps.is_empty() {
+            case.steps.iter().map(String::as_str).collect()
+        } else if let Some(op) = case.operation.as_deref() {
+            vec![op]
+        } else {
+            continue;
+        };
+        if let Err(msg) = annotated.resolve_case(&case_ops) {
+            return Err(format!("case '{}': {msg}", case.name));
         }
     }
 
@@ -332,21 +334,6 @@ enum CaseDisposition {
 }
 
 fn case_pieces_available(case: &spec::Case, annotated: &scan::AnnotatedSource) -> bool {
-    match &case.setup {
-        spec::Setup::None => {}
-        spec::Setup::Single(n) => {
-            if !annotated.setups.contains_key(n) {
-                return false;
-            }
-        }
-        spec::Setup::Multi(entries) => {
-            for (_, n) in entries {
-                if !annotated.setups.contains_key(n) {
-                    return false;
-                }
-            }
-        }
-    }
     let ops: Vec<&str> = if !case.steps.is_empty() {
         case.steps.iter().map(String::as_str).collect()
     } else if let Some(op) = case.operation.as_deref() {
@@ -354,7 +341,11 @@ fn case_pieces_available(case: &spec::Case, annotated: &scan::AnnotatedSource) -
     } else {
         return true;
     };
-    ops.iter().all(|o| annotated.operations.contains_key(*o))
+    if !ops.iter().all(|o| annotated.operations.contains_key(*o)) {
+        return false;
+    }
+    // The operation's setups must resolve (e.g. a method receiver has a setup).
+    annotated.resolve_case(&ops).is_ok()
 }
 
 /// If every case has level != MUST, return per-case warn/skip results.
@@ -464,20 +455,8 @@ fn resolve_fixture_source(package_root: &Path, fixture_basename: &str, cases: &[
         return Some(direct);
     }
     // Build required sets from the provided cases.
-    let mut req_setups: BTreeSet<String> = BTreeSet::new();
     let mut req_ops: BTreeSet<String> = BTreeSet::new();
     for case in cases {
-        match &case.setup {
-            spec::Setup::None => {}
-            spec::Setup::Single(n) => {
-                req_setups.insert(n.clone());
-            }
-            spec::Setup::Multi(es) => {
-                for (_, n) in es {
-                    req_setups.insert(n.clone());
-                }
-            }
-        }
         if !case.steps.is_empty() {
             for s in &case.steps {
                 req_ops.insert(s.clone());
@@ -495,10 +474,13 @@ fn resolve_fixture_source(package_root: &Path, fixture_basename: &str, cases: &[
                 score += 2;
             }
         }
-        for s in &req_setups {
-            if annotated.setups.contains_key(s) {
-                score += 1;
-            }
+        // Strongly prefer a source where the required operations actually wire
+        // (their setups/receivers resolve), so an orphan spec doesn't bind to a
+        // file that merely shares the operation name but can't construct it.
+        let op_refs: Vec<&str> = req_ops.iter().map(String::as_str).collect();
+        if !op_refs.is_empty() && op_refs.iter().all(|o| annotated.operations.contains_key(*o)) && annotated.resolve_case(&op_refs).is_ok()
+        {
+            score += 100;
         }
         if let Some(stem) = stem
             && fixture_basename.starts_with(stem)
@@ -591,12 +573,6 @@ fn check_shape(spec: &spec::Spec, raw: &serde_yaml::Value) -> Option<String> {
         } else {
             continue;
         };
-        let case_setups: Vec<&str> = match &case.setup {
-            spec::Setup::None => vec![],
-            spec::Setup::Single(n) => vec![n.as_str()],
-            spec::Setup::Multi(entries) => entries.iter().map(|(_, fn_name)| fn_name.as_str()).collect(),
-        };
-
         let mut allowed: BTreeSet<String> = BTreeSet::new();
         for op in &case_ops {
             if let Some(meta) = ops_meta.get(*op) {
@@ -615,13 +591,6 @@ fn check_shape(spec: &spec::Spec, raw: &serde_yaml::Value) -> Option<String> {
             allowed.insert("$outcome".into());
             allowed.insert("$error".into());
             allowed.insert("$value".into());
-        }
-        for setup in &case_setups {
-            if let Some(meta) = ops_meta.get(*setup) {
-                for inp in &meta.inputs {
-                    allowed.insert(format!("{setup}.{inp}"));
-                }
-            }
         }
 
         for entry in &case.expected {

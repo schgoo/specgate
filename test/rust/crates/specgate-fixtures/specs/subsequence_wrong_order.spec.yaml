@@ -3,15 +3,12 @@ name: fixture.subsequence_wrong_order
 binding: binding.yaml
 
 operations:
-  make_counter:
-    kind: setup
   increment:
     outputs: [count]
 
 cases:
   - name: increment_once
     desc: Expected events in reverse order
-    setup: make_counter
     operation: increment
     expected:
       - count: "1"

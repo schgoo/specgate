@@ -3,15 +3,12 @@ name: fixture.anywhere_event
 binding: binding.yaml
 
 operations:
-  make_counter:
-    kind: setup
   increment_twice:
     outputs: [count]
 
 cases:
   - name: anywhere_matches_early_event
     desc: Assert on count=0 (which appears before the Run) via $anywhere
-    setup: make_counter
     operation: increment_twice
     expected:
       - $run: increment_twice
@@ -21,7 +18,6 @@ cases:
 
   - name: anywhere_matches_late_event
     desc: Assert on count=2 (which appears after the Run) via $anywhere
-    setup: make_counter
     operation: increment_twice
     expected:
       - count: "0"
@@ -31,7 +27,6 @@ cases:
 
   - name: anywhere_matches_middle_event
     desc: Assert on count=1 (intermediate) via $anywhere regardless of position in expected list
-    setup: make_counter
     operation: increment_twice
     expected:
       - $anywhere:
@@ -41,7 +36,6 @@ cases:
 
   - name: anywhere_multiple_items
     desc: Multiple items in $anywhere — all must be present somewhere
-    setup: make_counter
     operation: increment_twice
     expected:
       - $anywhere:
@@ -51,7 +45,6 @@ cases:
 
   - name: anywhere_missing_fails
     desc: $anywhere item not in trace produces failure
-    setup: make_counter
     operation: increment_twice
     expected:
       - $anywhere:

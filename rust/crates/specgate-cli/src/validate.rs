@@ -378,10 +378,8 @@ fn check_file(
             if ops.contains_key(op) {
                 // operation exists, proceed
                 // 5. input_completeness: missing and extra inputs
-                let has_setup = cm.get(Value::String("setup".into())).is_some();
-                let provided: BTreeSet<String> = cm
-                    .get(Value::String("inputs".into()))
-                    .and_then(|v| v.as_mapping())
+                let inputs_map = cm.get(Value::String("inputs".into())).and_then(|v| v.as_mapping());
+                let provided: BTreeSet<String> = inputs_map
                     .map(|m| m.iter().filter_map(|(k, _)| k.as_str().map(String::from)).collect())
                     .unwrap_or_default();
                 let decl = &ops[op];
@@ -398,16 +396,22 @@ fn check_file(
                     }
                 }
 
-                // Skip extra-inputs check when case has setup: (mock injection pattern)
-                if !has_setup {
-                    for extra in provided.difference(&declared_set) {
-                        findings.push(ValidationFinding {
-                            severity: Severity::Error,
-                            check: "input_completeness".into(),
-                            file: file.into(),
-                            message: format!("case '{name}' has extra input '{extra}' not declared in operation '{op}'"),
-                        });
+                // Flag extra scalar inputs. Mapping-valued inputs are exempt:
+                // they are mock-response tables, injected by convention rather
+                // than declared as operation parameters.
+                for extra in provided.difference(&declared_set) {
+                    let is_mapping = inputs_map
+                        .and_then(|m| m.get(Value::String(extra.clone())))
+                        .is_some_and(|v| v.as_mapping().is_some());
+                    if is_mapping {
+                        continue;
                     }
+                    findings.push(ValidationFinding {
+                        severity: Severity::Error,
+                        check: "input_completeness".into(),
+                        file: file.into(),
+                        message: format!("case '{name}' has extra input '{extra}' not declared in operation '{op}'"),
+                    });
                 }
             } else {
                 findings.push(ValidationFinding {

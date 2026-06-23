@@ -3,8 +3,6 @@ name: fixture.multi_step
 binding: binding.yaml
 
 operations:
-  make_counter:
-    kind: setup
   increment:
     outputs: [count]
   decrement:
@@ -13,7 +11,6 @@ operations:
 cases:
   - name: increment_then_decrement
     desc: Count goes 0 to 1 to 0
-    setup: make_counter
     steps:
       - operation: increment
       - operation: decrement

@@ -1,0 +1,15 @@
+spec_version: "0.4.0"
+name: fixture.side_effect_setup
+binding: binding.yaml
+
+operations:
+  read_flag:
+    outputs:
+    - $result: i32
+
+cases:
+  - name: setup_side_effect_runs
+    desc: The side-effect setup is invoked before the operation
+    operation: read_flag
+    expected:
+      - $result: "1"

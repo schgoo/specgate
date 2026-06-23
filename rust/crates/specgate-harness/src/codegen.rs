@@ -2,7 +2,7 @@
 //! against the spec's cases and writes a JSON trace to disk.
 
 use crate::scan::{AnnotatedSource, OpDecl};
-use crate::spec::{Case, Setup, Spec};
+use crate::spec::{Case, Spec};
 use serde_yaml::Value;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -361,34 +361,40 @@ fn render_case(out: &mut String, case: &Case, spec: &Spec, annotated: &Annotated
         }
     }
 
-    // Setups: bind to variables.
-    let mut setup_vars: Vec<(String, String)> = Vec::new(); // (var_name, setup_fn_name)
-    match &case.setup {
-        Setup::None => {}
-        Setup::Single(name) => {
-            let sig = annotated.setups.get(name);
-            let args = render_setup_args(sig, &case.inputs);
-            let var = sanitize_ident(name);
-            writeln!(out, "        let mut {var} = fut::{name}({args});").expect("fmt");
-            if let Some(sig) = sig
-                && annotated.spec_event_structs.contains(sig.return_type.trim())
-            {
-                writeln!(out, "        SpecEvent::emit_fields(&{var}, None);").expect("fmt");
-            }
-            setup_vars.push((var, name.clone()));
-        }
-        Setup::Multi(entries) => {
-            for (alias, fn_name) in entries {
-                let sig = annotated.setups.get(fn_name);
-                let args = render_setup_args(sig, &case.inputs);
-                let var = sanitize_ident(alias);
-                writeln!(out, "        let mut {var} = fut::{fn_name}({args});").expect("fmt");
-                if let Some(sig) = sig
-                    && annotated.spec_event_structs.contains(sig.return_type.trim())
-                {
-                    writeln!(out, "        SpecEvent::emit_fields(&{var}, Some({alias:?}));").expect("fmt");
+    // Setups: resolve which setups construct the operation's receiver/params,
+    // build them, and emit their initial SpecEvent fields. Resolution errors
+    // are surfaced earlier (pre-flight in run_group), so unwrap is safe here.
+    let case_ops: Vec<&str> = if !case.steps.is_empty() {
+        case.steps.iter().map(String::as_str).collect()
+    } else if let Some(op) = case.operation.as_deref() {
+        vec![op]
+    } else {
+        vec![]
+    };
+    let bindings = annotated.resolve_case(&case_ops).unwrap_or_default();
+    for b in &bindings {
+        let args = render_construct_args(&b.params, &b.target, &case.inputs);
+        writeln!(out, "        let mut {} = fut::{}({args});", b.var, b.fn_ident).expect("fmt");
+        let ret_ty = annotated
+            .setups
+            .iter()
+            .find(|s| s.sig.fn_ident == b.fn_ident)
+            .map(|s| s.sig.return_type.trim().to_string())
+            .unwrap_or_default();
+        let derives_event = annotated.spec_event_structs.contains(ret_ty.as_str());
+        match &b.target {
+            crate::scan::SetupTarget::Receiver => {
+                if derives_event {
+                    writeln!(out, "        SpecEvent::emit_fields(&{}, None);", b.var).expect("fmt");
                 }
-                setup_vars.push((var, fn_name.clone()));
+            }
+            crate::scan::SetupTarget::Param(p) => {
+                if derives_event {
+                    writeln!(out, "        SpecEvent::emit_fields(&{}, Some({p:?}));", b.var).expect("fmt");
+                }
+            }
+            crate::scan::SetupTarget::SideEffect => {
+                writeln!(out, "        let _ = &{};", b.var).expect("fmt");
             }
         }
     }
@@ -404,7 +410,7 @@ fn render_case(out: &mut String, case: &Case, spec: &Spec, annotated: &Annotated
 
     for op in ops {
         let decl = annotated.operations.get(op);
-        let mut call = render_op_call(op, decl, &case.inputs, &setup_vars, annotated);
+        let mut call = render_op_call(op, decl, &case.inputs, &bindings, annotated);
         if spec.async_ops.contains(op) {
             call = format!("sg_block_on({call})");
         }
@@ -515,11 +521,19 @@ fn build_post_emit(
     .to_string()
 }
 
-fn render_setup_args(sig: Option<&crate::scan::FnSig>, inputs: &BTreeMap<String, Value>) -> String {
-    let Some(sig) = sig else { return String::new() };
+/// Render the construction arguments for a setup call. Values come from the
+/// case inputs, routed by the setup's parameter names. When one setup fills a
+/// named parameter (via `fills`), each construction input may be given per fill
+/// as a flat `<param>_<fills>` input; otherwise the bare `<param>` is used.
+fn render_construct_args(params: &[(String, String)], target: &crate::scan::SetupTarget, inputs: &BTreeMap<String, Value>) -> String {
+    let role: Option<&str> = if let crate::scan::SetupTarget::Param(p) = target {
+        Some(p.as_str())
+    } else {
+        None
+    };
     let mut parts = Vec::new();
-    for (p, ty) in &sig.params {
-        let v = inputs.get(p);
+    for (name, ty) in params {
+        let v = role.and_then(|r| inputs.get(&format!("{name}_{r}"))).or_else(|| inputs.get(name));
         parts.push(value_to_rust(v, ty));
     }
     parts.join(", ")
@@ -529,39 +543,36 @@ fn render_op_call(
     op_name: &str,
     decl: Option<&OpDecl>,
     inputs: &BTreeMap<String, Value>,
-    setup_vars: &[(String, String)],
+    bindings: &[crate::scan::SetupBinding],
     annotated: &AnnotatedSource,
 ) -> String {
     let Some(decl) = decl else {
         return format!("fut::{op_name}()");
     };
 
-    // Method: pick the matching receiver variable.
+    // Method: the receiver is the setup binding that targets the receiver.
     if decl.takes_self {
-        let recv = setup_vars
+        let recv_var = bindings
             .iter()
-            .find(|(_, fn_name)| {
-                annotated
-                    .setups
-                    .get(fn_name)
-                    .is_some_and(|s| decl.method_of.as_deref() == Some(s.return_type.trim()))
-            })
-            .or_else(|| setup_vars.first())
-            .cloned();
-        let recv_var = recv.map_or_else(|| "/* missing receiver */".to_string(), |(v, _)| v);
-        let args = render_op_args(decl, inputs, setup_vars);
+            .find(|b| matches!(b.target, crate::scan::SetupTarget::Receiver))
+            .map_or_else(|| "/* missing receiver */".to_string(), |b| b.var.clone());
+        let args = render_op_args(decl, inputs, bindings);
         return format!("{recv_var}.{}({args})", decl.sig.fn_ident);
     }
 
-    let args = render_op_args(decl, inputs, setup_vars);
+    let _ = annotated;
+    let args = render_op_args(decl, inputs, bindings);
     format!("fut::{}({args})", decl.sig.fn_ident)
 }
 
-fn render_op_args(decl: &OpDecl, inputs: &BTreeMap<String, Value>, setup_vars: &[(String, String)]) -> String {
+fn render_op_args(decl: &OpDecl, inputs: &BTreeMap<String, Value>, bindings: &[crate::scan::SetupBinding]) -> String {
     let mut parts = Vec::new();
     for (p, ty) in &decl.sig.params {
-        // If the param name matches a setup alias, pass that variable.
-        if let Some((var, _)) = setup_vars.iter().find(|(v, _)| v == p) {
+        // If a setup binding fills this parameter, pass its variable.
+        if let Some(b) = bindings
+            .iter()
+            .find(|b| matches!(&b.target, crate::scan::SetupTarget::Param(n) if n == p))
+        {
             let prefix = if ty.starts_with("&mut") {
                 "&mut "
             } else if ty.starts_with('&') {
@@ -569,17 +580,13 @@ fn render_op_args(decl: &OpDecl, inputs: &BTreeMap<String, Value>, setup_vars: &
             } else {
                 ""
             };
-            parts.push(format!("{prefix}{var}"));
+            parts.push(format!("{prefix}{}", b.var));
             continue;
         }
         let v = inputs.get(p);
         parts.push(value_to_rust(v, ty));
     }
     parts.join(", ")
-}
-
-fn sanitize_ident(s: &str) -> String {
-    s.replace(['-', '.', ' '], "_")
 }
 
 fn value_to_rust(v: Option<&Value>, ty: &str) -> String {
@@ -681,7 +688,7 @@ mod tests {
 
     fn empty_annotated() -> AnnotatedSource {
         AnnotatedSource {
-            setups: BTreeMap::new(),
+            setups: Vec::new(),
             operations: BTreeMap::new(),
             spec_event_structs: BTreeSet::new(),
             spec_event_enums: BTreeSet::new(),

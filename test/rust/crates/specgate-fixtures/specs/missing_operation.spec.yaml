@@ -3,15 +3,12 @@ name: fixture.missing_operation
 binding: binding.yaml
 
 operations:
-  make_counter:
-    kind: setup
   increment:
     outputs: [count]
 
 cases:
   - name: increment_once
     desc: References an operation not annotated in source
-    setup: make_counter
     operation: increment
     expected:
       - count: "1"

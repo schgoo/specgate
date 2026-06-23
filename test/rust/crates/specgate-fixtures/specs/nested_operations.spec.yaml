@@ -3,8 +3,6 @@ name: fixture.nested_operations
 binding: binding.yaml
 
 operations:
-  make_account:
-    kind: setup
   transfer:
     inputs: { amount: i32 }
     outputs: [balance]
@@ -18,7 +16,6 @@ operations:
 cases:
   - name: transfer_50
     desc: Transfer calls withdraw then deposit
-    setup: make_account
     operation: transfer
     inputs: { amount: 50 }
     expected:

@@ -1,7 +1,7 @@
 // Mock via call-site interception — on input X return Y.
 use specgate::*;
 
-#[spec_setup("make_service")]
+#[spec_setup("get_user")]
 pub fn make_service() -> UserService {
     UserService { db: RealDb {} }
 }

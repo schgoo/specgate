@@ -3,15 +3,12 @@ name: fixture.statemachine_counter
 binding: binding.yaml
 
 operations:
-  make_counter:
-    kind: setup
   increment:
     outputs: [count]
 
 cases:
   - name: increment_once
     desc: Incrementing counter from 0 produces count 1
-    setup: make_counter
     operation: increment
     expected:
       - count: "0"

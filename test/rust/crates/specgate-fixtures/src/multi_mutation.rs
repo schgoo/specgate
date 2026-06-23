@@ -2,7 +2,7 @@
 // The system must capture every mutation of count, not just boundaries.
 use specgate::*;
 
-#[spec_setup("make_counter")]
+#[spec_setup("increment_twice")]
 pub fn make_counter() -> Counter {
     Counter { count: 0 }
 }

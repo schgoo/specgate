@@ -3,15 +3,12 @@ name: fixture.mismatch_wrong_field
 binding: binding.yaml
 
 operations:
-  make_counter:
-    kind: setup
   increment:
     outputs: [count]
 
 cases:
   - name: increment_once
     desc: Expects 'total' but source produces 'count'
-    setup: make_counter
     operation: increment
     expected:
       - total: "1"

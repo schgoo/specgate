@@ -1,12 +1,13 @@
-// Multiple setup functions — setting up two objects for one operation.
+// Multiple setups constructing two receiver objects for one operation.
+// Same output type (Account) → each setup pins itself with `fills`.
 use specgate::*;
 
-#[spec_setup("make_source")]
+#[spec_setup("transfer", fills = "source")]
 pub fn make_source() -> Account {
     Account { balance: 100 }
 }
 
-#[spec_setup("make_target")]
+#[spec_setup("transfer", fills = "target")]
 pub fn make_target() -> Account {
     Account { balance: 0 }
 }

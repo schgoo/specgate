@@ -2,7 +2,7 @@
 // with a single count field, so $anywhere can match count=0/1/2.
 use specgate::*;
 
-#[spec_setup("make_counter")]
+#[spec_setup("increment_twice")]
 pub fn make_counter() -> Counter {
     Counter { count: 0 }
 }

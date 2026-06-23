@@ -116,13 +116,10 @@ User-authored capture names stay bare (`count`, `shape.radius`,
 | Kind | Description |
 |------|-------------|
 | *(default)* | Regular annotated operation (discovered via `#[spec_operation]`) |
-| `setup` | Factory function that creates state objects |
 | `command` | Shell command — exit 0 = pass |
 
 ```yaml
 operations:
-  make_counter:
-    kind: setup
   increment:
     outputs: [count]
   mechanism_proof:
@@ -171,7 +168,6 @@ cases:
 | `kind` | no | Defaults to a concrete runnable case; `narrative` and `property` are special forms |
 | `operation` | for single-step concrete case | Operation name (must match the operations block) |
 | `steps` | for multi-step | Ordered list of `{operation, inputs?, expected?}` |
-| `setup` | no | Setup operation name (string) or `{alias: setup_name}` map |
 | `inputs` | no | Values bound to operation parameters by name |
 | `expected` | yes | Expected trace assertions (see below) |
 | `target` | no | Per-case binding target override |
@@ -271,13 +267,25 @@ agents but not executed by the harness:
 | `desc` | yes | Constraint in plain language |
 | `verify` | no | Steps to manually verify the constraint |
 
-### `setup`
+### Setups are invisible
 
-A case can name a setup operation:
+Setups never appear in a spec. A spec describes only operations, their
+inputs, and their observable outputs — it never names a constructor, declares
+`kind: setup`, or carries a `setup:` field on a case. How an operation's
+receiver or state objects get built is an implementation concern.
+
+In code, a setup is a function annotated with the **operation** it prepares:
+
+```rust
+#[spec_setup("increment")]            // linked to the operation, not named in the spec
+fn make_counter() -> Counter { Counter { count: 0 } }
+```
+
+The harness matches a setup's return value to the operation's method receiver
+or a parameter **by type**. The spec just runs the operation:
 
 ```yaml
 - name: increment_once
-  setup: make_counter
   operation: increment
   expected:
     - count: "0"
@@ -285,13 +293,30 @@ A case can name a setup operation:
     - count: "1"
 ```
 
-Multi-setup form — aliases map to setup names:
+**Construction inputs** a setup needs are declared as ordinary operation
+inputs and routed to the setup by parameter name:
+
+```yaml
+operations:
+  increment:
+    inputs: { initial: i32 }   # consumed by the setup that builds the counter
+    outputs: [count]
+```
+
+**Disambiguation with `fills`** — when an operation has more than one
+parameter of the setup's output type, or more than one setup produces that
+type, each setup pins its target parameter:
+
+```rust
+#[spec_setup("transfer", fills = "source")]
+fn make_source() -> Account { Account { balance: 100 } }
+
+#[spec_setup("transfer", fills = "target")]
+fn make_target() -> Account { Account { balance: 0 } }
+```
 
 ```yaml
 - name: transfer_between_accounts
-  setup:
-    source: make_source
-    target: make_target
   operation: transfer
   inputs: { amount: 50 }
   expected:
@@ -302,14 +327,19 @@ Multi-setup form — aliases map to setup names:
     - target.balance: "50"
 ```
 
+Multiple `#[spec_setup(..., fills = ...)]` attributes may be stacked on one
+function to build several same-typed parameters. When such parameters need
+distinct construction inputs, give each as a flat input named
+`<param>_<fills>` — e.g. for `make_box(start)` filling `left` and `right`,
+declare `inputs: { start_left: i32, start_right: i32 }`.
+
 ### `inputs`
 
-A flat map of parameter values. Mock response tables go in `inputs`
-keyed by the mock's name:
+A map of parameter values. Mock response tables go in `inputs` keyed by the
+mock's name:
 
 ```yaml
 - name: find_user_1
-  setup: make_service
   operation: get_user
   inputs:
     id: "user_1"
@@ -438,11 +468,11 @@ Canonical fixtures: `operators.spec.yaml`, `scalar_operators.spec.yaml`,
 ### Multi-step cases
 
 Use `steps:` when a case invokes multiple operations against the same
-setup:
+constructed state (the setup that builds the receiver runs once and is shared
+across the steps):
 
 ```yaml
 - name: increment_then_decrement
-  setup: make_counter
   steps:
     - operation: increment
     - operation: decrement

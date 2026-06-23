@@ -3,15 +3,12 @@ name: fixture.subsequence_with_gaps
 binding: binding.yaml
 
 operations:
-  make_counter:
-    kind: setup
   increment_twice:
     outputs: [count]
 
 cases:
   - name: double_increment
     desc: Assert count=0 then count=2, skipping the intermediate count=1
-    setup: make_counter
     operation: increment_twice
     expected:
       - count: "0"

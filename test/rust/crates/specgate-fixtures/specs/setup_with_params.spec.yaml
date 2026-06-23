@@ -3,20 +3,16 @@ name: fixture.setup_with_params
 binding: binding.yaml
 
 operations:
-  make_counter:
-    kind: setup
-    inputs: { initial: i32 }
   increment:
+    inputs: { initial: i32 }
     outputs: [count]
 
 cases:
   - name: start_at_10
     desc: Counter starting at 10 becomes 11 after increment
-    setup:
-      make_counter: { initial: 10 }
     operation: increment
+    inputs: { initial: 10 }
     expected:
-      - make_counter.initial: "10"
       - count: "10"
       - $run: increment
       - count: "11"

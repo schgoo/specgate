@@ -30,6 +30,9 @@ pub struct OpMeta {
     pub is_async: bool,
     pub params: &'static [(&'static str, &'static str)],
     pub return_type: &'static str,
+    /// For setups: the operation parameter this setup fills (empty if unset).
+    /// Used to disambiguate when several params share the setup's output type.
+    pub fills: &'static str,
 }
 
 /// Metadata about a struct/enum that derives `SpecEvent`.
@@ -55,8 +58,8 @@ pub fn discovery_json() -> String {
         }
         let _ = write!(
             out,
-            "{{\"name\":\"{}\",\"module_path\":\"{}\",\"fn_name\":\"{}\",\"is_setup\":{},\"is_async\":{},\"return_type\":\"{}\"}}",
-            op.name, op.module_path, op.fn_name, op.is_setup, op.is_async, op.return_type
+            "{{\"name\":\"{}\",\"module_path\":\"{}\",\"fn_name\":\"{}\",\"is_setup\":{},\"is_async\":{},\"return_type\":\"{}\",\"fills\":\"{}\"}}",
+            op.name, op.module_path, op.fn_name, op.is_setup, op.is_async, op.return_type, op.fills
         );
     }
     out.push_str("],\"types\":[");

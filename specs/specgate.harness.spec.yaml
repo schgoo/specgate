@@ -145,6 +145,26 @@ cases:
       - Reusing the same operation name in different source files does not cause registry symbol collisions
       - specgate_runtime::discovery_json() returns valid JSON listing the registered operations
 
+  - name: invisible_setups
+    kind: narrative
+    desc: >
+      Setups are invisible to the spec: a spec never names a setup function,
+      declares `kind: setup`, or carries `setup:` on a case. A setup is linked
+      in code via #[spec_setup("operation")] and constructs the operation's
+      receiver or a parameter, matched by return type. When several parameters
+      share that type, or several setups produce it, each setup pins its target
+      with fills = "<param>" (which may be stacked to fill several params from
+      one function). Construction inputs are declared as ordinary operation
+      inputs, scoped by parameter role when needed. Side-effect setups (no
+      consumed return) are simply invoked before the operation.
+    verify:
+      - statemachine_counter completes — a method receiver is built by its linked setup
+      - setup_with_params completes — a setup's construction input is a declared operation input
+      - multi_setup completes — two same-typed setups pinned with fills build source and target
+      - shared_setup completes — one stacked-fills setup builds multiple same-typed params
+      - side_effect_setup completes — a non-consumed setup is still invoked before the operation
+      - A method operation with no setup for its receiver fails pre-flight with a precise error
+
   - name: multi_file_operations
     kind: narrative
     desc: >
@@ -983,7 +1003,7 @@ cases:
   # ================================================================
 
   - name: setup_with_input_params
-    desc: Setup function parameters are traced
+    desc: A setup constructs state from a declared operation input (setup stays invisible)
     operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/setup_with_params.spec.yaml
@@ -994,18 +1014,16 @@ cases:
             - name: start_at_10
               status: pass
               expected:
-                - make_counter.initial: "10"
                 - count: "10"
                 - $run: increment
                 - count: "11"
               traces:
-                - Event: { name: make_counter.initial, value: "10" }
                 - Event: { name: count, value: "10" }
                 - Run: { operation: increment }
                 - Event: { name: count, value: "11" }
 
   - name: multiple_setups
-    desc: Two setup functions create two objects for one operation
+    desc: Two setups create two objects for one operation
     operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/multi_setup.spec.yaml
@@ -1025,6 +1043,7 @@ cases:
                 - Event: { name: source.balance, value: "100" }
                 - Event: { name: target.balance, value: "0" }
                 - Run: { operation: transfer }
+                - Event: { name: transfer.amount, value: "50" }
                 - Event: { name: source.balance, value: "50" }
                 - Event: { name: target.balance, value: "50" }
 
@@ -1966,14 +1985,14 @@ cases:
           reason: "binding 'nonexistent' not found"
 
   - name: error_missing_setup
-    desc: Setup not found in source annotations
+    desc: A method operation whose receiver type has no linked setup
     operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/missing_setup.spec.yaml
     expected:
       outcome:
         Error:
-          reason: "setup 'make_counter' not found in source annotations"
+          reason: "case 'increment_once': operation 'increment' is a method on 'Counter' but no #[spec_setup(\"increment\")] returns 'Counter' to construct the receiver"
 
   - name: error_missing_operation
     desc: Operation not found in source annotations

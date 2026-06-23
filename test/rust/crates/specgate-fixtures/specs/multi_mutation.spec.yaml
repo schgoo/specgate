@@ -3,15 +3,12 @@ name: fixture.multi_mutation
 binding: binding.yaml
 
 operations:
-  make_counter:
-    kind: setup
   increment_twice:
     outputs: [count]
 
 cases:
   - name: double_increment
     desc: Count goes from 0 to 2 via two mutations
-    setup: make_counter
     operation: increment_twice
     expected:
       - count: "0"

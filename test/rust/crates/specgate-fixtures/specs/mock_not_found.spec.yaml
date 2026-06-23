@@ -3,8 +3,6 @@ name: fixture.mock_not_found
 binding: binding.yaml
 
 operations:
-  make_service:
-    kind: setup
   get_user:
     inputs: { id: string }
     outputs: [db.request, db.error]
@@ -12,7 +10,6 @@ operations:
 cases:
   - name: query_unknown_user
     desc: Mock called with input not in table
-    setup: make_service
     operation: get_user
     inputs:
       id: "user_99"

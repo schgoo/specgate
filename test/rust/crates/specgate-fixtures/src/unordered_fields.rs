@@ -3,7 +3,7 @@
 // balance and transaction_count events.
 use specgate::*;
 
-#[spec_setup("make_account")]
+#[spec_setup("withdraw")]
 pub fn make_account() -> Account {
     Account { balance: 100, transaction_count: 0 }
 }
