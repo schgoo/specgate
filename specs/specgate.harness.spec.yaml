@@ -167,6 +167,19 @@ cases:
       - No syn-based expression evaluation exists in harness source
       - The harness invokes cargo build/test, never evaluates Rust in-process
 
+  - name: operation_inputs_emitted
+    kind: narrative
+    desc: >
+      Every input parameter of an operation must be emitted to the trace as an
+      `op.param` event, including complex inputs (structs, enums, lists, maps).
+      A single non-primitive parameter must not suppress emission of the other
+      parameters. This lets specs assert on what an operation received, not just
+      what it produced.
+    verify:
+      - Complex (struct/enum/list/map) input parameters appear as op.param events
+      - Primitive parameters are still emitted even when a sibling parameter is complex
+      - Run complex_inputs.spec.yaml — input-echo expectations on lookup, describe_config, and describe_person pass
+
   - name: structured_values_not_stringified
     kind: narrative
     desc: >

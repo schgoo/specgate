@@ -189,6 +189,7 @@ fn multiple_setups() {
             ev("source.balance", 100i64),
             ev("target.balance", 0i64),
             run_op("transfer"),
+            ev("transfer.amount", "50"),
             ev("source.balance", 50i64),
             ev("target.balance", 50i64),
         ]

@@ -89,6 +89,13 @@ fn is_reference(ty: &Type) -> bool {
     matches!(ty, Type::Reference(_))
 }
 
+/// True for `&mut T` parameters. These represent mutable state objects threaded
+/// through an operation (their mutations are captured separately), not value
+/// inputs — so they are excluded from input-echo emission.
+fn is_mut_ref(ty: &Type) -> bool {
+    matches!(ty, Type::Reference(r) if r.mutability.is_some())
+}
+
 /// Like `is_owned_primitive` but also accepts shared references to primitives
 /// (notably `&str`) — the printed value just goes through `format!("{}", x)`.
 fn is_printable_param(ty: &Type) -> bool {
@@ -344,15 +351,21 @@ fn build_pre_stmts(op_name: &str, params: &[(Ident, Type)], is_method: bool, _ha
     if is_method {
         return out;
     }
-    let all_printable = params.iter().all(|(_, t)| is_printable_param(t));
-    if !all_printable {
-        return out;
-    }
-    for (id, _) in params {
+    // Emit every parameter as an `op.param` event. Printable primitives go
+    // through Display; complex types (structs, enums, collections) emit a
+    // structured Value via ToSpecValue. A single complex parameter must not
+    // suppress emission of its primitive siblings.
+    for (id, ty) in params {
         let event_name = format!("{op_name}.{id}");
-        out.push(parse_quote!(
-            #rt::emit_event(#event_name, &::std::format!("{}", #id));
-        ));
+        if is_printable_param(ty) {
+            out.push(parse_quote!(
+                #rt::emit_event(#event_name, &::std::format!("{}", #id));
+            ));
+        } else if !is_mut_ref(ty) {
+            out.push(parse_quote!(
+                #rt::emit_event_v(#event_name, #rt::ToSpecValue::to_spec_value(&#id));
+            ));
+        }
     }
     out
 }

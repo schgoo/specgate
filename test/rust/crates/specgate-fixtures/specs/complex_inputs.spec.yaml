@@ -149,6 +149,8 @@ cases:
     - x: 3
       y: 4
   expected:
+  - sum_points.points:
+      $size: 2
   - $result:
       $match:
         x: '4'
@@ -178,6 +180,10 @@ cases:
       max_retries: 3
       verbose: true
   expected:
+  - describe_config.config:
+      name: my-app
+      max_retries: '3'
+      verbose: 'true'
   - $result: my-app
   - retry_info: retries=3, verbose=true
 - name: area_of_circle
@@ -188,6 +194,9 @@ cases:
       Circle:
         radius: 5
   expected:
+  - area_of_shape.shape:
+      Circle:
+        radius: '5'
   - $result: '78'
 - name: area_of_rectangle
   desc: Different enum variant deserialized
@@ -259,6 +268,11 @@ cases:
       gamma: 3
     key: beta
   expected:
+  - lookup.table:
+      alpha: '1'
+      beta: '2'
+      gamma: '3'
+  - lookup.key: beta
   - $result: '2'
 - name: invert_string_int_map
   desc: Map output serialized as structured Value
@@ -350,6 +364,12 @@ cases:
         street: 123 Main St
         city: Portland
   expected:
+  - describe_person.person:
+      name: Alice
+      age: '30'
+      address:
+        street: 123 Main St
+        city: Portland
   - $result: Alice, age 30
   - city: Portland
 - name: create_person_struct

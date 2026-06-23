@@ -123,6 +123,15 @@ pub fn find_point(points: Vec<Point>, target_x: i32) -> Option<Point> {
     points.into_iter().find(|p| p.x == target_x)
 }
 
+#[spec_operation("find_shape")]
+pub fn find_shape(sides: i32) -> Option<Shape> {
+    match sides {
+        1 => Some(Shape::Circle { radius: 5 }),
+        0 => Some(Shape::Point),
+        _ => None,
+    }
+}
+
 #[spec_operation("describe_person")]
 pub fn describe_person(person: Person) -> String {
     let result = format!("{}, age {}", person.name, person.age);
