@@ -591,6 +591,7 @@ fn check_shape(spec: &spec::Spec, raw: &serde_yaml::Value) -> Option<String> {
             allowed.insert("$outcome".into());
             allowed.insert("$error".into());
             allowed.insert("$value".into());
+            allowed.insert("$fault".into());
         }
 
         for entry in &case.expected {
@@ -604,11 +605,12 @@ fn check_shape(spec: &spec::Spec, raw: &serde_yaml::Value) -> Option<String> {
                 if case_ops.iter().any(|op| k.starts_with(&format!("{op}."))) {
                     continue;
                 }
-                let strict_op = case_ops.iter().find(|op| {
-                    ops_meta
-                        .get(**op)
-                        .is_some_and(|m| !m.outputs.is_empty() && m.outputs.iter().all(|o| o.starts_with(&format!("{op}."))))
-                });
+                // Schema check: a case must not assert on an output name the
+                // operation never declares. If the operation declares any
+                // outputs, a leaf that is neither in the allowed set nor a
+                // `{op}.`-prefixed event (handled just above) is a schema
+                // violation — a pre-flight harness Error, not a case failure.
+                let strict_op = case_ops.iter().find(|op| ops_meta.get(**op).is_some_and(|m| !m.outputs.is_empty()));
                 if let Some(op) = strict_op {
                     return Some(format!("expected event '{k}' is not a declared output of operation '{op}'"));
                 }
@@ -658,12 +660,118 @@ fn ops_metadata(raw: &serde_yaml::Value) -> std::collections::BTreeMap<String, O
         }
         if let Some(serde_yaml::Value::Sequence(outs)) = body.get(serde_yaml::Value::String("outputs".into())) {
             for o in outs {
+                // Per the schema, an output entry is either a bare string event
+                // name (`count`) or an object mapping event name(s) to a type
+                // reference. The value may be a scalar type (`i32`), a complex
+                // `oneof:` block, or `{}`; we only need the event name(s) here.
+                // Mappings are single-key by convention, but we register every
+                // key so a multi-key entry can never silently drop an output.
                 if let Some(s) = o.as_str() {
                     meta.outputs.push(s.to_string());
+                } else if let Some(m) = o.as_mapping() {
+                    for (k, _) in m {
+                        if let Some(s) = k.as_str() {
+                            meta.outputs.push(s.to_string());
+                        }
+                    }
                 }
             }
         }
         out.insert(name, meta);
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ops_metadata;
+
+    fn meta(yaml: &str) -> std::collections::BTreeMap<String, super::OpMeta> {
+        let raw: serde_yaml::Value = serde_yaml::from_str(yaml).expect("valid yaml");
+        ops_metadata(&raw)
+    }
+
+    #[test]
+    fn parses_bare_string_outputs() {
+        let m = meta("operations:\n  increment:\n    outputs: [count]\n");
+        assert_eq!(m["increment"].outputs, vec!["count".to_string()]);
+    }
+
+    #[test]
+    fn parses_single_key_scalar_outputs() {
+        let m = meta("operations:\n  divide:\n    inputs: { a: i32, b: i32 }\n    outputs:\n      - $result: i32\n");
+        assert_eq!(m["divide"].outputs, vec!["$result".to_string()]);
+        assert_eq!(m["divide"].inputs, vec!["a".to_string(), "b".to_string()]);
+    }
+
+    #[test]
+    fn parses_string_typed_collection_outputs() {
+        // The value is a string type ref like `List<Point>`; only the event
+        // name (`$result`) is registered as an output.
+        let m = meta("operations:\n  get_points:\n    outputs:\n      - $result: \"List<Point>\"\n");
+        assert_eq!(m["get_points"].outputs, vec!["$result".to_string()]);
+    }
+
+    #[test]
+    fn parses_structured_collection_outputs() {
+        // Collection output whose value is itself a `{type: list, items: ...}`
+        // mapping. Only the outer event name is registered; the nested
+        // type/items keys must NOT leak in as outputs.
+        let yaml = "operations:\n  resolve:\n    outputs:\n      - entity_name: string\n      - key_properties:\n          type: list\n          items: string\n";
+        let m = meta(yaml);
+        assert_eq!(
+            m["resolve"].outputs,
+            vec!["entity_name".to_string(), "key_properties".to_string()],
+            "nested type/items keys must not be registered as outputs"
+        );
+    }
+
+    #[test]
+    fn parses_map_outputs() {
+        // `{type: map, keys, values}` — only `$result` is an output; the
+        // nested keys/values/type keys must not leak.
+        let yaml = "operations:\n  invert:\n    outputs:\n      - $result:\n          type: map\n          keys: string\n          values: string\n";
+        let m = meta(yaml);
+        assert_eq!(m["invert"].outputs, vec!["$result".to_string()]);
+    }
+
+    #[test]
+    fn parses_set_outputs() {
+        let yaml = "operations:\n  tags:\n    outputs:\n      - $result:\n          type: set\n          items: string\n";
+        let m = meta(yaml);
+        assert_eq!(m["tags"].outputs, vec!["$result".to_string()]);
+    }
+
+    #[test]
+    fn parses_nested_list_of_structs_outputs() {
+        // `{type: list, fields: {...}}` — the nested `fields` map (and its
+        // own keys) must not be registered as outputs.
+        let yaml = "operations:\n  cols:\n    outputs:\n      - $result:\n          type: list\n          fields:\n            name: string\n            nullable: string\n";
+        let m = meta(yaml);
+        assert_eq!(m["cols"].outputs, vec!["$result".to_string()]);
+    }
+
+    #[test]
+    fn parses_enum_typed_outputs() {
+        // Enum return type is a bare type-name string value; only `$result`
+        // is registered.
+        let m = meta("operations:\n  classify:\n    outputs:\n      - $result: Shape\n");
+        assert_eq!(m["classify"].outputs, vec!["$result".to_string()]);
+    }
+
+    #[test]
+    fn parses_complex_oneof_outputs() {
+        let yaml =
+            "operations:\n  run:\n    outputs:\n      - outcome:\n          oneof:\n            Complete: {}\n            Error: {}\n";
+        let m = meta(yaml);
+        assert_eq!(m["run"].outputs, vec!["outcome".to_string()]);
+    }
+
+    #[test]
+    fn registers_every_key_of_a_multi_key_output_entry() {
+        // The schema permits (though no spec uses) a multi-key output object;
+        // every key must be registered so none is silently dropped.
+        let m = meta("operations:\n  op:\n    outputs:\n      - { a: i32, b: i32 }\n");
+        assert_eq!(m["op"].outputs, vec!["a".to_string(), "b".to_string()]);
+    }
 }

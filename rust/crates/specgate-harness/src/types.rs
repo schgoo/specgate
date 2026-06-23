@@ -54,7 +54,7 @@ pub enum Matcher {
     Contains(Box<AnyArg>),
     ContainsAll(Vec<Value>),
     Excludes(Vec<Value>),
-    Match(BTreeMap<String, Value>),
+    Match(BTreeMap<String, AssertValue>),
     Exists(bool),
     Any(Box<AnyArg>),
     Every(Box<AnyArg>),

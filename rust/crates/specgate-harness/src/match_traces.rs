@@ -134,7 +134,12 @@ fn matcher_matches(m: &Matcher, v: &Value) -> bool {
             .iter()
             .all(|it| !matcher_matches(&Matcher::Contains(Box::new(AnyArg::Value(it.clone()))), v)),
         Matcher::Match(spec) => match v {
-            Value::Map(m) => spec.iter().all(|(k, val)| m.get(k).is_some_and(|av| values_equal(val, av))),
+            Value::Map(m) => spec.iter().all(|(k, av)| {
+                m.get(k).is_some_and(|actual| match av {
+                    AssertValue::Exact(val) => values_equal(val, actual),
+                    AssertValue::Matcher(inner) => matcher_matches(inner, actual),
+                })
+            }),
             _ => false,
         },
         Matcher::Exists(_) => true, // handled at find_leaf level

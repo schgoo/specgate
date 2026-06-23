@@ -362,7 +362,7 @@ fn parse_single_op(op: &str, v: &YValue) -> Result<Matcher, ParseError> {
                     .as_str()
                     .ok_or_else(|| ParseError::Shape("$match key not string".into()))?
                     .to_string();
-                out.insert(key, parse_value(v)?);
+                out.insert(key, parse_assert_value(v)?);
             }
             Ok(Matcher::Match(out))
         }

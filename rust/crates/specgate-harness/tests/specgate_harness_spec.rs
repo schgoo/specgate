@@ -375,8 +375,10 @@ fn mismatch_missing_field() {
 
 #[test]
 fn mismatch_wrong_field_name() {
-    let r = complete(run("test/rust/crates/specgate-fixtures/specs/mismatch_wrong_field.spec.yaml"));
-    check_case(&r[0], "increment_once", CaseStatus::Fail);
+    // Asserting on an output name the operation does not declare is a schema
+    // violation — a pre-flight harness Error, not a case failure.
+    let reason = err_reason(run("test/rust/crates/specgate-fixtures/specs/mismatch_wrong_field.spec.yaml"));
+    assert_eq!(reason, "expected event 'total' is not a declared output of operation 'increment'");
 }
 
 #[test]

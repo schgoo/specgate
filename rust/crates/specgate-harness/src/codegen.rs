@@ -644,10 +644,17 @@ fn value_to_rust(v: Option<&Value>, ty: &str) -> String {
     }
 }
 
-/// Emit a `serde_yaml::from_str::<Type>(r#"..."#).unwrap()` expression.
+/// Emit a deserialization expression for a named type from the spec value.
+///
+/// Uses `singleton_map_recursive` so externally-tagged enums are read in the
+/// canonical `{ Variant: data }` form (matching the spec's trace format) rather
+/// than `serde_yaml`'s default `!Variant` tag syntax. Structs, maps, sequences,
+/// and scalars pass through unchanged.
 fn yaml_deser(v: &Value, ty: &str) -> String {
     let yaml_str = serde_yaml::to_string(v).unwrap_or_else(|_| "~\n".to_string());
-    format!("serde_yaml::from_str::<{ty}>({yaml_str:?}).unwrap()")
+    format!(
+        "{{ let __sg_v: {ty} = serde_yaml::with::singleton_map_recursive::deserialize(serde_yaml::Deserializer::from_str({yaml_str:?})).unwrap(); __sg_v }}"
+    )
 }
 
 /// Extract the inner type from `Option<T>`.

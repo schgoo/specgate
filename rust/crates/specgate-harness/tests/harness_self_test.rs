@@ -44,6 +44,10 @@ fn all_fixture_specs_complete() {
         "missing_setup",
         "missing_target",
         "no_cases",
+        // Schema violations: a case asserts on an output the operation never
+        // declares — caught pre-flight as an error, not a case failure.
+        "shape_mismatch",
+        "mismatch_wrong_field",
     ];
 
     // Specs not yet implemented — skip entirely
@@ -58,8 +62,6 @@ fn all_fixture_specs_complete() {
         "property_no_calls",
         "property_no_assert",
         "property_bad_ref",
-        // Complex inputs codegen not fully wired
-        "complex_inputs",
         // Command target (not a source fixture)
         "command_target",
     ];
