@@ -1,6 +1,6 @@
 // Complex input/output types: structs, enums, lists, maps, and optionals.
+use serde::{Deserialize, Serialize};
 use specgate::*;
-use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 
 // ---------------------------------------------------------------------------
@@ -101,7 +101,10 @@ pub fn area_of_shape(shape: Shape) -> i32 {
 #[spec_operation("classify")]
 pub fn classify(sides: i32) -> Shape {
     match sides {
-        4 => Shape::Rectangle { width: 3, height: 4 },
+        4 => Shape::Rectangle {
+            width: 3,
+            height: 4,
+        },
         1 => Shape::Point,
         _ => Shape::Circle { radius: 5 },
     }

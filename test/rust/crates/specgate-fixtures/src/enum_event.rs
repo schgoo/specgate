@@ -13,7 +13,10 @@ pub fn classify(sides: i32) -> Shape {
     match sides {
         0 => Shape::Point,
         1 => Shape::Circle { radius: 5.0 },
-        4 => Shape::Rectangle { width: 3.0, height: 4.0 },
+        4 => Shape::Rectangle {
+            width: 3.0,
+            height: 4.0,
+        },
         _ => Shape::Point,
     }
 }

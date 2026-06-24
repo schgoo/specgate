@@ -14,6 +14,7 @@
 spec_version: "0.4.0"
 name: specgate.harness
 binding: bindings/rust.yaml
+target: run_spec
 
 types:
   Value:
@@ -114,23 +115,23 @@ cases:
 
   - name: harness_compiles_and_emits_traces
     operation: mechanism_proof
+    target: mechanism_proof
     desc: >
       Annotations expand into real trace-emitting code at compile time.
       Calling annotated functions and checking traces proves compilation
       happened and macros are not no-ops.
     expected:
-      outcome:
-        Complete: {}
+      - $outcome: "Complete"
 
   - name: fixtures_compile
     operation: check_fixtures
+    target: check_fixtures
     desc: >
       The specgate-fixtures crate must compile with the current annotations.
       This forces the annotations crate to handle #[derive(SpecEvent)],
       #[spec_operation], #[spec_setup], #[spec_mock], and spec_trace!.
     expected:
-      outcome:
-        Complete: {}
+      - $outcome: "Complete"
 
   - name: discovery_registry_handles_methods_and_duplicates
     kind: narrative
@@ -305,18 +306,18 @@ cases:
     inputs:
       spec: test/fixtures/nested/deep/path/nested_path.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: add_from_nested_path
-              status: pass
-              expected:
-                - $result: "30"
-              traces:
-                - Run: { operation: add }
-                - Event: { name: add.a, value: "10" }
-                - Event: { name: add.b, value: "20" }
-                - Event: { name: $result, value: "30" }
+      - $result:
+          Complete:
+            results:
+              - name: add_from_nested_path
+                status: pass
+                expected:
+                  - $result: "30"
+                traces:
+                  - Run: { operation: add }
+                  - Event: { name: add.a, value: "10" }
+                  - Event: { name: add.b, value: "20" }
+                  - Event: { name: $result, value: "30" }
 
   - name: target_selection
     desc: >
@@ -326,17 +327,17 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/target_selection.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: greet_world
-              status: pass
-              expected:
-                - $result: "Hello, World!"
-              traces:
-                - Run: { operation: greet }
-                - Event: { name: greet.name, value: "World" }
-                - Event: { name: $result, value: "Hello, World!" }
+      - $result:
+          Complete:
+            results:
+              - name: greet_world
+                status: pass
+                expected:
+                  - $result: "Hello, World!"
+                traces:
+                  - Run: { operation: greet }
+                  - Event: { name: greet.name, value: "World" }
+                  - Event: { name: $result, value: "Hello, World!" }
 
   - name: per_case_target_override
     desc: >
@@ -347,26 +348,26 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/per_case_target.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: add_from_default
-              status: pass
-              expected:
-                - $result: "3"
-              traces:
-                - Run: { operation: add }
-                - Event: { name: add.a, value: "1" }
-                - Event: { name: add.b, value: "2" }
-                - Event: { name: $result, value: "3" }
-            - name: greet_from_alt
-              status: pass
-              expected:
-                - $result: "Hello, Test!"
-              traces:
-                - Run: { operation: greet }
-                - Event: { name: greet.name, value: "Test" }
-                - Event: { name: $result, value: "Hello, Test!" }
+      - $result:
+          Complete:
+            results:
+              - name: add_from_default
+                status: pass
+                expected:
+                  - $result: "3"
+                traces:
+                  - Run: { operation: add }
+                  - Event: { name: add.a, value: "1" }
+                  - Event: { name: add.b, value: "2" }
+                  - Event: { name: $result, value: "3" }
+              - name: greet_from_alt
+                status: pass
+                expected:
+                  - $result: "Hello, Test!"
+                traces:
+                  - Run: { operation: greet }
+                  - Event: { name: greet.name, value: "Test" }
+                  - Event: { name: $result, value: "Hello, Test!" }
 
   - name: missing_target_error
     desc: Spec references a target that doesn't exist in the binding
@@ -374,9 +375,9 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/missing_target.spec.yaml
     expected:
-      outcome:
-        Error:
-          reason: "target 'nonexistent' not found in binding"
+      - $result:
+          Error:
+            reason: "target 'nonexistent' not found in binding"
 
   - name: no_vacuous_match
     desc: >
@@ -386,13 +387,13 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/vacuous_match.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: wrong_value_fails
-              status: fail
-            - name: wrong_run_fails
-              status: fail
+      - $result:
+          Complete:
+            results:
+              - name: wrong_value_fails
+                status: fail
+              - name: wrong_run_fails
+                status: fail
 
   - name: self_test_rejects_all_errors
     desc: >
@@ -403,18 +404,18 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/stateless_add.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: add_2_3
-              status: pass
-              expected:
-                - $result: "5"
-              traces:
-                - Run: { operation: add }
-                - Event: { name: add.a, value: "2" }
-                - Event: { name: add.b, value: "3" }
-                - Event: { name: $result, value: "5" }
+      - $result:
+          Complete:
+            results:
+              - name: add_2_3
+                status: pass
+                expected:
+                  - $result: "5"
+                traces:
+                  - Run: { operation: add }
+                  - Event: { name: add.a, value: "2" }
+                  - Event: { name: add.b, value: "3" }
+                  - Event: { name: $result, value: "5" }
 
   # ================================================================
   # Crate dependency — #[path] inclusion cannot work (#7)
@@ -430,18 +431,18 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/cross_dep.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: extract_yaml_value
-              status: pass
-              expected:
-                - $result: "Customer"
-              traces:
-                - Run: { operation: parse_yaml_key }
-                - Event: { name: parse_yaml_key.input, value: "name: Customer\nid: 42" }
-                - Event: { name: parse_yaml_key.key, value: "name" }
-                - Event: { name: $result, value: "Customer" }
+      - $result:
+          Complete:
+            results:
+              - name: extract_yaml_value
+                status: pass
+                expected:
+                  - $result: "Customer"
+                traces:
+                  - Run: { operation: parse_yaml_key }
+                  - Event: { name: parse_yaml_key.input, value: "name: Customer\nid: 42" }
+                  - Event: { name: parse_yaml_key.key, value: "name" }
+                  - Event: { name: $result, value: "Customer" }
 
   # ================================================================
   # Structured values — lists, maps, sets, $-operators
@@ -453,141 +454,141 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/operators.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: eq_scalar
-              status: pass
-              expected:
-                - product_name: { $eq: "Milk" }
-              traces:
-                - Run: { operation: get_product }
-                - Event: { name: product_name, value: "Milk" }
-                - Event: { name: price, value: "4" }
-                - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
-                - Event: { name: attributes, value: { category: "food", origin: "local" } }
-                - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
-            - name: size_list
-              status: pass
-              expected:
-                - tags: { $size: 3 }
-              traces:
-                - Run: { operation: get_product }
-                - Event: { name: product_name, value: "Milk" }
-                - Event: { name: price, value: "4" }
-                - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
-                - Event: { name: attributes, value: { category: "food", origin: "local" } }
-                - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
-            - name: size_map
-              status: pass
-              expected:
-                - attributes: { $size: 2 }
-              traces:
-                - Run: { operation: get_product }
-                - Event: { name: product_name, value: "Milk" }
-                - Event: { name: price, value: "4" }
-                - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
-                - Event: { name: attributes, value: { category: "food", origin: "local" } }
-                - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
-            - name: contains_single
-              status: pass
-              expected:
-                - tags: { $contains: "dairy" }
-              traces:
-                - Run: { operation: get_product }
-                - Event: { name: product_name, value: "Milk" }
-                - Event: { name: price, value: "4" }
-                - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
-                - Event: { name: attributes, value: { category: "food", origin: "local" } }
-                - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
-            - name: contains_all
-              status: pass
-              expected:
-                - tags: { $containsAll: ["dairy", "organic"] }
-              traces:
-                - Run: { operation: get_product }
-                - Event: { name: product_name, value: "Milk" }
-                - Event: { name: price, value: "4" }
-                - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
-                - Event: { name: attributes, value: { category: "food", origin: "local" } }
-                - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
-            - name: excludes_values
-              status: pass
-              expected:
-                - tags: { $excludes: ["expired", "recalled"] }
-              traces:
-                - Run: { operation: get_product }
-                - Event: { name: product_name, value: "Milk" }
-                - Event: { name: price, value: "4" }
-                - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
-                - Event: { name: attributes, value: { category: "food", origin: "local" } }
-                - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
-            - name: excludes_fails_when_present
-              status: fail
-              expected:
-                - tags: { $excludes: ["dairy"] }
-              traces:
-                - Run: { operation: get_product }
-                - Event: { name: product_name, value: "Milk" }
-                - Event: { name: price, value: "4" }
-                - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
-                - Event: { name: attributes, value: { category: "food", origin: "local" } }
-                - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
-            - name: match_partial_object
-              status: pass
-              expected:
-                - attributes: { $match: { "category": "food" } }
-              traces:
-                - Run: { operation: get_product }
-                - Event: { name: product_name, value: "Milk" }
-                - Event: { name: price, value: "4" }
-                - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
-                - Event: { name: attributes, value: { category: "food", origin: "local" } }
-                - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
-            - name: exists_field
-              status: pass
-              expected:
-                - product_name: { $exists: true }
-              traces:
-                - Run: { operation: get_product }
-                - Event: { name: product_name, value: "Milk" }
-                - Event: { name: price, value: "4" }
-                - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
-                - Event: { name: attributes, value: { category: "food", origin: "local" } }
-                - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
-            - name: any_with_matcher
-              status: pass
-              expected:
-                - tags: { $any: { $matches: "^org" } }
-              traces:
-                - Run: { operation: get_product }
-                - Event: { name: product_name, value: "Milk" }
-                - Event: { name: price, value: "4" }
-                - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
-                - Event: { name: attributes, value: { category: "food", origin: "local" } }
-                - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
-            - name: type_check
-              status: pass
-              expected:
-                - product_name: { $type: "string" }
-              traces:
-                - Run: { operation: get_product }
-                - Event: { name: product_name, value: "Milk" }
-                - Event: { name: price, value: "4" }
-                - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
-                - Event: { name: attributes, value: { category: "food", origin: "local" } }
-                - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
-            - name: composed_operators
-              status: pass
-              expected:
-                - tags: { $size: 3, $containsAll: ["dairy", "organic", "local"] }
-              traces:
-                - Run: { operation: get_product }
-                - Event: { name: product_name, value: "Milk" }
-                - Event: { name: price, value: "4" }
-                - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
-                - Event: { name: attributes, value: { category: "food", origin: "local" } }
-                - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
+      - $result:
+          Complete:
+            results:
+              - name: eq_scalar
+                status: pass
+                expected:
+                  - product_name: { $eq: "Milk" }
+                traces:
+                  - Run: { operation: get_product }
+                  - Event: { name: product_name, value: "Milk" }
+                  - Event: { name: price, value: "4" }
+                  - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
+                  - Event: { name: attributes, value: { category: "food", origin: "local" } }
+                  - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
+              - name: size_list
+                status: pass
+                expected:
+                  - tags: { $size: 3 }
+                traces:
+                  - Run: { operation: get_product }
+                  - Event: { name: product_name, value: "Milk" }
+                  - Event: { name: price, value: "4" }
+                  - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
+                  - Event: { name: attributes, value: { category: "food", origin: "local" } }
+                  - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
+              - name: size_map
+                status: pass
+                expected:
+                  - attributes: { $size: 2 }
+                traces:
+                  - Run: { operation: get_product }
+                  - Event: { name: product_name, value: "Milk" }
+                  - Event: { name: price, value: "4" }
+                  - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
+                  - Event: { name: attributes, value: { category: "food", origin: "local" } }
+                  - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
+              - name: contains_single
+                status: pass
+                expected:
+                  - tags: { $contains: "dairy" }
+                traces:
+                  - Run: { operation: get_product }
+                  - Event: { name: product_name, value: "Milk" }
+                  - Event: { name: price, value: "4" }
+                  - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
+                  - Event: { name: attributes, value: { category: "food", origin: "local" } }
+                  - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
+              - name: contains_all
+                status: pass
+                expected:
+                  - tags: { $containsAll: ["dairy", "organic"] }
+                traces:
+                  - Run: { operation: get_product }
+                  - Event: { name: product_name, value: "Milk" }
+                  - Event: { name: price, value: "4" }
+                  - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
+                  - Event: { name: attributes, value: { category: "food", origin: "local" } }
+                  - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
+              - name: excludes_values
+                status: pass
+                expected:
+                  - tags: { $excludes: ["expired", "recalled"] }
+                traces:
+                  - Run: { operation: get_product }
+                  - Event: { name: product_name, value: "Milk" }
+                  - Event: { name: price, value: "4" }
+                  - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
+                  - Event: { name: attributes, value: { category: "food", origin: "local" } }
+                  - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
+              - name: excludes_fails_when_present
+                status: fail
+                expected:
+                  - tags: { $excludes: ["dairy"] }
+                traces:
+                  - Run: { operation: get_product }
+                  - Event: { name: product_name, value: "Milk" }
+                  - Event: { name: price, value: "4" }
+                  - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
+                  - Event: { name: attributes, value: { category: "food", origin: "local" } }
+                  - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
+              - name: match_partial_object
+                status: pass
+                expected:
+                  - attributes: { $match: { "category": "food" } }
+                traces:
+                  - Run: { operation: get_product }
+                  - Event: { name: product_name, value: "Milk" }
+                  - Event: { name: price, value: "4" }
+                  - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
+                  - Event: { name: attributes, value: { category: "food", origin: "local" } }
+                  - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
+              - name: exists_field
+                status: pass
+                expected:
+                  - product_name: { $exists: true }
+                traces:
+                  - Run: { operation: get_product }
+                  - Event: { name: product_name, value: "Milk" }
+                  - Event: { name: price, value: "4" }
+                  - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
+                  - Event: { name: attributes, value: { category: "food", origin: "local" } }
+                  - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
+              - name: any_with_matcher
+                status: pass
+                expected:
+                  - tags: { $any: { $matches: "^org" } }
+                traces:
+                  - Run: { operation: get_product }
+                  - Event: { name: product_name, value: "Milk" }
+                  - Event: { name: price, value: "4" }
+                  - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
+                  - Event: { name: attributes, value: { category: "food", origin: "local" } }
+                  - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
+              - name: type_check
+                status: pass
+                expected:
+                  - product_name: { $type: "string" }
+                traces:
+                  - Run: { operation: get_product }
+                  - Event: { name: product_name, value: "Milk" }
+                  - Event: { name: price, value: "4" }
+                  - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
+                  - Event: { name: attributes, value: { category: "food", origin: "local" } }
+                  - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
+              - name: composed_operators
+                status: pass
+                expected:
+                  - tags: { $size: 3, $containsAll: ["dairy", "organic", "local"] }
+                traces:
+                  - Run: { operation: get_product }
+                  - Event: { name: product_name, value: "Milk" }
+                  - Event: { name: price, value: "4" }
+                  - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
+                  - Event: { name: attributes, value: { category: "food", origin: "local" } }
+                  - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
 
   - name: structured_list_matching
     desc: List outputs match with exact, $contains, $size, $any operators
@@ -595,61 +596,61 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/structured_output.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: list_exact_match
-              status: pass
-              expected:
-                - entity_name: "Customer"
-                - key_properties: ["ID"]
-                - structural_properties: ["ID", "Name", "Email"]
-              traces:
-                - Run: { operation: resolve_entity }
-                - Event: { name: entity_name, value: "Customer" }
-                - Event: { name: key_properties, value: [ "ID" ] }
-                - Event: { name: structural_properties, value: [ "ID", "Name", "Email" ] }
-                - Event: { name: $result, value: { entity_name: "Customer", key_properties: [ "ID" ], structural_properties: [ "ID", "Name", "Email" ] } }
-            - name: list_contains_check
-              status: pass
-              expected:
-                - structural_properties: { $contains: "Name" }
-              traces:
-                - Run: { operation: resolve_entity }
-                - Event: { name: entity_name, value: "Customer" }
-                - Event: { name: key_properties, value: [ "ID" ] }
-                - Event: { name: structural_properties, value: [ "ID", "Name", "Email" ] }
-                - Event: { name: $result, value: { entity_name: "Customer", key_properties: [ "ID" ], structural_properties: [ "ID", "Name", "Email" ] } }
-            - name: list_size_check
-              status: pass
-              expected:
-                - structural_properties: { $size: 3 }
-              traces:
-                - Run: { operation: resolve_entity }
-                - Event: { name: entity_name, value: "Customer" }
-                - Event: { name: key_properties, value: [ "ID" ] }
-                - Event: { name: structural_properties, value: [ "ID", "Name", "Email" ] }
-                - Event: { name: $result, value: { entity_name: "Customer", key_properties: [ "ID" ], structural_properties: [ "ID", "Name", "Email" ] } }
-            - name: list_any_operator
-              status: pass
-              expected:
-                - key_properties: { $any: "ID" }
-              traces:
-                - Run: { operation: resolve_entity }
-                - Event: { name: entity_name, value: "Customer" }
-                - Event: { name: key_properties, value: [ "ID" ] }
-                - Event: { name: structural_properties, value: [ "ID", "Name", "Email" ] }
-                - Event: { name: $result, value: { entity_name: "Customer", key_properties: [ "ID" ], structural_properties: [ "ID", "Name", "Email" ] } }
-            - name: list_wrong_value_fails
-              status: fail
-              expected:
-                - key_properties: ["NonexistentKey"]
-              traces:
-                - Run: { operation: resolve_entity }
-                - Event: { name: entity_name, value: "Customer" }
-                - Event: { name: key_properties, value: [ "ID" ] }
-                - Event: { name: structural_properties, value: [ "ID", "Name", "Email" ] }
-                - Event: { name: $result, value: { entity_name: "Customer", key_properties: [ "ID" ], structural_properties: [ "ID", "Name", "Email" ] } }
+      - $result:
+          Complete:
+            results:
+              - name: list_exact_match
+                status: pass
+                expected:
+                  - entity_name: "Customer"
+                  - key_properties: ["ID"]
+                  - structural_properties: ["ID", "Name", "Email"]
+                traces:
+                  - Run: { operation: resolve_entity }
+                  - Event: { name: entity_name, value: "Customer" }
+                  - Event: { name: key_properties, value: [ "ID" ] }
+                  - Event: { name: structural_properties, value: [ "ID", "Name", "Email" ] }
+                  - Event: { name: $result, value: { entity_name: "Customer", key_properties: [ "ID" ], structural_properties: [ "ID", "Name", "Email" ] } }
+              - name: list_contains_check
+                status: pass
+                expected:
+                  - structural_properties: { $contains: "Name" }
+                traces:
+                  - Run: { operation: resolve_entity }
+                  - Event: { name: entity_name, value: "Customer" }
+                  - Event: { name: key_properties, value: [ "ID" ] }
+                  - Event: { name: structural_properties, value: [ "ID", "Name", "Email" ] }
+                  - Event: { name: $result, value: { entity_name: "Customer", key_properties: [ "ID" ], structural_properties: [ "ID", "Name", "Email" ] } }
+              - name: list_size_check
+                status: pass
+                expected:
+                  - structural_properties: { $size: 3 }
+                traces:
+                  - Run: { operation: resolve_entity }
+                  - Event: { name: entity_name, value: "Customer" }
+                  - Event: { name: key_properties, value: [ "ID" ] }
+                  - Event: { name: structural_properties, value: [ "ID", "Name", "Email" ] }
+                  - Event: { name: $result, value: { entity_name: "Customer", key_properties: [ "ID" ], structural_properties: [ "ID", "Name", "Email" ] } }
+              - name: list_any_operator
+                status: pass
+                expected:
+                  - key_properties: { $any: "ID" }
+                traces:
+                  - Run: { operation: resolve_entity }
+                  - Event: { name: entity_name, value: "Customer" }
+                  - Event: { name: key_properties, value: [ "ID" ] }
+                  - Event: { name: structural_properties, value: [ "ID", "Name", "Email" ] }
+                  - Event: { name: $result, value: { entity_name: "Customer", key_properties: [ "ID" ], structural_properties: [ "ID", "Name", "Email" ] } }
+              - name: list_wrong_value_fails
+                status: fail
+                expected:
+                  - key_properties: ["NonexistentKey"]
+                traces:
+                  - Run: { operation: resolve_entity }
+                  - Event: { name: entity_name, value: "Customer" }
+                  - Event: { name: key_properties, value: [ "ID" ] }
+                  - Event: { name: structural_properties, value: [ "ID", "Name", "Email" ] }
+                  - Event: { name: $result, value: { entity_name: "Customer", key_properties: [ "ID" ], structural_properties: [ "ID", "Name", "Email" ] } }
 
   - name: structured_map_matching
     desc: Map outputs match with key-value, subset, $size operators
@@ -657,41 +658,41 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/structured_map.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: map_key_value_match
-              status: pass
-              expected:
-                - $result: {"ID": "1", "Name": "Customer"}
-              traces:
-                - Run: { operation: get_entity_values }
-                - Event: { name: get_entity_values.id, value: "1" }
-                - Event: { name: $result, value: {"ID": "1", "Name": "Customer", "Email": "cust@example.com"} }
-            - name: map_subset_match
-              status: pass
-              expected:
-                - $result: {"ID": "1"}
-              traces:
-                - Run: { operation: get_entity_values }
-                - Event: { name: get_entity_values.id, value: "1" }
-                - Event: { name: $result, value: {"ID": "1", "Name": "Customer", "Email": "cust@example.com"} }
-            - name: map_wrong_value_fails
-              status: fail
-              expected:
-                - $result: {"ID": "999"}
-              traces:
-                - Run: { operation: get_entity_values }
-                - Event: { name: get_entity_values.id, value: "1" }
-                - Event: { name: $result, value: {"ID": "1", "Name": "Customer", "Email": "cust@example.com"} }
-            - name: map_size_check
-              status: pass
-              expected:
-                - $result: { $size: 3 }
-              traces:
-                - Run: { operation: get_entity_values }
-                - Event: { name: get_entity_values.id, value: "1" }
-                - Event: { name: $result, value: {"ID": "1", "Name": "Customer", "Email": "cust@example.com"} }
+      - $result:
+          Complete:
+            results:
+              - name: map_key_value_match
+                status: pass
+                expected:
+                  - $result: {"ID": "1", "Name": "Customer"}
+                traces:
+                  - Run: { operation: get_entity_values }
+                  - Event: { name: get_entity_values.id, value: "1" }
+                  - Event: { name: $result, value: {"ID": "1", "Name": "Customer", "Email": "cust@example.com"} }
+              - name: map_subset_match
+                status: pass
+                expected:
+                  - $result: {"ID": "1"}
+                traces:
+                  - Run: { operation: get_entity_values }
+                  - Event: { name: get_entity_values.id, value: "1" }
+                  - Event: { name: $result, value: {"ID": "1", "Name": "Customer", "Email": "cust@example.com"} }
+              - name: map_wrong_value_fails
+                status: fail
+                expected:
+                  - $result: {"ID": "999"}
+                traces:
+                  - Run: { operation: get_entity_values }
+                  - Event: { name: get_entity_values.id, value: "1" }
+                  - Event: { name: $result, value: {"ID": "1", "Name": "Customer", "Email": "cust@example.com"} }
+              - name: map_size_check
+                status: pass
+                expected:
+                  - $result: { $size: 3 }
+                traces:
+                  - Run: { operation: get_entity_values }
+                  - Event: { name: get_entity_values.id, value: "1" }
+                  - Event: { name: $result, value: {"ID": "1", "Name": "Customer", "Email": "cust@example.com"} }
 
   - name: structured_set_matching
     desc: Set outputs match with $set presence, $contains, $size operators
@@ -699,44 +700,44 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/structured_set.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: set_presence_match
-              status: pass
-              expected:
-                - result: { $containsAll: ["Orders", "Address"] }
-              traces:
-                - Run: { operation: get_navigation_properties }
-                - Event: { name: $result, value: ["Address", "Contacts", "Orders"] }
-            - name: set_all_items
-              status: pass
-              expected:
-                - result: { $containsAll: ["Orders", "Address", "Contacts"] }
-              traces:
-                - Run: { operation: get_navigation_properties }
-                - Event: { name: $result, value: ["Address", "Contacts", "Orders"] }
-            - name: set_missing_item_fails
-              status: fail
-              expected:
-                - result: { $containsAll: ["Orders", "NonexistentNav"] }
-              traces:
-                - Run: { operation: get_navigation_properties }
-                - Event: { name: $result, value: ["Address", "Contacts", "Orders"] }
-            - name: set_size_check
-              status: pass
-              expected:
-                - result: { $size: 3 }
-              traces:
-                - Run: { operation: get_navigation_properties }
-                - Event: { name: $result, value: ["Address", "Contacts", "Orders"] }
-            - name: set_contains_check
-              status: pass
-              expected:
-                - result: { $contains: "Contacts" }
-              traces:
-                - Run: { operation: get_navigation_properties }
-                - Event: { name: $result, value: ["Address", "Contacts", "Orders"] }
+      - $result:
+          Complete:
+            results:
+              - name: set_presence_match
+                status: pass
+                expected:
+                  - $result: { $containsAll: [ "Orders", "Address" ] }
+                traces:
+                  - Run: { operation: get_navigation_properties }
+                  - Event: { name: $result, value: ["Address", "Contacts", "Orders"] }
+              - name: set_all_items
+                status: pass
+                expected:
+                  - $result: { $containsAll: [ "Orders", "Address", "Contacts" ] }
+                traces:
+                  - Run: { operation: get_navigation_properties }
+                  - Event: { name: $result, value: ["Address", "Contacts", "Orders"] }
+              - name: set_missing_item_fails
+                status: fail
+                expected:
+                  - $result: { $containsAll: [ "Orders", "NonexistentNav" ] }
+                traces:
+                  - Run: { operation: get_navigation_properties }
+                  - Event: { name: $result, value: ["Address", "Contacts", "Orders"] }
+              - name: set_size_check
+                status: pass
+                expected:
+                  - $result: { $size: 3 }
+                traces:
+                  - Run: { operation: get_navigation_properties }
+                  - Event: { name: $result, value: ["Address", "Contacts", "Orders"] }
+              - name: set_contains_check
+                status: pass
+                expected:
+                  - $result: { $contains: "Contacts" }
+                traces:
+                  - Run: { operation: get_navigation_properties }
+                  - Event: { name: $result, value: ["Address", "Contacts", "Orders"] }
 
   - name: nested_structured_matching
     desc: List of maps — nested operators ($any with $match, $contains with $match)
@@ -744,17 +745,17 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/nested_structured.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: nested_list_of_maps_exact
-              status: pass
-            - name: nested_any_with_match
-              status: pass
-            - name: nested_size
-              status: pass
-            - name: nested_contains_element
-              status: pass
+      - $result:
+          Complete:
+            results:
+              - name: nested_list_of_maps_exact
+                status: pass
+              - name: nested_any_with_match
+                status: pass
+              - name: nested_size
+                status: pass
+              - name: nested_contains_element
+                status: pass
 
   - name: scalar_operators_matching
     desc: Regex, negation, numeric comparisons, empty, $every, multi-field
@@ -762,141 +763,210 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/scalar_operators.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: regex_match
-              status: pass
-              expected:
-                - label: { $matches: "^sensor-[A-Z]\\d+-\\w+$" }
-              traces:
-                - Run: { operation: get_measurement }
-                - Event: { name: temperature, value: "72" }
-                - Event: { name: label, value: "sensor-A3-north" }
-                - Event: { name: readings, value: [ "68", "70", "72", "71", "73" ] }
-                - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ "68", "70", "72", "71", "73" ], temperature: "72" } }
-            - name: regex_no_match_fails
-              status: fail
-              expected:
-                - label: { $matches: "^invalid" }
-              traces:
-                - Run: { operation: get_measurement }
-                - Event: { name: temperature, value: "72" }
-                - Event: { name: label, value: "sensor-A3-north" }
-                - Event: { name: readings, value: [ "68", "70", "72", "71", "73" ] }
-                - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ "68", "70", "72", "71", "73" ], temperature: "72" } }
-            - name: not_value
-              status: pass
-              expected:
-                - temperature: { $not: 100 }
-              traces:
-                - Run: { operation: get_measurement }
-                - Event: { name: temperature, value: "72" }
-                - Event: { name: label, value: "sensor-A3-north" }
-                - Event: { name: readings, value: [ "68", "70", "72", "71", "73" ] }
-                - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ "68", "70", "72", "71", "73" ], temperature: "72" } }
-            - name: not_fails_when_equal
-              status: fail
-              expected:
-                - temperature: { $not: 72 }
-              traces:
-                - Run: { operation: get_measurement }
-                - Event: { name: temperature, value: "72" }
-                - Event: { name: label, value: "sensor-A3-north" }
-                - Event: { name: readings, value: [ "68", "70", "72", "71", "73" ] }
-                - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ "68", "70", "72", "71", "73" ], temperature: "72" } }
-            - name: gt_passes
-              status: pass
-              expected:
-                - temperature: { $gt: 70 }
-              traces:
-                - Run: { operation: get_measurement }
-                - Event: { name: temperature, value: "72" }
-                - Event: { name: label, value: "sensor-A3-north" }
-                - Event: { name: readings, value: [ "68", "70", "72", "71", "73" ] }
-                - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ "68", "70", "72", "71", "73" ], temperature: "72" } }
-            - name: gte_passes_equal
-              status: pass
-              expected:
-                - temperature: { $gte: 72 }
-              traces:
-                - Run: { operation: get_measurement }
-                - Event: { name: temperature, value: "72" }
-                - Event: { name: label, value: "sensor-A3-north" }
-                - Event: { name: readings, value: [ "68", "70", "72", "71", "73" ] }
-                - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ "68", "70", "72", "71", "73" ], temperature: "72" } }
-            - name: lt_passes
-              status: pass
-              expected:
-                - temperature: { $lt: 100 }
-              traces:
-                - Run: { operation: get_measurement }
-                - Event: { name: temperature, value: "72" }
-                - Event: { name: label, value: "sensor-A3-north" }
-                - Event: { name: readings, value: [ "68", "70", "72", "71", "73" ] }
-                - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ "68", "70", "72", "71", "73" ], temperature: "72" } }
-            - name: lte_fails
-              status: fail
-              expected:
-                - temperature: { $lte: 50 }
-              traces:
-                - Run: { operation: get_measurement }
-                - Event: { name: temperature, value: "72" }
-                - Event: { name: label, value: "sensor-A3-north" }
-                - Event: { name: readings, value: [ "68", "70", "72", "71", "73" ] }
-                - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ "68", "70", "72", "71", "73" ], temperature: "72" } }
-            - name: empty_list
-              status: pass
-              expected:
-                - $result: { $size: 0 }
-              traces:
-                - Run: { operation: get_empty }
-                - Event: { name: $result, value: [] }
-            - name: every_element
-              status: pass
-              expected:
-                - readings: { $every: { $gt: 60 } }
-              traces:
-                - Run: { operation: get_measurement }
-                - Event: { name: temperature, value: "72" }
-                - Event: { name: label, value: "sensor-A3-north" }
-                - Event: { name: readings, value: [ "68", "70", "72", "71", "73" ] }
-                - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ "68", "70", "72", "71", "73" ], temperature: "72" } }
-            - name: every_fails
-              status: fail
-              expected:
-                - readings: { $every: { $gt: 71 } }
-              traces:
-                - Run: { operation: get_measurement }
-                - Event: { name: temperature, value: "72" }
-                - Event: { name: label, value: "sensor-A3-north" }
-                - Event: { name: readings, value: [ "68", "70", "72", "71", "73" ] }
-                - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ "68", "70", "72", "71", "73" ], temperature: "72" } }
-            - name: combined_multi_field
-              status: pass
-              expected:
-                - temperature: { $gt: 60, $lt: 100 }
-                - label: { $matches: "^sensor-[A-Z]" }
-                - readings: { $size: 5, $every: { $gte: 60 } }
-              traces:
-                - Run: { operation: get_measurement }
-                - Event: { name: temperature, value: "72" }
-                - Event: { name: label, value: "sensor-A3-north" }
-                - Event: { name: readings, value: [ "68", "70", "72", "71", "73" ] }
-                - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ "68", "70", "72", "71", "73" ], temperature: "72" } }
-            - name: combined_multi_field_one_fails
-              status: fail
-              expected:
-                - temperature: { $gt: 60 }
-                - label: { $matches: "^invalid" }
-                - readings: { $size: 5 }
-              traces:
-                - Run: { operation: get_measurement }
-                - Event: { name: temperature, value: "72" }
-                - Event: { name: label, value: "sensor-A3-north" }
-                - Event: { name: readings, value: [ "68", "70", "72", "71", "73" ] }
-                - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ "68", "70", "72", "71", "73" ], temperature: "72" } }
-
+      - $result:
+          Complete:
+            results:
+              - name: regex_match
+                status: pass
+                expected:
+                  - label: { $matches: "^sensor-[A-Z]\\d+-\\w+$" }
+                traces:
+                  - Run: { operation: get_measurement }
+                  - Event: { name: temperature, value: 72 }
+                  - Event: { name: label, value: "sensor-A3-north" }
+                  - Event: { name: readings, value: [ 68, 70, 72, 71, 73 ] }
+                  - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ 68, 70, 72, 71, 73 ], temperature: 72 } }
+              - name: regex_no_match_fails
+                status: fail
+                expected:
+                  - label: { $matches: "^invalid" }
+                traces:
+                  - Run: { operation: get_measurement }
+                  - Event: { name: temperature, value: 72 }
+                  - Event: { name: label, value: "sensor-A3-north" }
+                  - Event: { name: readings, value: [ 68, 70, 72, 71, 73 ] }
+                  - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ 68, 70, 72, 71, 73 ], temperature: 72 } }
+              - name: ne_value
+                status: pass
+                expected:
+                  - temperature: { $ne: 100 }
+                traces:
+                  - Run: { operation: get_measurement }
+                  - Event: { name: temperature, value: 72 }
+                  - Event: { name: label, value: "sensor-A3-north" }
+                  - Event: { name: readings, value: [ 68, 70, 72, 71, 73 ] }
+                  - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ 68, 70, 72, 71, 73 ], temperature: 72 } }
+              - name: ne_fails_when_equal
+                status: fail
+                expected:
+                  - temperature: { $ne: 72 }
+                traces:
+                  - Run: { operation: get_measurement }
+                  - Event: { name: temperature, value: 72 }
+                  - Event: { name: label, value: "sensor-A3-north" }
+                  - Event: { name: readings, value: [ 68, 70, 72, 71, 73 ] }
+                  - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ 68, 70, 72, 71, 73 ], temperature: 72 } }
+              - name: not_gt
+                status: pass
+                expected:
+                  - temperature: { $not: { $gt: 100 } }
+                traces:
+                  - Run: { operation: get_measurement }
+                  - Event: { name: temperature, value: 72 }
+                  - Event: { name: label, value: "sensor-A3-north" }
+                  - Event: { name: readings, value: [ 68, 70, 72, 71, 73 ] }
+                  - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ 68, 70, 72, 71, 73 ], temperature: 72 } }
+              - name: not_gt_fails
+                status: fail
+                expected:
+                  - temperature: { $not: { $gt: 70 } }
+                traces:
+                  - Run: { operation: get_measurement }
+                  - Event: { name: temperature, value: 72 }
+                  - Event: { name: label, value: "sensor-A3-north" }
+                  - Event: { name: readings, value: [ 68, 70, 72, 71, 73 ] }
+                  - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ 68, 70, 72, 71, 73 ], temperature: 72 } }
+              - name: not_lt
+                status: pass
+                expected:
+                  - temperature: { $not: { $lt: 50 } }
+                traces:
+                  - Run: { operation: get_measurement }
+                  - Event: { name: temperature, value: 72 }
+                  - Event: { name: label, value: "sensor-A3-north" }
+                  - Event: { name: readings, value: [ 68, 70, 72, 71, 73 ] }
+                  - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ 68, 70, 72, 71, 73 ], temperature: 72 } }
+              - name: not_matches
+                status: pass
+                expected:
+                  - label: { $not: { $matches: "^device-" } }
+                traces:
+                  - Run: { operation: get_measurement }
+                  - Event: { name: temperature, value: 72 }
+                  - Event: { name: label, value: "sensor-A3-north" }
+                  - Event: { name: readings, value: [ 68, 70, 72, 71, 73 ] }
+                  - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ 68, 70, 72, 71, 73 ], temperature: 72 } }
+              - name: not_size
+                status: pass
+                expected:
+                  - readings: { $not: { $size: 3 } }
+                traces:
+                  - Run: { operation: get_measurement }
+                  - Event: { name: temperature, value: 72 }
+                  - Event: { name: label, value: "sensor-A3-north" }
+                  - Event: { name: readings, value: [ 68, 70, 72, 71, 73 ] }
+                  - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ 68, 70, 72, 71, 73 ], temperature: 72 } }
+              - name: not_contains
+                status: pass
+                expected:
+                  - readings: { $not: { $contains: 999 } }
+                traces:
+                  - Run: { operation: get_measurement }
+                  - Event: { name: temperature, value: 72 }
+                  - Event: { name: label, value: "sensor-A3-north" }
+                  - Event: { name: readings, value: [ 68, 70, 72, 71, 73 ] }
+                  - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ 68, 70, 72, 71, 73 ], temperature: 72 } }
+              - name: not_every
+                status: pass
+                expected:
+                  - readings: { $not: { $every: { $gt: 71 } } }
+                traces:
+                  - Run: { operation: get_measurement }
+                  - Event: { name: temperature, value: 72 }
+                  - Event: { name: label, value: "sensor-A3-north" }
+                  - Event: { name: readings, value: [ 68, 70, 72, 71, 73 ] }
+                  - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ 68, 70, 72, 71, 73 ], temperature: 72 } }
+              - name: gt_passes
+                status: pass
+                expected:
+                  - temperature: { $gt: 70 }
+                traces:
+                  - Run: { operation: get_measurement }
+                  - Event: { name: temperature, value: 72 }
+                  - Event: { name: label, value: "sensor-A3-north" }
+                  - Event: { name: readings, value: [ 68, 70, 72, 71, 73 ] }
+                  - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ 68, 70, 72, 71, 73 ], temperature: 72 } }
+              - name: gte_passes_equal
+                status: pass
+                expected:
+                  - temperature: { $gte: 72 }
+                traces:
+                  - Run: { operation: get_measurement }
+                  - Event: { name: temperature, value: 72 }
+                  - Event: { name: label, value: "sensor-A3-north" }
+                  - Event: { name: readings, value: [ 68, 70, 72, 71, 73 ] }
+                  - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ 68, 70, 72, 71, 73 ], temperature: 72 } }
+              - name: lt_passes
+                status: pass
+                expected:
+                  - temperature: { $lt: 100 }
+                traces:
+                  - Run: { operation: get_measurement }
+                  - Event: { name: temperature, value: 72 }
+                  - Event: { name: label, value: "sensor-A3-north" }
+                  - Event: { name: readings, value: [ 68, 70, 72, 71, 73 ] }
+                  - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ 68, 70, 72, 71, 73 ], temperature: 72 } }
+              - name: lte_fails
+                status: fail
+                expected:
+                  - temperature: { $lte: 50 }
+                traces:
+                  - Run: { operation: get_measurement }
+                  - Event: { name: temperature, value: 72 }
+                  - Event: { name: label, value: "sensor-A3-north" }
+                  - Event: { name: readings, value: [ 68, 70, 72, 71, 73 ] }
+                  - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ 68, 70, 72, 71, 73 ], temperature: 72 } }
+              - name: empty_list
+                status: pass
+                expected:
+                  - $result: { $size: 0 }
+                traces:
+                  - Run: { operation: get_empty }
+                  - Event: { name: $result, value: [] }
+              - name: every_element
+                status: pass
+                expected:
+                  - readings: { $every: { $gt: 60 } }
+                traces:
+                  - Run: { operation: get_measurement }
+                  - Event: { name: temperature, value: 72 }
+                  - Event: { name: label, value: "sensor-A3-north" }
+                  - Event: { name: readings, value: [ 68, 70, 72, 71, 73 ] }
+                  - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ 68, 70, 72, 71, 73 ], temperature: 72 } }
+              - name: every_fails
+                status: fail
+                expected:
+                  - readings: { $every: { $gt: 71 } }
+                traces:
+                  - Run: { operation: get_measurement }
+                  - Event: { name: temperature, value: 72 }
+                  - Event: { name: label, value: "sensor-A3-north" }
+                  - Event: { name: readings, value: [ 68, 70, 72, 71, 73 ] }
+                  - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ 68, 70, 72, 71, 73 ], temperature: 72 } }
+              - name: combined_multi_field
+                status: pass
+                expected:
+                  - temperature: { $gt: 60, $lt: 100 }
+                  - label: { $matches: "^sensor-[A-Z]" }
+                  - readings: { $every: { $gte: 60 }, $size: 5 }
+                traces:
+                  - Run: { operation: get_measurement }
+                  - Event: { name: temperature, value: 72 }
+                  - Event: { name: label, value: "sensor-A3-north" }
+                  - Event: { name: readings, value: [ 68, 70, 72, 71, 73 ] }
+                  - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ 68, 70, 72, 71, 73 ], temperature: 72 } }
+              - name: combined_multi_field_one_fails
+                status: fail
+                expected:
+                  - temperature: { $gt: 60 }
+                  - label: { $matches: "^invalid" }
+                  - readings: { $size: 5 }
+                traces:
+                  - Run: { operation: get_measurement }
+                  - Event: { name: temperature, value: 72 }
+                  - Event: { name: label, value: "sensor-A3-north" }
+                  - Event: { name: readings, value: [ 68, 70, 72, 71, 73 ] }
+                  - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ 68, 70, 72, 71, 73 ], temperature: 72 } }
   # ================================================================
   # Happy path — basic operations
   # ================================================================
@@ -907,18 +977,18 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/async_fetch.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: fetch_returns_response
-              status: pass
-              expected:
-                - $run: fetch
-                - $result: "response from https://example.com"
-              traces:
-                - Run: { operation: fetch }
-                - Event: { name: fetch.url, value: "https://example.com" }
-                - Event: { name: $result, value: "response from https://example.com" }
+      - $result:
+          Complete:
+            results:
+              - name: fetch_returns_response
+                status: pass
+                expected:
+                  - $run: fetch
+                  - $result: "response from https://example.com"
+                traces:
+                  - Run: { operation: fetch }
+                  - Event: { name: fetch.url, value: "https://example.com" }
+                  - Event: { name: $result, value: "response from https://example.com" }
 
   - name: stateless_return_value
     desc: Stateless function captures return value
@@ -926,18 +996,18 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/stateless_add.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: add_2_3
-              status: pass
-              expected:
-                - $result: "5"
-              traces:
-                - Run: { operation: add }
-                - Event: { name: add.a, value: "2" }
-                - Event: { name: add.b, value: "3" }
-                - Event: { name: $result, value: "5" }
+      - $result:
+          Complete:
+            results:
+              - name: add_2_3
+                status: pass
+                expected:
+                  - $result: "5"
+                traces:
+                  - Run: { operation: add }
+                  - Event: { name: add.a, value: "2" }
+                  - Event: { name: add.b, value: "3" }
+                  - Event: { name: $result, value: "5" }
 
   - name: statemachine_before_after
     desc: StateMachine captures field state before and after
@@ -945,19 +1015,19 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/statemachine_counter.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: increment_once
-              status: pass
-              expected:
-                - count: "0"
-                - $run: increment
-                - count: "1"
-              traces:
-                - Event: { name: count, value: "0" }
-                - Run: { operation: increment }
-                - Event: { name: count, value: "1" }
+      - $result:
+          Complete:
+            results:
+              - name: increment_once
+                status: pass
+                expected:
+                  - count: "0"
+                  - $run: increment
+                  - count: "1"
+                traces:
+                  - Event: { name: count, value: "0" }
+                  - Run: { operation: increment }
+                  - Event: { name: count, value: "1" }
 
   - name: multi_field_capture
     desc: Multiple annotated fields all captured
@@ -965,22 +1035,22 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/multi_field_capture.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: withdraw_50
-              status: pass
-              expected:
-                - balance: "100"
-                - $run: withdraw
-                - balance: "50"
-                - transaction_count: "1"
-              traces:
-                - Event: { name: balance, value: "100" }
-                - Event: { name: transaction_count, value: "0" }
-                - Run: { operation: withdraw }
-                - Event: { name: balance, value: "50" }
-                - Event: { name: transaction_count, value: "1" }
+      - $result:
+          Complete:
+            results:
+              - name: withdraw_50
+                status: pass
+                expected:
+                  - balance: "100"
+                  - $run: withdraw
+                  - balance: "50"
+                  - transaction_count: "1"
+                traces:
+                  - Event: { name: balance, value: "100" }
+                  - Event: { name: transaction_count, value: "0" }
+                  - Run: { operation: withdraw }
+                  - Event: { name: balance, value: "50" }
+                  - Event: { name: transaction_count, value: "1" }
 
   - name: inline_checkpoint
     desc: spec_event!() emits an event at invocation point
@@ -988,20 +1058,20 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/checkpoint_inline.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: process_hello
-              status: pass
-              expected:
-                - $run: process
-                - after_upper: " HELLO "
-                - $result: "HELLO"
-              traces:
-                - Run: { operation: process }
-                - Event: { name: process.data, value: " hello " }
-                - Event: { name: after_upper, value: " HELLO " }
-                - Event: { name: $result, value: "HELLO" }
+      - $result:
+          Complete:
+            results:
+              - name: process_hello
+                status: pass
+                expected:
+                  - $run: process
+                  - after_upper: " HELLO "
+                  - $result: "HELLO"
+                traces:
+                  - Run: { operation: process }
+                  - Event: { name: process.data, value: " hello " }
+                  - Event: { name: after_upper, value: " HELLO " }
+                  - Event: { name: $result, value: "HELLO" }
 
   - name: multi_mutation
     desc: Every mutation of an annotated field is captured
@@ -1009,21 +1079,21 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/multi_mutation.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: double_increment
-              status: pass
-              expected:
-                - count: "0"
-                - $run: increment_twice
-                - count: "1"
-                - count: "2"
-              traces:
-                - Event: { name: count, value: "0" }
-                - Run: { operation: increment_twice }
-                - Event: { name: count, value: "1" }
-                - Event: { name: count, value: "2" }
+      - $result:
+          Complete:
+            results:
+              - name: double_increment
+                status: pass
+                expected:
+                  - count: "0"
+                  - $run: increment_twice
+                  - count: "1"
+                  - count: "2"
+                traces:
+                  - Event: { name: count, value: "0" }
+                  - Run: { operation: increment_twice }
+                  - Event: { name: count, value: "1" }
+                  - Event: { name: count, value: "2" }
 
   - name: nested_operations
     desc: Nested calls produce sequential Run events
@@ -1031,25 +1101,25 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/nested_operations.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: transfer_50
-              status: pass
-              expected:
-                - balance: "100"
-                - $run: transfer
-                - $run: withdraw
-                - balance: "50"
-                - $run: deposit
-                - balance: "100"
-              traces:
-                - Event: { name: balance, value: "100" }
-                - Run: { operation: transfer }
-                - Run: { operation: withdraw }
-                - Event: { name: balance, value: "50" }
-                - Run: { operation: deposit }
-                - Event: { name: balance, value: "100" }
+      - $result:
+          Complete:
+            results:
+              - name: transfer_50
+                status: pass
+                expected:
+                  - balance: "100"
+                  - $run: transfer
+                  - $run: withdraw
+                  - balance: "50"
+                  - $run: deposit
+                  - balance: "100"
+                traces:
+                  - Event: { name: balance, value: "100" }
+                  - Run: { operation: transfer }
+                  - Run: { operation: withdraw }
+                  - Event: { name: balance, value: "50" }
+                  - Run: { operation: deposit }
+                  - Event: { name: balance, value: "100" }
 
   # ================================================================
   # Happy path — setup variations
@@ -1061,19 +1131,19 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/setup_with_params.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: start_at_10
-              status: pass
-              expected:
-                - count: "10"
-                - $run: increment
-                - count: "11"
-              traces:
-                - Event: { name: count, value: "10" }
-                - Run: { operation: increment }
-                - Event: { name: count, value: "11" }
+      - $result:
+          Complete:
+            results:
+              - name: start_at_10
+                status: pass
+                expected:
+                  - count: "10"
+                  - $run: increment
+                  - count: "11"
+                traces:
+                  - Event: { name: count, value: "10" }
+                  - Run: { operation: increment }
+                  - Event: { name: count, value: "11" }
 
   - name: multiple_setups
     desc: Two setups create two objects for one operation
@@ -1081,24 +1151,24 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/multi_setup.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: transfer_between_accounts
-              status: pass
-              expected:
-                - source.balance: "100"
-                - target.balance: "0"
-                - $run: transfer
-                - source.balance: "50"
-                - target.balance: "50"
-              traces:
-                - Event: { name: source.balance, value: "100" }
-                - Event: { name: target.balance, value: "0" }
-                - Run: { operation: transfer }
-                - Event: { name: transfer.amount, value: "50" }
-                - Event: { name: source.balance, value: "50" }
-                - Event: { name: target.balance, value: "50" }
+      - $result:
+          Complete:
+            results:
+              - name: transfer_between_accounts
+                status: pass
+                expected:
+                  - source.balance: "100"
+                  - target.balance: "0"
+                  - $run: transfer
+                  - source.balance: "50"
+                  - target.balance: "50"
+                traces:
+                  - Event: { name: source.balance, value: "100" }
+                  - Event: { name: target.balance, value: "0" }
+                  - Run: { operation: transfer }
+                  - Event: { name: transfer.amount, value: "50" }
+                  - Event: { name: source.balance, value: "50" }
+                  - Event: { name: target.balance, value: "50" }
 
   # ================================================================
   # Happy path — multi-file ops, shared / side-effect setups,
@@ -1111,41 +1181,38 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/multi_file.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: greet_from_separate_file
-              status: pass
-              expected:
-                - $run: greet
-                - $result: "Hello, World!"
-            - name: farewell_from_separate_file
-              status: pass
-              expected:
-                - $run: farewell
-                - $result: "Goodbye, World!"
-
+      - $result:
+          Complete:
+            results:
+              - name: greet_from_separate_file
+                status: pass
+                expected:
+                  - $result: "Hello, World!"
+              - name: farewell_from_separate_file
+                status: pass
+                expected:
+                  - $result: "Goodbye, World!"
   - name: language_neutral_input_names_run
     desc: Parameters renamed via #[spec_input] are addressed by their spec names
     operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/named_inputs.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: divide_10_by_2
-              status: pass
-              expected:
-                - divide.numerator: "10"
-                - divide.denominator: "2"
-                - $result: "5"
-            - name: scale_3_by_4
-              status: pass
-              expected:
-                - factor: "3"
-                - $run: scale
-                - $result: "12"
+      - $result:
+          Complete:
+            results:
+              - name: divide_10_by_2
+                status: pass
+                expected:
+                  - divide.numerator: "10"
+                  - divide.denominator: "2"
+                  - $result: "5"
+              - name: scale_3_by_4
+                status: pass
+                expected:
+                  - factor: "3"
+                  - $run: scale
+                  - $result: "12"
 
   - name: shared_setup_fills_many_params
     desc: One stacked-fills setup builds several same-typed parameters
@@ -1153,24 +1220,24 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/shared_setup.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: one_setup_fills_two_params
-              status: pass
-              expected:
-                - left.value: "10"
-                - right.value: "5"
-                - $run: combine
-                - $result: "15"
-            - name: one_setup_fills_three_params
-              status: pass
-              expected:
-                - a.value: "1"
-                - b.value: "1"
-                - c.value: "1"
-                - $run: combine_three
-                - $result: "3"
+      - $result:
+          Complete:
+            results:
+              - name: one_setup_fills_two_params
+                status: pass
+                expected:
+                  - left.value: "10"
+                  - right.value: "5"
+                  - $run: combine
+                  - $result: "15"
+              - name: one_setup_fills_three_params
+                status: pass
+                expected:
+                  - a.value: "1"
+                  - b.value: "1"
+                  - c.value: "1"
+                  - $run: combine_three
+                  - $result: "3"
 
   - name: side_effect_setup_runs
     desc: A setup whose return value is not consumed is still invoked before the operation
@@ -1178,13 +1245,13 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/side_effect_setup.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: setup_side_effect_runs
-              status: pass
-              expected:
-                - $result: "1"
+      - $result:
+          Complete:
+            results:
+              - name: setup_side_effect_runs
+                status: pass
+                expected:
+                  - $result: "1"
 
   - name: simple_output_setup_fills_param
     desc: A setup returning a primitive fills an operation parameter by type
@@ -1192,13 +1259,13 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/simple_output_setup.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: setup_fills_primitive_param
-              status: pass
-              expected:
-                - $result: "42"
+      - $result:
+          Complete:
+            results:
+              - name: setup_fills_primitive_param
+                status: pass
+                expected:
+                  - $result: "42"
 
   # ================================================================
   # Happy path — multi-case and multi-step
@@ -1210,17 +1277,17 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/multi_case.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: add_2_3
-              status: pass
-              expected:
-                - $result: "5"
-            - name: add_10_20
-              status: pass
-              expected:
-                - $result: "30"
+      - $result:
+          Complete:
+            results:
+              - name: add_2_3
+                status: pass
+                expected:
+                  - $result: "5"
+              - name: add_10_20
+                status: pass
+                expected:
+                  - $result: "30"
 
   - name: multi_step_sequence
     desc: Two operations in sequence with state tracked
@@ -1228,23 +1295,23 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/multi_step.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: increment_then_decrement
-              status: pass
-              expected:
-                - count: "0"
-                - $run: increment
-                - count: "1"
-                - $run: decrement
-                - count: "0"
-              traces:
-                - Event: { name: count, value: "0" }
-                - Run: { operation: increment }
-                - Event: { name: count, value: "1" }
-                - Run: { operation: decrement }
-                - Event: { name: count, value: "0" }
+      - $result:
+          Complete:
+            results:
+              - name: increment_then_decrement
+                status: pass
+                expected:
+                  - count: "0"
+                  - $run: increment
+                  - count: "1"
+                  - $run: decrement
+                  - count: "0"
+                traces:
+                  - Event: { name: count, value: "0" }
+                  - Run: { operation: increment }
+                  - Event: { name: count, value: "1" }
+                  - Run: { operation: decrement }
+                  - Event: { name: count, value: "0" }
 
   # ================================================================
   # Happy path — mocks
@@ -1256,21 +1323,21 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/mock_field.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: find_user_1
-              status: pass
-              expected:
-                - $run: get_user
-                - db.request: "user_1"
-                - db.response: "Alice"
-                - $result: "Alice"
-              traces:
-                - Run: { operation: get_user }
-                - Event: { name: db.request, value: "user_1" }
-                - Event: { name: db.response, value: "Alice" }
-                - Event: { name: $result, value: "Alice" }
+      - $result:
+          Complete:
+            results:
+              - name: find_user_1
+                status: pass
+                expected:
+                  - $run: get_user
+                  - db.request: "user_1"
+                  - db.response: "Alice"
+                  - $result: "Alice"
+                traces:
+                  - Run: { operation: get_user }
+                  - Event: { name: db.request, value: "user_1" }
+                  - Event: { name: db.response, value: "Alice" }
+                  - Event: { name: $result, value: "Alice" }
 
   - name: mock_multi_response
     desc: Mock returns different values for different inputs
@@ -1278,25 +1345,25 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/mock_multi_response.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: get_two_different_users
-              status: pass
-              expected:
-                - $run: get_users
-                - db.request: "user_1"
-                - db.response: "Alice"
-                - db.request: "user_2"
-                - db.response: "Bob"
-                - $result: "Alice and Bob"
-              traces:
-                - Run: { operation: get_users }
-                - Event: { name: db.request, value: "user_1" }
-                - Event: { name: db.response, value: "Alice" }
-                - Event: { name: db.request, value: "user_2" }
-                - Event: { name: db.response, value: "Bob" }
-                - Event: { name: $result, value: "Alice and Bob" }
+      - $result:
+          Complete:
+            results:
+              - name: get_two_different_users
+                status: pass
+                expected:
+                  - $run: get_users
+                  - db.request: "user_1"
+                  - db.response: "Alice"
+                  - db.request: "user_2"
+                  - db.response: "Bob"
+                  - $result: "Alice and Bob"
+                traces:
+                  - Run: { operation: get_users }
+                  - Event: { name: db.request, value: "user_1" }
+                  - Event: { name: db.response, value: "Alice" }
+                  - Event: { name: db.request, value: "user_2" }
+                  - Event: { name: db.response, value: "Bob" }
+                  - Event: { name: $result, value: "Alice and Bob" }
 
   - name: mock_input_not_in_table
     desc: Mock called with unknown input produces error event
@@ -1304,14 +1371,14 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/mock_not_found.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: query_unknown_user
-              status: pass
-              expected:
-                - db.request: "user_99"
-                - db.error: "no mock response for input 'user_99'"
+      - $result:
+          Complete:
+            results:
+              - name: query_unknown_user
+                status: pass
+                expected:
+                  - db.request: "user_99"
+                  - db.error: "no mock response for input 'user_99'"
 
   # ================================================================
   # Happy path — Result and special returns
@@ -1323,19 +1390,18 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/result_ok.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: divide_10_by_2
-              status: pass
-              expected:
-                - $outcome: "Ok"
-                - $result: "5"
-              traces:
-                - Run: { operation: divide }
-                - Event: { name: divide.a, value: "10" }
-                - Event: { name: divide.b, value: "2" }
-                - Event: { name: $result, value: { Ok: "5" } }
+      - $result:
+          Complete:
+            results:
+              - name: divide_10_by_2
+                status: pass
+                expected:
+                  - $result: { Ok: "5" }
+                traces:
+                  - Run: { operation: divide }
+                  - Event: { name: divide.a, value: "10" }
+                  - Event: { name: divide.b, value: "2" }
+                  - Event: { name: $result, value: { Ok: "5" } }
 
   - name: result_err_path
     desc: Operation returning Err produces outcome Error
@@ -1343,19 +1409,18 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/result_err.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: divide_by_zero
-              status: pass
-              expected:
-                - $outcome: "Error"
-                - $error: "division by zero"
-              traces:
-                - Run: { operation: divide }
-                - Event: { name: divide.a, value: "10" }
-                - Event: { name: divide.b, value: "0" }
-                - Event: { name: $result, value: { Err: "division by zero" } }
+      - $result:
+          Complete:
+            results:
+              - name: divide_by_zero
+                status: pass
+                expected:
+                  - $result: { Err: "division by zero" }
+                traces:
+                  - Run: { operation: divide }
+                  - Event: { name: divide.a, value: "10" }
+                  - Event: { name: divide.b, value: "0" }
+                  - Event: { name: $result, value: { Err: "division by zero" } }
 
   - name: unrecoverable_panic
     desc: Operation that panics produces Unrecoverable outcome
@@ -1363,33 +1428,31 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/unrecoverable.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: divide_by_zero_panics
-              status: pass
-              expected:
-                - $outcome: "Unrecoverable"
-                - $error: "attempt to divide by zero"
-
+      - $result:
+          Complete:
+            results:
+              - name: divide_by_zero_panics
+                status: pass
+                expected:
+                  - $fault: "attempt to divide by zero"
   - name: option_some_path
     desc: Operation returning Some produces $result with the value
     operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/option_some.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: find_existing
-              status: pass
-              expected:
-                - $result: "1"
-              traces:
-                - Run: { operation: find }
-                - Event: { name: find.items, value: [ "10", "20", "30" ] }
-                - Event: { name: find.target, value: "20" }
-                - Event: { name: $result, value: { Some: "1" } }
+      - $result:
+          Complete:
+            results:
+              - name: find_existing
+                status: pass
+                expected:
+                  - $result: { Some: "1" }
+                traces:
+                  - Run: { operation: find }
+                  - Event: { name: find.items, value: [ "10", "20", "30" ] }
+                  - Event: { name: find.target, value: "20" }
+                  - Event: { name: $result, value: { Some: "1" } }
 
   - name: option_none_path
     desc: Operation returning None produces $result "None"
@@ -1397,18 +1460,18 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/option_none.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: find_missing
-              status: pass
-              expected:
-                - $result: "None"
-              traces:
-                - Run: { operation: find }
-                - Event: { name: find.items, value: [ "10", "20", "30" ] }
-                - Event: { name: find.target, value: "99" }
-                - Event: { name: $result, value: { None: {} } }
+      - $result:
+          Complete:
+            results:
+              - name: find_missing
+                status: pass
+                expected:
+                  - $result: { None: {} }
+                traces:
+                  - Run: { operation: find }
+                  - Event: { name: find.items, value: [ "10", "20", "30" ] }
+                  - Event: { name: find.target, value: "99" }
+                  - Event: { name: $result, value: { None: {} } }
 
   - name: void_operation
     desc: Void operation produces no result event
@@ -1416,19 +1479,19 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/void_operation.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: log_a_message
-              status: pass
-              expected:
-                - count: "0"
-                - $run: log
-                - count: "1"
-              traces:
-                - Event: { name: count, value: "0" }
-                - Run: { operation: log }
-                - Event: { name: count, value: "1" }
+      - $result:
+          Complete:
+            results:
+              - name: log_a_message
+                status: pass
+                expected:
+                  - count: "0"
+                  - $run: log
+                  - count: "1"
+                traces:
+                  - Event: { name: count, value: "0" }
+                  - Run: { operation: log }
+                  - Event: { name: count, value: "1" }
 
   - name: readonly_operation
     desc: Read-only operation returns value without state change
@@ -1436,13 +1499,13 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/readonly_operation.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: read_count
-              status: pass
-              expected:
-                - $result: "42"
+      - $result:
+          Complete:
+            results:
+              - name: read_count
+                status: pass
+                expected:
+                  - $result: "42"
 
   # ================================================================
   # Subsequence matching — field order doesn't matter
@@ -1454,14 +1517,14 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/multi_field_capture_reordered.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: withdraw_50
-              status: pass
-              expected:
-                - balance: "50"
-                - transaction_count: "1"
+      - $result:
+          Complete:
+            results:
+              - name: withdraw_50
+                status: pass
+                expected:
+                  - balance: "50"
+                  - transaction_count: "1"
 
   # ================================================================
   # Mismatch — failures detected
@@ -1473,17 +1536,17 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/statemachine_counter_wrong.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: increment_once
-              status: fail
-              expected:
-                - count: "999"
-              traces:
-                - Event: { name: count, value: "0" }
-                - Run: { operation: increment }
-                - Event: { name: count, value: "1" }
+      - $result:
+          Complete:
+            results:
+              - name: increment_once
+                status: fail
+                expected:
+                  - count: "999"
+                traces:
+                  - Event: { name: count, value: "0" }
+                  - Run: { operation: increment }
+                  - Event: { name: count, value: "1" }
 
   - name: mismatch_missing_field
     desc: Expected field not in traces produces fail
@@ -1491,19 +1554,19 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/mismatch_missing_event.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: add_2_3
-              status: fail
-              expected:
-                - $result: "5"
-                - add.extra: "bonus"
-              traces:
-                - Run: { operation: add }
-                - Event: { name: add.a, value: "2" }
-                - Event: { name: add.b, value: "3" }
-                - Event: { name: $result, value: "5" }
+      - $result:
+          Complete:
+            results:
+              - name: add_2_3
+                status: fail
+                expected:
+                  - $result: "5"
+                  - add.extra: "bonus"
+                traces:
+                  - Run: { operation: add }
+                  - Event: { name: add.a, value: "2" }
+                  - Event: { name: add.b, value: "3" }
+                  - Event: { name: $result, value: "5" }
 
   - name: mismatch_wrong_field_name
     desc: Asserting on an output name the operation does not declare is a schema error
@@ -1511,9 +1574,9 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/mismatch_wrong_field.spec.yaml
     expected:
-      outcome:
-        Error:
-          reason: "expected event 'total' is not a declared output of operation 'increment'"
+      - $result:
+          Error:
+            reason: "expected event 'total' is not a declared output of operation 'increment'"
 
   - name: mismatch_second_step
     desc: First step OK but second step has wrong value
@@ -1521,20 +1584,20 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/mismatch_second_step.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: increment_then_decrement
-              status: fail
-              expected:
-                - $run: decrement
-                - count: "999"
-              traces:
-                - Event: { name: count, value: "0" }
-                - Run: { operation: increment }
-                - Event: { name: count, value: "1" }
-                - Run: { operation: decrement }
-                - Event: { name: count, value: "0" }
+      - $result:
+          Complete:
+            results:
+              - name: increment_then_decrement
+                status: fail
+                expected:
+                  - $run: decrement
+                  - count: "999"
+                traces:
+                  - Event: { name: count, value: "0" }
+                  - Run: { operation: increment }
+                  - Event: { name: count, value: "1" }
+                  - Run: { operation: decrement }
+                  - Event: { name: count, value: "0" }
 
   # ================================================================
   # Subsequence matching — order matters
@@ -1546,18 +1609,18 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/subsequence_wrong_order.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: increment_once
-              status: fail
-              expected:
-                - count: "1"
-                - count: "0"
-              traces:
-                - Event: { name: count, value: "0" }
-                - Run: { operation: increment }
-                - Event: { name: count, value: "1" }
+      - $result:
+          Complete:
+            results:
+              - name: increment_once
+                status: fail
+                expected:
+                  - count: "1"
+                  - count: "0"
+                traces:
+                  - Event: { name: count, value: "0" }
+                  - Run: { operation: increment }
+                  - Event: { name: count, value: "1" }
 
   - name: subsequence_with_gaps
     desc: Matching with gaps between expected events
@@ -1565,19 +1628,19 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/subsequence_with_gaps.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: double_increment
-              status: pass
-              expected:
-                - count: "0"
-                - count: "2"
-              traces:
-                - Event: { name: count, value: "0" }
-                - Run: { operation: increment_twice }
-                - Event: { name: count, value: "1" }
-                - Event: { name: count, value: "2" }
+      - $result:
+          Complete:
+            results:
+              - name: double_increment
+                status: pass
+                expected:
+                  - count: "0"
+                  - count: "2"
+                traces:
+                  - Event: { name: count, value: "0" }
+                  - Run: { operation: increment_twice }
+                  - Event: { name: count, value: "1" }
+                  - Event: { name: count, value: "2" }
 
   # ================================================================
   # Matching directives — $unordered, $anywhere, $run collision
@@ -1589,64 +1652,64 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/unordered_fields.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: unordered_both_present
-              status: pass
-              expected:
-                - $run: withdraw
-                - $unordered:
-                  - balance: "50"
-                  - transaction_count: "1"
-              traces:
-                - Event: { name: balance, value: "100" }
-                - Event: { name: transaction_count, value: "0" }
-                - Run: { operation: withdraw }
-                - Event: { name: balance, value: "50" }
-                - Event: { name: transaction_count, value: "1" }
-            - name: unordered_reversed_still_passes
-              status: pass
-              expected:
-                - $run: withdraw
-                - $unordered:
-                  - transaction_count: "1"
-                  - balance: "50"
-              traces:
-                - Event: { name: balance, value: "100" }
-                - Event: { name: transaction_count, value: "0" }
-                - Run: { operation: withdraw }
-                - Event: { name: balance, value: "50" }
-                - Event: { name: transaction_count, value: "1" }
-            - name: unordered_wrong_value_fails
-              status: fail
-              expected:
-                - $run: withdraw
-                - $unordered:
-                  - balance: "999"
-                  - transaction_count: "1"
-              traces:
-                - Event: { name: balance, value: "100" }
-                - Event: { name: transaction_count, value: "0" }
-                - Run: { operation: withdraw }
-                - Event: { name: balance, value: "50" }
-                - Event: { name: transaction_count, value: "1" }
-            - name: unordered_multiple_blocks
-              status: pass
-              expected:
-                - $unordered:
-                  - balance: "100"
-                  - transaction_count: "0"
-                - $run: withdraw
-                - $unordered:
-                  - balance: "50"
-                  - transaction_count: "1"
-              traces:
-                - Event: { name: balance, value: "100" }
-                - Event: { name: transaction_count, value: "0" }
-                - Run: { operation: withdraw }
-                - Event: { name: balance, value: "50" }
-                - Event: { name: transaction_count, value: "1" }
+      - $result:
+          Complete:
+            results:
+              - name: unordered_both_present
+                status: pass
+                expected:
+                  - $run: withdraw
+                  - $unordered:
+                    - balance: "50"
+                    - transaction_count: "1"
+                traces:
+                  - Event: { name: balance, value: "100" }
+                  - Event: { name: transaction_count, value: "0" }
+                  - Run: { operation: withdraw }
+                  - Event: { name: balance, value: "50" }
+                  - Event: { name: transaction_count, value: "1" }
+              - name: unordered_reversed_still_passes
+                status: pass
+                expected:
+                  - $run: withdraw
+                  - $unordered:
+                    - transaction_count: "1"
+                    - balance: "50"
+                traces:
+                  - Event: { name: balance, value: "100" }
+                  - Event: { name: transaction_count, value: "0" }
+                  - Run: { operation: withdraw }
+                  - Event: { name: balance, value: "50" }
+                  - Event: { name: transaction_count, value: "1" }
+              - name: unordered_wrong_value_fails
+                status: fail
+                expected:
+                  - $run: withdraw
+                  - $unordered:
+                    - balance: "999"
+                    - transaction_count: "1"
+                traces:
+                  - Event: { name: balance, value: "100" }
+                  - Event: { name: transaction_count, value: "0" }
+                  - Run: { operation: withdraw }
+                  - Event: { name: balance, value: "50" }
+                  - Event: { name: transaction_count, value: "1" }
+              - name: unordered_multiple_blocks
+                status: pass
+                expected:
+                  - $unordered:
+                    - balance: "100"
+                    - transaction_count: "0"
+                  - $run: withdraw
+                  - $unordered:
+                    - balance: "50"
+                    - transaction_count: "1"
+                traces:
+                  - Event: { name: balance, value: "100" }
+                  - Event: { name: transaction_count, value: "0" }
+                  - Run: { operation: withdraw }
+                  - Event: { name: balance, value: "50" }
+                  - Event: { name: transaction_count, value: "1" }
 
   - name: anywhere_event_matching
     desc: $anywhere matches events regardless of position in trace
@@ -1654,67 +1717,67 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/anywhere_event.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: anywhere_matches_early_event
-              status: pass
-              expected:
-                - $run: increment_twice
-                - count: "2"
-                - $anywhere:
-                  - count: "0"
-              traces:
-                - Event: { name: count, value: "0" }
-                - Run: { operation: increment_twice }
-                - Event: { name: count, value: "1" }
-                - Event: { name: count, value: "2" }
-            - name: anywhere_matches_late_event
-              status: pass
-              expected:
-                - count: "0"
-                - $run: increment_twice
-                - $anywhere:
+      - $result:
+          Complete:
+            results:
+              - name: anywhere_matches_early_event
+                status: pass
+                expected:
+                  - $run: increment_twice
                   - count: "2"
-              traces:
-                - Event: { name: count, value: "0" }
-                - Run: { operation: increment_twice }
-                - Event: { name: count, value: "1" }
-                - Event: { name: count, value: "2" }
-            - name: anywhere_matches_middle_event
-              status: pass
-              expected:
-                - $anywhere:
-                  - count: "1"
-                - $run: increment_twice
-                - count: "2"
-              traces:
-                - Event: { name: count, value: "0" }
-                - Run: { operation: increment_twice }
-                - Event: { name: count, value: "1" }
-                - Event: { name: count, value: "2" }
-            - name: anywhere_multiple_items
-              status: pass
-              expected:
-                - $anywhere:
+                  - $anywhere:
+                    - count: "0"
+                traces:
+                  - Event: { name: count, value: "0" }
+                  - Run: { operation: increment_twice }
+                  - Event: { name: count, value: "1" }
+                  - Event: { name: count, value: "2" }
+              - name: anywhere_matches_late_event
+                status: pass
+                expected:
                   - count: "0"
-                  - count: "1"
+                  - $run: increment_twice
+                  - $anywhere:
+                    - count: "2"
+                traces:
+                  - Event: { name: count, value: "0" }
+                  - Run: { operation: increment_twice }
+                  - Event: { name: count, value: "1" }
+                  - Event: { name: count, value: "2" }
+              - name: anywhere_matches_middle_event
+                status: pass
+                expected:
+                  - $anywhere:
+                    - count: "1"
+                  - $run: increment_twice
                   - count: "2"
-              traces:
-                - Event: { name: count, value: "0" }
-                - Run: { operation: increment_twice }
-                - Event: { name: count, value: "1" }
-                - Event: { name: count, value: "2" }
-            - name: anywhere_missing_fails
-              status: fail
-              expected:
-                - $anywhere:
-                  - count: "999"
-              traces:
-                - Event: { name: count, value: "0" }
-                - Run: { operation: increment_twice }
-                - Event: { name: count, value: "1" }
-                - Event: { name: count, value: "2" }
+                traces:
+                  - Event: { name: count, value: "0" }
+                  - Run: { operation: increment_twice }
+                  - Event: { name: count, value: "1" }
+                  - Event: { name: count, value: "2" }
+              - name: anywhere_multiple_items
+                status: pass
+                expected:
+                  - $anywhere:
+                    - count: "0"
+                    - count: "1"
+                    - count: "2"
+                traces:
+                  - Event: { name: count, value: "0" }
+                  - Run: { operation: increment_twice }
+                  - Event: { name: count, value: "1" }
+                  - Event: { name: count, value: "2" }
+              - name: anywhere_missing_fails
+                status: fail
+                expected:
+                  - $anywhere:
+                    - count: "999"
+                traces:
+                  - Event: { name: count, value: "0" }
+                  - Run: { operation: increment_twice }
+                  - Event: { name: count, value: "1" }
+                  - Event: { name: count, value: "2" }
 
   - name: keyword_collision_operation_named_run
     desc: Operation named "run" works with $run prefix — no collision
@@ -1722,18 +1785,18 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/keyword_collision.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: operation_named_run
-              status: pass
-              expected:
-                - $run: run
-                - $result: "executed: test"
-              traces:
-                - Run: { operation: run }
-                - Event: { name: run.input, value: "test" }
-                - Event: { name: $result, value: "executed: test" }
+      - $result:
+          Complete:
+            results:
+              - name: operation_named_run
+                status: pass
+                expected:
+                  - $run: run
+                  - $result: "executed: test"
+                traces:
+                  - Run: { operation: run }
+                  - Event: { name: run.input, value: "test" }
+                  - Event: { name: $result, value: "executed: test" }
 
   # ================================================================
   # Normative strength — level: must/should/may
@@ -1745,23 +1808,23 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/provenance_example.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: add_with_provenance
-              status: pass
-              level: must
-              source:
-                assertion_ids: [TEST-A1, TEST-A2]
-                spec: "Test Specification v1.0"
-                section: "§3.1"
-              expected:
-                - $result: "5"
-              traces:
-                - Run: { operation: add }
-                - Event: { name: add.a, value: "2" }
-                - Event: { name: add.b, value: "3" }
-                - Event: { name: $result, value: "5" }
+      - $result:
+          Complete:
+            results:
+              - name: add_with_provenance
+                status: pass
+                level: must
+                source:
+                  assertion_ids: [TEST-A1, TEST-A2]
+                  spec: "Test Specification v1.0"
+                  section: "§3.1"
+                expected:
+                  - $result: "5"
+                traces:
+                  - Run: { operation: add }
+                  - Event: { name: add.a, value: "2" }
+                  - Event: { name: add.b, value: "3" }
+                  - Event: { name: $result, value: "5" }
 
   - name: level_may_missing_skips
     desc: MAY operation not implemented — case is skipped, not an error
@@ -1769,13 +1832,13 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/level_may_missing.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: optional_not_implemented
-              status: skip
-              expected: []
-              traces: []
+      - $result:
+          Complete:
+            results:
+              - name: optional_not_implemented
+                status: skip
+                expected: []
+                traces: []
 
   - name: level_should_missing_warns
     desc: SHOULD operation not implemented — case produces warning status
@@ -1783,13 +1846,13 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/level_should_missing.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: recommended_not_implemented
-              status: warn
-              expected: []
-              traces: []
+      - $result:
+          Complete:
+            results:
+              - name: recommended_not_implemented
+                status: warn
+                expected: []
+                traces: []
 
   # ================================================================
   # Enum SpecEvent support (#19)
@@ -1801,36 +1864,33 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/enum_event.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: unit_variant
-              status: pass
-              expected:
-                - shape: "Point"
-              traces:
-                - Run: { operation: classify }
-                - Event: { name: classify.sides, value: "0" }
-                - Event: { name: $result, value: { Point: {} } }
-            - name: single_field_variant
-              status: pass
-              expected:
-                - shape: "Circle"
-                - shape.radius: "5"
-              traces:
-                - Run: { operation: classify }
-                - Event: { name: classify.sides, value: "1" }
-                - Event: { name: $result, value: { Circle: { radius: "5" } } }
-            - name: multi_field_variant
-              status: pass
-              expected:
-                - shape: "Rectangle"
-                - shape.width: "3"
-                - shape.height: "4"
-              traces:
-                - Run: { operation: classify }
-                - Event: { name: classify.sides, value: "4" }
-                - Event: { name: $result, value: { Rectangle: { height: "4", width: "3" } } }
+      - $result:
+          Complete:
+            results:
+              - name: unit_variant
+                status: pass
+                expected:
+                  - $result: { Point: {} }
+                traces:
+                  - Run: { operation: classify }
+                  - Event: { name: classify.sides, value: "0" }
+                  - Event: { name: $result, value: { Point: {} } }
+              - name: single_field_variant
+                status: pass
+                expected:
+                  - $result: { Circle: { radius: "5" } }
+                traces:
+                  - Run: { operation: classify }
+                  - Event: { name: classify.sides, value: "1" }
+                  - Event: { name: $result, value: { Circle: { radius: "5" } } }
+              - name: multi_field_variant
+                status: pass
+                expected:
+                  - $result: { Rectangle: { height: "4", width: "3" } }
+                traces:
+                  - Run: { operation: classify }
+                  - Event: { name: classify.sides, value: "4" }
+                  - Event: { name: $result, value: { Rectangle: { height: "4", width: "3" } } }
 
   # ================================================================
   # Complex inputs — structured YAML deserialized into typed params
@@ -1848,71 +1908,71 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/complex_inputs.spec.yaml
     expected:
-      outcome:
-        Complete:
-          results:
-            - name: create_enum_with_members
-              status: pass
-            - name: sum_two_points
-              status: pass
-            - name: sum_three_points
-              status: pass
-            - name: nested_config_object
-              status: pass
-            - name: area_of_circle
-              status: pass
-            - name: area_of_rectangle
-              status: pass
-            - name: area_of_point
-              status: pass
-            - name: classify_circle
-              status: pass
-            - name: classify_rectangle
-              status: pass
-            - name: classify_point
-              status: pass
-            - name: get_three_points
-              status: pass
-            - name: lookup_in_map
-              status: pass
-            - name: invert_string_int_map
-              status: pass
-            - name: greet_with_name
-              status: pass
-            - name: greet_without_name
-              status: pass
-            - name: find_point_exists
-              status: pass
-            - name: find_point_missing
-              status: pass
-            - name: find_shape_some_circle
-              status: pass
-              expected:
-                - $result: { Some: { Circle: { radius: "5" } } }
-              traces:
-                - Run: { operation: find_shape }
-                - Event: { name: find_shape.sides, value: "1" }
-                - Event: { name: $result, value: { Some: { Circle: { radius: "5" } } } }
-            - name: find_shape_some_point
-              status: pass
-              expected:
-                - $result: { Some: { Point: {} } }
-              traces:
-                - Run: { operation: find_shape }
-                - Event: { name: find_shape.sides, value: "0" }
-                - Event: { name: $result, value: { Some: { Point: {} } } }
-            - name: find_shape_none
-              status: pass
-              expected:
-                - $result: { None: {} }
-              traces:
-                - Run: { operation: find_shape }
-                - Event: { name: find_shape.sides, value: "-1" }
-                - Event: { name: $result, value: { None: {} } }
-            - name: describe_person_with_address
-              status: pass
-            - name: create_person_struct
-              status: pass
+      - $result:
+          Complete:
+            results:
+              - name: create_enum_with_members
+                status: pass
+              - name: sum_two_points
+                status: pass
+              - name: sum_three_points
+                status: pass
+              - name: nested_config_object
+                status: pass
+              - name: area_of_circle
+                status: pass
+              - name: area_of_rectangle
+                status: pass
+              - name: area_of_point
+                status: pass
+              - name: classify_circle
+                status: pass
+              - name: classify_rectangle
+                status: pass
+              - name: classify_point
+                status: pass
+              - name: get_three_points
+                status: pass
+              - name: lookup_in_map
+                status: pass
+              - name: invert_string_int_map
+                status: pass
+              - name: greet_with_name
+                status: pass
+              - name: greet_without_name
+                status: pass
+              - name: find_point_exists
+                status: pass
+              - name: find_point_missing
+                status: pass
+              - name: find_shape_some_circle
+                status: pass
+                expected:
+                  - $result: { Some: { Circle: { radius: "5" } } }
+                traces:
+                  - Run: { operation: find_shape }
+                  - Event: { name: find_shape.sides, value: "1" }
+                  - Event: { name: $result, value: { Some: { Circle: { radius: "5" } } } }
+              - name: find_shape_some_point
+                status: pass
+                expected:
+                  - $result: { Some: { Point: {} } }
+                traces:
+                  - Run: { operation: find_shape }
+                  - Event: { name: find_shape.sides, value: "0" }
+                  - Event: { name: $result, value: { Some: { Point: {} } } }
+              - name: find_shape_none
+                status: pass
+                expected:
+                  - $result: { None: {} }
+                traces:
+                  - Run: { operation: find_shape }
+                  - Event: { name: find_shape.sides, value: "-1" }
+                  - Event: { name: $result, value: { None: {} } }
+              - name: describe_person_with_address
+                status: pass
+              - name: create_person_struct
+                status: pass
 
   # ================================================================
   # Property tests — generators, calls, $assert
@@ -2151,9 +2211,9 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/bad_yaml.spec.yaml
     expected:
-      outcome:
-        Error:
-          reason: "spec file is not valid YAML"
+      - $result:
+          Error:
+            reason: "spec file is not valid YAML"
 
   - name: error_bad_binding
     desc: Nonexistent binding produces an error
@@ -2161,9 +2221,9 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/bad_binding.spec.yaml
     expected:
-      outcome:
-        Error:
-          reason: "binding 'nonexistent' not found"
+      - $result:
+          Error:
+            reason: "binding 'nonexistent' not found"
 
   - name: error_missing_setup
     desc: A method operation whose receiver type has no linked setup
@@ -2171,9 +2231,9 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/missing_setup.spec.yaml
     expected:
-      outcome:
-        Error:
-          reason: "case 'increment_once': operation 'increment' is a method on 'Counter' but no #[spec_setup(\"increment\")] returns 'Counter' to construct the receiver"
+      - $result:
+          Error:
+            reason: "case 'increment_once': operation 'increment' is a method on 'Counter' but no #[spec_setup(\"increment\")] returns 'Counter' to construct the receiver"
 
   - name: error_missing_operation
     desc: Operation not found in source annotations
@@ -2181,9 +2241,9 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/missing_operation.spec.yaml
     expected:
-      outcome:
-        Error:
-          reason: "operation 'increment' not found in source annotations"
+      - $result:
+          Error:
+            reason: "operation 'increment' not found in source annotations"
 
   - name: error_compile_failure
     desc: Source has a syntax error
@@ -2191,9 +2251,9 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/compile_error.spec.yaml
     expected:
-      outcome:
-        Error:
-          reason: "source failed to compile"
+      - $result:
+          Error:
+            reason: "source failed to compile"
 
   - name: error_no_cases
     desc: Spec with no test cases
@@ -2201,9 +2261,9 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/no_cases.spec.yaml
     expected:
-      outcome:
-        Error:
-          reason: "spec has no test cases"
+      - $result:
+          Error:
+            reason: "spec has no test cases"
 
   - name: error_shape_mismatch
     desc: Expected asserts on an event not declared in operation outputs
@@ -2211,6 +2271,6 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/shape_mismatch.spec.yaml
     expected:
-      outcome:
-        Error:
-          reason: "expected event 'answer' is not a declared output of operation 'add'"
+      - $result:
+          Error:
+            reason: "expected event 'answer' is not a declared output of operation 'add'"

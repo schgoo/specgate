@@ -22,7 +22,11 @@ pub fn get_product() -> Product {
     Product {
         name: "Milk".to_string(),
         price: 4,
-        tags: vec!["dairy".to_string(), "organic".to_string(), "local".to_string()],
+        tags: vec![
+            "dairy".to_string(),
+            "organic".to_string(),
+            "local".to_string(),
+        ],
         attributes: attrs,
     }
 }

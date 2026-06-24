@@ -5,7 +5,10 @@ use specgate::*;
 
 #[spec_setup("withdraw")]
 pub fn make_account() -> Account {
-    Account { balance: 100, transaction_count: 0 }
+    Account {
+        balance: 100,
+        transaction_count: 0,
+    }
 }
 
 #[derive(SpecEvent)]

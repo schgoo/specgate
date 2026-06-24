@@ -200,7 +200,6 @@ dependencies = [
  "serde",
  "serde_yaml",
  "specgate",
- "specgate-harness",
 ]
 
 [[package]]

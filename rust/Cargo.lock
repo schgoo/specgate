@@ -254,7 +254,6 @@ dependencies = [
 name = "specgate"
 version = "0.5.0"
 dependencies = [
- "serde_yaml",
  "specgate",
  "specgate-annotations",
  "specgate-harness",
@@ -295,7 +294,6 @@ dependencies = [
  "serde",
  "serde_yaml",
  "specgate",
- "specgate-harness",
 ]
 
 [[package]]

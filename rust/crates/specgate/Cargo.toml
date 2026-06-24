@@ -20,11 +20,10 @@ trace = ["specgate-annotations/specgate-trace"]
 specgate-annotations = { workspace = true, public = true }
 specgate-harness = { workspace = true, optional = true }
 
-# Enable the `harness` feature in this crate's own tests so the dogfood
+# Enable the `harness` feature in this crate's own tests so the self-host
 # integration test can call the public `specgate::run_spec` API.
 [dev-dependencies]
 specgate = { path = ".", features = ["harness"] }
-serde_yaml = { workspace = true }
 
 [lints]
 workspace = true

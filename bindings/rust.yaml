@@ -2,16 +2,16 @@
 # Binding: Rust implementation
 # All paths are relative to this file (bindings/rust.yaml)
 #
-# Targets are addressed by name. When a spec uses `binding: bindings/rust.yaml`
-# without specifying a target, the harness selects the **first** target listed
-# below as the default — currently `harness`, which points at the harness crate.
+# Targets are addressed by name. A spec selects a target via its target:
+# field (or per-case target:). Non-command targets need only a package_root;
+# the harness finds the implementation by scanning that package for the
+# #[spec_operation("<name>")] matching each case's operation key.
 
 language: rust
 
 targets:
   run_spec:
-    package_root: ../rust/crates/specgate-harness
-    function: specgate_harness::run_spec
+    package_root: ../test/rust/crates/specgate-selfhost
 
   validate_spec:
     package_root: ../rust/crates/specgate-types

@@ -1,6 +1,0 @@
-# Binding for the self-host spec — points at the dedicated specgate-selfhost
-# crate, whose lib.rs provides the #[spec_operation("run_spec")] wrapper.
-language: rust
-targets:
-  default:
-    package_root: ../../specgate-selfhost
