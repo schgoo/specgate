@@ -640,20 +640,27 @@ fn operators_spec() {
 #[test]
 fn scalar_operators_spec() {
     let r = complete(run("test/rust/crates/specgate-fixtures/specs/scalar_operators.spec.yaml"));
-    assert_eq!(r.len(), 13);
+    assert_eq!(r.len(), 20);
     check_case(&r[0], "regex_match", CaseStatus::Pass);
     check_case(&r[1], "regex_no_match_fails", CaseStatus::Fail);
-    check_case(&r[2], "not_value", CaseStatus::Pass);
-    check_case(&r[3], "not_fails_when_equal", CaseStatus::Fail);
-    check_case(&r[4], "gt_passes", CaseStatus::Pass);
-    check_case(&r[5], "gte_passes_equal", CaseStatus::Pass);
-    check_case(&r[6], "lt_passes", CaseStatus::Pass);
-    check_case(&r[7], "lte_fails", CaseStatus::Fail);
-    check_case(&r[8], "empty_list", CaseStatus::Pass);
-    check_case(&r[9], "every_element", CaseStatus::Pass);
-    check_case(&r[10], "every_fails", CaseStatus::Fail);
-    check_case(&r[11], "combined_multi_field", CaseStatus::Pass);
-    check_case(&r[12], "combined_multi_field_one_fails", CaseStatus::Fail);
+    check_case(&r[2], "ne_value", CaseStatus::Pass);
+    check_case(&r[3], "ne_fails_when_equal", CaseStatus::Fail);
+    check_case(&r[4], "not_gt", CaseStatus::Pass);
+    check_case(&r[5], "not_gt_fails", CaseStatus::Fail);
+    check_case(&r[6], "not_lt", CaseStatus::Pass);
+    check_case(&r[7], "not_matches", CaseStatus::Pass);
+    check_case(&r[8], "not_size", CaseStatus::Pass);
+    check_case(&r[9], "not_contains", CaseStatus::Pass);
+    check_case(&r[10], "not_every", CaseStatus::Pass);
+    check_case(&r[11], "gt_passes", CaseStatus::Pass);
+    check_case(&r[12], "gte_passes_equal", CaseStatus::Pass);
+    check_case(&r[13], "lt_passes", CaseStatus::Pass);
+    check_case(&r[14], "lte_fails", CaseStatus::Fail);
+    check_case(&r[15], "empty_list", CaseStatus::Pass);
+    check_case(&r[16], "every_element", CaseStatus::Pass);
+    check_case(&r[17], "every_fails", CaseStatus::Fail);
+    check_case(&r[18], "combined_multi_field", CaseStatus::Pass);
+    check_case(&r[19], "combined_multi_field_one_fails", CaseStatus::Fail);
 }
 
 #[test]

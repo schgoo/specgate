@@ -30,18 +30,61 @@ cases:
     expected:
       - label: { $matches: "^invalid" }
 
-  # $not — negation
-  - name: not_value
-    desc: Temperature is not 100
+  # $ne — value inequality (MongoDB-aligned: $ne for value, not $not)
+  - name: ne_value
+    desc: Temperature is not equal to 100
     operation: get_measurement
     expected:
-      - temperature: { $not: 100 }
+      - temperature: { $ne: 100 }
 
-  - name: not_fails_when_equal
-    desc: Not fails when value matches
+  - name: ne_fails_when_equal
+    desc: $ne fails when the value is equal
     operation: get_measurement
     expected:
-      - temperature: { $not: 72 }
+      - temperature: { $ne: 72 }
+
+  # $not — negates another operator (never a bare value)
+  - name: not_gt
+    desc: Temperature is NOT greater than 100
+    operation: get_measurement
+    expected:
+      - temperature: { $not: { $gt: 100 } }
+
+  - name: not_gt_fails
+    desc: $not fails when the wrapped operator matches
+    operation: get_measurement
+    expected:
+      - temperature: { $not: { $gt: 70 } }
+
+  - name: not_lt
+    desc: Temperature is NOT less than 50
+    operation: get_measurement
+    expected:
+      - temperature: { $not: { $lt: 50 } }
+
+  - name: not_matches
+    desc: Label does NOT match an unrelated regex
+    operation: get_measurement
+    expected:
+      - label: { $not: { $matches: "^device-" } }
+
+  - name: not_size
+    desc: Readings list size is NOT 3
+    operation: get_measurement
+    expected:
+      - readings: { $not: { $size: 3 } }
+
+  - name: not_contains
+    desc: Readings do NOT contain 999
+    operation: get_measurement
+    expected:
+      - readings: { $not: { $contains: 999 } }
+
+  - name: not_every
+    desc: NOT every reading is greater than 71
+    operation: get_measurement
+    expected:
+      - readings: { $not: { $every: { $gt: 71 } } }
 
   # $gt, $gte, $lt, $lte — numeric comparisons
   - name: gt_passes

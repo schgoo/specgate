@@ -111,6 +111,7 @@ fn string_matches_scalar(s: &str, actual: &Value) -> bool {
 fn matcher_matches(m: &Matcher, v: &Value) -> bool {
     match m {
         Matcher::Eq(target) => values_equal(target, v),
+        Matcher::Ne(target) => !values_equal(target, v),
         Matcher::Size(n) => length_of(v).is_some_and(|l| l == *n),
         Matcher::Contains(arg) => match v {
             Value::List(xs) => xs.iter().any(|x| match arg.as_ref() {

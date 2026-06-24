@@ -316,6 +316,7 @@ fn parse_matcher(m: &serde_yaml::Mapping) -> Result<Matcher, ParseError> {
 fn parse_single_op(op: &str, v: &YValue) -> Result<Matcher, ParseError> {
     match op {
         "$eq" => Ok(Matcher::Eq(parse_value(v)?)),
+        "$ne" => Ok(Matcher::Ne(parse_value(v)?)),
         "$size" => {
             let n = v.as_u64().ok_or_else(|| ParseError::Shape("$size expects an integer".into()))?;
             #[allow(clippy::cast_possible_truncation)] // $size values in specs are always small; truncation on 32-bit is intentional
@@ -397,13 +398,15 @@ fn parse_single_op(op: &str, v: &YValue) -> Result<Matcher, ParseError> {
             Ok(Matcher::Every(Box::new(arg)))
         }
         "$not" => {
-            let inner = if let YValue::Mapping(mp) = v {
-                let has_op = mp.iter().any(|(k, _)| k.as_str().is_some_and(|s| s.starts_with('$')));
-                if has_op { parse_matcher(mp)? } else { Matcher::Eq(parse_value(v)?) }
-            } else {
-                Matcher::Eq(parse_value(v)?)
-            };
-            Ok(Matcher::Not(Box::new(inner)))
+            // MongoDB-aligned: $not negates another operator expression and
+            // never takes a bare value (use $ne for value inequality).
+            let mp = v
+                .as_mapping()
+                .filter(|mp| mp.iter().any(|(k, _)| k.as_str().is_some_and(|s| s.starts_with('$'))))
+                .ok_or_else(|| {
+                    ParseError::Shape("$not expects an operator expression like { $gt: 5 }; use $ne for value inequality".into())
+                })?;
+            Ok(Matcher::Not(Box::new(parse_matcher(mp)?)))
         }
         "$gt" => Ok(Matcher::Gt(parse_value(v)?)),
         "$gte" => Ok(Matcher::Gte(parse_value(v)?)),

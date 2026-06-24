@@ -50,6 +50,7 @@ impl From<bool> for AssertValue {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Matcher {
     Eq(Value),
+    Ne(Value),
     Size(usize),
     Contains(Box<AnyArg>),
     ContainsAll(Vec<Value>),

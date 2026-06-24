@@ -448,6 +448,7 @@ expected:
 | Operator | Meaning |
 |----------|---------|
 | `$eq` | Explicit equality |
+| `$ne` | Value inequality (not equal to the given value) |
 | `$size` | Collection size |
 | `$contains` | Contains one value |
 | `$containsAll` | Contains all listed values |
@@ -458,8 +459,12 @@ expected:
 | `$every` | Every element matches |
 | `$type` | Value has the given type |
 | `$matches` | Regex match |
-| `$not` | Negated nested matcher |
+| `$not` | Negates another operator expression (e.g. `{ $not: { $gt: 5 } }`) |
 | `$gt`, `$gte`, `$lt`, `$lte` | Numeric comparison |
+
+Following MongoDB semantics, `$not` negates an operator expression and never
+takes a bare value — use `$ne` for value inequality (`{ $ne: 100 }`), and
+`$not` to invert another operator (`{ $not: { $gt: 5 } }`).
 
 Canonical fixtures: `operators.spec.yaml`, `scalar_operators.spec.yaml`,
 `structured_output.spec.yaml`, `structured_map.spec.yaml`,
