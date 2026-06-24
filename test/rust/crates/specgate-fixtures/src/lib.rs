@@ -15,6 +15,8 @@ pub mod multi_file;
 pub mod multi_mutation;
 pub mod multi_setup;
 pub mod multi_step;
+pub mod multi_toplevel_a;
+pub mod multi_toplevel_b;
 pub mod named_inputs;
 pub mod nested_operations;
 pub mod nested_structured;

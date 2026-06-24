@@ -13,11 +13,6 @@ targets:
   run_spec:
     package_root: ../test/rust/crates/specgate-selfhost
 
-  validate_spec:
-    package_root: ../rust/crates/specgate-types
-    test_root: ../rust/crates/specgate-types/tests
-    function: specgate_types::validate_spec_document
-
   mechanism_proof:
     package_root: ../rust/crates/specgate-harness
     command: cargo test --test mechanism_proof

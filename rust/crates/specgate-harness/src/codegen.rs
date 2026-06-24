@@ -90,7 +90,7 @@ fn to_cargo_path(p: &Path) -> String {
     s.replace('\\', "/")
 }
 
-pub fn generate(scratch_dir: &Path, fixture_src: &Path, config: &GenerateConfig) -> std::io::Result<GeneratedProject> {
+pub fn generate(scratch_dir: &Path, fixture_srcs: &[PathBuf], config: &GenerateConfig) -> std::io::Result<GeneratedProject> {
     std::fs::create_dir_all(scratch_dir.join("src"))?;
     let trace_file = scratch_dir.join("traces.json");
 
@@ -99,13 +99,23 @@ pub fn generate(scratch_dir: &Path, fixture_src: &Path, config: &GenerateConfig)
     let macros_path = config.workspace_root.join("crates/specgate-macros");
     let harness_path = config.workspace_root.join("crates/specgate-harness");
 
-    // Determine the fixture module name from the source file stem.
-    let module_name = fixture_src.file_stem().and_then(|s| s.to_str()).unwrap_or("fixture").to_string();
+    // Module name per contributing source (its file stem).
+    let module_names: Vec<String> = fixture_srcs
+        .iter()
+        .map(|p| p.file_stem().and_then(|s| s.to_str()).unwrap_or("fixture").to_string())
+        .collect();
 
-    // Try to use the fixture crate as a path dependency when possible.
-    let fixture_crate = config.fixture_pkg_root.and_then(|root| resolve_fixture_crate(root, &module_name));
+    // Use the fixture crate as a path dependency when EVERY contributing module
+    // resolves to a `pub mod` in the crate's lib.rs. Otherwise fall back to raw
+    // `#[path]` includes of the source files.
+    let fixture_crates: Option<Vec<FixtureCrateInfo>> = config.fixture_pkg_root.and_then(|root| {
+        let resolved: Vec<FixtureCrateInfo> = module_names.iter().filter_map(|m| resolve_fixture_crate(root, m)).collect();
+        (resolved.len() == module_names.len() && !resolved.is_empty()).then_some(resolved)
+    });
 
-    let fixture_dep = if let Some(ref fc) = fixture_crate {
+    let fixture_dep = if let Some(crates) = fixture_crates.as_ref() {
+        // All modules live in the same crate, so add the dependency once.
+        let fc = &crates[0];
         format!("\n{} = {{ path = \"{}\" }}", fc.cargo_name, to_cargo_path(&fc.path))
     } else {
         String::new()
@@ -154,13 +164,13 @@ serde_yaml = "0.9"{fixture_dep}
     }
 
     let main_rs = render_main(
-        fixture_src,
+        fixture_srcs,
         config.spec,
         config.cases_to_run,
         config.annotated,
         &trace_file,
         config.needs_async,
-        fixture_crate.as_ref(),
+        fixture_crates.as_deref(),
     )?;
     std::fs::write(scratch_dir.join("src").join("main.rs"), main_rs)?;
 
@@ -171,27 +181,54 @@ serde_yaml = "0.9"{fixture_dep}
 }
 
 fn render_main(
-    fixture_src: &Path,
+    fixture_srcs: &[PathBuf],
     spec: &Spec,
     cases_to_run: &[&Case],
     annotated: &AnnotatedSource,
     trace_out: &Path,
     needs_async: bool,
-    fixture_crate: Option<&FixtureCrateInfo>,
+    fixture_crates: Option<&[FixtureCrateInfo]>,
 ) -> std::io::Result<String> {
     let mut out = String::new();
     out.push_str("#![allow(unused, unused_mut, unused_variables, dead_code, clippy::all)]\n");
     out.push_str("use specgate::{TraceEvent, Value, take_traces, reset, set_mock, SpecEvent};\n");
     out.push_str("use std::collections::HashMap;\n");
 
-    if let Some(fc) = fixture_crate {
-        // Alias the fixture module as `fut` so call sites work uniformly.
-        writeln!(out, "use {}::{} as fut;", fc.rust_ident, fc.module_name).expect("fmt");
-    } else {
-        let abs = std::fs::canonicalize(fixture_src)?;
-        let abs_str = abs.display().to_string();
-        let abs_str = abs_str.strip_prefix(r"\\?\").unwrap_or(&abs_str);
-        writeln!(out, "#[path = \"{}\"] mod fut;", abs_str.replace('\\', "\\\\")).expect("fmt");
+    match fixture_crates {
+        // Single crate module: alias it directly as `fut` (unchanged form).
+        Some(crates) if crates.len() == 1 => {
+            writeln!(out, "use {}::{} as fut;", crates[0].rust_ident, crates[0].module_name).expect("fmt");
+        }
+        // Multiple crate modules (operations split across files): re-export each
+        // module's public items into a synthetic `fut` module.
+        Some(crates) => {
+            out.push_str("mod fut {\n");
+            for fc in crates {
+                writeln!(out, "    pub use ::{}::{}::*;", fc.rust_ident, fc.module_name).expect("fmt");
+            }
+            out.push_str("}\n");
+        }
+        // Raw single file: include it directly as `fut` (unchanged form).
+        None if fixture_srcs.len() == 1 => {
+            let abs = std::fs::canonicalize(&fixture_srcs[0])?;
+            let abs_str = abs.display().to_string();
+            let abs_str = abs_str.strip_prefix(r"\\?\").unwrap_or(&abs_str);
+            writeln!(out, "#[path = \"{}\"] mod fut;", abs_str.replace('\\', "\\\\")).expect("fmt");
+        }
+        // Raw multiple files: include each, then re-export into `fut`.
+        None => {
+            for (i, src) in fixture_srcs.iter().enumerate() {
+                let abs = std::fs::canonicalize(src)?;
+                let abs_str = abs.display().to_string();
+                let abs_str = abs_str.strip_prefix(r"\\?\").unwrap_or(&abs_str);
+                writeln!(out, "#[path = \"{}\"] mod __fut_{};", abs_str.replace('\\', "\\\\"), i).expect("fmt");
+            }
+            out.push_str("mod fut {\n");
+            for i in 0..fixture_srcs.len() {
+                writeln!(out, "    pub use super::__fut_{i}::*;").expect("fmt");
+            }
+            out.push_str("}\n");
+        }
     }
     out.push_str("use fut::*;\n");
     out.push('\n');
@@ -725,7 +762,7 @@ mod tests {
         };
 
         let fixture_src = workspace_root.join("crates/specgate-harness/src/lib.rs");
-        let result = generate(scratch.path(), &fixture_src, &config);
+        let result = generate(scratch.path(), std::slice::from_ref(&fixture_src), &config);
         assert!(result.is_ok(), "generate failed: {:?}", result.err());
 
         let manifest = std::fs::read_to_string(scratch.path().join("Cargo.toml")).unwrap();
@@ -762,7 +799,7 @@ mod tests {
         };
 
         let fixture_src = workspace_root.join("crates/specgate-harness/src/lib.rs");
-        let result = generate(scratch.path(), &fixture_src, &config);
+        let result = generate(scratch.path(), std::slice::from_ref(&fixture_src), &config);
         assert!(result.is_ok(), "generate failed: {:?}", result.err());
 
         let manifest = std::fs::read_to_string(scratch.path().join("Cargo.toml")).unwrap();

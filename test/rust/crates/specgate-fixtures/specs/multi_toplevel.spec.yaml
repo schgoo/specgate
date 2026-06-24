@@ -1,0 +1,30 @@
+spec_version: "0.4.0"
+name: fixture.multi_toplevel
+binding: binding.yaml
+
+operations:
+  alpha:
+    inputs:
+      x: i32
+    outputs:
+      - $result: i32
+  beta:
+    inputs:
+      x: i32
+    outputs:
+      - $result: i32
+
+cases:
+  - name: alpha_increments
+    operation: alpha
+    inputs:
+      x: 10
+    expected:
+      - $result: "11"
+
+  - name: beta_doubles
+    operation: beta
+    inputs:
+      x: 10
+    expected:
+      - $result: "20"

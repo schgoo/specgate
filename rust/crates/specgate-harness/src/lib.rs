@@ -168,7 +168,8 @@ fn run_group(
         return run_command_group(command, &target.package_root, group_cases);
     }
 
-    let Some(fixture_src) = resolve_fixture_source(&target.package_root, fixture_basename, group_cases) else {
+    let fixture_srcs = resolve_fixture_sources(&target.package_root, fixture_basename, group_cases);
+    if fixture_srcs.is_empty() {
         if let Some(results) = short_circuit_non_must(group_cases, None) {
             return Ok(results);
         }
@@ -176,9 +177,15 @@ fn run_group(
             "source file not found: {}",
             target.package_root.join("src").join(format!("{fixture_basename}.rs")).display()
         ));
-    };
+    }
 
-    let src_text = load_fixture_text(&fixture_src)?;
+    // Merge the text of every contributing source so operations split across
+    // separate files are scanned together.
+    let mut src_text = String::new();
+    for fs in &fixture_srcs {
+        src_text.push_str(&load_fixture_text(fs)?);
+        src_text.push('\n');
+    }
 
     let annotated = scan::scan(&src_text);
 
@@ -254,7 +261,7 @@ fn run_group(
 
     let proj = codegen::generate(
         scratch_dir,
-        &fixture_src,
+        &fixture_srcs,
         &codegen::GenerateConfig {
             spec,
             cases_to_run: &cases_to_run,
@@ -279,6 +286,10 @@ fn run_group(
     cmd.env_remove("CARGO");
     cmd.env_remove("CARGO_MANIFEST_DIR");
     cmd.env("CARGO_TARGET_DIR", proj.crate_dir.join("target").as_os_str());
+    // Anchor the runner's working directory to the repo root so that
+    // path-input operations resolve repo-root-relative paths deterministically,
+    // independent of where the harness itself was invoked from.
+    cmd.current_dir(repo_root());
 
     let output = cmd.output().map_err(|e| format!("failed to invoke cargo: {e}"))?;
 
@@ -477,6 +488,16 @@ fn workspace_root() -> PathBuf {
     p
 }
 
+/// The repository root — the parent of the Rust workspace. Used as the working
+/// directory for the generated runner so that path-input operations (e.g. the
+/// CLI's `validate`/`run`) resolve repo-root-relative paths exactly as a user
+/// invoking the CLI from the repo root would.
+fn repo_root() -> PathBuf {
+    let mut p = workspace_root();
+    p.pop(); // rust -> repo root
+    p
+}
+
 /// Returns true if specgate-harness is being used from a local workspace
 /// (path dependency) rather than from crates.io.
 fn is_local_workspace() -> bool {
@@ -500,15 +521,27 @@ fn cargo_bin() -> String {
     std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string())
 }
 
-/// Try to find the fixture source file for a spec. Prefer `<basename>.rs`;
-/// otherwise pick the .rs file (or directory module) under src/ whose
-/// annotations contain the most setups + operations the cases need.
-fn resolve_fixture_source(package_root: &Path, fixture_basename: &str, cases: &[&spec::Case]) -> Option<PathBuf> {
+/// Resolve the set of fixture source files needed to cover the operations the
+/// cases require. Usually a single file (or one directory module), but
+/// operations may be split across several separate top-level files — in that
+/// case the minimal covering set is returned so the harness can merge them.
+///
+/// Prefers `src/<basename>.rs` when it exists. Otherwise scores each candidate
+/// (top-level `.rs` file or directory module) by the required operations it
+/// provides; if one candidate covers everything it wins, else a greedy set
+/// cover over the remaining operations is returned.
+fn resolve_fixture_sources(package_root: &Path, fixture_basename: &str, cases: &[&spec::Case]) -> Vec<PathBuf> {
+    struct Candidate {
+        repr: PathBuf,
+        ops: BTreeSet<String>,
+        score: usize,
+    }
+
     let direct = package_root.join("src").join(format!("{fixture_basename}.rs"));
     if direct.exists() {
-        return Some(direct);
+        return vec![direct];
     }
-    // Build required sets from the provided cases.
+
     let mut req_ops: BTreeSet<String> = BTreeSet::new();
     for case in cases {
         if !case.steps.is_empty() {
@@ -520,40 +553,16 @@ fn resolve_fixture_source(package_root: &Path, fixture_basename: &str, cases: &[
         }
     }
 
-    let score_text = |text: &str, stem: Option<&str>| -> usize {
-        let annotated = scan::scan(text);
-        let mut score = 0usize;
-        for o in &req_ops {
-            if annotated.operations.contains_key(o) {
-                score += 2;
-            }
-        }
-        // Strongly prefer a source where the required operations actually wire
-        // (their setups/receivers resolve), so an orphan spec doesn't bind to a
-        // file that merely shares the operation name but can't construct it.
-        let op_refs: Vec<&str> = req_ops.iter().map(String::as_str).collect();
-        if !op_refs.is_empty() && op_refs.iter().all(|o| annotated.operations.contains_key(*o)) && annotated.resolve_case(&op_refs).is_ok()
-        {
-            score += 100;
-        }
-        if let Some(stem) = stem
-            && fixture_basename.starts_with(stem)
-            && stem.len() > 4
-        {
-            score += stem.len();
-        }
-        score
-    };
-
     let src_dir = package_root.join("src");
-    let entries = std::fs::read_dir(&src_dir).ok()?;
-    let mut best: Option<(usize, PathBuf)> = None;
+    let Ok(entries) = std::fs::read_dir(&src_dir) else {
+        return Vec::new();
+    };
+    let mut cands: Vec<Candidate> = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
         let stem = path.file_stem().and_then(|s| s.to_str()).map(ToString::to_string);
         // Directory module: merge all .rs files it contains and score together.
-        // The representative path is the synthetic `src/<dirname>.rs`, whose
-        // file stem drives the module name used during codegen.
+        // The representative path is the synthetic `src/<dirname>.rs`.
         let (text, repr) = if path.is_dir() {
             let Some(text) = merge_module_dir(&path) else { continue };
             let Some(dir_name) = stem.clone() else { continue };
@@ -564,12 +573,49 @@ fn resolve_fixture_source(package_root: &Path, fixture_basename: &str, cases: &[
         } else {
             continue;
         };
-        let score = score_text(&text, stem.as_deref());
-        if best.as_ref().is_none_or(|b| score > b.0) && score > 0 {
-            best = Some((score, repr));
+        let annotated = scan::scan(&text);
+        let provided: BTreeSet<String> = req_ops.iter().filter(|o| annotated.operations.contains_key(*o)).cloned().collect();
+        if provided.is_empty() {
+            continue;
+        }
+        // Prefer sources whose provided operations actually wire (setups /
+        // receivers resolve), and where the file stem matches the spec name.
+        let provided_refs: Vec<&str> = provided.iter().map(String::as_str).collect();
+        let wires = annotated.resolve_case(&provided_refs).is_ok();
+        let mut score = provided.len() * 2 + usize::from(wires) * 100;
+        if let Some(stem) = stem.as_deref()
+            && fixture_basename.starts_with(stem)
+            && stem.len() > 4
+        {
+            score += stem.len();
+        }
+        cands.push(Candidate {
+            repr,
+            ops: provided,
+            score,
+        });
+    }
+
+    // If a single candidate covers every required operation, take the best one.
+    if let Some(full) = cands.iter().filter(|c| c.ops.len() == req_ops.len()).max_by_key(|c| c.score) {
+        return vec![full.repr.clone()];
+    }
+
+    // Greedy set cover: take highest-scoring candidates until all required
+    // operations are covered (or no candidate adds anything new).
+    cands.sort_by_key(|c| std::cmp::Reverse(c.score));
+    let mut covered: BTreeSet<String> = BTreeSet::new();
+    let mut chosen: Vec<PathBuf> = Vec::new();
+    for c in &cands {
+        if c.ops.iter().any(|o| !covered.contains(o)) {
+            covered.extend(c.ops.iter().cloned());
+            chosen.push(c.repr.clone());
+            if covered.len() == req_ops.len() {
+                break;
+            }
         }
     }
-    best.map(|(_, p)| p)
+    chosen
 }
 
 /// Concatenate the source text of every `.rs` file under a module directory
