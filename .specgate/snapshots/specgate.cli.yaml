@@ -35,9 +35,6 @@ operations:
       strict:
         type: bool
         desc: Treat warnings as errors
-      suppress:
-        type: List<string>
-        desc: Check names to suppress
       assertions_dir:
         type: string
         desc: Directory of assertion source files for coverage checking (opt-in)
@@ -77,14 +74,13 @@ cases:
     inputs:
       spec_dir: test/fixtures/validation/valid_complete
       strict: false
-      suppress: []
       assertions_dir: ""
       check_source: false
     expected:
-      outcome:
-        Pass:
-          report:
-            errors: 0
+      - $result:
+          Pass:
+            report:
+              errors: 0
 
   - name: validate_schema_missing_version
     desc: Spec without spec_version fails schema validation
@@ -92,18 +88,17 @@ cases:
     inputs:
       spec_dir: test/fixtures/validation/missing_version
       strict: false
-      suppress: []
       assertions_dir: ""
       check_source: false
     expected:
-      outcome:
-        Fail:
-          report:
-            errors: 1
-            findings:
-              - severity: error
-                check: schema
-                message: "missing required field 'spec_version'"
+      - $result:
+          Fail:
+            report:
+              errors: 1
+              findings:
+                - severity: error
+                  check: schema
+                  message: "missing required field 'spec_version'"
 
   # ================================================================
   # Validate — 2. Operation reference check
@@ -115,14 +110,13 @@ cases:
     inputs:
       spec_dir: test/fixtures/validation/valid_complete
       strict: false
-      suppress: []
       assertions_dir: ""
       check_source: false
     expected:
-      outcome:
-        Pass:
-          report:
-            findings: []
+      - $result:
+          Pass:
+            report:
+              findings: []
 
   - name: validate_op_ref_fail
     desc: Case referencing undefined operation fails
@@ -130,18 +124,17 @@ cases:
     inputs:
       spec_dir: test/fixtures/validation/bad_op_ref
       strict: false
-      suppress: []
       assertions_dir: ""
       check_source: false
     expected:
-      outcome:
-        Fail:
-          report:
-            errors: 1
-            findings:
-              - severity: error
-                check: operation_reference
-                message: "case 'test_case' references undefined operation 'nonexistent'"
+      - $result:
+          Fail:
+            report:
+              errors: 1
+              findings:
+                - severity: error
+                  check: operation_reference
+                  message: "case 'test_case' references undefined operation 'nonexistent'"
 
   # ================================================================
   # Validate — 3. Name uniqueness
@@ -153,14 +146,13 @@ cases:
     inputs:
       spec_dir: test/fixtures/validation/valid_complete
       strict: false
-      suppress: []
       assertions_dir: ""
       check_source: false
     expected:
-      outcome:
-        Pass:
-          report:
-            errors: 0
+      - $result:
+          Pass:
+            report:
+              errors: 0
 
   - name: validate_names_duplicate_fail
     desc: Duplicate case names fail
@@ -168,71 +160,17 @@ cases:
     inputs:
       spec_dir: test/fixtures/validation/duplicate_names
       strict: false
-      suppress: []
       assertions_dir: ""
       check_source: false
     expected:
-      outcome:
-        Fail:
-          report:
-            errors: 1
-            findings:
-              - severity: error
-                check: name_uniqueness
-                message: "duplicate case name 'my_case'"
-
-  # ================================================================
-  # Validate — 4. Source provenance
-  # ================================================================
-
-  - name: validate_provenance_pass
-    desc: Case with source.assertion_ids produces no warning
-    operation: validate
-    inputs:
-      spec_dir: test/fixtures/validation/valid_complete
-      strict: false
-      suppress: []
-      assertions_dir: ""
-      check_source: false
-    expected:
-      outcome:
-        Pass:
-          report:
-            warnings: 0
-
-  - name: validate_provenance_missing_warn
-    desc: Case without source.assertion_ids produces warning
-    operation: validate
-    inputs:
-      spec_dir: test/fixtures/validation/no_provenance
-      strict: false
-      suppress: []
-      assertions_dir: ""
-      check_source: false
-    expected:
-      outcome:
-        Pass:
-          report:
-            warnings: 1
-            findings:
-              - severity: warn
-                check: provenance
-                message: "case 'my_case' has no source.assertion_ids"
-
-  - name: validate_provenance_strict_fail
-    desc: In strict mode, provenance warning becomes error
-    operation: validate
-    inputs:
-      spec_dir: test/fixtures/validation/no_provenance
-      strict: true
-      suppress: []
-      assertions_dir: ""
-      check_source: false
-    expected:
-      outcome:
-        Fail:
-          report:
-            errors: 1
+      - $result:
+          Fail:
+            report:
+              errors: 1
+              findings:
+                - severity: error
+                  check: name_uniqueness
+                  message: "duplicate case name 'my_case'"
 
   # ================================================================
   # Validate — 5. Input completeness
@@ -244,14 +182,13 @@ cases:
     inputs:
       spec_dir: test/fixtures/validation/valid_complete
       strict: false
-      suppress: []
       assertions_dir: ""
       check_source: false
     expected:
-      outcome:
-        Pass:
-          report:
-            errors: 0
+      - $result:
+          Pass:
+            report:
+              errors: 0
 
   - name: validate_inputs_missing_fail
     desc: Case missing a declared input produces error
@@ -259,18 +196,17 @@ cases:
     inputs:
       spec_dir: test/fixtures/validation/input_mismatch
       strict: false
-      suppress: []
       assertions_dir: ""
       check_source: false
     expected:
-      outcome:
-        Fail:
-          report:
-            errors: 1
-            findings:
-              - severity: error
-                check: input_completeness
-                message: "case 'missing_input' missing required input 'b' for operation 'add'"
+      - $result:
+          Fail:
+            report:
+              errors: 1
+              findings:
+                - severity: error
+                  check: input_completeness
+                  message: "case 'missing_input' missing required input 'b' for operation 'add'"
 
   # ================================================================
   # Validate — 6. Expected format
@@ -282,14 +218,13 @@ cases:
     inputs:
       spec_dir: test/fixtures/validation/valid_complete
       strict: false
-      suppress: []
       assertions_dir: ""
       check_source: false
     expected:
-      outcome:
-        Pass:
-          report:
-            errors: 0
+      - $result:
+          Pass:
+            report:
+              errors: 0
 
   - name: validate_expected_format_fail
     desc: Expected entry with multiple keys fails
@@ -297,18 +232,17 @@ cases:
     inputs:
       spec_dir: test/fixtures/validation/bad_expected
       strict: false
-      suppress: []
       assertions_dir: ""
       check_source: false
     expected:
-      outcome:
-        Fail:
-          report:
-            errors: 1
-            findings:
-              - severity: error
-                check: expected_format
-                message: "case 'bad_format' has expected entry with multiple keys"
+      - $result:
+          Fail:
+            report:
+              errors: 1
+              findings:
+                - severity: error
+                  check: expected_format
+                  message: "case 'bad_format' has expected entry with multiple keys"
 
   # ================================================================
   # Validate — 7. Narrative misuse detection
@@ -320,14 +254,13 @@ cases:
     inputs:
       spec_dir: test/fixtures/validation/valid_complete
       strict: false
-      suppress: []
       assertions_dir: ""
       check_source: false
     expected:
-      outcome:
-        Pass:
-          report:
-            warnings: 0
+      - $result:
+          Pass:
+            report:
+              warnings: 0
 
   - name: validate_narrative_misuse_warn
     desc: Narrative with testable-looking verify steps produces warning
@@ -335,18 +268,17 @@ cases:
     inputs:
       spec_dir: test/fixtures/validation/narrative_misuse
       strict: false
-      suppress: []
       assertions_dir: ""
       check_source: false
     expected:
-      outcome:
-        Pass:
-          report:
-            warnings: 1
-            findings:
-              - severity: warn
-                check: narrative_misuse
-                message: "narrative case 'should_be_runnable' has verify steps that look testable"
+      - $result:
+          Pass:
+            report:
+              warnings: 1
+              findings:
+                - severity: warn
+                  check: narrative_misuse
+                  message: "narrative case 'should_be_runnable' has verify steps that look testable"
 
   # ================================================================
   # Validate — 8. Assertion coverage (requires assertions dir)
@@ -378,14 +310,13 @@ cases:
     inputs:
       spec_dir: test/fixtures/validation/valid_complete
       strict: false
-      suppress: []
       assertions_dir: ""
       check_source: false
     expected:
-      outcome:
-        Pass:
-          report:
-            warnings: 0
+      - $result:
+          Pass:
+            report:
+              warnings: 0
 
   - name: validate_level_mismatch_warn
     desc: Source assertion is MUST but case level is may — produces warning
@@ -393,18 +324,17 @@ cases:
     inputs:
       spec_dir: test/fixtures/validation/level_mismatch
       strict: false
-      suppress: []
       assertions_dir: test/fixtures/validation/assertions
       check_source: false
     expected:
-      outcome:
-        Pass:
-          report:
-            warnings: 1
-            findings:
-              - severity: warn
-                check: level_correctness
-                message: "case 'required_but_marked_may' has level 'may' but assertion 'SPEC-REQ-1' is level 'must'"
+      - $result:
+          Pass:
+            report:
+              warnings: 1
+              findings:
+                - severity: warn
+                  check: level_correctness
+                  message: "case 'required_but_marked_may' has level 'may' but assertion 'SPEC-REQ-1' is level 'must'"
 
   # ================================================================
   # Validate — 10. Negative case coverage
@@ -416,14 +346,13 @@ cases:
     inputs:
       spec_dir: test/fixtures/validation/negative_coverage_pass
       strict: false
-      suppress: []
       assertions_dir: test/fixtures/validation/assertions
       check_source: false
     expected:
-      outcome:
-        Pass:
-          report:
-            errors: 0
+      - $result:
+          Pass:
+            report:
+              errors: 0
 
   - name: validate_negative_coverage_warn
     desc: Negatable assertion with only a positive case produces warning
@@ -431,52 +360,17 @@ cases:
     inputs:
       spec_dir: test/fixtures/validation/no_negative_case
       strict: false
-      suppress: []
       assertions_dir: test/fixtures/validation/assertions
       check_source: false
     expected:
-      outcome:
-        Pass:
-          report:
-            warnings: 1
-            findings:
-              - severity: warn
-                check: negative_coverage
-                message: "assertion 'SPEC-MUST-1' is negatable but has no negative test case"
-
-  # ================================================================
-  # Validate — suppress
-  # ================================================================
-
-  - name: validate_suppress_single_check
-    desc: Suppressed check produces no findings
-    operation: validate
-    inputs:
-      spec_dir: test/fixtures/validation/no_provenance
-      strict: false
-      suppress: [provenance]
-      assertions_dir: ""
-      check_source: false
-    expected:
-      outcome:
-        Pass:
-          report:
-            warnings: 0
-
-  - name: validate_suppress_multiple_checks
-    desc: Multiple suppressed checks all silenced
-    operation: validate
-    inputs:
-      spec_dir: test/fixtures/validation/level_mismatch
-      strict: false
-      suppress: [provenance, level_correctness]
-      assertions_dir: test/fixtures/validation/assertions
-      check_source: false
-    expected:
-      outcome:
-        Pass:
-          report:
-            warnings: 0
+      - $result:
+          Pass:
+            report:
+              warnings: 1
+              findings:
+                - severity: warn
+                  check: negative_coverage
+                  message: "assertion 'SPEC-MUST-1' is negatable but has no negative test case"
 
   # ================================================================
   # Validate — 11. Assertion coverage
@@ -488,14 +382,13 @@ cases:
     inputs:
       spec_dir: test/fixtures/validation/assertion_coverage
       strict: false
-      suppress: []
       assertions_dir: test/fixtures/validation/assertions
       check_source: false
     expected:
-      outcome:
-        Pass:
-          report:
-            errors: 0
+      - $result:
+          Pass:
+            report:
+              errors: 0
 
   - name: validate_assertion_coverage_miss
     desc: Assertion ID not found in assertions dir produces an error
@@ -503,18 +396,17 @@ cases:
     inputs:
       spec_dir: test/fixtures/validation/assertion_coverage_miss
       strict: false
-      suppress: []
       assertions_dir: test/fixtures/validation/assertions
       check_source: false
     expected:
-      outcome:
-        Fail:
-          report:
-            errors: 1
-            findings:
-              - severity: error
-                check: assertion_coverage
-                message: "assertion 'MISSING-1' referenced in case 'test_case' not found in assertions dir"
+      - $result:
+          Fail:
+            report:
+              errors: 1
+              findings:
+                - severity: error
+                  check: assertion_coverage
+                  message: "assertion 'MISSING-1' referenced in case 'test_case' not found in assertions dir"
 
   # ================================================================
   # Validate — 5b. Extra inputs
@@ -526,18 +418,17 @@ cases:
     inputs:
       spec_dir: test/fixtures/validation/extra_inputs
       strict: false
-      suppress: []
       assertions_dir: ""
       check_source: false
     expected:
-      outcome:
-        Fail:
-          report:
-            errors: 1
-            findings:
-              - severity: error
-                check: input_completeness
-                message: "case 'extra_input' has extra input 'c' not declared in operation 'add'"
+      - $result:
+          Fail:
+            report:
+              errors: 1
+              findings:
+                - severity: error
+                  check: input_completeness
+                  message: "case 'extra_input' has extra input 'c' not declared in operation 'add'"
 
   # ================================================================
   # Validate — dep_consistency
@@ -549,14 +440,13 @@ cases:
     inputs:
       spec_dir: test/fixtures/validation/dep_consistency_pass
       strict: false
-      suppress: []
       assertions_dir: ""
       check_source: false
     expected:
-      outcome:
-        Pass:
-          report:
-            errors: 0
+      - $result:
+          Pass:
+            report:
+              errors: 0
 
   - name: validate_dep_consistency_fail
     desc: Operation depends_on referencing an undefined operation produces error
@@ -564,18 +454,17 @@ cases:
     inputs:
       spec_dir: test/fixtures/validation/dep_consistency_fail
       strict: false
-      suppress: []
       assertions_dir: ""
       check_source: false
     expected:
-      outcome:
-        Fail:
-          report:
-            errors: 1
-            findings:
-              - severity: error
-                check: dep_consistency
-                message: "operation 'derived' depends on undefined operation 'missing_op'"
+      - $result:
+          Fail:
+            report:
+              errors: 1
+              findings:
+                - severity: error
+                  check: dep_consistency
+                  message: "operation 'derived' depends on undefined operation 'missing_op'"
 
   # ================================================================
   # Validate — mixed_level_bundle
@@ -587,18 +476,17 @@ cases:
     inputs:
       spec_dir: test/fixtures/validation/mixed_level_bundle
       strict: false
-      suppress: []
       assertions_dir: test/fixtures/validation/assertions
       check_source: false
     expected:
-      outcome:
-        Pass:
-          report:
-            warnings: 1
-            findings:
-              - severity: warn
-                check: mixed_level_bundle
-                message: "case 'mixed_case' bundles assertions of mixed levels (must and may)"
+      - $result:
+          Pass:
+            report:
+              warnings: 1
+              findings:
+                - severity: warn
+                  check: mixed_level_bundle
+                  message: "case 'mixed_case' bundles assertions of mixed levels (must and may)"
 
   # ================================================================
   # Validate — 12. Runnable cases must have expected
@@ -610,18 +498,17 @@ cases:
     inputs:
       spec_dir: test/fixtures/validation/no_expected
       strict: false
-      suppress: []
       assertions_dir: ""
       check_source: false
     expected:
-      outcome:
-        Fail:
-          report:
-            errors: 1
-            findings:
-              - severity: error
-                check: runnable_expected
-                message: "case 'missing_expected' has no expected or steps"
+      - $result:
+          Fail:
+            report:
+              errors: 1
+              findings:
+                - severity: error
+                  check: runnable_expected
+                  message: "case 'missing_expected' has no expected or steps"
 
   # ================================================================
   # Validate — source checks (opt-in with --check-source)
@@ -633,14 +520,13 @@ cases:
     inputs:
       spec_dir: test/fixtures/validation/source_check_pass
       strict: false
-      suppress: []
       assertions_dir: ""
       check_source: true
     expected:
-      outcome:
-        Pass:
-          report:
-            errors: 0
+      - $result:
+          Pass:
+            report:
+              errors: 0
 
   - name: validate_source_check_setup_not_pub
     desc: A #[spec_setup] function that is not pub produces an error
@@ -648,18 +534,17 @@ cases:
     inputs:
       spec_dir: test/fixtures/validation/source_check_fail_setup
       strict: false
-      suppress: []
       assertions_dir: ""
       check_source: true
     expected:
-      outcome:
-        Fail:
-          report:
-            errors: 1
-            findings:
-              - severity: error
-                check: source_setup_visibility
-                message: "#[spec_setup] function 'make_request' must be declared 'pub fn'"
+      - $result:
+          Fail:
+            report:
+              errors: 1
+              findings:
+                - severity: error
+                  check: source_setup_visibility
+                  message: "#[spec_setup] function 'make_request' must be declared 'pub fn'"
 
   - name: validate_source_check_field_not_pub
     desc: A constructible input-type field that is not pub produces an error
@@ -667,18 +552,17 @@ cases:
     inputs:
       spec_dir: test/fixtures/validation/source_check_fail_field
       strict: false
-      suppress: []
       assertions_dir: ""
       check_source: true
     expected:
-      outcome:
-        Fail:
-          report:
-            errors: 1
-            findings:
-              - severity: error
-                check: source_field_visibility
-                message: "field 'x' of input type 'ComputeRequest' must be 'pub'"
+      - $result:
+          Fail:
+            report:
+              errors: 1
+              findings:
+                - severity: error
+                  check: source_field_visibility
+                  message: "field 'x' of input type 'ComputeRequest' must be 'pub'"
 
   # ================================================================
   # Run — all status types
@@ -690,15 +574,15 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/stateless_add.spec.yaml
     expected:
-      outcome:
-        Complete:
-          report:
-            spec_name: fixture.stateless_add
-            total_cases: 1
-            passed: 1
-            failed: 0
-            skipped: 0
-            warned: 0
+      - $result:
+          Complete:
+            report:
+              spec_name: fixture.stateless_add
+              total_cases: 1
+              passed: 1
+              failed: 0
+              skipped: 0
+              warned: 0
 
   - name: run_with_failure
     desc: Running a failing spec reports failure count
@@ -706,15 +590,15 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/statemachine_counter_wrong.spec.yaml
     expected:
-      outcome:
-        Complete:
-          report:
-            spec_name: fixture.statemachine_counter_wrong
-            total_cases: 1
-            passed: 0
-            failed: 1
-            skipped: 0
-            warned: 0
+      - $result:
+          Complete:
+            report:
+              spec_name: fixture.statemachine_counter_wrong
+              total_cases: 1
+              passed: 0
+              failed: 1
+              skipped: 0
+              warned: 0
 
   - name: run_with_skip
     desc: Running a spec with level may + missing annotation reports skip
@@ -722,14 +606,14 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/level_may_missing.spec.yaml
     expected:
-      outcome:
-        Complete:
-          report:
-            total_cases: 1
-            passed: 0
-            failed: 0
-            skipped: 1
-            warned: 0
+      - $result:
+          Complete:
+            report:
+              total_cases: 1
+              passed: 0
+              failed: 0
+              skipped: 1
+              warned: 0
 
   - name: run_with_warn
     desc: Running a spec with level should + missing annotation reports warn
@@ -737,14 +621,14 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/level_should_missing.spec.yaml
     expected:
-      outcome:
-        Complete:
-          report:
-            total_cases: 1
-            passed: 0
-            failed: 0
-            skipped: 0
-            warned: 1
+      - $result:
+          Complete:
+            report:
+              total_cases: 1
+              passed: 0
+              failed: 0
+              skipped: 0
+              warned: 1
 
   - name: run_nonexistent_spec
     desc: Running a spec that doesn't exist produces error
@@ -752,9 +636,9 @@ cases:
     inputs:
       spec: does/not/exist.spec.yaml
     expected:
-      outcome:
-        Error:
-          reason: "spec file not found: does/not/exist.spec.yaml"
+      - $result:
+          Error:
+            reason: "spec file not found: does/not/exist.spec.yaml"
 
   - name: run_invalid_yaml
     desc: Running a spec with bad YAML produces error
@@ -762,9 +646,9 @@ cases:
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/bad_yaml.spec.yaml
     expected:
-      outcome:
-        Error:
-          reason: "spec file is not valid YAML"
+      - $result:
+          Error:
+            reason: "spec file is not valid YAML"
 
   # ================================================================
   # Narrative

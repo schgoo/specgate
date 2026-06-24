@@ -3,8 +3,8 @@
 
 use regex::Regex;
 use serde_yaml::Value;
-use specgate::spec_operation;
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use specgate::{SpecEvent, ToSpecValue, spec_operation};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
@@ -26,23 +26,39 @@ impl Severity {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+// Emit severity as a bare lowercase string ("error"/"warn"/"info") rather than
+// a tagged variant map, matching how the spec asserts it.
+impl ToSpecValue for Severity {
+    fn to_spec_value(&self) -> specgate::Value {
+        specgate::Value::String(self.as_str().to_string())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, SpecEvent)]
 pub struct ValidationFinding {
+    #[spec_event]
     pub severity: Severity,
+    #[spec_event]
     pub check: String,
+    #[spec_event]
     pub file: String,
+    #[spec_event]
     pub message: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, SpecEvent)]
 pub struct ValidationReport {
+    #[spec_event]
     pub total_files: i32,
+    #[spec_event]
     pub errors: i32,
+    #[spec_event]
     pub warnings: i32,
+    #[spec_event]
     pub findings: Vec<ValidationFinding>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, SpecEvent)]
 pub enum ValidateOutcome {
     Pass { report: ValidationReport },
     Fail { report: ValidationReport },
@@ -66,8 +82,7 @@ impl std::fmt::Display for ValidateOutcome {
 }
 
 #[spec_operation("validate")]
-pub fn validate(spec_dir: &str, strict: bool, suppress: &[String], assertions_dir: &str, check_source: bool) -> ValidateOutcome {
-    let suppress_set: HashSet<String> = suppress.iter().cloned().collect();
+pub fn validate(spec_dir: &str, strict: bool, assertions_dir: &str, check_source: bool) -> ValidateOutcome {
     let mut findings: Vec<ValidationFinding> = Vec::new();
     let mut total_files = 0;
 
@@ -110,8 +125,6 @@ pub fn validate(spec_dir: &str, strict: bool, suppress: &[String], assertions_di
             &mut findings,
         );
     }
-
-    findings.retain(|f| !suppress_set.contains(&f.check));
 
     if strict {
         for f in &mut findings {

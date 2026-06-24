@@ -7,8 +7,6 @@ language: rust
 targets:
   validate:
     package_root: ../rust/crates/specgate-cli
-    function: specgate_cli::validate
 
   run:
     package_root: ../rust/crates/specgate-cli
-    function: specgate_cli::run

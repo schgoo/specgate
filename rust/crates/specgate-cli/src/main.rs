@@ -8,7 +8,7 @@ fn print_usage() {
     eprintln!(
         "usage: specgate <command> [options] <args>\n\
          \n\
-         commands:\n  validate <spec-dir> [--strict] [--suppress check,check] [--assertions-dir <dir>] [--check-source]\n  run <spec.yaml>"
+         commands:\n  validate <spec-dir> [--strict] [--assertions-dir <dir>] [--check-source]\n  run <spec.yaml>"
     );
 }
 
@@ -38,7 +38,6 @@ fn main() -> ExitCode {
 fn cmd_validate(args: &[String]) -> ExitCode {
     let mut spec_dir: Option<String> = None;
     let mut strict = false;
-    let mut suppress: Vec<String> = Vec::new();
     let mut assertions_dir = String::new();
     let mut check_source = false;
     let mut i = 0;
@@ -48,19 +47,6 @@ fn cmd_validate(args: &[String]) -> ExitCode {
             "--strict" => {
                 strict = true;
                 i += 1;
-            }
-            "--suppress" => {
-                if i + 1 >= args.len() {
-                    eprintln!("error: --suppress needs an argument");
-                    return ExitCode::from(2);
-                }
-                for tok in args[i + 1].split(',') {
-                    let t = tok.trim();
-                    if !t.is_empty() {
-                        suppress.push(t.to_string());
-                    }
-                }
-                i += 2;
             }
             "--assertions-dir" => {
                 if i + 1 >= args.len() {
@@ -88,7 +74,7 @@ fn cmd_validate(args: &[String]) -> ExitCode {
         eprintln!("error: validate requires a spec directory");
         return ExitCode::from(2);
     };
-    let outcome = validate(&dir, strict, &suppress, &assertions_dir, check_source);
+    let outcome = validate(&dir, strict, &assertions_dir, check_source);
     print!("{}", validate::format_outcome(&outcome));
     match outcome {
         validate::ValidateOutcome::Pass { .. } => ExitCode::from(0),

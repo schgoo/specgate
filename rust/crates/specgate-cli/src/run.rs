@@ -3,20 +3,26 @@
 use std::fmt::Write as _;
 use std::path::Path;
 
-use specgate::spec_operation;
+use specgate::{SpecEvent, spec_operation};
 use specgate_harness::{CaseStatus, RunOutcome as HarnessOutcome};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, SpecEvent)]
 pub struct RunReport {
+    #[spec_event]
     pub spec_name: String,
+    #[spec_event]
     pub total_cases: i32,
+    #[spec_event]
     pub passed: i32,
+    #[spec_event]
     pub failed: i32,
+    #[spec_event]
     pub skipped: i32,
+    #[spec_event]
     pub warned: i32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, SpecEvent)]
 pub enum RunOutcome {
     Complete { report: RunReport },
     Error { reason: String },

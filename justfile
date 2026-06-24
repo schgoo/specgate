@@ -18,6 +18,12 @@ test:
 self-host:
     cd rust && cargo test -p specgate --test harness_self_host -- --ignored
 
+# Run the CLI self-hosting test: the harness validates the CLI's own spec by
+# running run_spec on specs/specgate.cli.spec.yaml, exercising the CLI's
+# validate/run operations. Doubly-nested and #[ignore]d like the harness one.
+cli-self-host:
+    cd rust && cargo test -p specgate-cli --test cli_self_host -- --ignored
+
 # Run clippy
 clippy:
     cd rust && cargo clippy --workspace --all-targets -- -D warnings
@@ -59,4 +65,4 @@ readme-check:
     cd rust && cargo doc2readme -p specgate-cli --lib --template crates/README.j2 --out crates/specgate-cli/README.md --check
 
 # Run all pre-PR checks
-check: build test clippy format-check deny validate readme-check self-host
+check: build test clippy format-check deny validate readme-check self-host cli-self-host
