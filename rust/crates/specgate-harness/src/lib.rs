@@ -161,6 +161,13 @@ fn run_group(
     workspace_root: &Path,
     scratch_dir: &Path,
 ) -> Result<Vec<CaseResult>, String> {
+    // Command target: run the binding's shell command once and map its exit
+    // status to a synthetic `$outcome` event (exit 0 -> "Complete", else
+    // "Error"), then match each case. No source file is resolved or compiled.
+    if let Some(command) = target.command.as_deref() {
+        return run_command_group(command, &target.package_root, group_cases);
+    }
+
     let Some(fixture_src) = resolve_fixture_source(&target.package_root, fixture_basename, group_cases) else {
         if let Some(results) = short_circuit_non_must(group_cases, None) {
             return Ok(results);
@@ -321,6 +328,53 @@ fn run_group(
         }
     }
     Ok(results)
+}
+
+// ---------------------------------------------------------------------------
+// Command targets
+// ---------------------------------------------------------------------------
+
+/// Run a command-target group: execute the binding's shell command once in the
+/// target's `package_root`, map its exit status to a synthetic `$outcome` event
+/// ("Complete" on exit 0, "Error" otherwise), then match each case against it.
+fn run_command_group(command: &str, package_root: &Path, group_cases: &[&spec::Case]) -> Result<Vec<CaseResult>, String> {
+    let success = run_shell_command(command, package_root).map_err(|e| format!("failed to run command target '{command}': {e}"))?;
+    let outcome = if success { "Complete" } else { "Error" };
+    let traces = vec![TraceEvent::Event {
+        name: "$outcome".to_string(),
+        value: Value::String(outcome.to_string()),
+    }];
+    Ok(group_cases
+        .iter()
+        .map(|case| {
+            let pass = match_traces::matches(&case.expected, &traces);
+            CaseResult {
+                name: case.name.clone(),
+                status: if pass { CaseStatus::Pass } else { CaseStatus::Fail },
+                level: case.level,
+                source: case.source.clone(),
+                expected: case.expected.clone(),
+                traces: traces.clone(),
+            }
+        })
+        .collect())
+}
+
+/// Execute `command` through the platform shell in `cwd`, returning whether it
+/// exited successfully. Output is captured (not streamed) to keep harness output
+/// clean; only the exit status is used.
+fn run_shell_command(command: &str, cwd: &Path) -> std::io::Result<bool> {
+    let mut cmd = if cfg!(windows) {
+        let mut c = Command::new("cmd");
+        c.arg("/C");
+        c
+    } else {
+        let mut c = Command::new("sh");
+        c.arg("-c");
+        c
+    };
+    cmd.arg(command).current_dir(cwd);
+    Ok(cmd.output()?.status.success())
 }
 
 // ---------------------------------------------------------------------------

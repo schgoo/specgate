@@ -7,7 +7,6 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone)]
 pub struct Target {
     pub package_root: PathBuf,
-    #[allow(dead_code)]
     pub command: Option<String>,
 }
 

@@ -2,4 +2,7 @@ language: rust
 targets:
   check:
     package_root: ..
-    command: cargo check --manifest-path ../Cargo.toml
+    command: exit 0
+  check_fail:
+    package_root: ..
+    command: exit 1

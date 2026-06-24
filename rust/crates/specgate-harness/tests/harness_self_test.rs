@@ -62,8 +62,6 @@ fn all_fixture_specs_complete() {
         "property_no_calls",
         "property_no_assert",
         "property_bad_ref",
-        // Command target (not a source fixture)
-        "command_target",
     ];
 
     for entry in std::fs::read_dir(&specs_dir).unwrap() {
@@ -178,6 +176,23 @@ fn self_test_error_case_returns_error() {
         RunOutcome::Complete { .. } => {
             panic!("bad YAML should produce Error, not Complete");
         }
+    }
+}
+
+#[test]
+fn command_target_executes_and_maps_exit_status() {
+    // Command targets run a shell command and map exit status to $outcome:
+    // exit 0 -> "Complete" (pass), non-zero -> "Error" (the failing case
+    // asserts $outcome: "Error", so it also passes).
+    let spec = repo_root().join("test/rust/crates/specgate-fixtures/specs/command_target.spec.yaml");
+    match run_spec(spec.to_str().unwrap()) {
+        RunOutcome::Complete { results } => {
+            assert_eq!(results.len(), 2, "command_target has two cases");
+            for r in &results {
+                assert_eq!(r.status, CaseStatus::Pass, "case '{}' should pass", r.name);
+            }
+        }
+        RunOutcome::Error { reason } => panic!("command_target should Complete, got Error: {reason}"),
     }
 }
 

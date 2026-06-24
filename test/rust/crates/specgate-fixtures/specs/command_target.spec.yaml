@@ -6,10 +6,19 @@ target: check
 operations:
   check:
     kind: command
+  check_fail:
+    kind: command
 
 cases:
   - name: command_succeeds
-    desc: Command target runs shell command and passes on exit 0
+    desc: Command target runs a shell command and passes when it exits 0
     operation: check
     expected:
       - $outcome: "Complete"
+
+  - name: command_fails
+    desc: Command target reports Error when the shell command exits non-zero
+    target: check_fail
+    operation: check_fail
+    expected:
+      - $outcome: "Error"
