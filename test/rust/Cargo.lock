@@ -223,6 +223,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "specgate-selfhost"
+version = "0.1.0"
+dependencies = [
+ "specgate",
+ "specgate-harness",
+]
+
+[[package]]
 name = "specgate-umbrella-fixture"
 version = "0.1.0"
 dependencies = [

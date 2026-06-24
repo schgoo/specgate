@@ -1,0 +1,2320 @@
+# GENERATED from specs/specgate.harness.spec.yaml by
+# scripts/gen_selfhost_harness_spec.py — do not edit by hand.
+# Each case runs the run_spec operation on a fixture spec and asserts the
+# structured $result. Regenerate after changing the harness spec.
+spec_version: 0.4.0
+name: fixture.selfhost_harness
+binding: binding_selfhost.yaml
+operations:
+  run_spec:
+    inputs:
+      spec: string
+    outputs:
+    - $result: SelfHostOutcome
+cases:
+- name: paths_resolve_relative_to_spec
+  desc: Spec at a deeply nested path resolves binding and fixture source correctly. Tests that the harness
+    absolutizes paths before embedding them in the generated runner, so the runner finds files regardless
+    of its own working directory.
+  operation: run_spec
+  inputs:
+    spec: test/fixtures/nested/deep/path/nested_path.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: add_from_nested_path
+          status: pass
+          traces:
+          - Run:
+              operation: add
+          - Event:
+              name: add.a
+              value: '10'
+          - Event:
+              name: add.b
+              value: '20'
+          - Event:
+              name: $result
+              value: '30'
+- name: target_selection
+  desc: 'Spec with target: alt selects a different crate than the default. Proves the harness dispatches
+    to the correct binding target.'
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/target_selection.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: greet_world
+          status: pass
+          traces:
+          - Run:
+              operation: greet
+          - Event:
+              name: greet.name
+              value: World
+          - Event:
+              name: $result
+              value: Hello, World!
+- name: per_case_target_override
+  desc: One spec with two cases using different targets. First case uses default target (add from fixtures),
+    second overrides to alt (greet from fixtures-alt).
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/per_case_target.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: add_from_default
+          status: pass
+          traces:
+          - Run:
+              operation: add
+          - Event:
+              name: add.a
+              value: '1'
+          - Event:
+              name: add.b
+              value: '2'
+          - Event:
+              name: $result
+              value: '3'
+        - name: greet_from_alt
+          status: pass
+          traces:
+          - Run:
+              operation: greet
+          - Event:
+              name: greet.name
+              value: Test
+          - Event:
+              name: $result
+              value: Hello, Test!
+- name: missing_target_error
+  desc: Spec references a target that doesn't exist in the binding
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/missing_target.spec.yaml
+  expected:
+  - $result:
+      Error: {}
+- name: no_vacuous_match
+  desc: Non-empty expected with zero matching traces must fail, not pass. Prevents the harness from silently
+    passing unparseable or impossible assertions.
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/vacuous_match.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: wrong_value_fails
+          status: fail
+        - name: wrong_run_fails
+          status: fail
+- name: self_test_rejects_all_errors
+  desc: "When the harness runs its own spec and every run_spec call returns an error (e.g. file not found),\
+    \ the self-test must fail \u2014 it must not pass vacuously."
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/stateless_add.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: add_2_3
+          status: pass
+          traces:
+          - Run:
+              operation: add
+          - Event:
+              name: add.a
+              value: '2'
+          - Event:
+              name: add.b
+              value: '3'
+          - Event:
+              name: $result
+              value: '5'
+- name: cross_crate_dependency
+  desc: 'Operation uses an external crate (serde_yaml). The harness must depend on the fixture crate as
+    a Cargo dependency, not #[path] include the source file. This proves the harness handles real crate
+    structures with external dependencies.'
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/cross_dep.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: extract_yaml_value
+          status: pass
+          traces:
+          - Run:
+              operation: parse_yaml_key
+          - Event:
+              name: parse_yaml_key.input
+              value: 'name: Customer
+
+                id: 42'
+          - Event:
+              name: parse_yaml_key.key
+              value: name
+          - Event:
+              name: $result
+              value: Customer
+- name: assertion_operators
+  desc: All 9 assertion operators work correctly
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/operators.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: eq_scalar
+          status: pass
+          traces:
+          - Run:
+              operation: get_product
+          - Event:
+              name: product_name
+              value: Milk
+          - Event:
+              name: price
+              value: '4'
+          - Event:
+              name: tags
+              value:
+              - dairy
+              - organic
+              - local
+          - Event:
+              name: attributes
+              value:
+                category: food
+                origin: local
+          - Event:
+              name: $result
+              value:
+                attributes:
+                  category: food
+                  origin: local
+                price: '4'
+                product_name: Milk
+                tags:
+                - dairy
+                - organic
+                - local
+        - name: size_list
+          status: pass
+          traces:
+          - Run:
+              operation: get_product
+          - Event:
+              name: product_name
+              value: Milk
+          - Event:
+              name: price
+              value: '4'
+          - Event:
+              name: tags
+              value:
+              - dairy
+              - organic
+              - local
+          - Event:
+              name: attributes
+              value:
+                category: food
+                origin: local
+          - Event:
+              name: $result
+              value:
+                attributes:
+                  category: food
+                  origin: local
+                price: '4'
+                product_name: Milk
+                tags:
+                - dairy
+                - organic
+                - local
+        - name: size_map
+          status: pass
+          traces:
+          - Run:
+              operation: get_product
+          - Event:
+              name: product_name
+              value: Milk
+          - Event:
+              name: price
+              value: '4'
+          - Event:
+              name: tags
+              value:
+              - dairy
+              - organic
+              - local
+          - Event:
+              name: attributes
+              value:
+                category: food
+                origin: local
+          - Event:
+              name: $result
+              value:
+                attributes:
+                  category: food
+                  origin: local
+                price: '4'
+                product_name: Milk
+                tags:
+                - dairy
+                - organic
+                - local
+        - name: contains_single
+          status: pass
+          traces:
+          - Run:
+              operation: get_product
+          - Event:
+              name: product_name
+              value: Milk
+          - Event:
+              name: price
+              value: '4'
+          - Event:
+              name: tags
+              value:
+              - dairy
+              - organic
+              - local
+          - Event:
+              name: attributes
+              value:
+                category: food
+                origin: local
+          - Event:
+              name: $result
+              value:
+                attributes:
+                  category: food
+                  origin: local
+                price: '4'
+                product_name: Milk
+                tags:
+                - dairy
+                - organic
+                - local
+        - name: contains_all
+          status: pass
+          traces:
+          - Run:
+              operation: get_product
+          - Event:
+              name: product_name
+              value: Milk
+          - Event:
+              name: price
+              value: '4'
+          - Event:
+              name: tags
+              value:
+              - dairy
+              - organic
+              - local
+          - Event:
+              name: attributes
+              value:
+                category: food
+                origin: local
+          - Event:
+              name: $result
+              value:
+                attributes:
+                  category: food
+                  origin: local
+                price: '4'
+                product_name: Milk
+                tags:
+                - dairy
+                - organic
+                - local
+        - name: excludes_values
+          status: pass
+          traces:
+          - Run:
+              operation: get_product
+          - Event:
+              name: product_name
+              value: Milk
+          - Event:
+              name: price
+              value: '4'
+          - Event:
+              name: tags
+              value:
+              - dairy
+              - organic
+              - local
+          - Event:
+              name: attributes
+              value:
+                category: food
+                origin: local
+          - Event:
+              name: $result
+              value:
+                attributes:
+                  category: food
+                  origin: local
+                price: '4'
+                product_name: Milk
+                tags:
+                - dairy
+                - organic
+                - local
+        - name: excludes_fails_when_present
+          status: fail
+          traces:
+          - Run:
+              operation: get_product
+          - Event:
+              name: product_name
+              value: Milk
+          - Event:
+              name: price
+              value: '4'
+          - Event:
+              name: tags
+              value:
+              - dairy
+              - organic
+              - local
+          - Event:
+              name: attributes
+              value:
+                category: food
+                origin: local
+          - Event:
+              name: $result
+              value:
+                attributes:
+                  category: food
+                  origin: local
+                price: '4'
+                product_name: Milk
+                tags:
+                - dairy
+                - organic
+                - local
+        - name: match_partial_object
+          status: pass
+          traces:
+          - Run:
+              operation: get_product
+          - Event:
+              name: product_name
+              value: Milk
+          - Event:
+              name: price
+              value: '4'
+          - Event:
+              name: tags
+              value:
+              - dairy
+              - organic
+              - local
+          - Event:
+              name: attributes
+              value:
+                category: food
+                origin: local
+          - Event:
+              name: $result
+              value:
+                attributes:
+                  category: food
+                  origin: local
+                price: '4'
+                product_name: Milk
+                tags:
+                - dairy
+                - organic
+                - local
+        - name: exists_field
+          status: pass
+          traces:
+          - Run:
+              operation: get_product
+          - Event:
+              name: product_name
+              value: Milk
+          - Event:
+              name: price
+              value: '4'
+          - Event:
+              name: tags
+              value:
+              - dairy
+              - organic
+              - local
+          - Event:
+              name: attributes
+              value:
+                category: food
+                origin: local
+          - Event:
+              name: $result
+              value:
+                attributes:
+                  category: food
+                  origin: local
+                price: '4'
+                product_name: Milk
+                tags:
+                - dairy
+                - organic
+                - local
+        - name: any_with_matcher
+          status: pass
+          traces:
+          - Run:
+              operation: get_product
+          - Event:
+              name: product_name
+              value: Milk
+          - Event:
+              name: price
+              value: '4'
+          - Event:
+              name: tags
+              value:
+              - dairy
+              - organic
+              - local
+          - Event:
+              name: attributes
+              value:
+                category: food
+                origin: local
+          - Event:
+              name: $result
+              value:
+                attributes:
+                  category: food
+                  origin: local
+                price: '4'
+                product_name: Milk
+                tags:
+                - dairy
+                - organic
+                - local
+        - name: type_check
+          status: pass
+          traces:
+          - Run:
+              operation: get_product
+          - Event:
+              name: product_name
+              value: Milk
+          - Event:
+              name: price
+              value: '4'
+          - Event:
+              name: tags
+              value:
+              - dairy
+              - organic
+              - local
+          - Event:
+              name: attributes
+              value:
+                category: food
+                origin: local
+          - Event:
+              name: $result
+              value:
+                attributes:
+                  category: food
+                  origin: local
+                price: '4'
+                product_name: Milk
+                tags:
+                - dairy
+                - organic
+                - local
+        - name: composed_operators
+          status: pass
+          traces:
+          - Run:
+              operation: get_product
+          - Event:
+              name: product_name
+              value: Milk
+          - Event:
+              name: price
+              value: '4'
+          - Event:
+              name: tags
+              value:
+              - dairy
+              - organic
+              - local
+          - Event:
+              name: attributes
+              value:
+                category: food
+                origin: local
+          - Event:
+              name: $result
+              value:
+                attributes:
+                  category: food
+                  origin: local
+                price: '4'
+                product_name: Milk
+                tags:
+                - dairy
+                - organic
+                - local
+- name: structured_list_matching
+  desc: List outputs match with exact, $contains, $size, $any operators
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/structured_output.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: list_exact_match
+          status: pass
+          traces:
+          - Run:
+              operation: resolve_entity
+          - Event:
+              name: entity_name
+              value: Customer
+          - Event:
+              name: key_properties
+              value:
+              - ID
+          - Event:
+              name: structural_properties
+              value:
+              - ID
+              - Name
+              - Email
+          - Event:
+              name: $result
+              value:
+                entity_name: Customer
+                key_properties:
+                - ID
+                structural_properties:
+                - ID
+                - Name
+                - Email
+        - name: list_contains_check
+          status: pass
+          traces:
+          - Run:
+              operation: resolve_entity
+          - Event:
+              name: entity_name
+              value: Customer
+          - Event:
+              name: key_properties
+              value:
+              - ID
+          - Event:
+              name: structural_properties
+              value:
+              - ID
+              - Name
+              - Email
+          - Event:
+              name: $result
+              value:
+                entity_name: Customer
+                key_properties:
+                - ID
+                structural_properties:
+                - ID
+                - Name
+                - Email
+        - name: list_size_check
+          status: pass
+          traces:
+          - Run:
+              operation: resolve_entity
+          - Event:
+              name: entity_name
+              value: Customer
+          - Event:
+              name: key_properties
+              value:
+              - ID
+          - Event:
+              name: structural_properties
+              value:
+              - ID
+              - Name
+              - Email
+          - Event:
+              name: $result
+              value:
+                entity_name: Customer
+                key_properties:
+                - ID
+                structural_properties:
+                - ID
+                - Name
+                - Email
+        - name: list_any_operator
+          status: pass
+          traces:
+          - Run:
+              operation: resolve_entity
+          - Event:
+              name: entity_name
+              value: Customer
+          - Event:
+              name: key_properties
+              value:
+              - ID
+          - Event:
+              name: structural_properties
+              value:
+              - ID
+              - Name
+              - Email
+          - Event:
+              name: $result
+              value:
+                entity_name: Customer
+                key_properties:
+                - ID
+                structural_properties:
+                - ID
+                - Name
+                - Email
+        - name: list_wrong_value_fails
+          status: fail
+          traces:
+          - Run:
+              operation: resolve_entity
+          - Event:
+              name: entity_name
+              value: Customer
+          - Event:
+              name: key_properties
+              value:
+              - ID
+          - Event:
+              name: structural_properties
+              value:
+              - ID
+              - Name
+              - Email
+          - Event:
+              name: $result
+              value:
+                entity_name: Customer
+                key_properties:
+                - ID
+                structural_properties:
+                - ID
+                - Name
+                - Email
+- name: structured_map_matching
+  desc: Map outputs match with key-value, subset, $size operators
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/structured_map.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: map_key_value_match
+          status: pass
+          traces:
+          - Run:
+              operation: get_entity_values
+          - Event:
+              name: get_entity_values.id
+              value: '1'
+          - Event:
+              name: $result
+              value:
+                ID: '1'
+                Name: Customer
+                Email: cust@example.com
+        - name: map_subset_match
+          status: pass
+          traces:
+          - Run:
+              operation: get_entity_values
+          - Event:
+              name: get_entity_values.id
+              value: '1'
+          - Event:
+              name: $result
+              value:
+                ID: '1'
+                Name: Customer
+                Email: cust@example.com
+        - name: map_wrong_value_fails
+          status: fail
+          traces:
+          - Run:
+              operation: get_entity_values
+          - Event:
+              name: get_entity_values.id
+              value: '1'
+          - Event:
+              name: $result
+              value:
+                ID: '1'
+                Name: Customer
+                Email: cust@example.com
+        - name: map_size_check
+          status: pass
+          traces:
+          - Run:
+              operation: get_entity_values
+          - Event:
+              name: get_entity_values.id
+              value: '1'
+          - Event:
+              name: $result
+              value:
+                ID: '1'
+                Name: Customer
+                Email: cust@example.com
+- name: structured_set_matching
+  desc: Set outputs match with $set presence, $contains, $size operators
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/structured_set.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: set_presence_match
+          status: pass
+          traces:
+          - Run:
+              operation: get_navigation_properties
+          - Event:
+              name: $result
+              value:
+              - Address
+              - Contacts
+              - Orders
+        - name: set_all_items
+          status: pass
+          traces:
+          - Run:
+              operation: get_navigation_properties
+          - Event:
+              name: $result
+              value:
+              - Address
+              - Contacts
+              - Orders
+        - name: set_missing_item_fails
+          status: fail
+          traces:
+          - Run:
+              operation: get_navigation_properties
+          - Event:
+              name: $result
+              value:
+              - Address
+              - Contacts
+              - Orders
+        - name: set_size_check
+          status: pass
+          traces:
+          - Run:
+              operation: get_navigation_properties
+          - Event:
+              name: $result
+              value:
+              - Address
+              - Contacts
+              - Orders
+        - name: set_contains_check
+          status: pass
+          traces:
+          - Run:
+              operation: get_navigation_properties
+          - Event:
+              name: $result
+              value:
+              - Address
+              - Contacts
+              - Orders
+- name: nested_structured_matching
+  desc: "List of maps \u2014 nested operators ($any with $match, $contains with $match)"
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/nested_structured.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: nested_list_of_maps_exact
+          status: pass
+        - name: nested_any_with_match
+          status: pass
+        - name: nested_size
+          status: pass
+        - name: nested_contains_element
+          status: pass
+- name: scalar_operators_matching
+  desc: Regex, negation, numeric comparisons, empty, $every, multi-field
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/scalar_operators.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: regex_match
+          status: pass
+          traces:
+          - Run:
+              operation: get_measurement
+          - Event:
+              name: temperature
+              value: '72'
+          - Event:
+              name: label
+              value: sensor-A3-north
+          - Event:
+              name: readings
+              value:
+              - '68'
+              - '70'
+              - '72'
+              - '71'
+              - '73'
+          - Event:
+              name: $result
+              value:
+                label: sensor-A3-north
+                readings:
+                - '68'
+                - '70'
+                - '72'
+                - '71'
+                - '73'
+                temperature: '72'
+        - name: regex_no_match_fails
+          status: fail
+          traces:
+          - Run:
+              operation: get_measurement
+          - Event:
+              name: temperature
+              value: '72'
+          - Event:
+              name: label
+              value: sensor-A3-north
+          - Event:
+              name: readings
+              value:
+              - '68'
+              - '70'
+              - '72'
+              - '71'
+              - '73'
+          - Event:
+              name: $result
+              value:
+                label: sensor-A3-north
+                readings:
+                - '68'
+                - '70'
+                - '72'
+                - '71'
+                - '73'
+                temperature: '72'
+        - name: not_value
+          status: pass
+          traces:
+          - Run:
+              operation: get_measurement
+          - Event:
+              name: temperature
+              value: '72'
+          - Event:
+              name: label
+              value: sensor-A3-north
+          - Event:
+              name: readings
+              value:
+              - '68'
+              - '70'
+              - '72'
+              - '71'
+              - '73'
+          - Event:
+              name: $result
+              value:
+                label: sensor-A3-north
+                readings:
+                - '68'
+                - '70'
+                - '72'
+                - '71'
+                - '73'
+                temperature: '72'
+        - name: not_fails_when_equal
+          status: fail
+          traces:
+          - Run:
+              operation: get_measurement
+          - Event:
+              name: temperature
+              value: '72'
+          - Event:
+              name: label
+              value: sensor-A3-north
+          - Event:
+              name: readings
+              value:
+              - '68'
+              - '70'
+              - '72'
+              - '71'
+              - '73'
+          - Event:
+              name: $result
+              value:
+                label: sensor-A3-north
+                readings:
+                - '68'
+                - '70'
+                - '72'
+                - '71'
+                - '73'
+                temperature: '72'
+        - name: gt_passes
+          status: pass
+          traces:
+          - Run:
+              operation: get_measurement
+          - Event:
+              name: temperature
+              value: '72'
+          - Event:
+              name: label
+              value: sensor-A3-north
+          - Event:
+              name: readings
+              value:
+              - '68'
+              - '70'
+              - '72'
+              - '71'
+              - '73'
+          - Event:
+              name: $result
+              value:
+                label: sensor-A3-north
+                readings:
+                - '68'
+                - '70'
+                - '72'
+                - '71'
+                - '73'
+                temperature: '72'
+        - name: gte_passes_equal
+          status: pass
+          traces:
+          - Run:
+              operation: get_measurement
+          - Event:
+              name: temperature
+              value: '72'
+          - Event:
+              name: label
+              value: sensor-A3-north
+          - Event:
+              name: readings
+              value:
+              - '68'
+              - '70'
+              - '72'
+              - '71'
+              - '73'
+          - Event:
+              name: $result
+              value:
+                label: sensor-A3-north
+                readings:
+                - '68'
+                - '70'
+                - '72'
+                - '71'
+                - '73'
+                temperature: '72'
+        - name: lt_passes
+          status: pass
+          traces:
+          - Run:
+              operation: get_measurement
+          - Event:
+              name: temperature
+              value: '72'
+          - Event:
+              name: label
+              value: sensor-A3-north
+          - Event:
+              name: readings
+              value:
+              - '68'
+              - '70'
+              - '72'
+              - '71'
+              - '73'
+          - Event:
+              name: $result
+              value:
+                label: sensor-A3-north
+                readings:
+                - '68'
+                - '70'
+                - '72'
+                - '71'
+                - '73'
+                temperature: '72'
+        - name: lte_fails
+          status: fail
+          traces:
+          - Run:
+              operation: get_measurement
+          - Event:
+              name: temperature
+              value: '72'
+          - Event:
+              name: label
+              value: sensor-A3-north
+          - Event:
+              name: readings
+              value:
+              - '68'
+              - '70'
+              - '72'
+              - '71'
+              - '73'
+          - Event:
+              name: $result
+              value:
+                label: sensor-A3-north
+                readings:
+                - '68'
+                - '70'
+                - '72'
+                - '71'
+                - '73'
+                temperature: '72'
+        - name: empty_list
+          status: pass
+          traces:
+          - Run:
+              operation: get_empty
+          - Event:
+              name: $result
+              value: []
+        - name: every_element
+          status: pass
+          traces:
+          - Run:
+              operation: get_measurement
+          - Event:
+              name: temperature
+              value: '72'
+          - Event:
+              name: label
+              value: sensor-A3-north
+          - Event:
+              name: readings
+              value:
+              - '68'
+              - '70'
+              - '72'
+              - '71'
+              - '73'
+          - Event:
+              name: $result
+              value:
+                label: sensor-A3-north
+                readings:
+                - '68'
+                - '70'
+                - '72'
+                - '71'
+                - '73'
+                temperature: '72'
+        - name: every_fails
+          status: fail
+          traces:
+          - Run:
+              operation: get_measurement
+          - Event:
+              name: temperature
+              value: '72'
+          - Event:
+              name: label
+              value: sensor-A3-north
+          - Event:
+              name: readings
+              value:
+              - '68'
+              - '70'
+              - '72'
+              - '71'
+              - '73'
+          - Event:
+              name: $result
+              value:
+                label: sensor-A3-north
+                readings:
+                - '68'
+                - '70'
+                - '72'
+                - '71'
+                - '73'
+                temperature: '72'
+        - name: combined_multi_field
+          status: pass
+          traces:
+          - Run:
+              operation: get_measurement
+          - Event:
+              name: temperature
+              value: '72'
+          - Event:
+              name: label
+              value: sensor-A3-north
+          - Event:
+              name: readings
+              value:
+              - '68'
+              - '70'
+              - '72'
+              - '71'
+              - '73'
+          - Event:
+              name: $result
+              value:
+                label: sensor-A3-north
+                readings:
+                - '68'
+                - '70'
+                - '72'
+                - '71'
+                - '73'
+                temperature: '72'
+        - name: combined_multi_field_one_fails
+          status: fail
+          traces:
+          - Run:
+              operation: get_measurement
+          - Event:
+              name: temperature
+              value: '72'
+          - Event:
+              name: label
+              value: sensor-A3-north
+          - Event:
+              name: readings
+              value:
+              - '68'
+              - '70'
+              - '72'
+              - '71'
+              - '73'
+          - Event:
+              name: $result
+              value:
+                label: sensor-A3-north
+                readings:
+                - '68'
+                - '70'
+                - '72'
+                - '71'
+                - '73'
+                temperature: '72'
+- name: async_operation
+  desc: Async operation compiles and produces traces via async runtime
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/async_fetch.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: fetch_returns_response
+          status: pass
+          traces:
+          - Run:
+              operation: fetch
+          - Event:
+              name: fetch.url
+              value: https://example.com
+          - Event:
+              name: $result
+              value: response from https://example.com
+- name: stateless_return_value
+  desc: Stateless function captures return value
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/stateless_add.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: add_2_3
+          status: pass
+          traces:
+          - Run:
+              operation: add
+          - Event:
+              name: add.a
+              value: '2'
+          - Event:
+              name: add.b
+              value: '3'
+          - Event:
+              name: $result
+              value: '5'
+- name: statemachine_before_after
+  desc: StateMachine captures field state before and after
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/statemachine_counter.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: increment_once
+          status: pass
+          traces:
+          - Event:
+              name: count
+              value: '0'
+          - Run:
+              operation: increment
+          - Event:
+              name: count
+              value: '1'
+- name: multi_field_capture
+  desc: Multiple annotated fields all captured
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/multi_field_capture.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: withdraw_50
+          status: pass
+          traces:
+          - Event:
+              name: balance
+              value: '100'
+          - Event:
+              name: transaction_count
+              value: '0'
+          - Run:
+              operation: withdraw
+          - Event:
+              name: balance
+              value: '50'
+          - Event:
+              name: transaction_count
+              value: '1'
+- name: inline_checkpoint
+  desc: spec_event!() emits an event at invocation point
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/checkpoint_inline.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: process_hello
+          status: pass
+          traces:
+          - Run:
+              operation: process
+          - Event:
+              name: process.data
+              value: ' hello '
+          - Event:
+              name: after_upper
+              value: ' HELLO '
+          - Event:
+              name: $result
+              value: HELLO
+- name: multi_mutation
+  desc: Every mutation of an annotated field is captured
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/multi_mutation.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: double_increment
+          status: pass
+          traces:
+          - Event:
+              name: count
+              value: '0'
+          - Run:
+              operation: increment_twice
+          - Event:
+              name: count
+              value: '1'
+          - Event:
+              name: count
+              value: '2'
+- name: nested_operations
+  desc: Nested calls produce sequential Run events
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/nested_operations.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: transfer_50
+          status: pass
+          traces:
+          - Event:
+              name: balance
+              value: '100'
+          - Run:
+              operation: transfer
+          - Run:
+              operation: withdraw
+          - Event:
+              name: balance
+              value: '50'
+          - Run:
+              operation: deposit
+          - Event:
+              name: balance
+              value: '100'
+- name: setup_with_input_params
+  desc: A setup constructs state from a declared operation input (setup stays invisible)
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/setup_with_params.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: start_at_10
+          status: pass
+          traces:
+          - Event:
+              name: count
+              value: '10'
+          - Run:
+              operation: increment
+          - Event:
+              name: count
+              value: '11'
+- name: multiple_setups
+  desc: Two setups create two objects for one operation
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/multi_setup.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: transfer_between_accounts
+          status: pass
+          traces:
+          - Event:
+              name: source.balance
+              value: '100'
+          - Event:
+              name: target.balance
+              value: '0'
+          - Run:
+              operation: transfer
+          - Event:
+              name: transfer.amount
+              value: '50'
+          - Event:
+              name: source.balance
+              value: '50'
+          - Event:
+              name: target.balance
+              value: '50'
+- name: operations_across_files
+  desc: Operations defined in separate source files are all discovered and run
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/multi_file.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: greet_from_separate_file
+          status: pass
+        - name: farewell_from_separate_file
+          status: pass
+- name: language_neutral_input_names_run
+  desc: Parameters renamed via
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/named_inputs.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: divide_10_by_2
+          status: pass
+        - name: scale_3_by_4
+          status: pass
+- name: shared_setup_fills_many_params
+  desc: One stacked-fills setup builds several same-typed parameters
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/shared_setup.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: one_setup_fills_two_params
+          status: pass
+        - name: one_setup_fills_three_params
+          status: pass
+- name: side_effect_setup_runs
+  desc: A setup whose return value is not consumed is still invoked before the operation
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/side_effect_setup.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: setup_side_effect_runs
+          status: pass
+- name: simple_output_setup_fills_param
+  desc: A setup returning a primitive fills an operation parameter by type
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/simple_output_setup.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: setup_fills_primitive_param
+          status: pass
+- name: multiple_cases_one_spec
+  desc: Two test cases in one spec both produce results
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/multi_case.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: add_2_3
+          status: pass
+        - name: add_10_20
+          status: pass
+- name: multi_step_sequence
+  desc: Two operations in sequence with state tracked
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/multi_step.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: increment_then_decrement
+          status: pass
+          traces:
+          - Event:
+              name: count
+              value: '0'
+          - Run:
+              operation: increment
+          - Event:
+              name: count
+              value: '1'
+          - Run:
+              operation: decrement
+          - Event:
+              name: count
+              value: '0'
+- name: mock_call_site
+  desc: Mock intercepts call and returns configured value
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/mock_field.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: find_user_1
+          status: pass
+          traces:
+          - Run:
+              operation: get_user
+          - Event:
+              name: db.request
+              value: user_1
+          - Event:
+              name: db.response
+              value: Alice
+          - Event:
+              name: $result
+              value: Alice
+- name: mock_multi_response
+  desc: Mock returns different values for different inputs
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/mock_multi_response.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: get_two_different_users
+          status: pass
+          traces:
+          - Run:
+              operation: get_users
+          - Event:
+              name: db.request
+              value: user_1
+          - Event:
+              name: db.response
+              value: Alice
+          - Event:
+              name: db.request
+              value: user_2
+          - Event:
+              name: db.response
+              value: Bob
+          - Event:
+              name: $result
+              value: Alice and Bob
+- name: mock_input_not_in_table
+  desc: Mock called with unknown input produces error event
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/mock_not_found.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: query_unknown_user
+          status: pass
+- name: result_ok_path
+  desc: Operation returning Ok produces outcome Ok
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/result_ok.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: divide_10_by_2
+          status: pass
+          traces:
+          - Run:
+              operation: divide
+          - Event:
+              name: divide.a
+              value: '10'
+          - Event:
+              name: divide.b
+              value: '2'
+          - Event:
+              name: $result
+              value:
+                Ok: '5'
+- name: result_err_path
+  desc: Operation returning Err produces outcome Error
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/result_err.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: divide_by_zero
+          status: pass
+          traces:
+          - Run:
+              operation: divide
+          - Event:
+              name: divide.a
+              value: '10'
+          - Event:
+              name: divide.b
+              value: '0'
+          - Event:
+              name: $result
+              value:
+                Err: division by zero
+- name: unrecoverable_panic
+  desc: Operation that panics produces Unrecoverable outcome
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/unrecoverable.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: divide_by_zero_panics
+          status: pass
+- name: option_some_path
+  desc: Operation returning Some produces $result with the value
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/option_some.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: find_existing
+          status: pass
+          traces:
+          - Run:
+              operation: find
+          - Event:
+              name: find.items
+              value:
+              - '10'
+              - '20'
+              - '30'
+          - Event:
+              name: find.target
+              value: '20'
+          - Event:
+              name: $result
+              value:
+                Some: '1'
+- name: option_none_path
+  desc: Operation returning None produces $result "None"
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/option_none.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: find_missing
+          status: pass
+          traces:
+          - Run:
+              operation: find
+          - Event:
+              name: find.items
+              value:
+              - '10'
+              - '20'
+              - '30'
+          - Event:
+              name: find.target
+              value: '99'
+          - Event:
+              name: $result
+              value:
+                None: {}
+- name: void_operation
+  desc: Void operation produces no result event
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/void_operation.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: log_a_message
+          status: pass
+          traces:
+          - Event:
+              name: count
+              value: '0'
+          - Run:
+              operation: log
+          - Event:
+              name: count
+              value: '1'
+- name: readonly_operation
+  desc: Read-only operation returns value without state change
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/readonly_operation.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: read_count
+          status: pass
+- name: event_order_between_runs
+  desc: Asserting on final values works regardless of field iteration order
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/multi_field_capture_reordered.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: withdraw_50
+          status: pass
+- name: mismatch_wrong_value
+  desc: Wrong expected value produces fail
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/statemachine_counter_wrong.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: increment_once
+          status: fail
+          traces:
+          - Event:
+              name: count
+              value: '0'
+          - Run:
+              operation: increment
+          - Event:
+              name: count
+              value: '1'
+- name: mismatch_missing_field
+  desc: Expected field not in traces produces fail
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/mismatch_missing_event.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: add_2_3
+          status: fail
+          traces:
+          - Run:
+              operation: add
+          - Event:
+              name: add.a
+              value: '2'
+          - Event:
+              name: add.b
+              value: '3'
+          - Event:
+              name: $result
+              value: '5'
+- name: mismatch_wrong_field_name
+  desc: Asserting on an output name the operation does not declare is a schema error
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/mismatch_wrong_field.spec.yaml
+  expected:
+  - $result:
+      Error: {}
+- name: mismatch_second_step
+  desc: First step OK but second step has wrong value
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/mismatch_second_step.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: increment_then_decrement
+          status: fail
+          traces:
+          - Event:
+              name: count
+              value: '0'
+          - Run:
+              operation: increment
+          - Event:
+              name: count
+              value: '1'
+          - Run:
+              operation: decrement
+          - Event:
+              name: count
+              value: '0'
+- name: subsequence_wrong_order
+  desc: Expected events in wrong order produces fail
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/subsequence_wrong_order.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: increment_once
+          status: fail
+          traces:
+          - Event:
+              name: count
+              value: '0'
+          - Run:
+              operation: increment
+          - Event:
+              name: count
+              value: '1'
+- name: subsequence_with_gaps
+  desc: Matching with gaps between expected events
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/subsequence_with_gaps.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: double_increment
+          status: pass
+          traces:
+          - Event:
+              name: count
+              value: '0'
+          - Run:
+              operation: increment_twice
+          - Event:
+              name: count
+              value: '1'
+          - Event:
+              name: count
+              value: '2'
+- name: unordered_field_matching
+  desc: $unordered block matches fields in any order between ordered items
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/unordered_fields.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: unordered_both_present
+          status: pass
+          traces:
+          - Event:
+              name: balance
+              value: '100'
+          - Event:
+              name: transaction_count
+              value: '0'
+          - Run:
+              operation: withdraw
+          - Event:
+              name: balance
+              value: '50'
+          - Event:
+              name: transaction_count
+              value: '1'
+        - name: unordered_reversed_still_passes
+          status: pass
+          traces:
+          - Event:
+              name: balance
+              value: '100'
+          - Event:
+              name: transaction_count
+              value: '0'
+          - Run:
+              operation: withdraw
+          - Event:
+              name: balance
+              value: '50'
+          - Event:
+              name: transaction_count
+              value: '1'
+        - name: unordered_wrong_value_fails
+          status: fail
+          traces:
+          - Event:
+              name: balance
+              value: '100'
+          - Event:
+              name: transaction_count
+              value: '0'
+          - Run:
+              operation: withdraw
+          - Event:
+              name: balance
+              value: '50'
+          - Event:
+              name: transaction_count
+              value: '1'
+        - name: unordered_multiple_blocks
+          status: pass
+          traces:
+          - Event:
+              name: balance
+              value: '100'
+          - Event:
+              name: transaction_count
+              value: '0'
+          - Run:
+              operation: withdraw
+          - Event:
+              name: balance
+              value: '50'
+          - Event:
+              name: transaction_count
+              value: '1'
+- name: anywhere_event_matching
+  desc: $anywhere matches events regardless of position in trace
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/anywhere_event.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: anywhere_matches_early_event
+          status: pass
+          traces:
+          - Event:
+              name: count
+              value: '0'
+          - Run:
+              operation: increment_twice
+          - Event:
+              name: count
+              value: '1'
+          - Event:
+              name: count
+              value: '2'
+        - name: anywhere_matches_late_event
+          status: pass
+          traces:
+          - Event:
+              name: count
+              value: '0'
+          - Run:
+              operation: increment_twice
+          - Event:
+              name: count
+              value: '1'
+          - Event:
+              name: count
+              value: '2'
+        - name: anywhere_matches_middle_event
+          status: pass
+          traces:
+          - Event:
+              name: count
+              value: '0'
+          - Run:
+              operation: increment_twice
+          - Event:
+              name: count
+              value: '1'
+          - Event:
+              name: count
+              value: '2'
+        - name: anywhere_multiple_items
+          status: pass
+          traces:
+          - Event:
+              name: count
+              value: '0'
+          - Run:
+              operation: increment_twice
+          - Event:
+              name: count
+              value: '1'
+          - Event:
+              name: count
+              value: '2'
+        - name: anywhere_missing_fails
+          status: fail
+          traces:
+          - Event:
+              name: count
+              value: '0'
+          - Run:
+              operation: increment_twice
+          - Event:
+              name: count
+              value: '1'
+          - Event:
+              name: count
+              value: '2'
+- name: keyword_collision_operation_named_run
+  desc: "Operation named \"run\" works with $run prefix \u2014 no collision"
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/keyword_collision.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: operation_named_run
+          status: pass
+          traces:
+          - Run:
+              operation: run
+          - Event:
+              name: run.input
+              value: test
+          - Event:
+              name: $result
+              value: 'executed: test'
+- name: provenance_passes_through
+  desc: Source metadata and level are included in CaseResult
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/provenance_example.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: add_with_provenance
+          status: pass
+          traces:
+          - Run:
+              operation: add
+          - Event:
+              name: add.a
+              value: '2'
+          - Event:
+              name: add.b
+              value: '3'
+          - Event:
+              name: $result
+              value: '5'
+- name: level_may_missing_skips
+  desc: "MAY operation not implemented \u2014 case is skipped, not an error"
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/level_may_missing.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: optional_not_implemented
+          status: skip
+          traces: []
+- name: level_should_missing_warns
+  desc: "SHOULD operation not implemented \u2014 case produces warning status"
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/level_should_missing.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: recommended_not_implemented
+          status: warn
+          traces: []
+- name: enum_event_matching
+  desc: derive(SpecEvent) on enum emits variant name + associated fields
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/enum_event.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: unit_variant
+          status: pass
+          traces:
+          - Run:
+              operation: classify
+          - Event:
+              name: classify.sides
+              value: '0'
+          - Event:
+              name: $result
+              value:
+                Point: {}
+        - name: single_field_variant
+          status: pass
+          traces:
+          - Run:
+              operation: classify
+          - Event:
+              name: classify.sides
+              value: '1'
+          - Event:
+              name: $result
+              value:
+                Circle:
+                  radius: '5'
+        - name: multi_field_variant
+          status: pass
+          traces:
+          - Run:
+              operation: classify
+          - Event:
+              name: classify.sides
+              value: '4'
+          - Event:
+              name: $result
+              value:
+                Rectangle:
+                  height: '4'
+                  width: '3'
+- name: complex_input_deserialization
+  desc: "When a spec case input is a YAML Mapping or Sequence, and the operation's parameter type derives\
+    \ SpecEvent (which implies Deserialize), the harness deserializes the YAML directly into the typed\
+    \ parameter. Operations transform the input to prove deserialization worked. Covers: struct, enum,\
+    \ list, map, optional, and nested struct \u2014 both input and output directions."
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/complex_inputs.spec.yaml
+  expected:
+  - $result:
+      Complete:
+        results:
+        - name: create_enum_with_members
+          status: pass
+        - name: sum_two_points
+          status: pass
+        - name: sum_three_points
+          status: pass
+        - name: nested_config_object
+          status: pass
+        - name: area_of_circle
+          status: pass
+        - name: area_of_rectangle
+          status: pass
+        - name: area_of_point
+          status: pass
+        - name: classify_circle
+          status: pass
+        - name: classify_rectangle
+          status: pass
+        - name: classify_point
+          status: pass
+        - name: get_three_points
+          status: pass
+        - name: lookup_in_map
+          status: pass
+        - name: invert_string_int_map
+          status: pass
+        - name: greet_with_name
+          status: pass
+        - name: greet_without_name
+          status: pass
+        - name: find_point_exists
+          status: pass
+        - name: find_point_missing
+          status: pass
+        - name: find_shape_some_circle
+          status: pass
+          traces:
+          - Run:
+              operation: find_shape
+          - Event:
+              name: find_shape.sides
+              value: '1'
+          - Event:
+              name: $result
+              value:
+                Some:
+                  Circle:
+                    radius: '5'
+        - name: find_shape_some_point
+          status: pass
+          traces:
+          - Run:
+              operation: find_shape
+          - Event:
+              name: find_shape.sides
+              value: '0'
+          - Event:
+              name: $result
+              value:
+                Some:
+                  Point: {}
+        - name: find_shape_none
+          status: pass
+          traces:
+          - Run:
+              operation: find_shape
+          - Event:
+              name: find_shape.sides
+              value: '-1'
+          - Event:
+              name: $result
+              value:
+                None: {}
+        - name: describe_person_with_address
+          status: pass
+        - name: create_person_struct
+          status: pass
+- name: error_bad_yaml
+  desc: Invalid YAML produces an error
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/bad_yaml.spec.yaml
+  expected:
+  - $result:
+      Error: {}
+- name: error_bad_binding
+  desc: Nonexistent binding produces an error
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/bad_binding.spec.yaml
+  expected:
+  - $result:
+      Error: {}
+- name: error_missing_setup
+  desc: A method operation whose receiver type has no linked setup
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/missing_setup.spec.yaml
+  expected:
+  - $result:
+      Error: {}
+- name: error_missing_operation
+  desc: Operation not found in source annotations
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/missing_operation.spec.yaml
+  expected:
+  - $result:
+      Error: {}
+- name: error_compile_failure
+  desc: Source has a syntax error
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/compile_error.spec.yaml
+  expected:
+  - $result:
+      Error: {}
+- name: error_no_cases
+  desc: Spec with no test cases
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/no_cases.spec.yaml
+  expected:
+  - $result:
+      Error: {}
+- name: error_shape_mismatch
+  desc: Expected asserts on an event not declared in operation outputs
+  operation: run_spec
+  inputs:
+    spec: test/rust/crates/specgate-fixtures/specs/shape_mismatch.spec.yaml
+  expected:
+  - $result:
+      Error: {}

@@ -1,0 +1,14 @@
+[package]
+name = "specgate-selfhost"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Dedicated self-host crate: exposes `specgate_harness::run_spec` as a
+# `#[spec_operation("run_spec")]` so the harness spec can validate itself.
+# Depends on `specgate-harness` directly (not the umbrella's harness feature),
+# which keeps it a plain crate distinct from `specgate` — so the harness's
+# generated runner has no duplicate `specgate` dependency.
+[dependencies]
+specgate = { path = "../../../../rust/crates/specgate" }
+specgate-harness = { path = "../../../../rust/crates/specgate-harness" }

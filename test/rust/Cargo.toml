@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/specgate-fixtures", "crates/specgate-umbrella-fixture"]
+members = ["crates/specgate-fixtures", "crates/specgate-umbrella-fixture", "crates/specgate-selfhost"]
 resolver = "3"
 
 [workspace.package]

@@ -463,9 +463,10 @@ cases:
               traces:
                 - Run: { operation: get_product }
                 - Event: { name: product_name, value: "Milk" }
-                - Event: { name: price, value: 4 }
-                - Event: { name: tags, value: ["dairy", "organic", "local"] }
-                - Event: { name: attributes, value: {"category": "food", "origin": "local"} }
+                - Event: { name: price, value: "4" }
+                - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
+                - Event: { name: attributes, value: { category: "food", origin: "local" } }
+                - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
             - name: size_list
               status: pass
               expected:
@@ -473,9 +474,10 @@ cases:
               traces:
                 - Run: { operation: get_product }
                 - Event: { name: product_name, value: "Milk" }
-                - Event: { name: price, value: 4 }
-                - Event: { name: tags, value: ["dairy", "organic", "local"] }
-                - Event: { name: attributes, value: {"category": "food", "origin": "local"} }
+                - Event: { name: price, value: "4" }
+                - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
+                - Event: { name: attributes, value: { category: "food", origin: "local" } }
+                - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
             - name: size_map
               status: pass
               expected:
@@ -483,9 +485,10 @@ cases:
               traces:
                 - Run: { operation: get_product }
                 - Event: { name: product_name, value: "Milk" }
-                - Event: { name: price, value: 4 }
-                - Event: { name: tags, value: ["dairy", "organic", "local"] }
-                - Event: { name: attributes, value: {"category": "food", "origin": "local"} }
+                - Event: { name: price, value: "4" }
+                - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
+                - Event: { name: attributes, value: { category: "food", origin: "local" } }
+                - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
             - name: contains_single
               status: pass
               expected:
@@ -493,9 +496,10 @@ cases:
               traces:
                 - Run: { operation: get_product }
                 - Event: { name: product_name, value: "Milk" }
-                - Event: { name: price, value: 4 }
-                - Event: { name: tags, value: ["dairy", "organic", "local"] }
-                - Event: { name: attributes, value: {"category": "food", "origin": "local"} }
+                - Event: { name: price, value: "4" }
+                - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
+                - Event: { name: attributes, value: { category: "food", origin: "local" } }
+                - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
             - name: contains_all
               status: pass
               expected:
@@ -503,9 +507,10 @@ cases:
               traces:
                 - Run: { operation: get_product }
                 - Event: { name: product_name, value: "Milk" }
-                - Event: { name: price, value: 4 }
-                - Event: { name: tags, value: ["dairy", "organic", "local"] }
-                - Event: { name: attributes, value: {"category": "food", "origin": "local"} }
+                - Event: { name: price, value: "4" }
+                - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
+                - Event: { name: attributes, value: { category: "food", origin: "local" } }
+                - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
             - name: excludes_values
               status: pass
               expected:
@@ -513,9 +518,10 @@ cases:
               traces:
                 - Run: { operation: get_product }
                 - Event: { name: product_name, value: "Milk" }
-                - Event: { name: price, value: 4 }
-                - Event: { name: tags, value: ["dairy", "organic", "local"] }
-                - Event: { name: attributes, value: {"category": "food", "origin": "local"} }
+                - Event: { name: price, value: "4" }
+                - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
+                - Event: { name: attributes, value: { category: "food", origin: "local" } }
+                - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
             - name: excludes_fails_when_present
               status: fail
               expected:
@@ -523,9 +529,10 @@ cases:
               traces:
                 - Run: { operation: get_product }
                 - Event: { name: product_name, value: "Milk" }
-                - Event: { name: price, value: 4 }
-                - Event: { name: tags, value: ["dairy", "organic", "local"] }
-                - Event: { name: attributes, value: {"category": "food", "origin": "local"} }
+                - Event: { name: price, value: "4" }
+                - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
+                - Event: { name: attributes, value: { category: "food", origin: "local" } }
+                - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
             - name: match_partial_object
               status: pass
               expected:
@@ -533,9 +540,10 @@ cases:
               traces:
                 - Run: { operation: get_product }
                 - Event: { name: product_name, value: "Milk" }
-                - Event: { name: price, value: 4 }
-                - Event: { name: tags, value: ["dairy", "organic", "local"] }
-                - Event: { name: attributes, value: {"category": "food", "origin": "local"} }
+                - Event: { name: price, value: "4" }
+                - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
+                - Event: { name: attributes, value: { category: "food", origin: "local" } }
+                - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
             - name: exists_field
               status: pass
               expected:
@@ -543,9 +551,10 @@ cases:
               traces:
                 - Run: { operation: get_product }
                 - Event: { name: product_name, value: "Milk" }
-                - Event: { name: price, value: 4 }
-                - Event: { name: tags, value: ["dairy", "organic", "local"] }
-                - Event: { name: attributes, value: {"category": "food", "origin": "local"} }
+                - Event: { name: price, value: "4" }
+                - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
+                - Event: { name: attributes, value: { category: "food", origin: "local" } }
+                - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
             - name: any_with_matcher
               status: pass
               expected:
@@ -553,9 +562,10 @@ cases:
               traces:
                 - Run: { operation: get_product }
                 - Event: { name: product_name, value: "Milk" }
-                - Event: { name: price, value: 4 }
-                - Event: { name: tags, value: ["dairy", "organic", "local"] }
-                - Event: { name: attributes, value: {"category": "food", "origin": "local"} }
+                - Event: { name: price, value: "4" }
+                - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
+                - Event: { name: attributes, value: { category: "food", origin: "local" } }
+                - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
             - name: type_check
               status: pass
               expected:
@@ -563,9 +573,10 @@ cases:
               traces:
                 - Run: { operation: get_product }
                 - Event: { name: product_name, value: "Milk" }
-                - Event: { name: price, value: 4 }
-                - Event: { name: tags, value: ["dairy", "organic", "local"] }
-                - Event: { name: attributes, value: {"category": "food", "origin": "local"} }
+                - Event: { name: price, value: "4" }
+                - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
+                - Event: { name: attributes, value: { category: "food", origin: "local" } }
+                - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
             - name: composed_operators
               status: pass
               expected:
@@ -573,9 +584,10 @@ cases:
               traces:
                 - Run: { operation: get_product }
                 - Event: { name: product_name, value: "Milk" }
-                - Event: { name: price, value: 4 }
-                - Event: { name: tags, value: ["dairy", "organic", "local"] }
-                - Event: { name: attributes, value: {"category": "food", "origin": "local"} }
+                - Event: { name: price, value: "4" }
+                - Event: { name: tags, value: [ "dairy", "organic", "local" ] }
+                - Event: { name: attributes, value: { category: "food", origin: "local" } }
+                - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: "4", product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
 
   - name: structured_list_matching
     desc: List outputs match with exact, $contains, $size, $any operators
@@ -595,8 +607,9 @@ cases:
               traces:
                 - Run: { operation: resolve_entity }
                 - Event: { name: entity_name, value: "Customer" }
-                - Event: { name: key_properties, value: ["ID"] }
-                - Event: { name: structural_properties, value: ["ID", "Name", "Email"] }
+                - Event: { name: key_properties, value: [ "ID" ] }
+                - Event: { name: structural_properties, value: [ "ID", "Name", "Email" ] }
+                - Event: { name: $result, value: { entity_name: "Customer", key_properties: [ "ID" ], structural_properties: [ "ID", "Name", "Email" ] } }
             - name: list_contains_check
               status: pass
               expected:
@@ -604,8 +617,9 @@ cases:
               traces:
                 - Run: { operation: resolve_entity }
                 - Event: { name: entity_name, value: "Customer" }
-                - Event: { name: key_properties, value: ["ID"] }
-                - Event: { name: structural_properties, value: ["ID", "Name", "Email"] }
+                - Event: { name: key_properties, value: [ "ID" ] }
+                - Event: { name: structural_properties, value: [ "ID", "Name", "Email" ] }
+                - Event: { name: $result, value: { entity_name: "Customer", key_properties: [ "ID" ], structural_properties: [ "ID", "Name", "Email" ] } }
             - name: list_size_check
               status: pass
               expected:
@@ -613,8 +627,9 @@ cases:
               traces:
                 - Run: { operation: resolve_entity }
                 - Event: { name: entity_name, value: "Customer" }
-                - Event: { name: key_properties, value: ["ID"] }
-                - Event: { name: structural_properties, value: ["ID", "Name", "Email"] }
+                - Event: { name: key_properties, value: [ "ID" ] }
+                - Event: { name: structural_properties, value: [ "ID", "Name", "Email" ] }
+                - Event: { name: $result, value: { entity_name: "Customer", key_properties: [ "ID" ], structural_properties: [ "ID", "Name", "Email" ] } }
             - name: list_any_operator
               status: pass
               expected:
@@ -622,8 +637,9 @@ cases:
               traces:
                 - Run: { operation: resolve_entity }
                 - Event: { name: entity_name, value: "Customer" }
-                - Event: { name: key_properties, value: ["ID"] }
-                - Event: { name: structural_properties, value: ["ID", "Name", "Email"] }
+                - Event: { name: key_properties, value: [ "ID" ] }
+                - Event: { name: structural_properties, value: [ "ID", "Name", "Email" ] }
+                - Event: { name: $result, value: { entity_name: "Customer", key_properties: [ "ID" ], structural_properties: [ "ID", "Name", "Email" ] } }
             - name: list_wrong_value_fails
               status: fail
               expected:
@@ -631,8 +647,9 @@ cases:
               traces:
                 - Run: { operation: resolve_entity }
                 - Event: { name: entity_name, value: "Customer" }
-                - Event: { name: key_properties, value: ["ID"] }
-                - Event: { name: structural_properties, value: ["ID", "Name", "Email"] }
+                - Event: { name: key_properties, value: [ "ID" ] }
+                - Event: { name: structural_properties, value: [ "ID", "Name", "Email" ] }
+                - Event: { name: $result, value: { entity_name: "Customer", key_properties: [ "ID" ], structural_properties: [ "ID", "Name", "Email" ] } }
 
   - name: structured_map_matching
     desc: Map outputs match with key-value, subset, $size operators
@@ -754,72 +771,80 @@ cases:
                 - label: { $matches: "^sensor-[A-Z]\\d+-\\w+$" }
               traces:
                 - Run: { operation: get_measurement }
-                - Event: { name: temperature, value: 72 }
+                - Event: { name: temperature, value: "72" }
                 - Event: { name: label, value: "sensor-A3-north" }
-                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
+                - Event: { name: readings, value: [ "68", "70", "72", "71", "73" ] }
+                - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ "68", "70", "72", "71", "73" ], temperature: "72" } }
             - name: regex_no_match_fails
               status: fail
               expected:
                 - label: { $matches: "^invalid" }
               traces:
                 - Run: { operation: get_measurement }
-                - Event: { name: temperature, value: 72 }
+                - Event: { name: temperature, value: "72" }
                 - Event: { name: label, value: "sensor-A3-north" }
-                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
+                - Event: { name: readings, value: [ "68", "70", "72", "71", "73" ] }
+                - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ "68", "70", "72", "71", "73" ], temperature: "72" } }
             - name: not_value
               status: pass
               expected:
                 - temperature: { $not: 100 }
               traces:
                 - Run: { operation: get_measurement }
-                - Event: { name: temperature, value: 72 }
+                - Event: { name: temperature, value: "72" }
                 - Event: { name: label, value: "sensor-A3-north" }
-                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
+                - Event: { name: readings, value: [ "68", "70", "72", "71", "73" ] }
+                - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ "68", "70", "72", "71", "73" ], temperature: "72" } }
             - name: not_fails_when_equal
               status: fail
               expected:
                 - temperature: { $not: 72 }
               traces:
                 - Run: { operation: get_measurement }
-                - Event: { name: temperature, value: 72 }
+                - Event: { name: temperature, value: "72" }
                 - Event: { name: label, value: "sensor-A3-north" }
-                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
+                - Event: { name: readings, value: [ "68", "70", "72", "71", "73" ] }
+                - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ "68", "70", "72", "71", "73" ], temperature: "72" } }
             - name: gt_passes
               status: pass
               expected:
                 - temperature: { $gt: 70 }
               traces:
                 - Run: { operation: get_measurement }
-                - Event: { name: temperature, value: 72 }
+                - Event: { name: temperature, value: "72" }
                 - Event: { name: label, value: "sensor-A3-north" }
-                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
+                - Event: { name: readings, value: [ "68", "70", "72", "71", "73" ] }
+                - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ "68", "70", "72", "71", "73" ], temperature: "72" } }
             - name: gte_passes_equal
               status: pass
               expected:
                 - temperature: { $gte: 72 }
               traces:
                 - Run: { operation: get_measurement }
-                - Event: { name: temperature, value: 72 }
+                - Event: { name: temperature, value: "72" }
                 - Event: { name: label, value: "sensor-A3-north" }
-                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
+                - Event: { name: readings, value: [ "68", "70", "72", "71", "73" ] }
+                - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ "68", "70", "72", "71", "73" ], temperature: "72" } }
             - name: lt_passes
               status: pass
               expected:
                 - temperature: { $lt: 100 }
               traces:
                 - Run: { operation: get_measurement }
-                - Event: { name: temperature, value: 72 }
+                - Event: { name: temperature, value: "72" }
                 - Event: { name: label, value: "sensor-A3-north" }
-                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
+                - Event: { name: readings, value: [ "68", "70", "72", "71", "73" ] }
+                - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ "68", "70", "72", "71", "73" ], temperature: "72" } }
             - name: lte_fails
               status: fail
               expected:
                 - temperature: { $lte: 50 }
               traces:
                 - Run: { operation: get_measurement }
-                - Event: { name: temperature, value: 72 }
+                - Event: { name: temperature, value: "72" }
                 - Event: { name: label, value: "sensor-A3-north" }
-                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
+                - Event: { name: readings, value: [ "68", "70", "72", "71", "73" ] }
+                - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ "68", "70", "72", "71", "73" ], temperature: "72" } }
             - name: empty_list
               status: pass
               expected:
@@ -833,18 +858,20 @@ cases:
                 - readings: { $every: { $gt: 60 } }
               traces:
                 - Run: { operation: get_measurement }
-                - Event: { name: temperature, value: 72 }
+                - Event: { name: temperature, value: "72" }
                 - Event: { name: label, value: "sensor-A3-north" }
-                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
+                - Event: { name: readings, value: [ "68", "70", "72", "71", "73" ] }
+                - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ "68", "70", "72", "71", "73" ], temperature: "72" } }
             - name: every_fails
               status: fail
               expected:
                 - readings: { $every: { $gt: 71 } }
               traces:
                 - Run: { operation: get_measurement }
-                - Event: { name: temperature, value: 72 }
+                - Event: { name: temperature, value: "72" }
                 - Event: { name: label, value: "sensor-A3-north" }
-                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
+                - Event: { name: readings, value: [ "68", "70", "72", "71", "73" ] }
+                - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ "68", "70", "72", "71", "73" ], temperature: "72" } }
             - name: combined_multi_field
               status: pass
               expected:
@@ -853,9 +880,10 @@ cases:
                 - readings: { $size: 5, $every: { $gte: 60 } }
               traces:
                 - Run: { operation: get_measurement }
-                - Event: { name: temperature, value: 72 }
+                - Event: { name: temperature, value: "72" }
                 - Event: { name: label, value: "sensor-A3-north" }
-                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
+                - Event: { name: readings, value: [ "68", "70", "72", "71", "73" ] }
+                - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ "68", "70", "72", "71", "73" ], temperature: "72" } }
             - name: combined_multi_field_one_fails
               status: fail
               expected:
@@ -864,9 +892,10 @@ cases:
                 - readings: { $size: 5 }
               traces:
                 - Run: { operation: get_measurement }
-                - Event: { name: temperature, value: 72 }
+                - Event: { name: temperature, value: "72" }
                 - Event: { name: label, value: "sensor-A3-north" }
-                - Event: { name: readings, value: [68, 70, 72, 71, 73] }
+                - Event: { name: readings, value: [ "68", "70", "72", "71", "73" ] }
+                - Event: { name: $result, value: { label: "sensor-A3-north", readings: [ "68", "70", "72", "71", "73" ], temperature: "72" } }
 
   # ================================================================
   # Happy path — basic operations
@@ -970,6 +999,7 @@ cases:
                 - $result: "HELLO"
               traces:
                 - Run: { operation: process }
+                - Event: { name: process.data, value: " hello " }
                 - Event: { name: after_upper, value: " HELLO " }
                 - Event: { name: $result, value: "HELLO" }
 
@@ -1302,8 +1332,10 @@ cases:
                 - $outcome: "Ok"
                 - $result: "5"
               traces:
-                - Event: { name: $outcome, value: "Ok" }
-                - Event: { name: $result, value: "5" }
+                - Run: { operation: divide }
+                - Event: { name: divide.a, value: "10" }
+                - Event: { name: divide.b, value: "2" }
+                - Event: { name: $result, value: { Ok: "5" } }
 
   - name: result_err_path
     desc: Operation returning Err produces outcome Error
@@ -1320,8 +1352,10 @@ cases:
                 - $outcome: "Error"
                 - $error: "division by zero"
               traces:
-                - Event: { name: $outcome, value: "Error" }
-                - Event: { name: $error, value: "division by zero" }
+                - Run: { operation: divide }
+                - Event: { name: divide.a, value: "10" }
+                - Event: { name: divide.b, value: "0" }
+                - Event: { name: $result, value: { Err: "division by zero" } }
 
   - name: unrecoverable_panic
     desc: Operation that panics produces Unrecoverable outcome
@@ -1352,7 +1386,10 @@ cases:
               expected:
                 - $result: "1"
               traces:
-                - Event: { name: $result, value: "1" }
+                - Run: { operation: find }
+                - Event: { name: find.items, value: [ "10", "20", "30" ] }
+                - Event: { name: find.target, value: "20" }
+                - Event: { name: $result, value: { Some: "1" } }
 
   - name: option_none_path
     desc: Operation returning None produces $result "None"
@@ -1368,7 +1405,10 @@ cases:
               expected:
                 - $result: "None"
               traces:
-                - Event: { name: $result, value: "None" }
+                - Run: { operation: find }
+                - Event: { name: find.items, value: [ "10", "20", "30" ] }
+                - Event: { name: find.target, value: "99" }
+                - Event: { name: $result, value: { None: {} } }
 
   - name: void_operation
     desc: Void operation produces no result event
@@ -1771,7 +1811,7 @@ cases:
               traces:
                 - Run: { operation: classify }
                 - Event: { name: classify.sides, value: "0" }
-                - Event: { name: shape, value: "Point" }
+                - Event: { name: $result, value: { Point: {} } }
             - name: single_field_variant
               status: pass
               expected:
@@ -1780,8 +1820,7 @@ cases:
               traces:
                 - Run: { operation: classify }
                 - Event: { name: classify.sides, value: "1" }
-                - Event: { name: shape, value: "Circle" }
-                - Event: { name: shape.radius, value: "5" }
+                - Event: { name: $result, value: { Circle: { radius: "5" } } }
             - name: multi_field_variant
               status: pass
               expected:
@@ -1791,9 +1830,7 @@ cases:
               traces:
                 - Run: { operation: classify }
                 - Event: { name: classify.sides, value: "4" }
-                - Event: { name: shape, value: "Rectangle" }
-                - Event: { name: shape.width, value: "3" }
-                - Event: { name: shape.height, value: "4" }
+                - Event: { name: $result, value: { Rectangle: { height: "4", width: "3" } } }
 
   # ================================================================
   # Complex inputs — structured YAML deserialized into typed params
@@ -1848,6 +1885,30 @@ cases:
               status: pass
             - name: find_point_missing
               status: pass
+            - name: find_shape_some_circle
+              status: pass
+              expected:
+                - $result: { Some: { Circle: { radius: "5" } } }
+              traces:
+                - Run: { operation: find_shape }
+                - Event: { name: find_shape.sides, value: "1" }
+                - Event: { name: $result, value: { Some: { Circle: { radius: "5" } } } }
+            - name: find_shape_some_point
+              status: pass
+              expected:
+                - $result: { Some: { Point: {} } }
+              traces:
+                - Run: { operation: find_shape }
+                - Event: { name: find_shape.sides, value: "0" }
+                - Event: { name: $result, value: { Some: { Point: {} } } }
+            - name: find_shape_none
+              status: pass
+              expected:
+                - $result: { None: {} }
+              traces:
+                - Run: { operation: find_shape }
+                - Event: { name: find_shape.sides, value: "-1" }
+                - Event: { name: $result, value: { None: {} } }
             - name: describe_person_with_address
               status: pass
             - name: create_person_struct
