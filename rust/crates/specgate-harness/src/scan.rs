@@ -31,6 +31,12 @@ impl AnnotatedSource {
     /// across all its step operations. The candidate pool is the union of
     /// setups linked to any operation the case runs. Returns the ordered setup
     /// bindings, or a precise error describing an unresolvable/ambiguous wiring.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` with a diagnostic when the case's setups cannot be wired —
+    /// e.g. a method receiver has no `#[spec_setup]` producing its type, a
+    /// setup is ambiguous, or a `fills` target does not match any parameter.
     pub fn resolve_case(&self, ops: &[&str]) -> Result<Vec<SetupBinding>, String> {
         // Distinct operations, preserving first-seen order.
         let mut distinct: Vec<&str> = Vec::new();
@@ -175,6 +181,69 @@ impl AnnotatedSource {
 
         Ok(bindings)
     }
+
+    /// Pre-flight runnability check shared by the harness and the CLI's
+    /// `validate`: every operation a case runs must be annotated, and the
+    /// case's setups must wire. Mirrors exactly what `run_group` verifies before
+    /// generating and compiling a runner, so static validation and an actual run
+    /// agree on whether a spec is runnable. Only MUST-level cases are reported;
+    /// a non-MUST case whose pieces aren't available is skipped (the harness
+    /// degrades it to warn/skip rather than failing).
+    #[must_use]
+    pub fn check_runnable(&self, cases: &[RunnableCase]) -> Vec<RunnabilityIssue> {
+        let mut issues = Vec::new();
+        for c in cases {
+            let ops: Vec<&str> = c.ops.iter().map(String::as_str).collect();
+            let all_present = !ops.is_empty() && ops.iter().all(|o| self.operations.contains_key(*o));
+            let pieces_available = all_present && self.resolve_case(&ops).is_ok();
+            if !c.is_must && !pieces_available {
+                continue;
+            }
+            for o in &ops {
+                if !self.operations.contains_key(*o) {
+                    issues.push(RunnabilityIssue {
+                        case: c.name.clone(),
+                        problem: RunnabilityProblem::OperationNotAnnotated {
+                            operation: (*o).to_string(),
+                        },
+                    });
+                }
+            }
+            if all_present && let Err(detail) = self.resolve_case(&ops) {
+                issues.push(RunnabilityIssue {
+                    case: c.name.clone(),
+                    problem: RunnabilityProblem::SetupWiring { detail },
+                });
+            }
+        }
+        issues
+    }
+}
+
+/// A case reduced to what runnability checking needs: its name, the operations
+/// it runs (a multi-step case's steps, or a single `operation`), and whether it
+/// is MUST-level (non-MUST cases degrade rather than fail).
+#[derive(Debug, Clone)]
+pub struct RunnableCase {
+    pub name: String,
+    pub ops: Vec<String>,
+    pub is_must: bool,
+}
+
+/// A runnability problem found by [`AnnotatedSource::check_runnable`].
+#[derive(Debug, Clone)]
+pub struct RunnabilityIssue {
+    pub case: String,
+    pub problem: RunnabilityProblem,
+}
+
+#[derive(Debug, Clone)]
+pub enum RunnabilityProblem {
+    /// An operation the case runs has no `#[spec_operation]` in the source.
+    OperationNotAnnotated { operation: String },
+    /// The case's setups cannot be wired (missing or ambiguous); carries the
+    /// `resolve_case` diagnostic.
+    SetupWiring { detail: String },
 }
 
 /// How a setup's output is bound when running an operation.
@@ -257,6 +326,7 @@ fn strip_comments(src: &str) -> String {
     out
 }
 
+#[must_use]
 pub fn scan(src: &str) -> AnnotatedSource {
     let src = strip_comments(src);
     let mut setups: Vec<SetupDecl> = Vec::new();

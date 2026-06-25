@@ -32,6 +32,13 @@ pub use types::{AnyArg, AssertValue, Assertion, Matcher, TraceEvent, Value};
 /// drift between static validation and actual runs.
 pub use spec::binding_path_resolved;
 
+/// Source-annotation scanning and the shared runnability pre-flight. Re-exported
+/// so the CLI's `validate` checks operation-annotation and setup-wiring with the
+/// exact logic the harness uses before a run (single source of truth). Reaches
+/// the CLI directly via its `specgate-harness` dependency, without widening the
+/// `specgate` umbrella's public API.
+pub use scan::{AnnotatedSource, RunnabilityIssue, RunnabilityProblem, RunnableCase, scan};
+
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -193,45 +200,34 @@ fn run_group(
         src_text.push('\n');
     }
 
-    let annotated = scan::scan(&src_text);
+    let annotated = scan(&src_text);
 
-    // Required ops across all MUST cases in this group, plus a pre-flight
-    // check that every operation's setups resolve (precise diagnostics rather
-    // than a generic compile failure).
-    let mut required_ops: BTreeSet<String> = BTreeSet::new();
-    for case in group_cases {
-        if case.level != CaseLevel::Must && !case_pieces_available(case, &annotated) {
-            continue;
-        }
-        if !case.steps.is_empty() {
-            for s in &case.steps {
-                required_ops.insert(s.clone());
+    // Pre-flight runnability: every operation a MUST case runs must be
+    // annotated, and each case's setups must wire. Shared with the CLI's
+    // `validate` (scan::check_runnable) so static validation and runs agree.
+    // Returns a precise diagnostic before any code generation or compilation.
+    let runnable_cases: Vec<RunnableCase> = group_cases
+        .iter()
+        .map(|c| {
+            let ops = if c.steps.is_empty() {
+                c.operation.clone().into_iter().collect()
+            } else {
+                c.steps.clone()
+            };
+            RunnableCase {
+                name: c.name.clone(),
+                ops,
+                is_must: c.level == CaseLevel::Must,
             }
-        } else if let Some(op) = case.operation.as_deref() {
-            required_ops.insert(op.to_string());
-        }
-    }
-    for o in &required_ops {
-        if !annotated.operations.contains_key(o) {
-            return Err(format!("operation '{o}' not found in source annotations"));
-        }
-    }
-    // Pre-flight setup resolution: surface wiring problems (missing/ambiguous
-    // setups) with a clear message before generating and compiling code.
-    for case in group_cases {
-        if case.level != CaseLevel::Must && !case_pieces_available(case, &annotated) {
-            continue;
-        }
-        let case_ops: Vec<&str> = if !case.steps.is_empty() {
-            case.steps.iter().map(String::as_str).collect()
-        } else if let Some(op) = case.operation.as_deref() {
-            vec![op]
-        } else {
-            continue;
-        };
-        if let Err(msg) = annotated.resolve_case(&case_ops) {
-            return Err(format!("case '{}': {msg}", case.name));
-        }
+        })
+        .collect();
+    if let Some(issue) = annotated.check_runnable(&runnable_cases).into_iter().next() {
+        return Err(match issue.problem {
+            RunnabilityProblem::OperationNotAnnotated { operation } => {
+                format!("operation '{operation}' not found in source annotations")
+            }
+            RunnabilityProblem::SetupWiring { detail } => format!("case '{}': {detail}", issue.case),
+        });
     }
 
     // Decide which cases run via cargo vs short-circuit (skip/warn).
@@ -404,7 +400,7 @@ enum CaseDisposition {
     Warn,
 }
 
-fn case_pieces_available(case: &spec::Case, annotated: &scan::AnnotatedSource) -> bool {
+fn case_pieces_available(case: &spec::Case, annotated: &AnnotatedSource) -> bool {
     let ops: Vec<&str> = if !case.steps.is_empty() {
         case.steps.iter().map(String::as_str).collect()
     } else if let Some(op) = case.operation.as_deref() {
@@ -420,7 +416,7 @@ fn case_pieces_available(case: &spec::Case, annotated: &scan::AnnotatedSource) -
 }
 
 /// If every case has level != MUST, return per-case warn/skip results.
-fn short_circuit_non_must(cases: &[&spec::Case], _annotated: Option<&scan::AnnotatedSource>) -> Option<Vec<CaseResult>> {
+fn short_circuit_non_must(cases: &[&spec::Case], _annotated: Option<&AnnotatedSource>) -> Option<Vec<CaseResult>> {
     if cases.iter().any(|c| c.level == CaseLevel::Must) {
         return None;
     }
@@ -579,7 +575,7 @@ fn resolve_fixture_sources(package_root: &Path, fixture_basename: &str, cases: &
         } else {
             continue;
         };
-        let annotated = scan::scan(&text);
+        let annotated = scan(&text);
         let provided: BTreeSet<String> = req_ops.iter().filter(|o| annotated.operations.contains_key(*o)).cloned().collect();
         if provided.is_empty() {
             continue;
