@@ -767,6 +767,45 @@ cases:
               warnings: 0
 
   # ================================================================
+  # CLI binary — end-to-end command-target smoke tests
+  # ================================================================
+  # These run the actual `specgate` binary (via cargo run), so they cover the
+  # binary entry point — name, argument parsing, and exit codes — that the
+  # function-level validate/run cases bypass by calling the functions directly.
+
+  - name: cli_binary_validates_clean_spec
+    target: smoke_validate_pass
+    desc: >
+      The specgate binary builds, parses args, validates a complete spec, and
+      exits 0 (mapped to Complete).
+    expected:
+      - $outcome: "Complete"
+
+  - name: cli_binary_rejects_invalid_spec
+    target: smoke_validate_fail
+    desc: >
+      The specgate binary exits non-zero when validation fails (mapped to
+      Error), proving the Fail -> non-zero exit-code mapping in main.rs.
+    expected:
+      - $outcome: "Error"
+
+  - name: cli_binary_runs_passing_spec
+    target: smoke_run_pass
+    desc: >
+      The specgate binary's `run` subcommand executes a passing spec through
+      the harness and exits 0 (mapped to Complete).
+    expected:
+      - $outcome: "Complete"
+
+  - name: cli_binary_run_reports_error
+    target: smoke_run_fail
+    desc: >
+      The specgate binary's `run` subcommand exits non-zero for a missing spec
+      file (mapped to Error), covering run's error exit path.
+    expected:
+      - $outcome: "Error"
+
+  # ================================================================
   # Run — all status types
   # ================================================================
 

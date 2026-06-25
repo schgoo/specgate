@@ -10,3 +10,27 @@ targets:
 
   run:
     package_root: ../rust/crates/specgate-cli
+
+  # End-to-end smoke targets: invoke the CLI binary via `cargo run -p
+  # specgate-cli` so the binary entry point (argument parsing, exit codes) is
+  # exercised — the function-level cases call validate()/run() directly and
+  # bypass it. `cargo run -p` keeps these cross-platform; asserting the binary
+  # *name* and per-platform commands is deferred to the multi-platform change.
+  # Named `smoke_*` so they sort after `run`, keeping `run` the default target.
+  # package_root is the rust workspace so `cargo run` resolves; spec paths are
+  # relative to that CWD.
+  smoke_validate_pass:
+    package_root: ../rust
+    command: cargo run -p specgate-cli --quiet -- validate ../test/fixtures/validation/full_runnable
+
+  smoke_validate_fail:
+    package_root: ../rust
+    command: cargo run -p specgate-cli --quiet -- validate ../test/fixtures/validation/no_cases
+
+  smoke_run_pass:
+    package_root: ../rust
+    command: cargo run -p specgate-cli --quiet -- run ../test/rust/crates/specgate-fixtures/specs/stateless_add.spec.yaml
+
+  smoke_run_fail:
+    package_root: ../rust
+    command: cargo run -p specgate-cli --quiet -- run ../nonexistent.spec.yaml
