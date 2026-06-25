@@ -26,6 +26,12 @@ pub use types::{CaseLevel, CaseResult, CaseStatus, RunOutcome, Source};
 #[doc(hidden)]
 pub use types::{AnyArg, AssertValue, Assertion, Matcher, TraceEvent, Value};
 
+/// Resolve a binding path the same way `run_spec` does (spec-relative first,
+/// then walking up parent directories). Re-exported so other tools (e.g. the
+/// CLI's `validate`) resolve bindings identically to the harness, avoiding
+/// drift between static validation and actual runs.
+pub use spec::binding_path_resolved;
+
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -77,7 +83,7 @@ pub fn run_spec(spec_path: &str) -> RunOutcome {
             reason: "spec has no binding".into(),
         };
     };
-    let binding_full = spec::binding_path_resolved(&path, binding_path);
+    let binding_full = binding_path_resolved(&path, binding_path);
     let Some(binding) = binding::load_binding(&binding_full) else {
         return RunOutcome::Error {
             reason: format!("binding '{binding_path}' not found"),
