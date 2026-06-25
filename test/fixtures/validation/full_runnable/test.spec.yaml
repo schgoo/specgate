@@ -1,0 +1,28 @@
+spec_version: "0.4.0"
+name: test.full_runnable
+binding: binding.yaml
+operations:
+  add:
+    inputs: { a: i32, b: i32 }
+    outputs: [result]
+  increment:
+    outputs: [result]
+  compute:
+    inputs: { req: ComputeReq }
+    outputs: [result]
+types:
+  ComputeReq:
+    x: i32
+    y: i32
+cases:
+  - name: add_case
+    desc: Free function add with provided inputs
+    operation: add
+    inputs: { a: 2, b: 3 }
+    expected:
+      - result: "5"
+  - name: increment_case
+    desc: Method op whose receiver is constructed by a setup
+    operation: increment
+    expected:
+      - result: "1"

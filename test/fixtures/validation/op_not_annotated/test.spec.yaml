@@ -1,0 +1,12 @@
+spec_version: "0.4.0"
+name: test.op_not_annotated
+binding: binding.yaml
+operations:
+  compute:
+    outputs: [result]
+cases:
+  - name: compute_case
+    desc: Uses an operation that is declared but not annotated in source
+    operation: compute
+    expected:
+      - result: "0"

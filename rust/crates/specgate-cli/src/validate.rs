@@ -646,6 +646,19 @@ fn check_runnability(map: &serde_yaml::Mapping, file: &str, spec_path: &Path, sp
         return;
     }
 
+    // A command target runs via a shell `command:` instead of compiled source,
+    // so the harness short-circuits it before its source pre-flight. Validate
+    // must do the same: command targets get no package_root / source checks, and
+    // cases that run on them are excluded from operation/setup runnability.
+    let is_command = |t: &str| {
+        targets.is_some_and(|m| {
+            m.get(key(t))
+                .and_then(|tv| tv.as_mapping())
+                .is_some_and(|tm| tm.get(key("command")).is_some())
+        })
+    };
+    let spec_target = map.get(key("target")).and_then(|v| v.as_str()).map(String::from);
+
     // Targets whose package_root the harness would compile: the referenced ones
     // that exist, or (if none referenced) the default target.
     let mut used: Vec<String> = referenced.iter().filter(|t| target_present(t)).cloned().collect();
@@ -660,7 +673,12 @@ fn check_runnability(map: &serde_yaml::Mapping, file: &str, spec_path: &Path, sp
     }
 
     let binding_dir = binding_path.parent().unwrap_or(Path::new(""));
+    let mut merged_src = String::new();
+    let mut any_root = false;
     for tname in &used {
+        if is_command(tname) {
+            continue;
+        }
         let pkg_rel = targets
             .and_then(|m| m.get(key(tname)))
             .and_then(|tv| tv.as_mapping())
@@ -669,7 +687,9 @@ fn check_runnability(map: &serde_yaml::Mapping, file: &str, spec_path: &Path, sp
             .unwrap_or("src");
         let package_root = binding_dir.join(pkg_rel);
         if package_root.exists() {
-            run_source_visibility(map, file, &package_root, findings);
+            any_root = true;
+            merged_src.push_str(&collect_rs_content(&package_root));
+            merged_src.push('\n');
         } else {
             findings.push(ValidationFinding {
                 severity: Severity::Error,
@@ -679,22 +699,95 @@ fn check_runnability(map: &serde_yaml::Mapping, file: &str, spec_path: &Path, sp
             });
         }
     }
+    if any_root {
+        run_source_visibility(map, file, &merged_src, findings);
+        run_source_runnability(map, file, &merged_src, spec_target.as_deref(), &is_command, findings);
+    }
+}
+
+/// Operation-annotation and setup-wiring runnability, computed with the harness's
+/// own scanner + resolver so static validation agrees exactly with an actual
+/// run. Only MUST-level, non-narrative cases are reported (the harness degrades
+/// the rest to warn/skip). Cases whose effective target is a command target are
+/// excluded — they run via a shell command, not annotated source.
+fn run_source_runnability(
+    map: &serde_yaml::Mapping,
+    file: &str,
+    rs_content: &str,
+    spec_target: Option<&str>,
+    is_command: &dyn Fn(&str) -> bool,
+    findings: &mut Vec<ValidationFinding>,
+) {
+    let key = |k: &str| Value::String(k.into());
+    let Some(Value::Sequence(cases)) = map.get(key("cases")) else {
+        return;
+    };
+
+    let mut runnable: Vec<specgate_harness::RunnableCase> = Vec::new();
+    for c in cases {
+        let Some(cm) = c.as_mapping() else { continue };
+        if cm.get(key("kind")).and_then(|v| v.as_str()) == Some("narrative") {
+            continue;
+        }
+        // Effective target: case-level overrides spec-level. Command targets run
+        // via a shell command, so their cases have no source to annotate.
+        let eff_target = cm.get(key("target")).and_then(|v| v.as_str()).or(spec_target);
+        if eff_target.is_some_and(is_command) {
+            continue;
+        }
+        let name = cm.get(key("name")).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let ops: Vec<String> = match cm.get(key("steps")).and_then(|v| v.as_sequence()) {
+            Some(steps) if !steps.is_empty() => steps.iter().filter_map(|s| s.as_str().map(String::from)).collect(),
+            _ => cm
+                .get(key("operation"))
+                .and_then(|v| v.as_str())
+                .map(String::from)
+                .into_iter()
+                .collect(),
+        };
+        if ops.is_empty() {
+            continue;
+        }
+        let is_must = match cm.get(key("level")).and_then(|v| v.as_str()) {
+            None => true,
+            Some(l) => matches!(normalize_level(l).as_str(), "must"),
+        };
+        runnable.push(specgate_harness::RunnableCase { name, ops, is_must });
+    }
+
+    let annotated = specgate_harness::scan(rs_content);
+    for issue in annotated.check_runnable(&runnable) {
+        let (check, message) = match issue.problem {
+            specgate_harness::RunnabilityProblem::OperationNotAnnotated { operation } => (
+                "operation_annotated",
+                format!(
+                    "case '{}' uses operation '{operation}' with no #[spec_operation] in the source",
+                    issue.case
+                ),
+            ),
+            specgate_harness::RunnabilityProblem::SetupWiring { detail } => ("setup_wiring", format!("case '{}': {detail}", issue.case)),
+        };
+        findings.push(ValidationFinding {
+            severity: Severity::Error,
+            check: check.into(),
+            file: file.into(),
+            message,
+        });
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Source-level checks
 // ---------------------------------------------------------------------------
 
-/// Scan a resolved `package_root` for source-visibility runnability problems:
+/// Scan merged source for source-visibility runnability problems:
 /// `#[spec_setup]` functions and operation input-type struct fields must be
 /// `pub`, or the generated runner would fail to compile.
-fn run_source_visibility(map: &serde_yaml::Mapping, file: &str, package_root: &Path, findings: &mut Vec<ValidationFinding>) {
-    let rs_content = collect_rs_content(package_root);
-
+fn run_source_visibility(map: &serde_yaml::Mapping, file: &str, rs_content: &str, findings: &mut Vec<ValidationFinding>) {
     // (F) source_setup_visibility: every `#[spec_setup(...)]` function must be
     // declared `pub fn`.
     let setup_re = Regex::new(r"(?s)#\[spec_setup[^\]]*\]\s*(pub\s+)?fn\s+([A-Za-z_]\w*)").unwrap();
-    for caps in setup_re.captures_iter(&rs_content) {
+    for caps in setup_re.captures_iter(rs_content) {
         let is_pub = caps.get(1).is_some();
         if !is_pub {
             let fname = &caps[2];
@@ -738,7 +831,7 @@ fn run_source_visibility(map: &serde_yaml::Mapping, file: &str, package_root: &P
         let Ok(struct_re) = Regex::new(&pat) else {
             continue;
         };
-        if let Some(caps) = struct_re.captures(&rs_content) {
+        if let Some(caps) = struct_re.captures(rs_content) {
             let body = &caps[1];
             for fcaps in field_re.captures_iter(body) {
                 let is_pub = fcaps.get(1).is_some();

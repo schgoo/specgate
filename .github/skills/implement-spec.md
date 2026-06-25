@@ -329,12 +329,16 @@ errors the harness raises when a spec can't be run:
   `binding_resolves`)
 - Every referenced target exists in the binding (`target_exists`)
 - Each used target's `package_root` exists (`package_root_exists`)
+- Every operation a case runs is annotated `#[spec_operation]`
+  (`operation_annotated`) and each case's setups wire (`setup_wiring`) —
+  computed with the harness's own scanner/resolver, so validation agrees with
+  an actual run
 - `#[spec_setup]` functions and operation input-type struct fields are `pub`
   (`source_setup_visibility`, `source_field_visibility`)
 
 Pass `--spec-only` to skip the source-dependent runnability checks
-(`package_root_exists` and the two visibility checks) when authoring a spec
-before its implementation exists.
+(`package_root_exists`, `operation_annotated`, `setup_wiring`, and the two
+visibility checks) when authoring a spec before its implementation exists.
 
 Fix all errors before proceeding. Warnings are advisory.
 

@@ -1,0 +1,12 @@
+spec_version: "0.4.0"
+name: test.setup_not_wired
+binding: binding.yaml
+operations:
+  increment:
+    outputs: [result]
+cases:
+  - name: increment_case
+    desc: A method op whose receiver has no setup to construct it
+    operation: increment
+    expected:
+      - result: "1"

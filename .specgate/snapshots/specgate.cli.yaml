@@ -78,7 +78,7 @@ cases:
       spec_dir: test/fixtures/validation/valid_complete
       strict: false
       assertions_dir: ""
-      spec_only: false
+      spec_only: true
     expected:
       - $result:
           Pass:
@@ -92,7 +92,7 @@ cases:
       spec_dir: test/fixtures/validation/missing_version
       strict: false
       assertions_dir: ""
-      spec_only: false
+      spec_only: true
     expected:
       - $result:
           Fail:
@@ -114,7 +114,7 @@ cases:
       spec_dir: test/fixtures/validation/valid_complete
       strict: false
       assertions_dir: ""
-      spec_only: false
+      spec_only: true
     expected:
       - $result:
           Pass:
@@ -128,7 +128,7 @@ cases:
       spec_dir: test/fixtures/validation/bad_op_ref
       strict: false
       assertions_dir: ""
-      spec_only: false
+      spec_only: true
     expected:
       - $result:
           Fail:
@@ -150,7 +150,7 @@ cases:
       spec_dir: test/fixtures/validation/valid_complete
       strict: false
       assertions_dir: ""
-      spec_only: false
+      spec_only: true
     expected:
       - $result:
           Pass:
@@ -164,7 +164,7 @@ cases:
       spec_dir: test/fixtures/validation/duplicate_names
       strict: false
       assertions_dir: ""
-      spec_only: false
+      spec_only: true
     expected:
       - $result:
           Fail:
@@ -186,7 +186,7 @@ cases:
       spec_dir: test/fixtures/validation/valid_complete
       strict: false
       assertions_dir: ""
-      spec_only: false
+      spec_only: true
     expected:
       - $result:
           Pass:
@@ -200,7 +200,7 @@ cases:
       spec_dir: test/fixtures/validation/input_mismatch
       strict: false
       assertions_dir: ""
-      spec_only: false
+      spec_only: true
     expected:
       - $result:
           Fail:
@@ -222,7 +222,7 @@ cases:
       spec_dir: test/fixtures/validation/valid_complete
       strict: false
       assertions_dir: ""
-      spec_only: false
+      spec_only: true
     expected:
       - $result:
           Pass:
@@ -236,7 +236,7 @@ cases:
       spec_dir: test/fixtures/validation/bad_expected
       strict: false
       assertions_dir: ""
-      spec_only: false
+      spec_only: true
     expected:
       - $result:
           Fail:
@@ -258,7 +258,7 @@ cases:
       spec_dir: test/fixtures/validation/valid_complete
       strict: false
       assertions_dir: ""
-      spec_only: false
+      spec_only: true
     expected:
       - $result:
           Pass:
@@ -272,7 +272,7 @@ cases:
       spec_dir: test/fixtures/validation/narrative_misuse
       strict: false
       assertions_dir: ""
-      spec_only: false
+      spec_only: true
     expected:
       - $result:
           Pass:
@@ -314,7 +314,7 @@ cases:
       spec_dir: test/fixtures/validation/valid_complete
       strict: false
       assertions_dir: ""
-      spec_only: false
+      spec_only: true
     expected:
       - $result:
           Pass:
@@ -328,7 +328,7 @@ cases:
       spec_dir: test/fixtures/validation/level_mismatch
       strict: false
       assertions_dir: test/fixtures/validation/assertions
-      spec_only: false
+      spec_only: true
     expected:
       - $result:
           Pass:
@@ -350,7 +350,7 @@ cases:
       spec_dir: test/fixtures/validation/negative_coverage_pass
       strict: false
       assertions_dir: test/fixtures/validation/assertions
-      spec_only: false
+      spec_only: true
     expected:
       - $result:
           Pass:
@@ -364,7 +364,7 @@ cases:
       spec_dir: test/fixtures/validation/no_negative_case
       strict: false
       assertions_dir: test/fixtures/validation/assertions
-      spec_only: false
+      spec_only: true
     expected:
       - $result:
           Pass:
@@ -386,7 +386,7 @@ cases:
       spec_dir: test/fixtures/validation/assertion_coverage
       strict: false
       assertions_dir: test/fixtures/validation/assertions
-      spec_only: false
+      spec_only: true
     expected:
       - $result:
           Pass:
@@ -400,7 +400,7 @@ cases:
       spec_dir: test/fixtures/validation/assertion_coverage_miss
       strict: false
       assertions_dir: test/fixtures/validation/assertions
-      spec_only: false
+      spec_only: true
     expected:
       - $result:
           Fail:
@@ -422,7 +422,7 @@ cases:
       spec_dir: test/fixtures/validation/extra_inputs
       strict: false
       assertions_dir: ""
-      spec_only: false
+      spec_only: true
     expected:
       - $result:
           Fail:
@@ -444,7 +444,7 @@ cases:
       spec_dir: test/fixtures/validation/dep_consistency_pass
       strict: false
       assertions_dir: ""
-      spec_only: false
+      spec_only: true
     expected:
       - $result:
           Pass:
@@ -458,7 +458,7 @@ cases:
       spec_dir: test/fixtures/validation/dep_consistency_fail
       strict: false
       assertions_dir: ""
-      spec_only: false
+      spec_only: true
     expected:
       - $result:
           Fail:
@@ -480,7 +480,7 @@ cases:
       spec_dir: test/fixtures/validation/mixed_level_bundle
       strict: false
       assertions_dir: test/fixtures/validation/assertions
-      spec_only: false
+      spec_only: true
     expected:
       - $result:
           Pass:
@@ -502,7 +502,7 @@ cases:
       spec_dir: test/fixtures/validation/no_expected
       strict: false
       assertions_dir: ""
-      spec_only: false
+      spec_only: true
     expected:
       - $result:
           Fail:
@@ -688,6 +688,83 @@ cases:
           Pass:
             report:
               errors: 0
+
+  # ================================================================
+  # Validate — runnability: source annotation + wiring (on by default)
+  # ================================================================
+
+  - name: validate_operation_not_annotated_fail
+    desc: A cased operation with no #[spec_operation] in source cannot be run
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/op_not_annotated
+      strict: false
+      assertions_dir: ""
+      spec_only: false
+    expected:
+      - $result:
+          Fail:
+            report:
+              errors: 1
+              findings:
+                - severity: error
+                  check: operation_annotated
+                  message: "case 'compute_case' uses operation 'compute' with no #[spec_operation] in the source"
+
+  - name: validate_operation_not_annotated_skipped_when_spec_only
+    desc: spec_only suppresses operation-annotation checking
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/op_not_annotated
+      strict: false
+      assertions_dir: ""
+      spec_only: true
+    expected:
+      - $result:
+          Pass:
+            report:
+              errors: 0
+
+  - name: validate_setup_not_wired_fail
+    desc: A method op whose receiver has no setup cannot wire
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/setup_not_wired
+      strict: false
+      assertions_dir: ""
+      spec_only: false
+    expected:
+      - $result:
+          Fail:
+            report:
+              errors: 1
+              findings:
+                - severity: error
+                  check: setup_wiring
+                  message: "case 'increment_case': operation 'increment' is a method on 'Counter' but no #[spec_setup(\"increment\")] returns 'Counter' to construct the receiver"
+
+  # ================================================================
+  # Validate — full runnability pass (every check at once)
+  # ================================================================
+
+  - name: validate_full_runnable_pass
+    desc: >
+      A complete, genuinely-runnable spec passes every check at once in full
+      mode (no spec_only): schema and semantic checks, binding/target/
+      package_root resolution, operation annotation, setup wiring, and both
+      source-visibility checks.
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/full_runnable
+      strict: false
+      assertions_dir: ""
+      spec_only: false
+    expected:
+      - $result:
+          Pass:
+            report:
+              errors: 0
+              warnings: 0
 
   # ================================================================
   # Run — all status types
