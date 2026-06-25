@@ -466,6 +466,25 @@ Following MongoDB semantics, `$not` negates an operator expression and never
 takes a bare value — use `$ne` for value inequality (`{ $ne: 100 }`), and
 `$not` to invert another operator (`{ $not: { $gt: 5 } }`).
 
+#### Nested matchers
+
+Operators may appear at any depth inside a structured value — a plain map that
+contains a nested operator is treated as an implicit `$match`, so you can mix
+literal fields and matchers without an explicit `$match` wrapper:
+
+```yaml
+expected:
+  - $result:
+      Error:
+        reason:
+          $matches: "source failed to compile:[\\s\\S]*error"
+```
+
+Here `$result` is asserted as a partial object whose `Error.reason` field must
+match the regex; other fields (if any) are matched literally. Nesting applies to
+maps only — for matchers over list elements, use `$any`, `$every`, or
+`$contains`.
+
 Canonical fixtures: `operators.spec.yaml`, `scalar_operators.spec.yaml`,
 `structured_output.spec.yaml`, `structured_map.spec.yaml`,
 `structured_set.spec.yaml`, `nested_structured.spec.yaml`.

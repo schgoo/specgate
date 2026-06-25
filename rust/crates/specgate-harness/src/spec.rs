@@ -243,20 +243,43 @@ fn parse_assertion(v: &YValue) -> Result<Assertion, ParseError> {
 /// Parse a YAML node into either a concrete `Value` or a `Matcher` payload.
 fn parse_assert_value(v: &YValue) -> Result<AssertValue, ParseError> {
     if let YValue::Mapping(m) = v {
-        let mut has_op = false;
-        for (k, _) in m {
-            if let Some(s) = k.as_str()
-                && s.starts_with('$')
-            {
-                has_op = true;
-                break;
-            }
-        }
-        if has_op {
+        // A mapping with a top-level `$`-operator is itself a matcher.
+        if mapping_has_op(m) {
             return Ok(AssertValue::Matcher(parse_matcher(m)?));
+        }
+        // A plain mapping that contains a matcher *somewhere nested* is an
+        // implicit `$match`: each field is asserted as a subset and any field
+        // may itself be a matcher. This lets e.g. `reason: { $matches: "..." }`
+        // work inside a structured value (like `{ Error: { reason: ... } }`)
+        // without an explicit `$match` wrapper. Lists are not scanned — use
+        // `$any`/`$every`/`$contains` for list-element matchers.
+        if mapping_has_nested_op(m) {
+            let mut out = BTreeMap::new();
+            for (k, val) in m {
+                let key = k
+                    .as_str()
+                    .ok_or_else(|| ParseError::Shape("map key not string".into()))?
+                    .to_string();
+                out.insert(key, parse_assert_value(val)?);
+            }
+            return Ok(AssertValue::Matcher(Matcher::Match(out)));
         }
     }
     Ok(AssertValue::Exact(parse_value(v)?))
+}
+
+/// True if the mapping has a key that is a `$`-operator (e.g. `$matches`).
+fn mapping_has_op(m: &serde_yaml::Mapping) -> bool {
+    m.iter().any(|(k, _)| k.as_str().is_some_and(|s| s.starts_with('$')))
+}
+
+/// True if any value nested within the mapping (at any map depth) is a
+/// `$`-operator matcher. List elements are not scanned.
+fn mapping_has_nested_op(m: &serde_yaml::Mapping) -> bool {
+    m.iter().any(|(_, v)| match v {
+        YValue::Mapping(inner) => mapping_has_op(inner) || mapping_has_nested_op(inner),
+        _ => false,
+    })
 }
 
 /// Plain YAML → structured Value, preserving type.
@@ -464,4 +487,66 @@ pub fn binding_path_resolved(spec_path: &Path, binding: &str) -> PathBuf {
     }
     // Fall back to the spec-relative path (will surface as "not found").
     direct
+}
+
+#[cfg(test)]
+mod nested_matcher_tests {
+    use super::*;
+    use crate::types::TraceEvent;
+
+    fn yaml(s: &str) -> YValue {
+        serde_yaml::from_str(s).expect("valid yaml")
+    }
+
+    // Build an actual `$result` trace: { Error: { reason: <reason> } }.
+    fn error_result(reason: &str) -> Vec<TraceEvent> {
+        let mut inner = BTreeMap::new();
+        inner.insert("reason".to_string(), Value::String(reason.to_string()));
+        let mut outer = BTreeMap::new();
+        outer.insert("Error".to_string(), Value::Map(inner));
+        vec![TraceEvent::Event {
+            name: "$result".to_string(),
+            value: Value::Map(outer),
+        }]
+    }
+
+    fn result_assertion(expected_yaml: &str) -> Vec<Assertion> {
+        let av = parse_assert_value(&yaml(expected_yaml)).expect("parse");
+        vec![Assertion::Event {
+            name: "$result".to_string(),
+            value: av,
+        }]
+    }
+
+    #[test]
+    fn plain_map_with_nested_op_parses_as_implicit_match() {
+        // A plain map containing a nested `$`-operator becomes an implicit
+        // `$match`, not a literal `Exact` map.
+        let av = parse_assert_value(&yaml(r#"{ Error: { reason: { $matches: "^boom" } } }"#)).unwrap();
+        assert!(matches!(av, AssertValue::Matcher(Matcher::Match(_))), "got {av:?}");
+    }
+
+    #[test]
+    fn literal_map_without_ops_stays_exact() {
+        let av = parse_assert_value(&yaml(r#"{ Error: { reason: "exact text" } }"#)).unwrap();
+        assert!(matches!(av, AssertValue::Exact(_)), "got {av:?}");
+    }
+
+    #[test]
+    fn nested_matcher_matches_field_deep_in_structured_value() {
+        // `reason` is matched by a regex nested two levels deep without any
+        // explicit `$match` wrapper.
+        let expected = result_assertion(r#"{ Error: { reason: { $matches: "source failed to compile:[\\s\\S]*error" } } }"#);
+        let actual = error_result("source failed to compile:\nerror: expected expression");
+        assert!(crate::match_traces::matches(&expected, &actual));
+    }
+
+    #[test]
+    fn nested_matcher_rejects_non_matching_field() {
+        // Same shape, but the regex does not match the reason — proving the
+        // nested matcher actually runs (not vacuously true).
+        let expected = result_assertion(r#"{ Error: { reason: { $matches: "this will not appear" } } }"#);
+        let actual = error_result("source failed to compile:\nerror: expected expression");
+        assert!(!crate::match_traces::matches(&expected, &actual));
+    }
 }
