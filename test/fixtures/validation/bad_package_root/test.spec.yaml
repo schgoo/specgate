@@ -1,0 +1,12 @@
+spec_version: "0.4.0"
+name: test.bad_package_root
+binding: binding.yaml
+operations:
+  noop:
+    outputs: [result]
+cases:
+  - name: noop_case
+    desc: Trivial runnable case
+    operation: noop
+    expected:
+      - result: "0"

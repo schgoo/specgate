@@ -1,9 +1,15 @@
 spec_version: "0.4.0"
 name: test.dep_consistency_pass
+binding: ../_common/binding.yaml
 operations:
   base:
     outputs: [base.result]
   derived:
     depends_on: [base]
     outputs: [derived.result]
-cases: []
+cases:
+  - name: base_case
+    desc: Trivial runnable case
+    operation: base
+    expected:
+      - base.result: "ok"

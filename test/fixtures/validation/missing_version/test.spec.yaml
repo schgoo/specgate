@@ -1,4 +1,5 @@
 name: test.missing_version
+binding: ../_common/binding.yaml
 operations:
   do_thing:
     outputs: [result]

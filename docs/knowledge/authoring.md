@@ -309,6 +309,11 @@ specgate validate specs/
 ```
 
 This catches schema errors, undefined operations, missing inputs, and more.
+By default it also runs **runnability checks** that mirror the hard errors the
+harness would raise — no cases, a missing/unresolvable binding, an unknown
+target, a missing `package_root`, or non-`pub` setups/input-type fields — so you
+catch them before a run. Pass `--spec-only` to skip the checks that need the
+implementation source (for authoring a spec before the code exists).
 
 ## Next steps
 

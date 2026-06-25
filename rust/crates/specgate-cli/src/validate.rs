@@ -82,7 +82,7 @@ impl std::fmt::Display for ValidateOutcome {
 }
 
 #[spec_operation("validate")]
-pub fn validate(spec_dir: &str, strict: bool, assertions_dir: &str, check_source: bool) -> ValidateOutcome {
+pub fn validate(spec_dir: &str, strict: bool, spec_only: bool, assertions_dir: &str) -> ValidateOutcome {
     let mut findings: Vec<ValidationFinding> = Vec::new();
     let mut total_files = 0;
 
@@ -115,15 +115,7 @@ pub fn validate(spec_dir: &str, strict: bool, assertions_dir: &str, check_source
             });
             continue;
         };
-        check_file(
-            &value,
-            &file_str,
-            &path,
-            &assertions,
-            assertions_active,
-            check_source,
-            &mut findings,
-        );
+        check_file(&value, &file_str, &path, &assertions, assertions_active, spec_only, &mut findings);
     }
 
     if strict {
@@ -254,10 +246,9 @@ fn check_file(
     path: &Path,
     assertions: &BTreeMap<String, Assertion>,
     assertions_active: bool,
-    check_source: bool,
+    spec_only: bool,
     findings: &mut Vec<ValidationFinding>,
 ) {
-    let _ = path;
     let Some(map) = spec.as_mapping() else {
         findings.push(ValidationFinding {
             severity: Severity::Error,
@@ -557,9 +548,136 @@ fn check_file(
         }
     }
 
-    // Source-level checks (opt-in via --check-source)
-    if check_source {
-        run_source_checks(spec, file, findings);
+    // Runnability: structural checks (always on) plus source visibility
+    // (skipped under spec_only). These mirror the hard errors the harness
+    // would raise, so authors catch them before a run.
+    check_runnability(map, file, path, spec_only, findings);
+}
+
+// ---------------------------------------------------------------------------
+// Runnability checks
+// ---------------------------------------------------------------------------
+
+/// Structural + source-visibility checks that mirror the hard errors the
+/// harness raises when a spec can't be run. Structural checks (`no_cases`,
+/// `binding_present`, `binding_resolves`, `target_exists`) always run; the
+/// source-dependent checks (`package_root_exists` and the two visibility
+/// checks) are skipped under `spec_only` (for authoring a spec before its
+/// implementation exists). Checks degrade gracefully: a downstream check whose
+/// prerequisite failed simply does not run.
+fn check_runnability(map: &serde_yaml::Mapping, file: &str, spec_path: &Path, spec_only: bool, findings: &mut Vec<ValidationFinding>) {
+    let key = |k: &str| Value::String(k.into());
+
+    // no_cases: a spec with no cases can never be harnessed.
+    let has_cases = matches!(map.get(key("cases")), Some(Value::Sequence(seq)) if !seq.is_empty());
+    if !has_cases {
+        findings.push(ValidationFinding {
+            severity: Severity::Error,
+            check: "no_cases".into(),
+            file: file.into(),
+            message: "spec has no test cases".into(),
+        });
+    }
+
+    // binding_present: without a binding there is nothing to compile/run.
+    let Some(binding_rel) = map.get(key("binding")).and_then(|v| v.as_str()) else {
+        findings.push(ValidationFinding {
+            severity: Severity::Error,
+            check: "binding_present".into(),
+            file: file.into(),
+            message: "spec has no binding".into(),
+        });
+        return;
+    };
+
+    // binding_resolves: the binding path (resolved the same way the harness
+    // resolves it — spec-relative first, then walking up) must point at a
+    // parseable binding file.
+    let binding_path = specgate_harness::binding_path_resolved(spec_path, binding_rel);
+    let Some(binding) = std::fs::read_to_string(&binding_path)
+        .ok()
+        .and_then(|raw| serde_yaml::from_str::<Value>(&raw).ok())
+    else {
+        findings.push(ValidationFinding {
+            severity: Severity::Error,
+            check: "binding_resolves".into(),
+            file: file.into(),
+            message: format!("binding '{binding_rel}' not found"),
+        });
+        return;
+    };
+    let targets = binding
+        .as_mapping()
+        .and_then(|bm| bm.get(key("targets")))
+        .and_then(|v| v.as_mapping());
+
+    // Targets explicitly referenced by the spec (spec-level or per-case).
+    let mut referenced: Vec<String> = Vec::new();
+    let note = |t: &str, acc: &mut Vec<String>| {
+        if !acc.iter().any(|r| r == t) {
+            acc.push(t.to_string());
+        }
+    };
+    if let Some(t) = map.get(key("target")).and_then(|v| v.as_str()) {
+        note(t, &mut referenced);
+    }
+    if let Some(Value::Sequence(cases)) = map.get(key("cases")) {
+        for c in cases {
+            if let Some(t) = c.as_mapping().and_then(|cm| cm.get(key("target"))).and_then(|v| v.as_str()) {
+                note(t, &mut referenced);
+            }
+        }
+    }
+
+    // target_exists: every referenced target must be declared in the binding.
+    let target_present = |t: &str| targets.is_some_and(|m| m.get(key(t)).is_some());
+    for t in &referenced {
+        if !target_present(t) {
+            findings.push(ValidationFinding {
+                severity: Severity::Error,
+                check: "target_exists".into(),
+                file: file.into(),
+                message: format!("target '{t}' not found in binding"),
+            });
+        }
+    }
+
+    if spec_only {
+        return;
+    }
+
+    // Targets whose package_root the harness would compile: the referenced ones
+    // that exist, or (if none referenced) the default target.
+    let mut used: Vec<String> = referenced.iter().filter(|t| target_present(t)).cloned().collect();
+    if used.is_empty()
+        && let Some(tm) = targets
+    {
+        if tm.get(key("default")).is_some() {
+            used.push("default".into());
+        } else if let Some(name) = tm.iter().next().and_then(|(k, _)| k.as_str()) {
+            used.push(name.to_string());
+        }
+    }
+
+    let binding_dir = binding_path.parent().unwrap_or(Path::new(""));
+    for tname in &used {
+        let pkg_rel = targets
+            .and_then(|m| m.get(key(tname)))
+            .and_then(|tv| tv.as_mapping())
+            .and_then(|tm| tm.get(key("package_root")))
+            .and_then(|v| v.as_str())
+            .unwrap_or("src");
+        let package_root = binding_dir.join(pkg_rel);
+        if package_root.exists() {
+            run_source_visibility(map, file, &package_root, findings);
+        } else {
+            findings.push(ValidationFinding {
+                severity: Severity::Error,
+                check: "package_root_exists".into(),
+                file: file.into(),
+                message: format!("package_root '{pkg_rel}' does not exist"),
+            });
+        }
     }
 }
 
@@ -567,42 +685,11 @@ fn check_file(
 // Source-level checks
 // ---------------------------------------------------------------------------
 
-fn run_source_checks(spec: &Value, file: &str, findings: &mut Vec<ValidationFinding>) {
-    let Some(map) = spec.as_mapping() else { return };
-
-    let Some(binding_rel) = map.get(Value::String("binding".into())).and_then(|v| v.as_str()) else {
-        return;
-    };
-
-    let spec_dir = Path::new(file).parent().unwrap_or(Path::new(""));
-    let binding_path = spec_dir.join(binding_rel);
-
-    let Ok(binding_raw) = std::fs::read_to_string(&binding_path) else {
-        return;
-    };
-    let binding: Value = match serde_yaml::from_str(&binding_raw) {
-        Ok(v) => v,
-        Err(_) => return,
-    };
-
-    let package_root_rel = binding
-        .as_mapping()
-        .and_then(|bm| bm.get(Value::String("targets".into())))
-        .and_then(|v| v.as_mapping())
-        .and_then(|targets| targets.iter().next())
-        .and_then(|(_, tv)| tv.as_mapping())
-        .and_then(|tm| tm.get(Value::String("package_root".into())))
-        .and_then(|v| v.as_str())
-        .unwrap_or("src");
-
-    let binding_dir = binding_path.parent().unwrap_or(Path::new(""));
-    let package_root = binding_dir.join(package_root_rel);
-
-    if !package_root.exists() {
-        return;
-    }
-
-    let rs_content = collect_rs_content(&package_root);
+/// Scan a resolved `package_root` for source-visibility runnability problems:
+/// `#[spec_setup]` functions and operation input-type struct fields must be
+/// `pub`, or the generated runner would fail to compile.
+fn run_source_visibility(map: &serde_yaml::Mapping, file: &str, package_root: &Path, findings: &mut Vec<ValidationFinding>) {
+    let rs_content = collect_rs_content(package_root);
 
     // (F) source_setup_visibility: every `#[spec_setup(...)]` function must be
     // declared `pub fn`.

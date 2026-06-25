@@ -1,0 +1,7 @@
+spec_version: "0.4.0"
+name: test.no_cases
+binding: binding.yaml
+operations:
+  noop:
+    outputs: [result]
+cases: []

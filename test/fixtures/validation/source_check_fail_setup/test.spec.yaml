@@ -5,8 +5,15 @@ operations:
   compute:
     inputs: { req: ComputeRequest }
     outputs: [result]
+  noop:
+    outputs: [result]
 types:
   ComputeRequest:
     x: i32
     y: i32
-cases: []
+cases:
+  - name: noop_case
+    desc: Trivial runnable case so the spec is harnessable
+    operation: noop
+    expected:
+      - result: "0"

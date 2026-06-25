@@ -14,3 +14,8 @@ pub struct ComputeRequest {
     x: i32,
     pub y: i32,
 }
+
+#[spec_operation("noop")]
+pub fn noop() -> i32 {
+    0
+}

@@ -35,12 +35,15 @@ operations:
       strict:
         type: bool
         desc: Treat warnings as errors
+      spec_only:
+        type: bool
+        desc: >
+          Skip runnability checks that require the implementation source
+          (package_root existence and source visibility). Use when authoring
+          a spec before its implementation exists.
       assertions_dir:
         type: string
         desc: Directory of assertion source files for coverage checking (opt-in)
-      check_source:
-        type: bool
-        desc: Scan source files for annotation coverage (opt-in)
     outputs:
       - outcome:
           oneof:
@@ -75,7 +78,7 @@ cases:
       spec_dir: test/fixtures/validation/valid_complete
       strict: false
       assertions_dir: ""
-      check_source: false
+      spec_only: false
     expected:
       - $result:
           Pass:
@@ -89,7 +92,7 @@ cases:
       spec_dir: test/fixtures/validation/missing_version
       strict: false
       assertions_dir: ""
-      check_source: false
+      spec_only: false
     expected:
       - $result:
           Fail:
@@ -111,7 +114,7 @@ cases:
       spec_dir: test/fixtures/validation/valid_complete
       strict: false
       assertions_dir: ""
-      check_source: false
+      spec_only: false
     expected:
       - $result:
           Pass:
@@ -125,7 +128,7 @@ cases:
       spec_dir: test/fixtures/validation/bad_op_ref
       strict: false
       assertions_dir: ""
-      check_source: false
+      spec_only: false
     expected:
       - $result:
           Fail:
@@ -147,7 +150,7 @@ cases:
       spec_dir: test/fixtures/validation/valid_complete
       strict: false
       assertions_dir: ""
-      check_source: false
+      spec_only: false
     expected:
       - $result:
           Pass:
@@ -161,7 +164,7 @@ cases:
       spec_dir: test/fixtures/validation/duplicate_names
       strict: false
       assertions_dir: ""
-      check_source: false
+      spec_only: false
     expected:
       - $result:
           Fail:
@@ -183,7 +186,7 @@ cases:
       spec_dir: test/fixtures/validation/valid_complete
       strict: false
       assertions_dir: ""
-      check_source: false
+      spec_only: false
     expected:
       - $result:
           Pass:
@@ -197,7 +200,7 @@ cases:
       spec_dir: test/fixtures/validation/input_mismatch
       strict: false
       assertions_dir: ""
-      check_source: false
+      spec_only: false
     expected:
       - $result:
           Fail:
@@ -219,7 +222,7 @@ cases:
       spec_dir: test/fixtures/validation/valid_complete
       strict: false
       assertions_dir: ""
-      check_source: false
+      spec_only: false
     expected:
       - $result:
           Pass:
@@ -233,7 +236,7 @@ cases:
       spec_dir: test/fixtures/validation/bad_expected
       strict: false
       assertions_dir: ""
-      check_source: false
+      spec_only: false
     expected:
       - $result:
           Fail:
@@ -255,7 +258,7 @@ cases:
       spec_dir: test/fixtures/validation/valid_complete
       strict: false
       assertions_dir: ""
-      check_source: false
+      spec_only: false
     expected:
       - $result:
           Pass:
@@ -269,7 +272,7 @@ cases:
       spec_dir: test/fixtures/validation/narrative_misuse
       strict: false
       assertions_dir: ""
-      check_source: false
+      spec_only: false
     expected:
       - $result:
           Pass:
@@ -311,7 +314,7 @@ cases:
       spec_dir: test/fixtures/validation/valid_complete
       strict: false
       assertions_dir: ""
-      check_source: false
+      spec_only: false
     expected:
       - $result:
           Pass:
@@ -325,7 +328,7 @@ cases:
       spec_dir: test/fixtures/validation/level_mismatch
       strict: false
       assertions_dir: test/fixtures/validation/assertions
-      check_source: false
+      spec_only: false
     expected:
       - $result:
           Pass:
@@ -347,7 +350,7 @@ cases:
       spec_dir: test/fixtures/validation/negative_coverage_pass
       strict: false
       assertions_dir: test/fixtures/validation/assertions
-      check_source: false
+      spec_only: false
     expected:
       - $result:
           Pass:
@@ -361,7 +364,7 @@ cases:
       spec_dir: test/fixtures/validation/no_negative_case
       strict: false
       assertions_dir: test/fixtures/validation/assertions
-      check_source: false
+      spec_only: false
     expected:
       - $result:
           Pass:
@@ -383,7 +386,7 @@ cases:
       spec_dir: test/fixtures/validation/assertion_coverage
       strict: false
       assertions_dir: test/fixtures/validation/assertions
-      check_source: false
+      spec_only: false
     expected:
       - $result:
           Pass:
@@ -397,7 +400,7 @@ cases:
       spec_dir: test/fixtures/validation/assertion_coverage_miss
       strict: false
       assertions_dir: test/fixtures/validation/assertions
-      check_source: false
+      spec_only: false
     expected:
       - $result:
           Fail:
@@ -419,7 +422,7 @@ cases:
       spec_dir: test/fixtures/validation/extra_inputs
       strict: false
       assertions_dir: ""
-      check_source: false
+      spec_only: false
     expected:
       - $result:
           Fail:
@@ -441,7 +444,7 @@ cases:
       spec_dir: test/fixtures/validation/dep_consistency_pass
       strict: false
       assertions_dir: ""
-      check_source: false
+      spec_only: false
     expected:
       - $result:
           Pass:
@@ -455,7 +458,7 @@ cases:
       spec_dir: test/fixtures/validation/dep_consistency_fail
       strict: false
       assertions_dir: ""
-      check_source: false
+      spec_only: false
     expected:
       - $result:
           Fail:
@@ -477,7 +480,7 @@ cases:
       spec_dir: test/fixtures/validation/mixed_level_bundle
       strict: false
       assertions_dir: test/fixtures/validation/assertions
-      check_source: false
+      spec_only: false
     expected:
       - $result:
           Pass:
@@ -499,7 +502,7 @@ cases:
       spec_dir: test/fixtures/validation/no_expected
       strict: false
       assertions_dir: ""
-      check_source: false
+      spec_only: false
     expected:
       - $result:
           Fail:
@@ -511,7 +514,7 @@ cases:
                   message: "case 'missing_expected' has no expected or steps"
 
   # ================================================================
-  # Validate — source checks (opt-in with --check-source)
+  # Validate — runnability: source visibility (on by default)
   # ================================================================
 
   - name: validate_source_check_pass
@@ -521,7 +524,7 @@ cases:
       spec_dir: test/fixtures/validation/source_check_pass
       strict: false
       assertions_dir: ""
-      check_source: true
+      spec_only: false
     expected:
       - $result:
           Pass:
@@ -535,7 +538,7 @@ cases:
       spec_dir: test/fixtures/validation/source_check_fail_setup
       strict: false
       assertions_dir: ""
-      check_source: true
+      spec_only: false
     expected:
       - $result:
           Fail:
@@ -553,7 +556,7 @@ cases:
       spec_dir: test/fixtures/validation/source_check_fail_field
       strict: false
       assertions_dir: ""
-      check_source: true
+      spec_only: false
     expected:
       - $result:
           Fail:
@@ -563,6 +566,128 @@ cases:
                 - severity: error
                   check: source_field_visibility
                   message: "field 'x' of input type 'ComputeRequest' must be 'pub'"
+
+  - name: validate_spec_only_skips_source_checks
+    desc: spec_only suppresses source-dependent runnability checks
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/source_check_fail_setup
+      strict: false
+      assertions_dir: ""
+      spec_only: true
+    expected:
+      - $result:
+          Pass:
+            report:
+              errors: 0
+
+  # ================================================================
+  # Validate — runnability: structural (on by default)
+  # ================================================================
+
+  - name: validate_no_cases_fail
+    desc: A spec with no test cases cannot be harnessed
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/no_cases
+      strict: false
+      assertions_dir: ""
+      spec_only: false
+    expected:
+      - $result:
+          Fail:
+            report:
+              errors: 1
+              findings:
+                - severity: error
+                  check: no_cases
+                  message: "spec has no test cases"
+
+  - name: validate_no_binding_fail
+    desc: A spec without a binding cannot be harnessed
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/no_binding
+      strict: false
+      assertions_dir: ""
+      spec_only: false
+    expected:
+      - $result:
+          Fail:
+            report:
+              errors: 1
+              findings:
+                - severity: error
+                  check: binding_present
+                  message: "spec has no binding"
+
+  - name: validate_binding_not_found_fail
+    desc: A binding path that does not resolve cannot be harnessed
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/bad_binding_path
+      strict: false
+      assertions_dir: ""
+      spec_only: false
+    expected:
+      - $result:
+          Fail:
+            report:
+              errors: 1
+              findings:
+                - severity: error
+                  check: binding_resolves
+                  message: "binding 'does_not_exist.yaml' not found"
+
+  - name: validate_target_not_found_fail
+    desc: A referenced target absent from the binding cannot be harnessed
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/bad_target
+      strict: false
+      assertions_dir: ""
+      spec_only: false
+    expected:
+      - $result:
+          Fail:
+            report:
+              errors: 1
+              findings:
+                - severity: error
+                  check: target_exists
+                  message: "target 'ghost' not found in binding"
+
+  - name: validate_package_root_missing_fail
+    desc: A target whose package_root does not exist cannot be harnessed
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/bad_package_root
+      strict: false
+      assertions_dir: ""
+      spec_only: false
+    expected:
+      - $result:
+          Fail:
+            report:
+              errors: 1
+              findings:
+                - severity: error
+                  check: package_root_exists
+                  message: "package_root '../nonexistent' does not exist"
+
+  - name: validate_package_root_missing_skipped_when_spec_only
+    desc: spec_only suppresses package_root existence checking
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/bad_package_root
+      strict: false
+      assertions_dir: ""
+      spec_only: true
+    expected:
+      - $result:
+          Pass:
+            report:
+              errors: 0
 
   # ================================================================
   # Run — all status types

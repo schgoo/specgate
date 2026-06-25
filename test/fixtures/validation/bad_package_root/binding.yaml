@@ -1,0 +1,4 @@
+language: rust
+targets:
+  default:
+    package_root: ../nonexistent

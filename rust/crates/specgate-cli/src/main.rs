@@ -8,7 +8,7 @@ fn print_usage() {
     eprintln!(
         "usage: specgate <command> [options] <args>\n\
          \n\
-         commands:\n  validate <spec-dir> [--strict] [--assertions-dir <dir>] [--check-source]\n  run <spec.yaml>"
+         commands:\n  validate <spec-dir> [--strict] [--spec-only] [--assertions-dir <dir>]\n  run <spec.yaml>"
     );
 }
 
@@ -39,7 +39,7 @@ fn cmd_validate(args: &[String]) -> ExitCode {
     let mut spec_dir: Option<String> = None;
     let mut strict = false;
     let mut assertions_dir = String::new();
-    let mut check_source = false;
+    let mut spec_only = false;
     let mut i = 0;
     while i < args.len() {
         let a = &args[i];
@@ -56,8 +56,8 @@ fn cmd_validate(args: &[String]) -> ExitCode {
                 assertions_dir.clone_from(&args[i + 1]);
                 i += 2;
             }
-            "--check-source" => {
-                check_source = true;
+            "--spec-only" => {
+                spec_only = true;
                 i += 1;
             }
             _ if !a.starts_with("--") && spec_dir.is_none() => {
@@ -74,7 +74,7 @@ fn cmd_validate(args: &[String]) -> ExitCode {
         eprintln!("error: validate requires a spec directory");
         return ExitCode::from(2);
     };
-    let outcome = validate(&dir, strict, &assertions_dir, check_source);
+    let outcome = validate(&dir, strict, spec_only, &assertions_dir);
     print!("{}", validate::format_outcome(&outcome));
     match outcome {
         validate::ValidateOutcome::Pass { .. } => ExitCode::from(0),

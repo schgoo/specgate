@@ -322,9 +322,19 @@ This checks:
 - Mixed-level bundles (cases don't mix MUST/SHOULD/MAY assertions)
 - Runnable cases have expected
 
-With `--check-source` and a resolved binding, also checks:
-- Operations and setups are `pub fn`
-- Struct fields for input types are `pub`
+It also runs **runnability checks** (on by default) that mirror the hard
+errors the harness raises when a spec can't be run:
+- A spec has at least one case (`no_cases`)
+- A binding is declared and its file resolves (`binding_present`,
+  `binding_resolves`)
+- Every referenced target exists in the binding (`target_exists`)
+- Each used target's `package_root` exists (`package_root_exists`)
+- `#[spec_setup]` functions and operation input-type struct fields are `pub`
+  (`source_setup_visibility`, `source_field_visibility`)
+
+Pass `--spec-only` to skip the source-dependent runnability checks
+(`package_root_exists` and the two visibility checks) when authoring a spec
+before its implementation exists.
 
 Fix all errors before proceeding. Warnings are advisory.
 
