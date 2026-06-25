@@ -293,22 +293,22 @@ Then read only what you need:
 
 ## Using the CLI
 
-Build the CLI from the workspace root (`rust/`):
+Install the `specgate` CLI (once):
 
 ```bash
-cd rust
-cargo build -p specgate-cli --quiet
+cargo install specgate-cli
 ```
 
-Then use it via `cargo run -p specgate-cli --quiet --` or directly at
-`rust/target/debug/specgate` (or `release` with `--release`).
+Then invoke it as `specgate <command>`. (When working inside the SpecGate
+repository itself, you can instead run the in-tree build with
+`cargo run -p specgate-cli --quiet -- <command>`.)
 
 ## Running specgate validate
 
 Before implementing, validate the spec file is well-formed:
 
 ```bash
-cargo run -p specgate-cli --quiet -- validate <spec-dir>
+specgate validate <spec-dir>
 ```
 
 This checks:
@@ -347,7 +347,7 @@ Fix all errors before proceeding. Warnings are advisory.
 After implementation passes all tests, run the spec through the harness:
 
 ```bash
-cargo run -p specgate-cli -- run <spec-file.spec.yaml>
+specgate run <spec-file.spec.yaml>
 ```
 
 This compiles your annotated code, runs each case, collects traces, and
