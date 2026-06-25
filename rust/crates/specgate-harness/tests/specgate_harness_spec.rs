@@ -421,7 +421,11 @@ fn error_missing_operation() {
 #[test]
 fn error_compile_failure() {
     let reason = err_reason(run("test/rust/crates/specgate-fixtures/specs/compile_error.spec.yaml"));
-    assert_eq!(reason, "source failed to compile");
+    assert!(reason.starts_with("source failed to compile"), "reason: {reason}");
+    assert!(
+        reason.lines().count() > 1,
+        "expected compiler diagnostics appended to the reason, got: {reason}"
+    );
 }
 
 #[test]

@@ -2246,14 +2246,15 @@ cases:
             reason: "operation 'increment' not found in source annotations"
 
   - name: error_compile_failure
-    desc: Source has a syntax error
+    desc: Source has a syntax error; the reason includes the compiler diagnostics
     operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/compile_error.spec.yaml
     expected:
       - $result:
           Error:
-            reason: "source failed to compile"
+            reason:
+              $matches: "source failed to compile:[\\s\\S]*error"
 
   - name: error_no_cases
     desc: Spec with no test cases

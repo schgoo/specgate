@@ -298,7 +298,10 @@ fn run_group(
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         if stderr.contains("error[E") || stderr.contains("error:") || stderr.contains("could not compile") {
-            return Err("source failed to compile".into());
+            // Surface the actual compiler diagnostics (first 20 lines) so the
+            // failure is debuggable without hunting for the scratch directory.
+            let detail = stderr.lines().take(20).collect::<Vec<_>>().join("\n");
+            return Err(format!("source failed to compile:\n{detail}"));
         }
         return Err(format!("runner failed: {stderr}"));
     }
