@@ -135,6 +135,42 @@ impl RunOutcome {
     }
 }
 
+/// Outcome of running a spec with code-coverage measurement enabled.
+#[derive(Debug, Clone)]
+pub enum CoverageOutcome {
+    /// Cases ran and coverage of the implementation was measured.
+    Measured {
+        results: Vec<CaseResult>,
+        coverage: CoverageReport,
+    },
+    /// Cases ran but coverage could not be measured (e.g. the `llvm-tools`
+    /// component is absent, or every target was a command target with no
+    /// compiled source). `reason` explains why.
+    Unavailable { results: Vec<CaseResult>, reason: String },
+    /// The spec failed to run at all (same failures as `RunOutcome::Error`).
+    Error { reason: String },
+}
+
+/// Aggregate line-coverage of the implementation source exercised by a spec run.
+#[derive(Debug, Clone)]
+pub struct CoverageReport {
+    pub lines_total: u64,
+    pub lines_covered: u64,
+    /// Percentage of lines covered, 0.0–100.0.
+    pub percent: f64,
+    /// Per-file breakdown (implementation sources only).
+    pub files: Vec<FileCoverage>,
+}
+
+/// Line-coverage for a single implementation source file.
+#[derive(Debug, Clone)]
+pub struct FileCoverage {
+    pub path: String,
+    pub lines_total: u64,
+    pub lines_covered: u64,
+    pub percent: f64,
+}
+
 impl CaseStatus {
     #[must_use]
     pub fn as_str(self) -> &'static str {

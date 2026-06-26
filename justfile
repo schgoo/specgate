@@ -24,6 +24,13 @@ self-host:
 cli-self-host:
     cd rust && cargo test -p specgate-cli --test cli_self_host -- --ignored
 
+# Run the code-coverage test: runs a spec through the harness with
+# instrumentation and checks the implementation crate's coverage is measured.
+# Needs the llvm-tools component (`rustup component add llvm-tools-preview`);
+# tolerates its absence (degrades to "unavailable"). #[ignore]d like the others.
+coverage:
+    cd rust && cargo test -p specgate-harness --test coverage -- --ignored
+
 # Run clippy
 clippy:
     cd rust && cargo clippy --workspace --all-targets -- -D warnings
@@ -65,4 +72,4 @@ readme-check:
     cd rust && cargo doc2readme -p specgate-cli --lib --template crates/README.j2 --out crates/specgate-cli/README.md --check
 
 # Run all pre-PR checks
-check: build test clippy format-check deny validate readme-check self-host cli-self-host
+check: build test clippy format-check deny validate readme-check self-host cli-self-host coverage

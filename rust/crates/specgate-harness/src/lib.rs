@@ -13,13 +13,14 @@
 
 mod binding;
 mod codegen;
+mod coverage;
 mod match_traces;
 pub(crate) mod scan;
 mod spec;
 mod types;
 
 // Public API — what users need for run_spec() results
-pub use types::{CaseLevel, CaseResult, CaseStatus, RunOutcome, Source};
+pub use types::{CaseLevel, CaseResult, CaseStatus, CoverageOutcome, CoverageReport, FileCoverage, RunOutcome, Source};
 
 // Internal types — exposed for integration tests within this crate,
 // but hidden from public docs. Not part of the stable API.
@@ -53,53 +54,83 @@ use std::process::Command;
 /// groups are validated before any IO work begins, so the `.unwrap()` on
 /// `binding.target(...)` inside the group loop cannot be reached with an
 /// unknown target.
+#[must_use]
 pub fn run_spec(spec_path: &str) -> RunOutcome {
+    let exec = execute_spec(spec_path, false);
+    match exec.outcome {
+        Ok(results) => RunOutcome::Complete { results },
+        Err(reason) => RunOutcome::Error { reason },
+    }
+}
+
+/// Like [`run_spec`], but also measures code coverage of the implementation
+/// exercised by the spec's cases. Builds and runs each compiled target group's
+/// runner under `-C instrument-coverage`, then merges and reports the profiles.
+///
+/// # Panics
+///
+/// Panics only on the same internal invariant as [`run_spec`] (all target names
+/// are validated before the group loop).
+#[must_use]
+pub fn run_spec_with_coverage(spec_path: &str) -> CoverageOutcome {
+    let exec = execute_spec(spec_path, true);
+    let results = match exec.outcome {
+        Ok(results) => results,
+        Err(reason) => return CoverageOutcome::Error { reason },
+    };
+    match coverage::compute(&exec.group_cov, &exec.scratch_root) {
+        Ok(coverage) => CoverageOutcome::Measured { results, coverage },
+        Err(reason) => CoverageOutcome::Unavailable { results, reason },
+    }
+}
+
+/// Result of the shared spec-execution pipeline used by both [`run_spec`] and
+/// [`run_spec_with_coverage`].
+struct ExecResult {
+    outcome: Result<Vec<CaseResult>, String>,
+    group_cov: Vec<coverage::GroupCoverage>,
+    scratch_root: PathBuf,
+}
+
+fn execute_spec(spec_path: &str, coverage: bool) -> ExecResult {
+    let err = |reason: String| ExecResult {
+        outcome: Err(reason),
+        group_cov: Vec::new(),
+        scratch_root: PathBuf::new(),
+    };
+
     let path = PathBuf::from(spec_path);
     let path = std::fs::canonicalize(&path).unwrap_or(path);
     let Ok(raw) = std::fs::read_to_string(&path) else {
-        return RunOutcome::Error {
-            reason: format!("spec file not found: {spec_path}"),
-        };
+        return err(format!("spec file not found: {spec_path}"));
     };
 
     // First: pure YAML validity.
     let yaml_value: serde_yaml::Value = match serde_yaml::from_str(&raw) {
         Ok(v) => v,
-        Err(_) => {
-            return RunOutcome::Error {
-                reason: "spec file is not valid YAML".into(),
-            };
-        }
+        Err(_) => return err("spec file is not valid YAML".into()),
     };
 
     // Then: spec shape parsing.
     let Ok(parsed) = spec::parse_spec(&yaml_value) else {
-        return RunOutcome::Error {
-            reason: "spec file is not valid YAML".into(),
-        };
+        return err("spec file is not valid YAML".into());
     };
 
     if parsed.cases.is_empty() {
-        return RunOutcome::Error {
-            reason: "spec has no test cases".into(),
-        };
+        return err("spec has no test cases".into());
     }
 
     let Some(binding_path) = parsed.binding_path.as_deref() else {
-        return RunOutcome::Error {
-            reason: "spec has no binding".into(),
-        };
+        return err("spec has no binding".into());
     };
     let binding_full = binding_path_resolved(&path, binding_path);
     let Some(binding) = binding::load_binding(&binding_full) else {
-        return RunOutcome::Error {
-            reason: format!("binding '{binding_path}' not found"),
-        };
+        return err(format!("binding '{binding_path}' not found"));
     };
 
     // Shape check: spec-level event key validation.
     if let Some(reason) = check_shape(&parsed, &yaml_value) {
-        return RunOutcome::Error { reason };
+        return err(reason);
     }
 
     let fixture_basename = spec_basename(&path);
@@ -127,14 +158,13 @@ pub fn run_spec(spec_path: &str) -> RunOutcome {
     for (eff_target, _) in &groups {
         let target_name = eff_target.as_deref();
         if binding.target(target_name).is_none() {
-            return RunOutcome::Error {
-                reason: format!("target '{}' not found in binding", target_name.unwrap_or("<default>")),
-            };
+            return err(format!("target '{}' not found in binding", target_name.unwrap_or("<default>")));
         }
     }
 
     // Process each target group and accumulate results by original case index.
     let mut results_by_index: Vec<Option<CaseResult>> = vec![None; parsed.cases.len()];
+    let mut group_cov: Vec<coverage::GroupCoverage> = Vec::new();
 
     for (eff_target, case_indices) in &groups {
         let target = binding.target(eff_target.as_deref()).unwrap();
@@ -147,13 +177,30 @@ pub fn run_spec(spec_path: &str) -> RunOutcome {
         };
         let scratch_dir = scratch_for(&scratch_suffix);
 
-        match run_group(target, &group_cases, &parsed, &fixture_basename, &workspace_root, &scratch_dir) {
-            Ok(group_results) => {
+        match run_group(
+            target,
+            &group_cases,
+            &parsed,
+            &fixture_basename,
+            &workspace_root,
+            &scratch_dir,
+            coverage,
+        ) {
+            Ok((group_results, cov)) => {
                 for (&case_idx, result) in case_indices.iter().zip(group_results) {
                     results_by_index[case_idx] = Some(result);
                 }
+                if let Some(cov) = cov {
+                    group_cov.push(cov);
+                }
             }
-            Err(reason) => return RunOutcome::Error { reason },
+            Err(reason) => {
+                return ExecResult {
+                    outcome: Err(reason),
+                    group_cov,
+                    scratch_root: scratch_for(&fixture_basename),
+                };
+            }
         }
     }
 
@@ -161,11 +208,17 @@ pub fn run_spec(spec_path: &str) -> RunOutcome {
         .into_iter()
         .map(|r| r.expect("all case indices covered by groups"))
         .collect();
-    RunOutcome::Complete { results }
+    ExecResult {
+        outcome: Ok(results),
+        group_cov,
+        scratch_root: scratch_for(&fixture_basename),
+    }
 }
 
 /// Run one target group: resolve source, validate annotations, generate a
-/// temporary runner, compile + execute it, and return per-case results.
+/// temporary runner, compile + execute it, and return per-case results. When
+/// `coverage` is set, the runner is built/run under instrumentation and the
+/// captured artifacts are returned alongside the results.
 fn run_group(
     target: &binding::Target,
     group_cases: &[&spec::Case],
@@ -173,18 +226,20 @@ fn run_group(
     fixture_basename: &str,
     workspace_root: &Path,
     scratch_dir: &Path,
-) -> Result<Vec<CaseResult>, String> {
+    coverage: bool,
+) -> Result<(Vec<CaseResult>, Option<coverage::GroupCoverage>), String> {
     // Command target: run the binding's shell command once and map its exit
     // status to a synthetic `$outcome` event (exit 0 -> "Complete", else
-    // "Error"), then match each case. No source file is resolved or compiled.
+    // "Error"), then match each case. No source file is resolved or compiled,
+    // so command targets contribute no coverage data.
     if let Some(command) = target.command.as_deref() {
-        return run_command_group(command, &target.package_root, group_cases);
+        return run_command_group(command, &target.package_root, group_cases).map(|r| (r, None));
     }
 
     let fixture_srcs = resolve_fixture_sources(&target.package_root, fixture_basename, group_cases);
     if fixture_srcs.is_empty() {
         if let Some(results) = short_circuit_non_must(group_cases, None) {
-            return Ok(results);
+            return Ok((results, None));
         }
         return Err(format!(
             "source file not found: {}",
@@ -251,7 +306,7 @@ fn run_group(
     }
 
     if !runnable {
-        return Ok(build_short_circuit_results(group_cases, &case_disposition));
+        return Ok((build_short_circuit_results(group_cases, &case_disposition), None));
     }
 
     let cases_to_run: Vec<&spec::Case> = group_cases
@@ -292,6 +347,18 @@ fn run_group(
     // path-input operations resolve repo-root-relative paths deterministically,
     // independent of where the harness itself was invoked from.
     cmd.current_dir(repo_root());
+
+    // Under coverage, build + run the runner with instrumentation enabled so the
+    // profiles capture the implementation crate it links.
+    let cov_profraw_dir = if coverage {
+        let (env, profraw_dir) = coverage::instrumentation_env(scratch_dir);
+        for (k, v) in env {
+            cmd.env(k, v);
+        }
+        Some(profraw_dir)
+    } else {
+        None
+    };
 
     let output = cmd.output().map_err(|e| format!("failed to invoke cargo: {e}"))?;
 
@@ -343,7 +410,20 @@ fn run_group(
             }
         }
     }
-    Ok(results)
+
+    let group_cov = cov_profraw_dir.map(|profraw_dir| {
+        let exe = if cfg!(windows) { "sg-runner.exe" } else { "sg-runner" };
+        coverage::GroupCoverage {
+            binary: proj.crate_dir.join("target").join("debug").join(exe),
+            profraw_dir,
+            // Scope coverage to the whole crate under test (every `.rs` under
+            // the target's package_root), not just the files bound to this
+            // spec's operations. `compute` unions and dedups across groups, so a
+            // multi-target spec reports the union of its crates under test.
+            sources: coverage::collect_crate_sources(&target.package_root),
+        }
+    });
+    Ok((results, group_cov))
 }
 
 // ---------------------------------------------------------------------------

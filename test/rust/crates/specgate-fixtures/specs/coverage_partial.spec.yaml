@@ -1,0 +1,17 @@
+spec_version: "0.4.0"
+name: fixture.coverage_partial
+binding: binding_coverage.yaml
+operations:
+  classify:
+    inputs:
+      n: i32
+    outputs:
+      - $result: string
+cases:
+  - name: classify_positive
+    desc: A positive number is classified, exercising only the positive branch
+    operation: classify
+    inputs:
+      n: 5
+    expected:
+      - $result: "positive"
