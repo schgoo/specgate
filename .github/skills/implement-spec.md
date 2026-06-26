@@ -359,4 +359,26 @@ If the run fails:
 - Check that complex input types derive `Serialize` + `Deserialize`
 - Review the trace output to see what diverged from expected
 
+### Measuring coverage
+
+To see how much of the implementation crate under test the spec's cases
+actually exercise, add `--coverage`:
+
+```bash
+specgate run <spec-file.spec.yaml> --coverage
+```
+
+This instruments the implementation while running the spec and reports the
+percentage of lines covered, per crate under test (a spec with multiple targets
+reports the union of their crates). Use `--coverage-threshold <pct>` to fail
+(non-zero exit) when coverage drops below a bar — useful as a CI gate:
+
+```bash
+specgate run <spec-file.spec.yaml> --coverage-threshold 80
+```
+
+Coverage needs the `llvm-tools` component (`rustup component add
+llvm-tools-preview`); without it, the run still succeeds but reports coverage as
+unavailable.
+
 

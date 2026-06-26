@@ -8,7 +8,7 @@ fn print_usage() {
     eprintln!(
         "usage: specgate <command> [options] <args>\n\
          \n\
-         commands:\n  validate <spec-dir> [--strict] [--spec-only] [--assertions-dir <dir>]\n  run <spec.yaml>"
+         commands:\n  validate <spec-dir> [--strict] [--spec-only] [--assertions-dir <dir>]\n  run <spec.yaml> [--coverage] [--coverage-threshold <pct>]"
     );
 }
 
@@ -83,11 +83,51 @@ fn cmd_validate(args: &[String]) -> ExitCode {
 }
 
 fn cmd_run(args: &[String]) -> ExitCode {
-    if args.len() != 1 {
-        eprintln!("error: run requires exactly one spec file argument");
-        return ExitCode::from(2);
+    let mut spec: Option<String> = None;
+    let mut coverage = false;
+    let mut threshold: Option<f64> = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--coverage" => {
+                coverage = true;
+                i += 1;
+            }
+            "--coverage-threshold" => {
+                if i + 1 >= args.len() {
+                    eprintln!("error: --coverage-threshold needs a percentage argument");
+                    return ExitCode::from(2);
+                }
+                let Ok(pct) = args[i + 1].parse::<f64>() else {
+                    eprintln!("error: --coverage-threshold must be a number");
+                    return ExitCode::from(2);
+                };
+                threshold = Some(pct);
+                coverage = true; // a threshold implies coverage
+                i += 2;
+            }
+            a if !a.starts_with("--") && spec.is_none() => {
+                spec = Some(a.to_string());
+                i += 1;
+            }
+            a => {
+                eprintln!("error: unexpected argument '{a}'");
+                return ExitCode::from(2);
+            }
+        }
     }
-    let outcome = run(&args[0]);
+    let Some(spec) = spec else {
+        eprintln!("error: run requires a spec file argument");
+        return ExitCode::from(2);
+    };
+
+    if coverage {
+        let outcome = run::run_with_coverage(&spec);
+        print!("{}", run::format_coverage(&outcome));
+        return ExitCode::from(run::coverage_exit_code(&outcome, threshold));
+    }
+
+    let outcome = run(&spec);
     print!("{}", run::format_outcome(&outcome));
     match &outcome {
         run::RunOutcome::Error { .. } => ExitCode::from(1),

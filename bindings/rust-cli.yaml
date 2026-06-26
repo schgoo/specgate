@@ -34,3 +34,10 @@ targets:
   smoke_run_fail:
     package_root: ../rust
     command: cargo run -p specgate-cli --quiet -- run ../nonexistent.spec.yaml
+
+  # `run --coverage` end-to-end. Exits 0 whether coverage is Measured or
+  # Unavailable (no llvm-tools), so this stays robust across environments; the
+  # threshold exit-code logic is covered deterministically by unit tests.
+  smoke_run_coverage:
+    package_root: ../rust
+    command: cargo run -p specgate-cli --quiet -- run ../test/rust/crates/specgate-fixtures/specs/coverage_partial.spec.yaml --coverage

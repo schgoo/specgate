@@ -805,6 +805,16 @@ cases:
     expected:
       - $outcome: "Error"
 
+  - name: cli_binary_run_coverage
+    target: smoke_run_coverage
+    desc: >
+      The specgate binary's `run --coverage` measures coverage of the
+      implementation crate under test and exits 0 (mapped to Complete). Exits 0
+      whether coverage is measured or unavailable; the threshold exit-code logic
+      is covered by unit tests.
+    expected:
+      - $outcome: "Complete"
+
   # ================================================================
   # Run — all status types
   # ================================================================
