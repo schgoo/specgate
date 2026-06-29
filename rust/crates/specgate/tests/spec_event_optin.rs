@@ -9,6 +9,8 @@
 use specgate::{SpecEvent, ToSpecValue, Value};
 use std::collections::BTreeMap;
 
+specgate::spec_component!("test.spec_event_optin");
+
 #[derive(SpecEvent)]
 struct Mixed {
     #[spec_event]

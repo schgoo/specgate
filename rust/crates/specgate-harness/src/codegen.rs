@@ -194,6 +194,17 @@ fn render_main(
     out.push_str("use specgate::{TraceEvent, Value, take_traces, reset, set_mock, SpecEvent};\n");
     out.push_str("use std::collections::HashMap;\n");
 
+    // Raw-included fixture files (`#[path] mod fut;`) reference the crate-root
+    // `__SPECGATE_COMPONENT` constant their `spec_component!` would normally
+    // declare. When such a file is inlined here (rather than linked as its own
+    // crate), provide that constant at the runner crate root so the
+    // `#[spec_operation]` / `#[derive(SpecEvent)]` expansions resolve. The
+    // value is irrelevant to a harness run (the component axis only affects
+    // `extract`).
+    if fixture_crates.is_none() {
+        out.push_str("pub(crate) const __SPECGATE_COMPONENT: &str = \"harness.fixture\";\n");
+    }
+
     match fixture_crates {
         // Single crate module: alias it directly as `fut` (unchanged form).
         Some(crates) if crates.len() == 1 => {

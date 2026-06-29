@@ -1,4 +1,5 @@
 use specgate_annotations::{spec_operation, spec_setup};
+specgate_annotations::spec_component!("fixture.validation.full_runnable");
 
 #[spec_operation("add")]
 pub fn add(a: i32, b: i32) -> i32 {

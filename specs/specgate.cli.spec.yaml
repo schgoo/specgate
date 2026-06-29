@@ -87,6 +87,12 @@ operations:
       out:
         type: string
         desc: Path to write the generated .spec.yaml
+      component:
+        type: string
+        desc: >
+          Which declared component to extract when the crate hosts more than
+          one. Empty selects the sole component; an explicit name is required
+          (and is an error if absent) when several components are present.
     outputs:
       - outcome:
           oneof:
@@ -942,16 +948,18 @@ cases:
   - name: extract_fixture_summary
     desc: >
       Extracting the comprehensive fixture crate reports its schema summary —
-      10 operations and 3 SpecEvent types, with the derived spec name.
+      10 operations and 3 SpecEvent types, with the derived spec name (= the
+      crate's sole declared component).
     operation: extract
     inputs:
       package_root: test/rust/crates/specgate-extract-fixture
       out: rust/target/extract-fixture-out.spec.yaml
+      component: ""
     expected:
       - $result:
           Complete:
             report:
-              spec_name: extract_fixture
+              spec_name: fixture.extract
               operations: 10
               types: 3
 
@@ -978,6 +986,7 @@ cases:
     inputs:
       package_root: test/rust/crates/does-not-exist
       out: rust/target/extract-missing-out.spec.yaml
+      component: ""
     expected:
       - $result:
           Error:
@@ -989,10 +998,61 @@ cases:
     inputs:
       package_root: docs
       out: rust/target/extract-notcrate-out.spec.yaml
+      component: ""
     expected:
       - $result:
           Error:
             reason: { $matches: "no Cargo.toml" }
+
+  - name: extract_cross_component_depends_on
+    desc: >
+      A crate hosting two components (comp.core owns Widget; comp.app's
+      `assemble` returns Widget) extracts comp.app into its own spec. Widget is
+      foreign, so it is referenced by bare name and recorded under depends_on
+      (comp.core) rather than redefined — comp.app emits 1 operation and 0 local
+      types. The exact depends_on/bare-ref content is byte-checked by
+      `just extract-check` against the committed comp.app golden.
+    operation: extract
+    inputs:
+      package_root: test/rust/crates/specgate-component-fixture
+      out: rust/target/extract-comp-app-out.spec.yaml
+      component: comp.app
+    expected:
+      - $result:
+          Complete:
+            report:
+              spec_name: comp.app
+              operations: 1
+              types: 0
+
+  - name: extract_requires_component_selector
+    desc: >
+      Extracting a multi-component crate WITHOUT a component selector is
+      ambiguous and must error, naming the available components.
+    operation: extract
+    inputs:
+      package_root: test/rust/crates/specgate-component-fixture
+      out: rust/target/extract-ambiguous-out.spec.yaml
+      component: ""
+    expected:
+      - $result:
+          Error:
+            reason: { $matches: "multiple components" }
+
+  - name: extract_unresolved_type
+    desc: >
+      An operation whose `$result` is a non-SpecEvent, non-primitive type cannot
+      be resolved to a registered shape, so extraction hard-errors (the
+      no-dynamic-types decision) rather than emitting a placeholder.
+    operation: extract
+    inputs:
+      package_root: test/rust/crates/specgate-unresolved-fixture
+      out: rust/target/extract-unresolved-out.spec.yaml
+      component: ""
+    expected:
+      - $result:
+          Error:
+            reason: { $matches: "unresolved type" }
 
   # ================================================================
   # Narrative

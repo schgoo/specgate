@@ -58,13 +58,17 @@ validate:
 # the golden with `just extract-update` after an intentional emitter change.
 extract-check:
     cd rust && cargo run -p specgate-cli --quiet -- extract ../test/rust/crates/specgate-extract-fixture -o ../test/rust/crates/specgate-extract-fixture/.extract-check-tmp/extracted.spec.yaml
-    $exp = "test/rust/crates/specgate-extract-fixture/expected"; $tmp = "test/rust/crates/specgate-extract-fixture/.extract-check-tmp"; $bad = $false; foreach ($f in @("extracted.spec.yaml", "extracted.binding.yaml")) { if ((Get-FileHash "$exp/$f").Hash -ne (Get-FileHash "$tmp/$f").Hash) { Write-Host "extract-check: $f differs from committed golden (run 'just extract-update' to regenerate)"; $bad = $true } }; Remove-Item -Recurse -Force $tmp; if ($bad) { exit 1 } else { Write-Host "extract-check: golden reproduced byte-for-byte" }
+    cd rust && cargo run -p specgate-cli --quiet -- extract ../test/rust/crates/specgate-component-fixture --component comp.app -o ../test/rust/crates/specgate-component-fixture/.extract-check-tmp/comp.app.spec.yaml
+    cd rust && cargo run -p specgate-cli --quiet -- extract ../test/rust/crates/specgate-component-fixture --component comp.core -o ../test/rust/crates/specgate-component-fixture/.extract-check-tmp/comp.core.spec.yaml
+    $checks = @(@{ exp = "test/rust/crates/specgate-extract-fixture/expected"; tmp = "test/rust/crates/specgate-extract-fixture/.extract-check-tmp"; files = @("extracted.spec.yaml", "extracted.binding.yaml") }, @{ exp = "test/rust/crates/specgate-component-fixture/expected"; tmp = "test/rust/crates/specgate-component-fixture/.extract-check-tmp"; files = @("comp.app.spec.yaml", "comp.app.binding.yaml", "comp.core.spec.yaml", "comp.core.binding.yaml") }); $bad = $false; foreach ($c in $checks) { foreach ($f in $c.files) { if ((Get-FileHash "$($c.exp)/$f").Hash -ne (Get-FileHash "$($c.tmp)/$f").Hash) { Write-Host "extract-check: $f differs from committed golden (run 'just extract-update' to regenerate)"; $bad = $true } } }; foreach ($c in $checks) { Remove-Item -Recurse -Force $c.tmp -ErrorAction SilentlyContinue }; if ($bad) { exit 1 } else { Write-Host "extract-check: goldens reproduced byte-for-byte" }
 
 # Regenerate the committed extract golden (spec + binding) from the fixture crate.
 # Run after an intentional change to the extractor's deterministic output; review
 # the resulting diff before committing.
 extract-update:
     cd rust && cargo run -p specgate-cli --quiet -- extract ../test/rust/crates/specgate-extract-fixture -o ../test/rust/crates/specgate-extract-fixture/expected/extracted.spec.yaml
+    cd rust && cargo run -p specgate-cli --quiet -- extract ../test/rust/crates/specgate-component-fixture --component comp.app -o ../test/rust/crates/specgate-component-fixture/expected/comp.app.spec.yaml
+    cd rust && cargo run -p specgate-cli --quiet -- extract ../test/rust/crates/specgate-component-fixture --component comp.core -o ../test/rust/crates/specgate-component-fixture/expected/comp.core.spec.yaml
 
 # Generate README.md for each crate from lib.rs doc comments
 readme:

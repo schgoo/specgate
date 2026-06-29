@@ -87,7 +87,7 @@
 //! - **`trace`** — enables runtime trace collection (required for harness, zero-cost when off)
 
 // Public API — annotations
-pub use specgate_annotations::{SpecEvent, emit_event, spec_mock, spec_operation, spec_setup, spec_trace};
+pub use specgate_annotations::{SpecEvent, emit_event, spec_component, spec_mock, spec_operation, spec_setup, spec_trace};
 
 // Internal — needed by macro expansions but not user-facing
 #[doc(hidden)]

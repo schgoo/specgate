@@ -4,6 +4,8 @@
 //! crate coverage.
 use specgate::*;
 
+spec_component!("fixture.coverage");
+
 #[spec_operation("classify")]
 pub fn classify(n: i32) -> String {
     if n > 0 {

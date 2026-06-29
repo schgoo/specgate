@@ -4,7 +4,7 @@
 //! runtime support from `specgate-runtime`. Fixture code typically does
 //! `use specgate_annotations::*;` to pull in everything in one shot.
 
-pub use specgate_annotations_macros::{SpecEvent, spec_mock, spec_operation, spec_setup, spec_trace};
+pub use specgate_annotations_macros::{SpecEvent, spec_component, spec_mock, spec_operation, spec_setup, spec_trace};
 // Re-export the SpecEvent trait under the same name — traits live in the
 // type namespace while the derive macro lives in the macro namespace, so
 // they coexist without conflict.

@@ -26,6 +26,8 @@
 use specgate::*;
 use std::collections::{BTreeMap, BTreeSet};
 
+spec_component!("fixture.extract");
+
 /// Free function: scalar inputs, scalar `$result`.
 #[spec_operation("add")]
 pub fn add(a: i32, b: i32) -> i32 {

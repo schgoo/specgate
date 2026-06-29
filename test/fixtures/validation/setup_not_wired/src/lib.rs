@@ -1,4 +1,5 @@
 use specgate_annotations::spec_operation;
+specgate_annotations::spec_component!("fixture.validation.setup_not_wired");
 
 pub struct Counter {
     pub n: i32,

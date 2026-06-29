@@ -5,6 +5,8 @@
 
 use specgate::{emit_event, spec_operation};
 
+specgate::spec_component!("fixture.umbrella");
+
 #[spec_operation("echo")]
 pub fn echo(msg: &str) -> String {
     emit_event("input", msg);

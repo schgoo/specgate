@@ -13,7 +13,7 @@
 //! empty here, so a freshly-extracted skeleton validates as sound except for the
 //! expected `no_cases` finding.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -65,7 +65,7 @@ impl std::fmt::Display for ExtractOutcome {
 /// the output cannot be written.
 #[must_use]
 #[spec_operation("extract")]
-pub fn extract(package_root: &str, out: &str) -> ExtractOutcome {
+pub fn extract(package_root: &str, out: &str, component: &str) -> ExtractOutcome {
     let root = Path::new(package_root);
     if !root.exists() {
         return ExtractOutcome::Error {
@@ -88,16 +88,41 @@ pub fn extract(package_root: &str, out: &str) -> ExtractOutcome {
         Err(reason) => return ExtractOutcome::Error { reason },
     };
 
-    let Some(crate_name) = cargo_package_name(root) else {
+    let components = registry.present_components();
+    let selected = if component.is_empty() {
+        match components.len() {
+            0 => {
+                return ExtractOutcome::Error {
+                    reason: "no components found: crate has no annotated operations or types".to_string(),
+                };
+            }
+            1 => components[0].clone(),
+            _ => {
+                return ExtractOutcome::Error {
+                    reason: format!(
+                        "multiple components present ({}); select one with --component <name>",
+                        components.join(", ")
+                    ),
+                };
+            }
+        }
+    } else if components.iter().any(|c| c == component) {
+        component.to_string()
+    } else {
         return ExtractOutcome::Error {
-            reason: format!("could not read [package] name from {package_root}/Cargo.toml"),
+            reason: format!("component '{component}' not found; available components: {}", components.join(", ")),
         };
     };
-    let spec_name = derive_spec_name(&crate_name);
 
+    let depends_on = match resolve_dependencies(&registry, &selected) {
+        Ok(d) => d,
+        Err(reason) => return ExtractOutcome::Error { reason },
+    };
+
+    let spec_name = selected.clone();
     let out_path = Path::new(out);
     let binding_file_name = binding_file_name(out_path);
-    let spec_yaml = render_spec(&spec_name, &binding_file_name, &registry);
+    let spec_yaml = render_spec(&spec_name, &binding_file_name, &registry, &selected, &depends_on);
 
     // Create the output directory first so the binding's relative package_root
     // can be computed against a path that exists on disk (canonicalize requires
@@ -130,8 +155,8 @@ pub fn extract(package_root: &str, out: &str) -> ExtractOutcome {
 
     let report = ExtractReport {
         spec_name,
-        operations: i32::try_from(registry.operations().count()).unwrap_or(i32::MAX),
-        types: i32::try_from(registry.types.len()).unwrap_or(i32::MAX),
+        operations: i32::try_from(registry.operations_for(&selected).len()).unwrap_or(i32::MAX),
+        types: i32::try_from(registry.local_types(&selected).len()).unwrap_or(i32::MAX),
         output_path: out.to_string(),
     };
     ExtractOutcome::Complete { report }
@@ -250,6 +275,7 @@ struct OpInfo {
     return_type: String,
     fills: String,
     params: Vec<(String, String)>,
+    component: String,
 }
 
 #[derive(Debug, Clone)]
@@ -264,6 +290,7 @@ struct TypeInfo {
     kind: String,
     fields: Vec<(String, String)>,
     variants: Vec<VariantInfo>,
+    component: String,
 }
 
 #[derive(Debug, Clone)]
@@ -293,11 +320,34 @@ impl Registry {
         Ok(Registry { ops, types })
     }
 
-    /// All non-setup operations, sorted by name. Setups are invisible.
-    fn operations(&self) -> impl Iterator<Item = &OpInfo> {
-        let mut ops: Vec<&OpInfo> = self.ops.iter().filter(|o| !o.is_setup).collect();
+    /// Non-setup operations owned by `comp`, sorted by name.
+    fn operations_for(&self, comp: &str) -> Vec<&OpInfo> {
+        let mut ops: Vec<&OpInfo> = self.ops.iter().filter(|o| !o.is_setup && o.component == comp).collect();
         ops.sort_by(|a, b| a.name.cmp(&b.name));
-        ops.into_iter()
+        ops
+    }
+
+    /// Registered types owned by `comp`, sorted by name.
+    fn local_types(&self, comp: &str) -> Vec<&TypeInfo> {
+        let mut ts: Vec<&TypeInfo> = self.types.iter().filter(|t| t.component == comp).collect();
+        ts.sort_by(|a, b| a.name.cmp(&b.name));
+        ts
+    }
+
+    /// Distinct, sorted components present among non-setup operations and types.
+    fn present_components(&self) -> Vec<String> {
+        let mut set: BTreeSet<String> = BTreeSet::new();
+        for o in &self.ops {
+            if !o.is_setup && !o.component.is_empty() {
+                set.insert(o.component.clone());
+            }
+        }
+        for t in &self.types {
+            if !t.component.is_empty() {
+                set.insert(t.component.clone());
+            }
+        }
+        set.into_iter().collect()
     }
 
     /// Setups registered for the operation named `op`, in registry order.
@@ -319,6 +369,7 @@ fn parse_op(v: &serde_json::Value) -> OpInfo {
         return_type: str_field(v, "return_type"),
         fills: str_field(v, "fills"),
         params: parse_pairs(v.get("params")),
+        component: str_field(v, "component"),
     }
 }
 
@@ -340,6 +391,7 @@ fn parse_type(v: &serde_json::Value) -> TypeInfo {
         kind: str_field(v, "kind"),
         fields: parse_pairs(v.get("fields")),
         variants,
+        component: str_field(v, "component"),
     }
 }
 
@@ -363,17 +415,6 @@ fn str_field(v: &serde_json::Value, key: &str) -> String {
 // ---------------------------------------------------------------------------
 // Spec-name derivation
 // ---------------------------------------------------------------------------
-
-/// Derive the spec `name` from a crate's cargo name: strip a leading
-/// `specgate-` / `specgate_` prefix and replace remaining `-` with `_`. E.g.
-/// `specgate-extract-fixture` → `extract_fixture`.
-fn derive_spec_name(crate_name: &str) -> String {
-    let stripped = crate_name
-        .strip_prefix("specgate-")
-        .or_else(|| crate_name.strip_prefix("specgate_"))
-        .unwrap_or(crate_name);
-    stripped.replace('-', "_")
-}
 
 /// Binding file name beside the spec: `<stem>.binding.yaml`, where `<stem>` is
 /// the spec file name with a trailing `.spec.yaml` / `.yaml` removed.
@@ -464,9 +505,6 @@ fn map_named(name: &str, args: &[RustType], type_names: &[&str]) -> SpecType {
     let m = |t: &RustType| map_rust_type(t, type_names);
     match (name, args.len()) {
         ("String" | "str", _) => SpecType::Scalar("string".to_string()),
-        ("i8" | "i16" | "i32" | "i64" | "i128" | "isize" | "u8" | "u16" | "u32" | "u64" | "u128" | "usize" | "f32" | "f64" | "bool", _) => {
-            SpecType::Scalar(name.to_string())
-        }
         ("Option", 1) => SpecType::Scalar(format!("Option<{}>", m(&args[0]).ref_string())),
         ("Vec", 1) => SpecType::Scalar(format!("List<{}>", m(&args[0]).ref_string())),
         ("Result", 2) => SpecType::Scalar(format!("Result<{}, {}>", m(&args[0]).ref_string(), m(&args[1]).ref_string())),
@@ -480,6 +518,126 @@ fn map_named(name: &str, args: &[RustType], type_names: &[&str]) -> SpecType {
         // Named SpecEvent type or any other bare name → pass through by name.
         _ => SpecType::Scalar(name.to_string()),
     }
+}
+
+/// True for primitive scalars and the collection/option/result constructors
+/// extraction maps directly — i.e. type names that are NOT named `SpecEvent` refs.
+fn is_builtin_type(name: &str) -> bool {
+    matches!(
+        name,
+        "String"
+            | "str"
+            | "char"
+            | "bool"
+            | "i8"
+            | "i16"
+            | "i32"
+            | "i64"
+            | "i128"
+            | "isize"
+            | "u8"
+            | "u16"
+            | "u32"
+            | "u64"
+            | "u128"
+            | "usize"
+            | "f32"
+            | "f64"
+            | "Option"
+            | "Vec"
+            | "Result"
+            | "HashMap"
+            | "BTreeMap"
+            | "HashSet"
+            | "BTreeSet"
+    )
+}
+
+/// Collect every non-builtin named type referenced inside a stringified Rust
+/// type (recursing into generic args), in source order.
+fn collect_named_refs(ty: &str, out: &mut Vec<String>) {
+    if let Some(parsed) = parse_rust_type(ty) {
+        collect_from_rust_type(&parsed, out);
+    }
+}
+
+fn collect_from_rust_type(t: &RustType, out: &mut Vec<String>) {
+    match t {
+        RustType::Ref(inner) | RustType::Slice(inner) => collect_from_rust_type(inner, out),
+        RustType::Named { name, args } => {
+            if !is_builtin_type(name) {
+                out.push(name.clone());
+            }
+            for a in args {
+                collect_from_rust_type(a, out);
+            }
+        }
+    }
+}
+
+/// Every (named-type, location) reference on the selected component's spec
+/// surface: operation inputs/outputs and the component's own type fields/variants.
+fn referenced_types(registry: &Registry, comp: &str) -> Vec<(String, String)> {
+    let mut refs: Vec<(String, String)> = Vec::new();
+    for op in registry.operations_for(comp) {
+        for (_n, ty) in raw_inputs(op, registry) {
+            let mut names = Vec::new();
+            collect_named_refs(&ty, &mut names);
+            for nm in names {
+                refs.push((nm, format!("operation '{}' input", op.name)));
+            }
+        }
+        if !is_unit(&op.return_type) {
+            let mut names = Vec::new();
+            collect_named_refs(&op.return_type, &mut names);
+            for nm in names {
+                refs.push((nm, format!("operation '{}' output", op.name)));
+            }
+        }
+    }
+    for t in registry.local_types(comp) {
+        for (fname, fty) in &t.fields {
+            let mut names = Vec::new();
+            collect_named_refs(fty, &mut names);
+            for nm in names {
+                refs.push((nm, format!("type '{}' field '{}'", t.name, fname)));
+            }
+        }
+        for v in &t.variants {
+            for (fname, fty) in &v.fields {
+                let mut names = Vec::new();
+                collect_named_refs(fty, &mut names);
+                for nm in names {
+                    refs.push((nm, format!("type '{}' variant '{}' field '{}'", t.name, v.name, fname)));
+                }
+            }
+        }
+    }
+    refs
+}
+
+/// Resolve the selected component's referenced named types into a sorted,
+/// de-duplicated `depends_on` list (the owning components of FOREIGN types).
+/// Hard-errors on any reference that is neither a registered `SpecEvent` type nor
+/// a known primitive/collection (the no-dynamic-types rule).
+fn resolve_dependencies(registry: &Registry, comp: &str) -> Result<Vec<String>, String> {
+    let type_comp: BTreeMap<&str, &str> = registry.types.iter().map(|t| (t.name.as_str(), t.component.as_str())).collect();
+    let mut deps: BTreeSet<String> = BTreeSet::new();
+    for (name, location) in referenced_types(registry, comp) {
+        match type_comp.get(name.as_str()) {
+            Some(&owner) if owner == comp => {}
+            Some(&owner) => {
+                deps.insert(owner.to_string());
+            }
+            None => {
+                return Err(format!(
+                    "unresolved type '{name}' referenced by {location}: not a registered SpecEvent type or known primitive/collection"
+                ));
+            }
+        }
+    }
+    deps.remove(comp);
+    Ok(deps.into_iter().collect())
 }
 
 /// Parse a (possibly space-separated) Rust type string into a [`RustType`].
@@ -592,12 +750,12 @@ fn normalize_type(s: &str) -> String {
 // Inputs (setup-aware)
 // ---------------------------------------------------------------------------
 
-/// Build an operation's spec `inputs` list, applying the invisible-setup model:
-/// receiver-filling setups inject their construction params at the front (in
-/// setup order); a signature param whose type a setup fills is replaced by that
-/// setup's own construction params; remaining params are kept in order.
-fn build_inputs(op: &OpInfo, registry: &Registry) -> Vec<(String, SpecType)> {
-    let type_names = registry.type_names();
+/// Build an operation's RAW (unmapped) `inputs` list, applying the
+/// invisible-setup model: receiver-filling setups inject their construction
+/// params at the front (in setup order); a signature param whose type a setup
+/// fills is replaced by that setup's own construction params; remaining params
+/// are kept in order. Values are the stringified Rust types (unmapped).
+fn raw_inputs(op: &OpInfo, registry: &Registry) -> Vec<(String, String)> {
     let setups = registry.setups_for(&op.name);
 
     // For each signature param, the construction params injected in its place
@@ -624,24 +782,33 @@ fn build_inputs(op: &OpInfo, registry: &Registry) -> Vec<(String, SpecType)> {
         }
     }
 
-    let mut out: Vec<(String, SpecType)> = Vec::new();
+    let mut out: Vec<(String, String)> = Vec::new();
     for s in &receiver_setups {
         for (pn, pty) in &s.params {
-            out.push((pn.clone(), map_type(pty, &type_names)));
+            out.push((pn.clone(), pty.clone()));
         }
     }
     for (pn, pty) in &op.params {
         if filled.contains(pn) {
             if let Some(inj) = param_injection.get(pn) {
                 for (ipn, ipty) in inj {
-                    out.push((ipn.clone(), map_type(ipty, &type_names)));
+                    out.push((ipn.clone(), ipty.clone()));
                 }
             }
         } else {
-            out.push((pn.clone(), map_type(pty, &type_names)));
+            out.push((pn.clone(), pty.clone()));
         }
     }
     out
+}
+
+/// Build an operation's spec `inputs` list (mapped to `SpecType`).
+fn build_inputs(op: &OpInfo, registry: &Registry) -> Vec<(String, SpecType)> {
+    let type_names = registry.type_names();
+    raw_inputs(op, registry)
+        .into_iter()
+        .map(|(name, ty)| (name, map_type(&ty, &type_names)))
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -676,7 +843,7 @@ fn quote_ref(s: &str) -> String {
 }
 
 /// Render the full spec skeleton YAML.
-fn render_spec(spec_name: &str, binding_file: &str, registry: &Registry) -> String {
+fn render_spec(spec_name: &str, binding_file: &str, registry: &Registry, comp: &str, depends_on: &[String]) -> String {
     let type_names = registry.type_names();
     let mut s = String::new();
     s.push_str(SPEC_HEADER);
@@ -684,15 +851,23 @@ fn render_spec(spec_name: &str, binding_file: &str, registry: &Registry) -> Stri
     let _ = writeln!(s, "name: {spec_name}");
     let _ = writeln!(s, "binding: {binding_file}");
 
-    if !registry.types.is_empty() {
+    if !depends_on.is_empty() {
+        s.push_str("\ndepends_on:\n");
+        for d in depends_on {
+            let _ = writeln!(s, "  - {d}");
+        }
+    }
+
+    let local = registry.local_types(comp);
+    if !local.is_empty() {
         s.push_str("\ntypes:\n");
-        for t in &registry.types {
+        for t in &local {
             render_type(&mut s, t, &type_names);
         }
     }
 
     s.push_str("\noperations:\n");
-    for op in registry.operations() {
+    for op in registry.operations_for(comp) {
         render_operation(&mut s, op, registry, &type_names);
     }
 
@@ -879,14 +1054,6 @@ mod tests {
     }
 
     #[test]
-    fn derives_spec_name() {
-        assert_eq!(derive_spec_name("specgate-extract-fixture"), "extract_fixture");
-        assert_eq!(derive_spec_name("specgate_extract_fixture"), "extract_fixture");
-        assert_eq!(derive_spec_name("my-crate"), "my_crate");
-        assert_eq!(derive_spec_name("plain"), "plain");
-    }
-
-    #[test]
     fn binding_name_from_out() {
         assert_eq!(binding_file_name(Path::new("a/b/extracted.spec.yaml")), "extracted.binding.yaml");
         assert_eq!(binding_file_name(Path::new("foo.yaml")), "foo.binding.yaml");
@@ -917,6 +1084,7 @@ mod tests {
             return_type: return_type.into(),
             fills: fills.into(),
             params: params.iter().map(|(a, b)| ((*a).to_string(), (*b).to_string())).collect(),
+            component: String::new(),
         }
     }
 
@@ -982,7 +1150,7 @@ mod tests {
             {"name":"Money","module_path":"m","kind":"struct","fields":[["cents","i64"]],"variants":[]}
         ]}"#;
         let reg = Registry::parse(json).expect("parse");
-        assert_eq!(reg.operations().count(), 1);
+        assert_eq!(reg.operations_for("").len(), 1);
         assert_eq!(reg.types.len(), 1);
         assert_eq!(reg.setups_for("double").len(), 1);
     }
@@ -997,6 +1165,7 @@ mod tests {
                     kind: "struct".into(),
                     fields: vec![("cents".into(), "i64".into())],
                     variants: vec![],
+                    component: String::new(),
                 },
                 TypeInfo {
                     name: "Shape".into(),
@@ -1012,10 +1181,11 @@ mod tests {
                             fields: vec![],
                         },
                     ],
+                    component: String::new(),
                 },
             ],
         };
-        let yaml = render_spec("demo", "demo.binding.yaml", &reg);
+        let yaml = render_spec("demo", "demo.binding.yaml", &reg, "", &[]);
         assert!(yaml.contains("  Money:\n    cents: i64\n"), "{yaml}");
         assert!(
             yaml.contains("  Shape:\n    oneof:\n      Circle:\n        radius: f64\n      Point: {}\n"),
@@ -1033,7 +1203,7 @@ mod tests {
 
     #[test]
     fn error_when_package_root_missing() {
-        let out = extract("definitely/does/not/exist", "x.spec.yaml");
+        let out = extract("definitely/does/not/exist", "x.spec.yaml", "");
         match out {
             ExtractOutcome::Error { reason } => assert!(reason.contains("package_root not found"), "{reason}"),
             ExtractOutcome::Complete { report } => panic!("expected error, got {report:?}"),
@@ -1044,7 +1214,7 @@ mod tests {
     fn error_when_not_a_crate() {
         // `src` (this crate's source dir, the test CWD's child) exists but has
         // no Cargo.toml — extraction must reject it before writing anything.
-        let out = extract("src", "x.spec.yaml");
+        let out = extract("src", "x.spec.yaml", "");
         match out {
             ExtractOutcome::Error { reason } => assert!(reason.contains("no Cargo.toml"), "{reason}"),
             ExtractOutcome::Complete { report } => panic!("expected error, got {report:?}"),
@@ -1066,5 +1236,95 @@ mod tests {
         let e = ExtractOutcome::Error { reason: "boom".into() };
         assert_eq!(format!("{e}"), "Error(boom)");
         assert!(format_outcome(&e).contains("boom"));
+    }
+
+    // --- component axis ---------------------------------------------------
+
+    fn ty(name: &str, comp: &str, fields: &[(&str, &str)]) -> TypeInfo {
+        TypeInfo {
+            name: name.into(),
+            kind: "struct".into(),
+            fields: fields.iter().map(|(a, b)| ((*a).to_string(), (*b).to_string())).collect(),
+            variants: vec![],
+            component: comp.into(),
+        }
+    }
+
+    fn op_c(name: &str, comp: &str, return_type: &str, params: &[(&str, &str)]) -> OpInfo {
+        let mut o = op(name, false, return_type, "", params);
+        o.component = comp.into();
+        o
+    }
+
+    #[test]
+    fn present_components_sorted_distinct() {
+        let reg = Registry {
+            ops: vec![
+                op_c("b_op", "comp.b", "i32", &[]),
+                op_c("a_op", "comp.a", "i32", &[]),
+                op_c("a_op2", "comp.a", "i32", &[]),
+            ],
+            types: vec![ty("T", "comp.b", &[]), ty("U", "comp.core", &[])],
+        };
+        assert_eq!(reg.present_components(), vec!["comp.a", "comp.b", "comp.core"]);
+    }
+
+    #[test]
+    fn operations_and_local_types_filter_by_component() {
+        let reg = Registry {
+            ops: vec![op_c("x", "comp.a", "i32", &[]), op_c("y", "comp.b", "i32", &[])],
+            types: vec![ty("Ta", "comp.a", &[]), ty("Tb", "comp.b", &[])],
+        };
+        let ops_a: Vec<&str> = reg.operations_for("comp.a").iter().map(|o| o.name.as_str()).collect();
+        assert_eq!(ops_a, vec!["x"]);
+        let types_a: Vec<&str> = reg.local_types("comp.a").iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(types_a, vec!["Ta"]);
+    }
+
+    #[test]
+    fn resolve_dependencies_local_only_is_empty() {
+        let reg = Registry {
+            ops: vec![op_c("make", "comp.core", "Widget", &[])],
+            types: vec![ty("Widget", "comp.core", &[("id", "i32")])],
+        };
+        assert_eq!(resolve_dependencies(&reg, "comp.core").unwrap(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn resolve_dependencies_foreign_ref_adds_component() {
+        let reg = Registry {
+            ops: vec![
+                op_c("assemble", "comp.app", "Widget", &[]),
+                op_c("make", "comp.core", "Widget", &[]),
+            ],
+            types: vec![ty("Widget", "comp.core", &[("id", "i32")])],
+        };
+        assert_eq!(resolve_dependencies(&reg, "comp.app").unwrap(), vec!["comp.core".to_string()]);
+    }
+
+    #[test]
+    fn resolve_dependencies_unresolved_type_errors() {
+        let reg = Registry {
+            ops: vec![op_c("assemble", "comp.app", "Gadget", &[])],
+            types: vec![],
+        };
+        let err = resolve_dependencies(&reg, "comp.app").unwrap_err();
+        assert!(err.contains("unresolved type"), "{err}");
+        assert!(err.contains("Gadget"), "{err}");
+    }
+
+    #[test]
+    fn collect_named_refs_collects_named_only() {
+        let mut a = Vec::new();
+        collect_named_refs("Vec < Widget >", &mut a);
+        assert_eq!(a, vec!["Widget".to_string()]);
+
+        let mut b = Vec::new();
+        collect_named_refs("Result < i32, String >", &mut b);
+        assert!(b.is_empty(), "{b:?}");
+
+        let mut c = Vec::new();
+        collect_named_refs("Option < Widget >", &mut c);
+        assert_eq!(c, vec!["Widget".to_string()]);
     }
 }

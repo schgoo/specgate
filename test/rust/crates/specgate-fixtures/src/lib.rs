@@ -1,3 +1,6 @@
+// Crate-root default component for all fixture submodules.
+specgate::spec_component!("fixture");
+
 pub mod anywhere_event;
 pub mod async_fetch;
 pub mod checkpoint_inline;

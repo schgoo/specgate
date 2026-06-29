@@ -11,6 +11,8 @@
 
 use specgate::{SpecEvent, ToSpecValue, Value, spec_operation};
 
+specgate::spec_component!("specgate.harness");
+
 /// Identity adapter: the runtime `Value` is already a spec value but does not
 /// impl `ToSpecValue` (which every `#[derive(SpecEvent)]` field needs).
 pub struct SpecVal(pub Value);

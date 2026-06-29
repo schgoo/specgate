@@ -23,39 +23,91 @@ impl Parse for NameArg {
     }
 }
 
-/// Arguments to `#[spec_setup("operation", fills = "param")]`.
-/// The first positional string is the OPERATION this setup prepares (not the
-/// setup's own name — setups are invisible to the spec). The optional
-/// `fills = "param"` pins this setup to a specific operation parameter when
-/// several params share the setup's output type.
+/// Arguments to `#[spec_operation("name", spec = "component")]`. The optional
+/// `spec = "…"` overrides the crate-root default component for this operation.
+struct OperationArg {
+    op_name: String,
+    spec: Option<String>,
+}
+
+impl Parse for OperationArg {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let lit: LitStr = input.parse()?;
+        let mut spec = None;
+        while input.peek(syn::Token![,]) {
+            let _: syn::Token![,] = input.parse()?;
+            if input.is_empty() {
+                break;
+            }
+            let key: Ident = input.parse()?;
+            let _: syn::Token![=] = input.parse()?;
+            let val: LitStr = input.parse()?;
+            if key == "spec" {
+                spec = Some(val.value());
+            } else {
+                return Err(syn::Error::new(key.span(), "expected `spec`"));
+            }
+        }
+        Ok(OperationArg {
+            op_name: lit.value(),
+            spec,
+        })
+    }
+}
+
+/// Arguments to `#[spec_setup("operation", fills = "param", spec = "component")]`.
+/// The first positional string is the OPERATION this setup prepares. `fills`
+/// pins the setup to a specific operation parameter; `spec` overrides the
+/// crate-root default component. Both keys are optional and order-independent.
 struct SetupArg {
     op_name: String,
     fills: Option<String>,
+    spec: Option<String>,
 }
 
 impl Parse for SetupArg {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let lit: LitStr = input.parse()?;
         let mut fills = None;
-        if input.peek(syn::Token![,]) {
+        let mut spec = None;
+        while input.peek(syn::Token![,]) {
             let _: syn::Token![,] = input.parse()?;
-            let key: Ident = input.parse()?;
-            if key != "fills" {
-                return Err(syn::Error::new(key.span(), "expected `fills`"));
+            if input.is_empty() {
+                break;
             }
+            let key: Ident = input.parse()?;
             let _: syn::Token![=] = input.parse()?;
             let val: LitStr = input.parse()?;
-            fills = Some(val.value());
+            if key == "fills" {
+                fills = Some(val.value());
+            } else if key == "spec" {
+                spec = Some(val.value());
+            } else {
+                return Err(syn::Error::new(key.span(), "expected `fills` or `spec`"));
+            }
         }
         Ok(SetupArg {
             op_name: lit.value(),
             fills,
+            spec,
         })
     }
 }
 
 fn rt() -> TokenStream2 {
     quote! { ::specgate::__rt }
+}
+
+/// The token for an item's `component` field: an explicit `spec = "…"` literal
+/// when given, else the crate-root `__SPECGATE_COMPONENT` constant declared by
+/// `spec_component!`. The latter makes omitting `spec_component!` a COMPILE-TIME
+/// error ("cannot find value `__SPECGATE_COMPONENT` in the crate root").
+fn component_tokens(spec: Option<&str>) -> TokenStream2 {
+    if let Some(s) = spec {
+        quote! { #s }
+    } else {
+        quote! { crate::__SPECGATE_COMPONENT }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -331,7 +383,7 @@ fn field_emit_from_lhs(lhs: &Expr, param_names: &[String]) -> Option<Stmt> {
 
 #[proc_macro_attribute]
 pub fn spec_operation(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let NameArg(op_name) = parse_macro_input!(attr as NameArg);
+    let OperationArg { op_name, spec } = parse_macro_input!(attr as OperationArg);
     let mut func = parse_macro_input!(item as ItemFn);
 
     let return_kind = classify_return(&func.sig.output);
@@ -362,6 +414,7 @@ pub fn spec_operation(attr: TokenStream, item: TokenStream) -> TokenStream {
     // forbidden as an associated item; a named `const` containing inner items
     // is allowed in both positions.
     let rt = rt();
+    let component = component_tokens(spec.as_deref());
     let fn_name = func.sig.ident.to_string();
     let const_ident = Ident::new(&format!("_SPECGATE_REG_{}", fn_name.to_uppercase()), func.sig.ident.span());
     let static_ident = Ident::new(&format!("_SPECGATE_STATIC_{}", fn_name.to_uppercase()), func.sig.ident.span());
@@ -394,6 +447,7 @@ pub fn spec_operation(attr: TokenStream, item: TokenStream) -> TokenStream {
                 params: &[#(#param_entries),*],
                 return_type: #ret_str,
                 fills: "",
+                component: #component,
             };
         };
     }
@@ -433,10 +487,11 @@ fn build_pre_stmts(op_name: &str, params: &[(Ident, Type, Option<String>)], is_m
 
 #[proc_macro_attribute]
 pub fn spec_setup(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let SetupArg { op_name, fills } = parse_macro_input!(attr as SetupArg);
+    let SetupArg { op_name, fills, spec } = parse_macro_input!(attr as SetupArg);
     let mut func = parse_macro_input!(item as ItemFn);
     let params = extract_param_renames(&mut func);
     let rt = rt();
+    let component = component_tokens(spec.as_deref());
 
     // Setups are invisible to the spec: they emit no input-echo events. The
     // function body is left unchanged — it just constructs/prepares state.
@@ -481,6 +536,7 @@ pub fn spec_setup(attr: TokenStream, item: TokenStream) -> TokenStream {
                 params: &[#(#param_entries),*],
                 return_type: #ret_str,
                 fills: #fills_str,
+                component: #component,
             };
         };
     }
@@ -509,11 +565,23 @@ pub fn spec_mock(_attr: TokenStream, item: TokenStream) -> TokenStream {
 // #[derive(SpecEvent)] with helper attribute #[spec_event]
 // ---------------------------------------------------------------------------
 
-#[proc_macro_derive(SpecEvent, attributes(spec_event))]
+#[proc_macro_derive(SpecEvent, attributes(spec_event, spec_component))]
 pub fn derive_spec_event(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let name = &input.ident;
     let rt = rt();
+
+    // Optional `#[spec_component("comp")]` helper attribute overrides the
+    // crate-root default component for this type.
+    let mut comp_override: Option<String> = None;
+    for a in &input.attrs {
+        if a.path().is_ident("spec_component")
+            && let Ok(s) = a.parse_args::<LitStr>()
+        {
+            comp_override = Some(s.value());
+        }
+    }
+    let component = component_tokens(comp_override.as_deref());
 
     let (impl_g, ty_g, where_c) = input.generics.split_for_impl();
 
@@ -629,7 +697,7 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
         }
 
         let type_name_str = name.to_string();
-        let reg = register_type_meta(&type_name_str, name, "enum", &[], &variant_metas);
+        let reg = register_type_meta(&type_name_str, name, "enum", &[], &variant_metas, &component);
         let out = quote! {
             impl #impl_g #rt::SpecEvent for #name #ty_g #where_c {
                 fn emit_fields(&self, __sg_prefix: ::std::option::Option<&str>) {
@@ -720,7 +788,7 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
     }
 
     let type_name_str = name.to_string();
-    let reg = register_type_meta(&type_name_str, name, "struct", &field_metas, &[]);
+    let reg = register_type_meta(&type_name_str, name, "struct", &field_metas, &[], &component);
     let out = quote! {
         impl #impl_g #rt::SpecEvent for #name #ty_g #where_c {
             fn emit_fields(&self, __sg_prefix: ::std::option::Option<&str>) {
@@ -742,7 +810,14 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
 /// Build the `SPECGATE_TYPES` registration for a `SpecEvent` type. Uses the same
 /// const-wrapped `distributed_slice` static trick as `#[spec_operation]` so it
 /// compiles whether the type is at module scope or nested (e.g. inside a fn).
-fn register_type_meta(name_str: &str, name: &Ident, kind: &str, fields: &[TokenStream2], variants: &[TokenStream2]) -> TokenStream2 {
+fn register_type_meta(
+    name_str: &str,
+    name: &Ident,
+    kind: &str,
+    fields: &[TokenStream2],
+    variants: &[TokenStream2],
+    component: &TokenStream2,
+) -> TokenStream2 {
     let rt = rt();
     let suffix = sanitize_ident(name_str);
     let const_ident = Ident::new(&format!("_SPECGATE_TYPE_REG_{suffix}"), name.span());
@@ -758,6 +833,7 @@ fn register_type_meta(name_str: &str, name: &Ident, kind: &str, fields: &[TokenS
                 kind: #kind,
                 fields: &[#(#fields),*],
                 variants: &[#(#variants),*],
+                component: #component,
             };
         };
     }
@@ -789,4 +865,24 @@ pub fn spec_trace(input: TokenStream) -> TokenStream {
         #rt::emit_event(#name, &::std::format!("{}", #expr))
     };
     out.into()
+}
+
+// ---------------------------------------------------------------------------
+// spec_component!("dotted.name")
+// ---------------------------------------------------------------------------
+
+/// Declare the component that a crate's annotated items belong to by default.
+/// Expands to a crate-root `pub(crate) const __SPECGATE_COMPONENT: &str = …`
+/// that `#[spec_operation]` / `#[spec_setup]` / `#[derive(SpecEvent)]` reference
+/// when no per-item `spec = "…"` override is supplied. Invoke ONCE at a crate
+/// root (lib.rs / main.rs / an integration-test file root). Omitting it in a
+/// crate that has annotations is a compile-time error.
+#[proc_macro]
+pub fn spec_component(input: TokenStream) -> TokenStream {
+    let NameArg(name) = parse_macro_input!(input as NameArg);
+    quote! {
+        #[allow(dead_code)]
+        pub(crate) const __SPECGATE_COMPONENT: &str = #name;
+    }
+    .into()
 }

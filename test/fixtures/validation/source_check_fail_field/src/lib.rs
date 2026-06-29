@@ -1,4 +1,5 @@
 use specgate_annotations::{spec_operation, spec_setup};
+specgate_annotations::spec_component!("fixture.validation.source_check_fail_field");
 
 #[spec_setup("make_request")]
 pub fn make_request() -> ComputeRequest {

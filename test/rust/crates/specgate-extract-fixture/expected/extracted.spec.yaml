@@ -15,7 +15,7 @@
 # annotations; test cases come from trace collection (Part B). Regenerate with
 # `specgate extract <package_root> -o <out>`; do not edit by hand.
 spec_version: "0.4.0"
-name: extract_fixture
+name: fixture.extract
 binding: extracted.binding.yaml
 
 types:

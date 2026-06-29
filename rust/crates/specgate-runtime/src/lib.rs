@@ -33,6 +33,10 @@ pub struct OpMeta {
     /// For setups: the operation parameter this setup fills (empty if unset).
     /// Used to disambiguate when several params share the setup's output type.
     pub fills: &'static str,
+    /// The component (declared via `spec_component!` or a per-item `spec = "…"`
+    /// override) that owns this operation. Extraction groups by component and
+    /// derives cross-component `depends_on` from it.
+    pub component: &'static str,
 }
 
 /// One named field with its (stringified) Rust type. Used for both operation
@@ -57,6 +61,8 @@ pub struct TypeMeta {
     pub kind: &'static str,
     pub fields: &'static [FieldMeta],
     pub variants: &'static [VariantMeta],
+    /// The component that owns this type (see `OpMeta::component`).
+    pub component: &'static str,
 }
 
 #[linkme::distributed_slice]
@@ -109,7 +115,7 @@ pub fn discovery_json() -> String {
         }
         let _ = write!(
             out,
-            "{{\"name\":\"{}\",\"module_path\":\"{}\",\"fn_name\":\"{}\",\"is_setup\":{},\"is_async\":{},\"return_type\":\"{}\",\"fills\":\"{}\",\"params\":",
+            "{{\"name\":\"{}\",\"module_path\":\"{}\",\"fn_name\":\"{}\",\"is_setup\":{},\"is_async\":{},\"return_type\":\"{}\",\"fills\":\"{}\",\"component\":\"{}\",\"params\":",
             json_escape(op.name),
             json_escape(op.module_path),
             json_escape(op.fn_name),
@@ -117,6 +123,7 @@ pub fn discovery_json() -> String {
             op.is_async,
             json_escape(op.return_type),
             json_escape(op.fills),
+            json_escape(op.component),
         );
         write_fields_json(&mut out, op.params);
         out.push('}');
@@ -128,10 +135,11 @@ pub fn discovery_json() -> String {
         }
         let _ = write!(
             out,
-            "{{\"name\":\"{}\",\"module_path\":\"{}\",\"kind\":\"{}\",\"fields\":",
+            "{{\"name\":\"{}\",\"module_path\":\"{}\",\"kind\":\"{}\",\"component\":\"{}\",\"fields\":",
             json_escape(ty.name),
             json_escape(ty.module_path),
             json_escape(ty.kind),
+            json_escape(ty.component),
         );
         write_fields_json(&mut out, ty.fields);
         out.push_str(",\"variants\":[");
