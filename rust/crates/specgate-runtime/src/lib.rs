@@ -35,11 +35,28 @@ pub struct OpMeta {
     pub fills: &'static str,
 }
 
-/// Metadata about a struct/enum that derives `SpecEvent`.
+/// One named field with its (stringified) Rust type. Used for both operation
+/// parameters and `SpecEvent` struct/enum-variant fields.
+pub type FieldMeta = (&'static str, &'static str);
+
+/// One enum variant: its name plus any named fields. Tuple and unit variants
+/// carry an empty field list (Part-A extraction maps them to `{}`).
+#[derive(Debug, Clone)]
+pub struct VariantMeta {
+    pub name: &'static str,
+    pub fields: &'static [FieldMeta],
+}
+
+/// Metadata about a struct/enum that derives `SpecEvent`. `kind` is `"struct"`
+/// or `"enum"`. Structs populate `fields` (only `#[spec_event]`-tagged fields,
+/// honoring `#[spec_event(name = "…")]`); enums populate `variants`.
 #[derive(Debug, Clone)]
 pub struct TypeMeta {
     pub name: &'static str,
     pub module_path: &'static str,
+    pub kind: &'static str,
+    pub fields: &'static [FieldMeta],
+    pub variants: &'static [VariantMeta],
 }
 
 #[linkme::distributed_slice]
@@ -47,6 +64,40 @@ pub static SPECGATE_OPS: [OpMeta];
 
 #[linkme::distributed_slice]
 pub static SPECGATE_TYPES: [TypeMeta];
+
+/// Escape a string for inclusion as a JSON string literal. Handles the control
+/// and structural characters that can appear in stringified Rust types (quotes,
+/// backslashes); other characters pass through. Kept dependency-free so the
+/// runtime stays lean.
+fn json_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => {
+                let _ = write!(out, "\\u{:04x}", c as u32);
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// Write a JSON array of `[name, type]` field pairs into `out`.
+fn write_fields_json(out: &mut String, fields: &[FieldMeta]) {
+    out.push('[');
+    for (i, (name, ty)) in fields.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        let _ = write!(out, "[\"{}\",\"{}\"]", json_escape(name), json_escape(ty));
+    }
+    out.push(']');
+}
 
 /// Collect all registered metadata as JSON (used by the discovery binary).
 #[must_use]
@@ -58,16 +109,41 @@ pub fn discovery_json() -> String {
         }
         let _ = write!(
             out,
-            "{{\"name\":\"{}\",\"module_path\":\"{}\",\"fn_name\":\"{}\",\"is_setup\":{},\"is_async\":{},\"return_type\":\"{}\",\"fills\":\"{}\"}}",
-            op.name, op.module_path, op.fn_name, op.is_setup, op.is_async, op.return_type, op.fills
+            "{{\"name\":\"{}\",\"module_path\":\"{}\",\"fn_name\":\"{}\",\"is_setup\":{},\"is_async\":{},\"return_type\":\"{}\",\"fills\":\"{}\",\"params\":",
+            json_escape(op.name),
+            json_escape(op.module_path),
+            json_escape(op.fn_name),
+            op.is_setup,
+            op.is_async,
+            json_escape(op.return_type),
+            json_escape(op.fills),
         );
+        write_fields_json(&mut out, op.params);
+        out.push('}');
     }
     out.push_str("],\"types\":[");
     for (i, ty) in SPECGATE_TYPES.iter().enumerate() {
         if i > 0 {
             out.push(',');
         }
-        let _ = write!(out, "{{\"name\":\"{}\",\"module_path\":\"{}\"}}", ty.name, ty.module_path);
+        let _ = write!(
+            out,
+            "{{\"name\":\"{}\",\"module_path\":\"{}\",\"kind\":\"{}\",\"fields\":",
+            json_escape(ty.name),
+            json_escape(ty.module_path),
+            json_escape(ty.kind),
+        );
+        write_fields_json(&mut out, ty.fields);
+        out.push_str(",\"variants\":[");
+        for (j, v) in ty.variants.iter().enumerate() {
+            if j > 0 {
+                out.push(',');
+            }
+            let _ = write!(out, "{{\"name\":\"{}\",\"fields\":", json_escape(v.name));
+            write_fields_json(&mut out, v.fields);
+            out.push('}');
+        }
+        out.push_str("]}");
     }
     out.push_str("]}");
     out

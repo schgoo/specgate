@@ -522,12 +522,17 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
         let enum_name_lower = name.to_string().to_lowercase();
         let mut arms: Vec<TokenStream2> = Vec::new();
         let mut to_spec_value_arms: Vec<TokenStream2> = Vec::new();
+        // Registry: one entry per variant (name + named fields; tuple/unit empty).
+        let mut variant_metas: Vec<TokenStream2> = Vec::new();
 
         for variant in &data_enum.variants {
             let vname = &variant.ident;
             let vname_str = vname.to_string();
             match &variant.fields {
                 Fields::Unit => {
+                    variant_metas.push(quote! {
+                        #rt::VariantMeta { name: #vname_str, fields: &[] }
+                    });
                     arms.push(quote! {
                         #name::#vname => {
                             #rt::emit_event_v(
@@ -550,6 +555,20 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
                 Fields::Named(named) => {
                     let field_idents: Vec<&Ident> = named.named.iter().filter_map(|f| f.ident.as_ref()).collect();
                     let field_strs: Vec<String> = field_idents.iter().map(ToString::to_string).collect();
+                    let field_meta_entries: Vec<TokenStream2> = named
+                        .named
+                        .iter()
+                        .filter_map(|f| {
+                            let id = f.ident.as_ref()?;
+                            let ty = &f.ty;
+                            let id_str = id.to_string();
+                            let ty_str = quote!(#ty).to_string();
+                            Some(quote! { (#id_str, #ty_str) })
+                        })
+                        .collect();
+                    variant_metas.push(quote! {
+                        #rt::VariantMeta { name: #vname_str, fields: &[#(#field_meta_entries),*] }
+                    });
                     arms.push(quote! {
                         #name::#vname { #(#field_idents),* } => {
                             #rt::emit_event_v(
@@ -584,6 +603,9 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
                 }
                 Fields::Unnamed(_) => {
                     // Tuple variants: emit only the variant name.
+                    variant_metas.push(quote! {
+                        #rt::VariantMeta { name: #vname_str, fields: &[] }
+                    });
                     arms.push(quote! {
                         #name::#vname(..) => {
                             #rt::emit_event_v(
@@ -606,6 +628,8 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
             }
         }
 
+        let type_name_str = name.to_string();
+        let reg = register_type_meta(&type_name_str, name, "enum", &[], &variant_metas);
         let out = quote! {
             impl #impl_g #rt::SpecEvent for #name #ty_g #where_c {
                 fn emit_fields(&self, __sg_prefix: ::std::option::Option<&str>) {
@@ -625,6 +649,7 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
                     }
                 }
             }
+            #reg
         };
         return out.into();
     }
@@ -636,6 +661,8 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
     // fields are internal and excluded from both.
     let mut emits = Vec::new();
     let mut to_spec_value_inserts = Vec::new();
+    // Registry: one `(spec_name, type)` entry per tagged field, in source order.
+    let mut field_metas: Vec<TokenStream2> = Vec::new();
     if let Data::Struct(s) = &input.data {
         for field in &s.fields {
             // Determine whether this field opts into the spec surface.
@@ -665,6 +692,11 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
             // both the `to_spec_value` map key and the `emit_fields` event.
             let fname = override_name.unwrap_or_else(|| id.to_string());
 
+            // Registry field entry (spec name + stringified declared type).
+            let fty = &field.ty;
+            let fty_str = quote!(#fty).to_string();
+            field_metas.push(quote! { (#fname, #fty_str) });
+
             // ToSpecValue insert for each tagged field, keyed by spec name.
             to_spec_value_inserts.push(quote! {
                 __sg_m.insert(
@@ -687,6 +719,8 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
         }
     }
 
+    let type_name_str = name.to_string();
+    let reg = register_type_meta(&type_name_str, name, "struct", &field_metas, &[]);
     let out = quote! {
         impl #impl_g #rt::SpecEvent for #name #ty_g #where_c {
             fn emit_fields(&self, __sg_prefix: ::std::option::Option<&str>) {
@@ -700,8 +734,33 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
                 #rt::Value::Map(__sg_m)
             }
         }
+        #reg
     };
     out.into()
+}
+
+/// Build the `SPECGATE_TYPES` registration for a `SpecEvent` type. Uses the same
+/// const-wrapped `distributed_slice` static trick as `#[spec_operation]` so it
+/// compiles whether the type is at module scope or nested (e.g. inside a fn).
+fn register_type_meta(name_str: &str, name: &Ident, kind: &str, fields: &[TokenStream2], variants: &[TokenStream2]) -> TokenStream2 {
+    let rt = rt();
+    let suffix = sanitize_ident(name_str);
+    let const_ident = Ident::new(&format!("_SPECGATE_TYPE_REG_{suffix}"), name.span());
+    let static_ident = Ident::new(&format!("_SPECGATE_TYPE_S_{suffix}"), name.span());
+    quote! {
+        #[allow(dead_code, non_upper_case_globals)]
+        const #const_ident: () = {
+            #[#rt::linkme::distributed_slice(#rt::SPECGATE_TYPES)]
+            #[linkme(crate = #rt::linkme)]
+            static #static_ident: #rt::TypeMeta = #rt::TypeMeta {
+                name: #name_str,
+                module_path: ::core::module_path!(),
+                kind: #kind,
+                fields: &[#(#fields),*],
+                variants: &[#(#variants),*],
+            };
+        };
+    }
 }
 
 // ---------------------------------------------------------------------------

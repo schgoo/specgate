@@ -2,13 +2,13 @@
 
 use std::process::ExitCode;
 
-use specgate_cli::{run, validate};
+use specgate_cli::{extract, run, validate};
 
 fn print_usage() {
     eprintln!(
         "usage: specgate <command> [options] <args>\n\
          \n\
-         commands:\n  validate <spec-dir> [--strict] [--spec-only] [--assertions-dir <dir>]\n  run <spec.yaml> [--coverage] [--coverage-threshold <pct>]"
+         commands:\n  validate <spec-dir> [--strict] [--spec-only] [--assertions-dir <dir>]\n  run <spec.yaml> [--coverage] [--coverage-threshold <pct>]\n  extract <package-root> -o|--out <spec.yaml>"
     );
 }
 
@@ -23,6 +23,7 @@ fn main() -> ExitCode {
     match cmd.as_str() {
         "validate" => cmd_validate(rest),
         "run" => cmd_run(rest),
+        "extract" => cmd_extract(rest),
         "-h" | "--help" => {
             print_usage();
             ExitCode::from(0)
@@ -138,5 +139,46 @@ fn cmd_run(args: &[String]) -> ExitCode {
                 ExitCode::from(0)
             }
         }
+    }
+}
+
+fn cmd_extract(args: &[String]) -> ExitCode {
+    let mut package_root: Option<String> = None;
+    let mut out: Option<String> = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-o" | "--out" => {
+                if i + 1 >= args.len() {
+                    eprintln!("error: {} needs an argument", args[i]);
+                    return ExitCode::from(2);
+                }
+                out = Some(args[i + 1].clone());
+                i += 2;
+            }
+            a if !a.starts_with('-') && package_root.is_none() => {
+                package_root = Some(a.to_string());
+                i += 1;
+            }
+            a => {
+                eprintln!("error: unexpected argument '{a}'");
+                return ExitCode::from(2);
+            }
+        }
+    }
+    let Some(package_root) = package_root else {
+        eprintln!("error: extract requires a package_root argument");
+        return ExitCode::from(2);
+    };
+    let Some(out) = out else {
+        eprintln!("error: extract requires -o/--out <spec.yaml>");
+        return ExitCode::from(2);
+    };
+
+    let outcome = extract(&package_root, &out);
+    print!("{}", extract::format_outcome(&outcome));
+    match &outcome {
+        extract::ExtractOutcome::Error { .. } => ExitCode::from(1),
+        extract::ExtractOutcome::Complete { .. } => ExitCode::from(0),
     }
 }

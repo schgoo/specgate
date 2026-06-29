@@ -14,7 +14,7 @@ pub use specgate_runtime::{SpecEvent, ToSpecValue, TraceEvent, Value, take_trace
 pub mod __rt {
     pub use specgate_runtime::linkme;
     pub use specgate_runtime::{
-        OpMeta, SPECGATE_OPS, SPECGATE_TYPES, SpecEvent, ToSpecValue, TraceEvent, TypeMeta, Value, discovery_json, emit_event,
+        OpMeta, SPECGATE_OPS, SPECGATE_TYPES, SpecEvent, ToSpecValue, TraceEvent, TypeMeta, Value, VariantMeta, discovery_json, emit_event,
         emit_event_v, emit_run, mock_lookup, reset, set_mock, take_traces,
     };
 }

@@ -25,6 +25,12 @@ types:
     skipped: i32
     warned: i32
 
+  ExtractReport:
+    spec_name: string
+    operations: i32
+    types: i32
+    output_path: string
+
 operations:
   validate:
     desc: >
@@ -62,6 +68,30 @@ operations:
           oneof:
             Complete:
               report: RunReport
+            Error:
+              reason: string
+
+  extract:
+    desc: >
+      Deterministically extract a schema-only spec skeleton from an annotated
+      crate by reading its link-time operation/type registry (no source
+      parsing, no LLM). Writes a `.spec.yaml` to `out` and reports a summary.
+      Operations and types are sorted by name for determinism; param and field
+      order is preserved. `cases:` is left empty — test cases are produced
+      separately from trace collection (Part B), so a freshly-extracted
+      skeleton validates as sound except for the expected `no_cases` finding.
+    inputs:
+      package_root:
+        type: string
+        desc: Path to the annotated crate to extract from
+      out:
+        type: string
+        desc: Path to write the generated .spec.yaml
+    outputs:
+      - outcome:
+          oneof:
+            Complete:
+              report: ExtractReport
             Error:
               reason: string
 
@@ -900,6 +930,69 @@ cases:
       - $result:
           Error:
             reason: "spec file is not valid YAML"
+
+  # ================================================================
+  # Extract — schema-only spec skeleton from an annotated crate
+  # ================================================================
+  # The exhaustive field-level correctness of the emitted spec is asserted by
+  # the byte-exact golden diff (`just extract-check`) against
+  # test/rust/crates/specgate-extract-fixture/expected/. These cases cover the
+  # operation's summary report, its round-trip soundness, and its error paths.
+
+  - name: extract_fixture_summary
+    desc: >
+      Extracting the comprehensive fixture crate reports its schema summary —
+      10 operations and 3 SpecEvent types, with the derived spec name.
+    operation: extract
+    inputs:
+      package_root: test/rust/crates/specgate-extract-fixture
+      out: rust/target/extract-fixture-out.spec.yaml
+    expected:
+      - $result:
+          Complete:
+            report:
+              spec_name: extract_fixture
+              operations: 10
+              types: 3
+
+  - name: extract_roundtrip_validates
+    desc: >
+      The committed golden skeleton is schema-valid and semantically sound: a
+      full validate reports exactly one finding, no_cases (cases are produced
+      separately from trace collection, Part B). This is the extract round-trip.
+    operation: validate
+    inputs:
+      spec_dir: test/rust/crates/specgate-extract-fixture/expected
+      strict: false
+      spec_only: false
+      assertions_dir: ""
+    expected:
+      - $result:
+          Fail:
+            report:
+              errors: 1
+
+  - name: extract_missing_crate
+    desc: Extracting a package_root that does not exist produces an error
+    operation: extract
+    inputs:
+      package_root: test/rust/crates/does-not-exist
+      out: rust/target/extract-missing-out.spec.yaml
+    expected:
+      - $result:
+          Error:
+            reason: { $matches: "package_root not found" }
+
+  - name: extract_not_a_crate
+    desc: Extracting a path that exists but has no Cargo.toml produces an error
+    operation: extract
+    inputs:
+      package_root: docs
+      out: rust/target/extract-notcrate-out.spec.yaml
+    expected:
+      - $result:
+          Error:
+            reason: { $matches: "no Cargo.toml" }
 
   # ================================================================
   # Narrative

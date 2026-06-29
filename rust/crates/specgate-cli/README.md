@@ -5,7 +5,7 @@
 [![CI](https://github.com/schgoo/specgate/actions/workflows/ci.yml/badge.svg)](https://github.com/schgoo/specgate/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](../../LICENSE-MIT)
 
-specgate-cli library: validate and run commands used by the binary
+specgate-cli library: validate, run and extract commands used by the binary
 and by the integration test suite.
 
 
