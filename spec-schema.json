@@ -81,8 +81,8 @@
       "properties": {
         "type": {
           "type": "string",
-          "description": "Type kind: list, map, set, optional, or a scalar (string, i32, i64, f64, bool).",
-          "enum": ["string", "i32", "i64", "f64", "bool", "list", "map", "set", "optional"]
+          "description": "Type kind: list, map, set, optional, or a scalar (string, i32, i64, f64, bool, value). `value` is the universal structured value (any scalar, or a list/map/set of value) — the spec form of a runtime trace value.",
+          "enum": ["string", "i32", "i64", "f64", "bool", "value", "list", "map", "set", "optional"]
         },
         "items": {
           "description": "Element type for list, set, and optional. A string (type name) or inline type definition.",

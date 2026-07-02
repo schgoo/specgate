@@ -17,25 +17,17 @@ binding: bindings/rust.yaml
 target: run_spec
 
 types:
-  Value:
-    desc: >
-      Trace event values can be scalars or structured (collections).
-      The matcher compares based on type: strings use equality,
-      lists use subsequence (or $unordered), maps check key+value,
-      sets check presence. None/null values are represented by the
-      absence of the event — no event emitted means the field is null.
-    oneof:
-      String: string
-      Integer: i64
-      Float: f64
-      Bool: bool
-      List: List<Value>
-      Map: Map<string, Value>
-      Set: Set<Value>
+  # `value` is a built-in spec type: the universal structured trace value —
+  # any scalar, or a list/map/set of `value`. The matcher compares by type:
+  # strings use equality, lists use subsequence (or $unordered), maps check
+  # key+value, sets check presence. A null/None field is represented by the
+  # absence of its event. (Previously hand-modelled here as a `Value` oneof;
+  # it is now a built-in because the runtime `Value` is the spec's own value
+  # lattice and cannot itself be a SpecEvent.)
 
   TraceEvent:
     oneof:
-      Event: { span: string, name: string, value: Value }
+      Event: { span: string, name: string, value: value }
       Run: { span: string, operation: string }
 
   Assertion:
@@ -43,7 +35,7 @@ types:
       Expected assertions support exact values, structured values
       (lists, maps), and $-operators for flexible matching.
     oneof:
-      Event: { name: string, value: Value }
+      Event: { name: string, value: value }
       $run: { operation: string }
       $unordered: { items: List<Assertion> }
       $anywhere: { items: List<Assertion> }
@@ -67,7 +59,7 @@ types:
     expected: List<Assertion>
     traces: List<TraceEvent>
     # Property case fields (only when kind: property)
-    counterexample: Map<string, Value>  # generator values that caused failure (only on fail)
+    counterexample: Map<string, value>  # generator values that caused failure (only on fail)
     # traces: included on property fail — the trace from the counterexample run
 
 operations:

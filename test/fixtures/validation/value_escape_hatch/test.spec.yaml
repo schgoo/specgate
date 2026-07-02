@@ -1,0 +1,16 @@
+spec_version: "0.4.0"
+name: test.value_escape_hatch
+binding: binding.yaml
+operations:
+  passthrough:
+    desc: Surfaces the built-in `value` escape hatch on its result.
+    inputs: { id: i32 }
+    outputs:
+      - $result: value
+cases:
+  - name: passthrough_case
+    desc: A runnable case so the spec is otherwise valid (only the value warning fires)
+    operation: passthrough
+    inputs: { id: 1 }
+    expected:
+      - $result: "1"

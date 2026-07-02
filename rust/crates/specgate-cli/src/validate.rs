@@ -552,6 +552,146 @@ fn check_file(
     // (skipped under spec_only). These mirror the hard errors the harness
     // would raise, so authors catch them before a run.
     check_runnability(map, file, path, spec_only, findings);
+
+    // value_escape_hatch (advisory): the built-in `value` type is an untyped
+    // escape hatch, so emit one non-blocking warning per `value` type ref on the
+    // spec's surface (type fields/variants, operation inputs/outputs). Authors
+    // are nudged toward a concrete type where the shape is known.
+    check_value_escape_hatch(map, file, findings);
+}
+
+// ---------------------------------------------------------------------------
+// value_escape_hatch advisory
+// ---------------------------------------------------------------------------
+
+/// Emit an advisory `value_escape_hatch` warning for each `value` type ref found
+/// on the spec's type surface and operation input/output surface.
+fn check_value_escape_hatch(map: &serde_yaml::Mapping, file: &str, findings: &mut Vec<ValidationFinding>) {
+    if let Some(Value::Mapping(types)) = map.get(Value::String("types".into())) {
+        for (k, body) in types {
+            let tname = k.as_str().unwrap_or("");
+            scan_type_body(body, &format!("type '{tname}'"), file, findings);
+        }
+    }
+    if let Some(Value::Mapping(ops)) = map.get(Value::String("operations".into())) {
+        for (k, body) in ops {
+            let op = k.as_str().unwrap_or("");
+            scan_operation_io(body, op, file, findings);
+        }
+    }
+    // Single-operation specs declare inputs/outputs at the top level.
+    if let Some(inputs) = map.get(Value::String("inputs".into())).and_then(Value::as_mapping) {
+        for (k, v) in inputs {
+            let field = k.as_str().unwrap_or("");
+            scan_typeref(v, &format!("input '{field}'"), file, findings);
+        }
+    }
+    if let Some(outputs) = map.get(Value::String("outputs".into())).and_then(Value::as_sequence) {
+        for entry in outputs {
+            if let Some(em) = entry.as_mapping() {
+                for (k, v) in em {
+                    let field = k.as_str().unwrap_or("");
+                    scan_typeref(v, &format!("output '{field}'"), file, findings);
+                }
+            }
+        }
+    }
+}
+
+/// Scan a type definition body (struct fields or a `oneof:` of variants),
+/// skipping the `desc:` prose so descriptions mentioning "value" don't trip it.
+fn scan_type_body(body: &Value, location: &str, file: &str, findings: &mut Vec<ValidationFinding>) {
+    let Some(m) = body.as_mapping() else {
+        scan_typeref(body, location, file, findings);
+        return;
+    };
+    for (k, v) in m {
+        match k.as_str().unwrap_or("") {
+            "desc" => {}
+            "oneof" => {
+                if let Some(variants) = v.as_mapping() {
+                    for (vk, vv) in variants {
+                        let vname = vk.as_str().unwrap_or("");
+                        scan_typeref(vv, &format!("{location} variant '{vname}'"), file, findings);
+                    }
+                }
+            }
+            field => scan_typeref(v, &format!("{location} field '{field}'"), file, findings),
+        }
+    }
+}
+
+/// Scan an operation body's `inputs:` and `outputs:` type-ref surfaces.
+fn scan_operation_io(body: &Value, op: &str, file: &str, findings: &mut Vec<ValidationFinding>) {
+    let Some(m) = body.as_mapping() else { return };
+    if let Some(inputs) = m.get(Value::String("inputs".into())).and_then(Value::as_mapping) {
+        for (k, v) in inputs {
+            let field = k.as_str().unwrap_or("");
+            scan_typeref(v, &format!("operation '{op}' input '{field}'"), file, findings);
+        }
+    }
+    if let Some(outputs) = m.get(Value::String("outputs".into())).and_then(Value::as_sequence) {
+        for entry in outputs {
+            if let Some(em) = entry.as_mapping() {
+                for (k, v) in em {
+                    let field = k.as_str().unwrap_or("");
+                    scan_typeref(v, &format!("operation '{op}' output '{field}'"), file, findings);
+                }
+            }
+        }
+    }
+}
+
+/// Recursively scan a type reference node for `value` occurrences, pushing one
+/// advisory finding per occurrence. Handles string shorthand (`value`,
+/// `List<value>`, `Map<string, value>`), inline `{type: map/set, ...}` objects,
+/// and inline structs (oneof variant field maps).
+fn scan_typeref(node: &Value, location: &str, file: &str, findings: &mut Vec<ValidationFinding>) {
+    match node {
+        Value::String(s) => {
+            for _ in 0..count_value_tokens(s) {
+                findings.push(value_escape_hatch_finding(file, location));
+            }
+        }
+        Value::Mapping(m) => {
+            if m.get(Value::String("type".into())).is_some() {
+                for key in ["keys", "values", "items"] {
+                    if let Some(v) = m.get(Value::String(key.into())) {
+                        scan_typeref(v, location, file, findings);
+                    }
+                }
+            } else {
+                for (k, v) in m {
+                    let field = k.as_str().unwrap_or("");
+                    scan_typeref(v, &format!("{location} field '{field}'"), file, findings);
+                }
+            }
+        }
+        Value::Sequence(seq) => {
+            for it in seq {
+                scan_typeref(it, location, file, findings);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Count whole-word `value` tokens in a type-ref shorthand string. Splits on any
+/// character that is not part of an identifier so `List<value>` counts once and
+/// `values` (a different word) does not match.
+fn count_value_tokens(s: &str) -> usize {
+    s.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .filter(|tok| *tok == "value")
+        .count()
+}
+
+fn value_escape_hatch_finding(file: &str, location: &str) -> ValidationFinding {
+    ValidationFinding {
+        severity: Severity::Warn,
+        check: "value_escape_hatch".into(),
+        file: file.into(),
+        message: format!("{location}: type ref 'value' is an untyped escape hatch; prefer a concrete type where the shape is known"),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -904,4 +1044,57 @@ pub fn format_outcome(outcome: &ValidateOutcome) -> String {
         report.total_files, report.errors, report.warnings
     );
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn warns(yaml: &str) -> Vec<ValidationFinding> {
+        let map: serde_yaml::Mapping = serde_yaml::from_str(yaml).unwrap();
+        let mut findings = Vec::new();
+        check_value_escape_hatch(&map, "t.spec.yaml", &mut findings);
+        findings
+    }
+
+    #[test]
+    fn count_value_tokens_matches_whole_words_only() {
+        assert_eq!(count_value_tokens("value"), 1);
+        assert_eq!(count_value_tokens("List<value>"), 1);
+        assert_eq!(count_value_tokens("Map<string, value>"), 1);
+        assert_eq!(count_value_tokens("List<Map<string, value>>"), 1);
+        // `values` is a different word and must not match.
+        assert_eq!(count_value_tokens("values"), 0);
+        assert_eq!(count_value_tokens("i32"), 0);
+    }
+
+    #[test]
+    fn flags_each_value_ref_on_operation_io() {
+        let findings = warns("operations:\n  passthrough:\n    inputs: { id: i32 }\n    outputs:\n      - $result: value\n");
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].check, "value_escape_hatch");
+        assert_eq!(findings[0].severity, Severity::Warn);
+    }
+
+    #[test]
+    fn flags_value_in_type_fields_variants_and_inline_collections() {
+        let findings = warns(
+            "types:\n  \
+             Rec:\n    \
+             desc: a description mentioning value should not count\n    \
+             payload: value\n    \
+             history: List<value>\n    \
+             meta:\n      type: map\n      keys: string\n      values: value\n  \
+             Ev:\n    oneof:\n      Event: { name: string, value: value }\n",
+        );
+        // payload (1) + history (1) + meta inline values (1) + variant field (1) = 4;
+        // the `desc:` prose is skipped.
+        assert_eq!(findings.len(), 4, "{findings:?}");
+    }
+
+    #[test]
+    fn no_value_refs_yields_no_warnings() {
+        let findings = warns("types:\n  Rec:\n    id: i32\n    name: string\n");
+        assert!(findings.is_empty());
+    }
 }

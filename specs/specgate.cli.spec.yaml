@@ -1054,6 +1054,97 @@ cases:
           Error:
             reason: { $matches: "unresolved type" }
 
+  - name: extract_value_types
+    desc: >
+      A crate using the runtime `Value` directly on its SpecEvent surface
+      extracts cleanly via the built-in `value`: Value -> value,
+      Vec<Value> -> List<value>, BTreeMap<String, Value> -> an inline map of
+      value. 2 operations, 1 type. Field-level content is byte-checked by
+      `just extract-check` against the committed fixture.value golden.
+    operation: extract
+    inputs:
+      package_root: test/rust/crates/specgate-value-fixture
+      out: rust/target/extract-value-out.spec.yaml
+      component: ""
+    expected:
+      - $result:
+          Complete:
+            report:
+              spec_name: fixture.value
+              operations: 2
+              types: 1
+
+  - name: validate_value_escape_hatch_warns
+    desc: >
+      The built-in `value` type is an untyped escape hatch, so validate emits a
+      non-blocking advisory warning (value_escape_hatch). The spec is otherwise
+      valid, so validation still Passes (errors: 0) with the warning recorded.
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/value_escape_hatch
+      strict: false
+      assertions_dir: ""
+      spec_only: true
+    expected:
+      - $result:
+          Pass:
+            report:
+              errors: 0
+              warnings: 1
+              findings:
+                - severity: warn
+                  check: value_escape_hatch
+                  message: "operation 'passthrough' output '$result': type ref 'value' is an untyped escape hatch; prefer a concrete type where the shape is known"
+
+  - name: validate_value_multi_position_warns
+    desc: >
+      The value_escape_hatch advisory fires once per `value` occurrence across
+      the whole spec surface — a struct field, an enum-variant field, and an
+      operation output — yielding three non-blocking warnings (errors: 0).
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/value_multi
+      strict: false
+      assertions_dir: ""
+      spec_only: true
+    expected:
+      - $result:
+          Pass:
+            report:
+              errors: 0
+              warnings: 3
+              findings:
+                - severity: warn
+                  check: value_escape_hatch
+                  message: "type 'Wrapper' field 'payload': type ref 'value' is an untyped escape hatch; prefer a concrete type where the shape is known"
+                - severity: warn
+                  check: value_escape_hatch
+                  message: "type 'Tagged' variant 'Raw' field 'data': type ref 'value' is an untyped escape hatch; prefer a concrete type where the shape is known"
+                - severity: warn
+                  check: value_escape_hatch
+                  message: "operation 'passthrough' output '$result': type ref 'value' is an untyped escape hatch; prefer a concrete type where the shape is known"
+
+  - name: validate_value_strict_promotes
+    desc: >
+      Under --strict, the advisory value_escape_hatch warning is promoted to a
+      blocking error, so validation Fails (errors: 1, warnings: 0).
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/value_escape_hatch
+      strict: true
+      assertions_dir: ""
+      spec_only: true
+    expected:
+      - $result:
+          Fail:
+            report:
+              errors: 1
+              warnings: 0
+              findings:
+                - severity: error
+                  check: value_escape_hatch
+                  message: "operation 'passthrough' output '$result': type ref 'value' is an untyped escape hatch; prefer a concrete type where the shape is known"
+
   # ================================================================
   # Narrative
   # ================================================================

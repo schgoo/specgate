@@ -9,30 +9,14 @@
 //! asserts: `{ Complete: { results: [ { name, status, traces } ] } }` /
 //! `{ Error: { reason } }`.
 
-use specgate::{SpecEvent, ToSpecValue, Value, spec_operation};
+use specgate::{SpecEvent, Value, spec_operation};
 
 specgate::spec_component!("specgate.harness");
-
-/// Identity adapter: the runtime `Value` is already a spec value but does not
-/// impl `ToSpecValue` (which every `#[derive(SpecEvent)]` field needs).
-pub struct SpecVal(pub Value);
-
-impl std::fmt::Debug for SpecVal {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl ToSpecValue for SpecVal {
-    fn to_spec_value(&self) -> Value {
-        self.0.clone()
-    }
-}
 
 #[derive(Debug, SpecEvent)]
 pub enum SelfHostTrace {
     Run { operation: String },
-    Event { name: String, value: SpecVal },
+    Event { name: String, value: Value },
 }
 
 #[derive(Debug, SpecEvent)]
@@ -44,9 +28,9 @@ pub struct SelfHostCaseResult {
     #[spec_event]
     pub level: String,
     #[spec_event]
-    pub source: SpecVal,
+    pub source: Value,
     #[spec_event]
-    pub expected: Vec<SpecVal>,
+    pub expected: Vec<Value>,
     #[spec_event]
     pub traces: Vec<SelfHostTrace>,
 }
@@ -60,10 +44,7 @@ pub enum SelfHostOutcome {
 fn convert_trace(t: specgate_harness::TraceEvent) -> SelfHostTrace {
     match t {
         specgate_harness::TraceEvent::Run { operation } => SelfHostTrace::Run { operation },
-        specgate_harness::TraceEvent::Event { name, value } => SelfHostTrace::Event {
-            name,
-            value: SpecVal(value),
-        },
+        specgate_harness::TraceEvent::Event { name, value } => SelfHostTrace::Event { name, value },
     }
 }
 
@@ -211,12 +192,8 @@ pub fn run_spec(#[spec_input("spec")] spec_path: &str) -> SelfHostOutcome {
                     name: r.name,
                     status: r.status.as_str().to_string(),
                     level: r.level.as_str().to_string(),
-                    source: SpecVal(source_to_value(&r.source)),
-                    expected: r
-                        .expected
-                        .iter()
-                        .map(|a| SpecVal(assertion_to_value(a)))
-                        .collect(),
+                    source: source_to_value(&r.source),
+                    expected: r.expected.iter().map(assertion_to_value).collect(),
                     traces: r.traces.into_iter().map(convert_trace).collect(),
                 })
                 .collect(),

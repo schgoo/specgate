@@ -1,0 +1,22 @@
+spec_version: "0.4.0"
+name: test.value_multi
+binding: binding.yaml
+types:
+  Wrapper:
+    payload: value
+  Tagged:
+    oneof:
+      Raw: { data: value }
+operations:
+  passthrough:
+    desc: Surfaces `value` on its result alongside the type-level uses above.
+    inputs: { id: i32 }
+    outputs:
+      - $result: value
+cases:
+  - name: passthrough_case
+    desc: A runnable case so the spec is otherwise valid; only value warnings fire
+    operation: passthrough
+    inputs: { id: 1 }
+    expected:
+      - $result: "1"

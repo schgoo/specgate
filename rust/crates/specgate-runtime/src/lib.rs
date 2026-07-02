@@ -651,6 +651,12 @@ impl<T: ToSpecValue> ToSpecValue for Option<T> {
     }
 }
 
+impl ToSpecValue for Value {
+    fn to_spec_value(&self) -> Value {
+        self.clone()
+    }
+}
+
 impl<T: ToSpecValue + ?Sized> ToSpecValue for &T {
     fn to_spec_value(&self) -> Value {
         (**self).to_spec_value()

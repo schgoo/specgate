@@ -7,17 +7,31 @@
 #
 # Docs: https://github.com/schgoo/specgate
 spec_version: "0.4.0"
-name: comp.core
-binding: comp.core.binding.yaml
+name: fixture.value
+binding: fixture.value.binding.yaml
 
 types:
-  Widget:
+  Record:
     id: i32
-    label: string
+    payload: value
+    history: "List<value>"
+    meta:
+      type: map
+      keys: string
+      values: value
+    tags:
+      type: set
+      items: value
+    note: "Option<value>"
 
 operations:
-  make_widget:
+  echo:
+    inputs:
+      input: i32
     outputs:
-      - $result: Widget
+      - $result: value
+  snapshot:
+    outputs:
+      - $result: Record
 
 cases: []
