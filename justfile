@@ -51,26 +51,18 @@ deny:
 validate:
     cd rust && cargo run -p specgate-cli --quiet -- validate ../specs
 
-# Verify `specgate extract` still reproduces the committed golden schema-only
-# skeleton for the extract fixture crate, byte-for-byte. Emits to a temp dir one
-# level under the crate (so the binding's relative package_root matches `..`),
-# hashes both the spec and binding against expected/, then cleans up. Regenerate
-# the golden with `just extract-update` after an intentional emitter change.
+# Verify `specgate extract` still reproduces the committed golden specs for the
+# extract fixture crates, byte-for-byte. See scripts/extract-goldens.ps1 for the
+# fixture list. Regenerate the goldens with `just extract-update` after an
+# intentional emitter change.
 extract-check:
-    cd rust && cargo run -p specgate-cli --quiet -- extract ../test/rust/crates/specgate-extract-fixture -o ../test/rust/crates/specgate-extract-fixture/.extract-check-tmp/extracted.spec.yaml
-    cd rust && cargo run -p specgate-cli --quiet -- extract ../test/rust/crates/specgate-component-fixture --component comp.app -o ../test/rust/crates/specgate-component-fixture/.extract-check-tmp/comp.app.spec.yaml
-    cd rust && cargo run -p specgate-cli --quiet -- extract ../test/rust/crates/specgate-component-fixture --component comp.core -o ../test/rust/crates/specgate-component-fixture/.extract-check-tmp/comp.core.spec.yaml
-    cd rust && cargo run -p specgate-cli --quiet -- extract ../test/rust/crates/specgate-value-fixture -o ../test/rust/crates/specgate-value-fixture/.extract-check-tmp/fixture.value.spec.yaml
-    $checks = @(@{ exp = "test/rust/crates/specgate-extract-fixture/expected"; tmp = "test/rust/crates/specgate-extract-fixture/.extract-check-tmp"; files = @("extracted.spec.yaml", "extracted.binding.yaml") }, @{ exp = "test/rust/crates/specgate-component-fixture/expected"; tmp = "test/rust/crates/specgate-component-fixture/.extract-check-tmp"; files = @("comp.app.spec.yaml", "comp.app.binding.yaml", "comp.core.spec.yaml", "comp.core.binding.yaml") }, @{ exp = "test/rust/crates/specgate-value-fixture/expected"; tmp = "test/rust/crates/specgate-value-fixture/.extract-check-tmp"; files = @("fixture.value.spec.yaml", "fixture.value.binding.yaml") }); $bad = $false; foreach ($c in $checks) { foreach ($f in $c.files) { if ((Get-FileHash "$($c.exp)/$f").Hash -ne (Get-FileHash "$($c.tmp)/$f").Hash) { Write-Host "extract-check: $f differs from committed golden (run 'just extract-update' to regenerate)"; $bad = $true } } }; foreach ($c in $checks) { Remove-Item -Recurse -Force $c.tmp -ErrorAction SilentlyContinue }; if ($bad) { exit 1 } else { Write-Host "extract-check: goldens reproduced byte-for-byte" }
+    pwsh -NoLogo -NoProfile -File scripts/extract-goldens.ps1 -Mode check
 
-# Regenerate the committed extract golden (spec + binding) from the fixture crate.
-# Run after an intentional change to the extractor's deterministic output; review
-# the resulting diff before committing.
+# Regenerate the committed extract goldens (spec + binding) from the fixture
+# crates. Run after an intentional change to the extractor's deterministic
+# output; review the resulting diff before committing.
 extract-update:
-    cd rust && cargo run -p specgate-cli --quiet -- extract ../test/rust/crates/specgate-extract-fixture -o ../test/rust/crates/specgate-extract-fixture/expected/extracted.spec.yaml
-    cd rust && cargo run -p specgate-cli --quiet -- extract ../test/rust/crates/specgate-component-fixture --component comp.app -o ../test/rust/crates/specgate-component-fixture/expected/comp.app.spec.yaml
-    cd rust && cargo run -p specgate-cli --quiet -- extract ../test/rust/crates/specgate-component-fixture --component comp.core -o ../test/rust/crates/specgate-component-fixture/expected/comp.core.spec.yaml
-    cd rust && cargo run -p specgate-cli --quiet -- extract ../test/rust/crates/specgate-value-fixture -o ../test/rust/crates/specgate-value-fixture/expected/fixture.value.spec.yaml
+    pwsh -NoLogo -NoProfile -File scripts/extract-goldens.ps1 -Mode update
 
 # Generate README.md for each crate from lib.rs doc comments
 readme:
