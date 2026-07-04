@@ -247,6 +247,36 @@ Then:
 - **Mark the flagged test as `#[ignore]`** with a comment explaining the
   suspected spec issue, so the rest of the suite still passes
 
+### Dead code from spec changes
+
+The spec is the source of truth and is **read-only** for you — never add, edit,
+or remove spec files or spec entries. Whether something belongs in the
+component's API is the **spec author's** decision, already encoded in the spec
+you were given.
+
+When you implement a spec change that removes an operation or type, the code
+that implemented it becomes dead — rustc flags it, or its `#[spec_operation]` /
+`#[derive(SpecEvent)]` annotation is now orphaned (no matching spec entry).
+**Delete that code.** Do not preserve it, do not re-add the entry to the spec,
+and do not deliberate whether it was "really" API — absence from the spec is the
+answer. Removing a dropped API is a normal part of implementing the change; note
+what you removed in your summary.
+
+Absence from the spec is not a "spec seems wrong" situation: an intentional
+deletion and an accidental omission look identical from the implementation side
+(absent + dead), so intent is not recoverable — don't guess it. (Genuine spec
+bugs are the *detectable* inconsistencies above, e.g. a case referencing an
+undeclared operation, which `specgate validate` catches.)
+
+Before deleting, confirm the item is genuinely unused:
+
+- It isn't exercised under `#[cfg(test)]`, a feature flag, or another build
+  configuration ("dead" may mean "dead only in this configuration").
+- It isn't still used by another operation or type that **is** in the spec.
+
+Stay scoped: remove only dead code that results from the spec change you are
+implementing — don't purge unrelated pre-existing dead code.
+
 ### When a spec uses features the harness doesn't consume yet
 
 State machine specs may use `state`, `init`, `operations`, `invariants`, or
