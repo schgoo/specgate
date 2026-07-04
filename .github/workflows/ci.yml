@@ -45,3 +45,51 @@ jobs:
         run: |
           cargo install cargo-deny --version 0.19.0 --locked
           cargo deny check licenses
+
+  # Everything `just check` runs beyond build/test/clippy/fmt/deny: spec
+  # validation, the extract golden byte-check, README freshness, the harness and
+  # CLI self-hosting runs, and instrumented coverage. The self-host/coverage
+  # tests are `#[ignore]`d (so the `test` job's `cargo test` skips them) — here
+  # they are invoked explicitly with `--ignored`. These are OS-independent, so
+  # run on both to catch path/newline regressions.
+  checks:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.96.0"
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - name: Install cargo-doc2readme
+        run: cargo install cargo-doc2readme --locked
+      - name: Validate specs
+        working-directory: rust
+        run: cargo run -p specgate-cli --quiet -- validate ../specs
+      - name: Extract goldens (byte-check)
+        run: pwsh -NoLogo -NoProfile -File scripts/extract-goldens.ps1 -Mode check
+      - name: README freshness
+        working-directory: rust
+        run: |
+          cargo doc2readme -p specgate-runtime --lib --template crates/README.j2 --out crates/specgate-runtime/README.md --check
+          cargo doc2readme -p specgate-annotations-macros --lib --template crates/README.j2 --out crates/specgate-annotations-macros/README.md --check
+          cargo doc2readme -p specgate-annotations --lib --template crates/README.j2 --out crates/specgate-annotations/README.md --check
+          cargo doc2readme -p specgate-types --lib --template crates/README.j2 --out crates/specgate-types/README.md --check
+          cargo doc2readme -p specgate-harness --lib --template crates/README.j2 --out crates/specgate-harness/README.md --check
+          cargo doc2readme -p specgate --lib --template crates/README.j2 --out crates/specgate/README.md --check
+          cargo doc2readme -p specgate-cli --lib --template crates/README.j2 --out crates/specgate-cli/README.md --check
+      - name: Harness self-host
+        working-directory: rust
+        run: cargo test -p specgate --test harness_self_host -- --ignored
+      - name: CLI self-host
+        working-directory: rust
+        run: cargo test -p specgate-cli --test cli_self_host -- --ignored
+      - name: Coverage
+        working-directory: rust
+        run: cargo test -p specgate-harness --test coverage -- --ignored
