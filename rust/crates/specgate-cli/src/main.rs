@@ -8,7 +8,7 @@ fn print_usage() {
     eprintln!(
         "usage: specgate <command> [options] <args>\n\
          \n\
-         commands:\n  validate <spec-dir> [--strict] [--spec-only] [--assertions-dir <dir>]\n  run <spec.yaml> [--coverage] [--coverage-threshold <pct>]\n  extract <package-root> -o|--out <spec.yaml> [--component <name>]"
+         commands:\n  validate <spec-dir> [--strict] [--spec-only] [--assertions-dir <dir>]\n  run <spec.yaml> [--coverage] [--coverage-threshold <pct>]\n  extract <package-root> -o|--out <spec.yaml> [--component <name>] [--cases]"
     );
 }
 
@@ -146,6 +146,7 @@ fn cmd_extract(args: &[String]) -> ExitCode {
     let mut package_root: Option<String> = None;
     let mut out: Option<String> = None;
     let mut component: Option<String> = None;
+    let mut cases = false;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -164,6 +165,10 @@ fn cmd_extract(args: &[String]) -> ExitCode {
                 }
                 component = Some(args[i + 1].clone());
                 i += 2;
+            }
+            "--cases" => {
+                cases = true;
+                i += 1;
             }
             a if !a.starts_with('-') && package_root.is_none() => {
                 package_root = Some(a.to_string());
@@ -184,7 +189,7 @@ fn cmd_extract(args: &[String]) -> ExitCode {
         return ExitCode::from(2);
     };
 
-    let outcome = extract(&package_root, &out, &component.unwrap_or_default());
+    let outcome = extract(&package_root, &out, &component.unwrap_or_default(), cases);
     print!("{}", extract::format_outcome(&outcome));
     match &outcome {
         extract::ExtractOutcome::Error { .. } => ExitCode::from(1),

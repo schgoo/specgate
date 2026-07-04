@@ -456,118 +456,36 @@ fn render_case(out: &mut String, case: &Case, spec: &Spec, annotated: &Annotated
         vec![]
     };
 
-    for op in ops {
+    let is_steps = !case.steps.is_empty();
+    for (i, op) in ops.iter().enumerate() {
+        let op = *op;
         let decl = annotated.operations.get(op);
         let op_defaults = spec.op_input_defaults.get(op);
-        let mut call = render_op_call(op, decl, &case.inputs, &bindings, annotated, op_defaults);
+        // A multi-step case may carry per-step `inputs:`; use them for that
+        // step's call (free-function steps supply their own arguments). Fall
+        // back to the shared case-level inputs when a step omits them (the
+        // state-machine step shape, where inputs come from the receiver).
+        let inputs = if is_steps {
+            case.step_inputs.get(i).filter(|m| !m.is_empty()).unwrap_or(&case.inputs)
+        } else {
+            &case.inputs
+        };
+        let mut call = render_op_call(op, decl, inputs, &bindings, annotated, op_defaults);
         if spec.async_ops.contains(op) {
             call = format!("sg_block_on({call})");
         }
-        let return_type = decl.map(|d| d.sig.return_type.trim().to_string()).unwrap_or_default();
-        let post_emit = build_post_emit(&return_type, &annotated.spec_event_structs, &annotated.spec_event_enums);
+        // The annotated operation self-emits its full trace (`$run`, input
+        // echoes, and `$result`/field events) via `#[spec_operation]`, so the
+        // runner only needs to invoke it and discard the value.
         out.push_str("        {\n");
         write!(out,
-            "            let __r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {{\n                let __sg_ret = {call};\n                {post_emit}\n            }}));\n"
+            "            let __r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {{\n                let __sg_ret = {call};\n                let _ = __sg_ret;\n            }}));\n"
         ).expect("fmt");
         out.push_str("            if let Err(__e) = __r {\n");
         out.push_str("                let msg = panic_msg(&__e);\n                specgate::emit_event(\"$fault\", &msg);\n");
         out.push_str("            }\n");
         out.push_str("        }\n");
     }
-}
-
-/// Emit Rust source for post-call return handling based on the operation's
-/// declared return type. Produces statements that consume `__sg_ret`.
-fn build_post_emit(
-    return_type: &str,
-    spec_event_structs: &std::collections::BTreeSet<String>,
-    spec_event_enums: &std::collections::BTreeSet<String>,
-) -> String {
-    let rt = return_type.trim();
-    if rt.is_empty() || rt == "()" {
-        return "let _ = __sg_ret;".to_string();
-    }
-    if rt.starts_with("Result<") || rt.starts_with("::std::result::Result<") || rt.starts_with("std::result::Result<") {
-        return r#"
-            match &__sg_ret {
-                Ok(__sg_v) => {
-                    let mut __sg_m = ::std::collections::BTreeMap::new();
-                    __sg_m.insert("Ok".to_string(), specgate::__rt::ToSpecValue::to_spec_value(__sg_v));
-                    specgate::emit_event_v("$result", specgate::Value::Map(__sg_m));
-                }
-                Err(__sg_e) => {
-                    let mut __sg_m = ::std::collections::BTreeMap::new();
-                    __sg_m.insert("Err".to_string(), specgate::Value::String(format!("{}", __sg_e)));
-                    specgate::emit_event_v("$result", specgate::Value::Map(__sg_m));
-                }
-            }
-            let _ = __sg_ret;
-        "#
-        .to_string();
-    }
-    if rt.starts_with("Option<") || rt.starts_with("::std::option::Option<") || rt.starts_with("std::option::Option<") {
-        return r#"
-            match &__sg_ret {
-                Some(__sg_v) => {
-                    let mut __sg_m = ::std::collections::BTreeMap::new();
-                    __sg_m.insert("Some".to_string(), specgate::__rt::ToSpecValue::to_spec_value(__sg_v));
-                    specgate::emit_event_v("$result", specgate::Value::Map(__sg_m));
-                }
-                None => {
-                    let mut __sg_m = ::std::collections::BTreeMap::new();
-                    __sg_m.insert("None".to_string(), specgate::Value::Map(::std::collections::BTreeMap::new()));
-                    specgate::emit_event_v("$result", specgate::Value::Map(__sg_m));
-                }
-            }
-            let _ = __sg_ret;
-        "#
-        .to_string();
-    }
-    // SpecEvent-derived struct: emit each annotated field and the full
-    // structured $result via ToSpecValue.
-    let bare = rt.trim_start_matches('&').trim_start_matches("mut ").trim();
-    let head = bare.split(['<', ' ']).next().unwrap_or(bare);
-    // Enum returns: emit ONLY the structured $result (tagged variant map),
-    // no dotted field events.
-    if spec_event_enums.contains(head) {
-        return r#"
-            specgate::emit_event_v(
-                "$result",
-                specgate::__rt::ToSpecValue::to_spec_value(&__sg_ret),
-            );
-            let _ = __sg_ret;
-        "#
-        .to_string();
-    }
-    if spec_event_structs.contains(head) {
-        return r#"
-            specgate::SpecEvent::emit_fields(&__sg_ret, None);
-            specgate::emit_event_v(
-                "$result",
-                specgate::__rt::ToSpecValue::to_spec_value(&__sg_ret),
-            );
-            let _ = __sg_ret;
-        "#
-        .to_string();
-    }
-    // Known collection types → use ToSpecValue for structured emission.
-    let is_collection = matches!(head, "Vec" | "BTreeMap" | "HashMap" | "BTreeSet" | "HashSet") || bare.starts_with('[');
-    if is_collection {
-        return r#"
-            specgate::emit_event_v(
-                "$result",
-                specgate::__rt::ToSpecValue::to_spec_value(&__sg_ret),
-            );
-            let _ = __sg_ret;
-        "#
-        .to_string();
-    }
-    // Default: emit $result via Display.
-    r#"
-            specgate::emit_event("$result", &format!("{}", __sg_ret));
-            let _ = __sg_ret;
-        "#
-    .to_string()
 }
 
 /// Render the construction arguments for a setup call. Values come from the

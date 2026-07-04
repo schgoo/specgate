@@ -44,7 +44,7 @@ pub struct OpMeta {
 pub type FieldMeta = (&'static str, &'static str);
 
 /// One enum variant: its name plus any named fields. Tuple and unit variants
-/// carry an empty field list (Part-A extraction maps them to `{}`).
+/// carry an empty field list (schema extraction maps them to `{}`).
 #[derive(Debug, Clone)]
 pub struct VariantMeta {
     pub name: &'static str,
@@ -480,20 +480,53 @@ pub fn emit_event(name: &str, value: &str) {
 
 /// Push a structured `Event { name, value }`.
 pub fn emit_event_v(name: &str, value: Value) {
+    let event = TraceEvent::Event {
+        name: name.to_string(),
+        value,
+    };
+    record_event(&event);
     BUFFER.with(|b| {
-        b.borrow_mut().push(TraceEvent::Event {
-            name: name.to_string(),
-            value,
-        });
+        b.borrow_mut().push(event);
     });
 }
 
 pub fn emit_run(operation: &str) {
+    let event = TraceEvent::Run {
+        operation: operation.to_string(),
+    };
+    record_event(&event);
     BUFFER.with(|b| {
-        b.borrow_mut().push(TraceEvent::Run {
-            operation: operation.to_string(),
-        });
+        b.borrow_mut().push(event);
     });
+}
+
+/// Record-mode sink. When the `SPECGATE_RECORD` environment variable names a
+/// (non-empty) file, every emitted event is also appended to that file as one
+/// JSON object per line (JSONL of [`TraceEvent`], which is `#[serde(tag =
+/// "kind")]`). The `extract --cases` command sets this while running a target
+/// crate's tests so the events a plain `#[test]` produces can be captured and
+/// turned into spec cases. The buffer path is unaffected; this is purely an
+/// additional side channel that is a no-op when the variable is unset.
+fn record_event(event: &TraceEvent) {
+    let Ok(path) = std::env::var("SPECGATE_RECORD") else {
+        return;
+    };
+    if path.is_empty() {
+        return;
+    }
+    append_record_line(&path, event);
+}
+
+/// Append one JSONL-serialized event to the record file at `path`. Failures
+/// (unwritable path, serialization error) are silently ignored so record mode
+/// never perturbs the traced program.
+fn append_record_line(path: &str, event: &TraceEvent) {
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path)
+        && let Ok(line) = serde_json::to_string(event)
+    {
+        use std::io::Write as _;
+        let _ = writeln!(file, "{line}");
+    }
 }
 
 #[must_use]
@@ -529,6 +562,12 @@ pub fn mock_lookup(mock_name: &str, input: &str) -> Option<String> {
 pub trait SpecEvent {
     fn emit_fields(&self, prefix: Option<&str>);
 }
+
+/// Marker implemented (via `#[derive(SpecEvent)]`) ONLY by struct types, never
+/// enums. It lets return-value emission distinguish a struct return (which emits
+/// both its per-field events and a structured `$result`) from an enum return
+/// (which emits only the tagged `$result`). See [`ReturnEmit`].
+pub trait SpecEventStruct: SpecEvent + ToSpecValue {}
 
 // ---------------------------------------------------------------------------
 // ToSpecValue — convert any annotated value to a structured `Value`.
@@ -669,42 +708,136 @@ impl<T: ToSpecValue + ?Sized> ToSpecValue for Box<T> {
 }
 
 // ---------------------------------------------------------------------------
-// ReturnEmit — autoref specialization that picks `emit_fields` for SpecEvent
-// types and `to_spec_value` for everything else. The macro-expanded body of
-// `#[spec_operation]` ends with `(&ReturnEmit(&__sg_ret)).emit("$result");`.
+// ReturnEmit — autoref specialization that emits an operation's `$result` (and,
+// for struct returns, its per-field events) based on the return value's type.
+// The macro-expanded body of `#[spec_operation]` for a non-scalar, non-Result,
+// non-Option return ends with `(&&&#rt::ReturnEmit(&__sg_ret)).emit_result();`.
+//
+// Resolution ladder (highest → lowest priority — MORE `&` on the impl Self type
+// is tried first: the macro calls this with four references, so method lookup
+// matches the most-referenced by-value receiver at the outermost step before
+// dereferencing to the lower-priority levels):
+//   1. `T: SpecEventStruct` (struct)            → emit_fields + structured $result
+//   2. `T: ToSpecValue` (enum / collection)     → structured $result only
+//   3. `T: Display` (any other printable value) → Display-string $result
+//   4. (no bound) any other return type         → emits nothing
+//
+// All four are TRAIT impls (never an inherent method) so that an unsatisfied
+// bound falls through to the next level instead of hard-erroring. The Level 4
+// universal fallback ensures an annotated op whose return type implements none
+// of the higher traits (e.g. a non-SpecEvent struct that `extract` will later
+// reject as an "unresolved type") still COMPILES, emitting no `$result`.
+//
+// Scalars (i32/String/&str/bool/…) are handled by the macro directly via the
+// Display path and never reach this ladder, so a primitive's `ToSpecValue`
+// impl does not shadow its intended Display formatting.
 // ---------------------------------------------------------------------------
 
 #[derive(Debug)]
 pub struct ReturnEmit<'a, T: ?Sized>(pub &'a T);
 
-// More-specific inherent impl: chosen first by method lookup when `T: SpecEvent`.
-impl<T: SpecEvent + ?Sized> ReturnEmit<'_, T> {
+// Level 1 (highest priority) — struct returns: per-field events + $result.
+pub trait ReturnEmitStruct {
+    fn emit_result(&self);
+}
+
+impl<T: SpecEventStruct + ?Sized> ReturnEmitStruct for &&&ReturnEmit<'_, T> {
     #[inline]
-    pub fn emit(&self, _name: &str) {
+    fn emit_result(&self) {
         self.0.emit_fields(None);
+        emit_event_v("$result", self.0.to_spec_value());
     }
 }
 
-// Fallback via trait (visible through autoref).
-pub trait ReturnEmitFallback {
-    fn emit(&self, name: &str);
+// Level 2 — enums / collections / any `ToSpecValue`: structured $result only.
+pub trait ReturnEmitToSpec {
+    fn emit_result(&self);
 }
 
-impl<T: ToSpecValue + ?Sized> ReturnEmitFallback for &ReturnEmit<'_, T> {
+impl<T: ToSpecValue + ?Sized> ReturnEmitToSpec for &&ReturnEmit<'_, T> {
     #[inline]
-    fn emit(&self, name: &str) {
-        emit_event_v(name, self.0.to_spec_value());
+    fn emit_result(&self) {
+        emit_event_v("$result", self.0.to_spec_value());
     }
 }
 
-/// Least-specific fallback — any `T: Display` is emitted as a String value.
+// Level 3 — any `Display` value: Display-string $result.
 pub trait ReturnEmitDisplay {
-    fn emit(&self, name: &str);
+    fn emit_result(&self);
 }
 
-impl<T: std::fmt::Display + ?Sized> ReturnEmitDisplay for &&ReturnEmit<'_, T> {
+impl<T: std::fmt::Display + ?Sized> ReturnEmitDisplay for &ReturnEmit<'_, T> {
     #[inline]
-    fn emit(&self, name: &str) {
-        emit_event_v(name, Value::String(format!("{}", self.0)));
+    fn emit_result(&self) {
+        emit_event_v("$result", Value::String(format!("{}", self.0)));
+    }
+}
+
+// Level 4 (lowest priority, universal fallback) — any return type: emits nothing.
+pub trait ReturnEmitNone {
+    fn emit_result(&self);
+}
+
+impl<T: ?Sized> ReturnEmitNone for ReturnEmit<'_, T> {
+    #[inline]
+    fn emit_result(&self) {}
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn trace_event_jsonl_roundtrips() {
+        // Record mode persists events as JSONL; each line must round-trip back
+        // into the same TraceEvent (the capture driver parses these).
+        let events = vec![
+            TraceEvent::Run { operation: "add".into() },
+            TraceEvent::Event {
+                name: "add.a".into(),
+                value: Value::String("2".into()),
+            },
+            TraceEvent::Event {
+                name: "$result".into(),
+                value: Value::String("5".into()),
+            },
+        ];
+        for ev in &events {
+            let line = serde_json::to_string(ev).unwrap();
+            let back: TraceEvent = serde_json::from_str(&line).unwrap();
+            assert_eq!(&back, ev);
+        }
+        // The tag discriminates the two shapes.
+        let run_line = serde_json::to_string(&events[0]).unwrap();
+        assert!(run_line.contains("\"kind\":\"Run\""), "{run_line}");
+    }
+
+    #[test]
+    fn append_record_line_writes_parseable_jsonl() {
+        // Build artifacts belong under the workspace target dir (gitignored).
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("target");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!("specgate-record-test-{}.jsonl", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let path_str = path.to_string_lossy().to_string();
+
+        let e1 = TraceEvent::Run { operation: "greet".into() };
+        let e2 = TraceEvent::Event {
+            name: "greet.name".into(),
+            value: Value::String("world".into()),
+        };
+        append_record_line(&path_str, &e1);
+        append_record_line(&path_str, &e2);
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        let parsed: Vec<TraceEvent> = text.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        assert_eq!(parsed, vec![e1, e2]);
+
+        let _ = std::fs::remove_file(&path);
     }
 }

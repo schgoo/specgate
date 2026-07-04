@@ -30,6 +30,11 @@ pub struct Case {
     pub target: Option<String>,
     pub operation: Option<String>,
     pub steps: Vec<String>,
+    /// Per-step `inputs:` mappings, parallel to `steps`. A step that declares no
+    /// `inputs:` gets an empty map here; the codegen then falls back to the
+    /// case-level `inputs`. This lets free-function multi-step cases supply
+    /// distinct arguments for each invocation.
+    pub step_inputs: Vec<BTreeMap<String, YValue>>,
     pub inputs: BTreeMap<String, YValue>,
     pub expected: Vec<Assertion>,
     pub level: CaseLevel,
@@ -128,6 +133,7 @@ fn parse_case(v: &YValue) -> Result<Case, ParseError> {
 
     let operation = m.get(YValue::String("operation".into())).and_then(|x| x.as_str()).map(String::from);
 
+    let mut step_inputs: Vec<BTreeMap<String, YValue>> = Vec::new();
     let steps = match m.get(YValue::String("steps".into())) {
         None => Vec::new(),
         Some(YValue::Sequence(seq)) => {
@@ -140,6 +146,17 @@ fn parse_case(v: &YValue) -> Result<Case, ParseError> {
                     .ok_or_else(|| ParseError::Shape("step missing operation".into()))?
                     .to_string();
                 out.push(op);
+                // Optional per-step inputs (used by free-function multi-step
+                // cases where each invocation has distinct arguments).
+                let mut si = BTreeMap::new();
+                if let Some(YValue::Mapping(mp)) = m.get(YValue::String("inputs".into())) {
+                    for (k, val) in mp {
+                        if let Some(key) = k.as_str() {
+                            si.insert(key.to_string(), val.clone());
+                        }
+                    }
+                }
+                step_inputs.push(si);
             }
             out
         }
@@ -208,6 +225,7 @@ fn parse_case(v: &YValue) -> Result<Case, ParseError> {
         target,
         operation,
         steps,
+        step_inputs,
         inputs,
         expected,
         level,

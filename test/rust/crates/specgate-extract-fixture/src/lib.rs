@@ -1,7 +1,7 @@
 //! A comprehensive annotated crate used to test deterministic spec extraction
 //! (implementation -> spec). Every operation/type here isolates one or two of
-//! the spec/annotation features that Part-A (schema-only, registry-based)
-//! extraction must reproduce. The committed golden (`expected/extracted.spec.yaml`)
+//! the spec/annotation features that schema extraction (registry-based) must
+//! reproduce. The committed golden (`expected/extracted.spec.yaml`)
 //! is the byte-exact target; `just extract-check` regression-guards it.
 //!
 //! Coverage map (all exercised here):
@@ -20,9 +20,9 @@
 //!   * setup that fills an operation param by type (param is
 //!     omitted from `inputs:`)                                   — `double` + `seed`
 //!
-//! Out of scope for Part A (come from trace collection / body analysis, Part B):
-//! test `cases:`, `#[spec_mock]` dependency I/O, `spec_trace!` checkpoints,
-//! state-machine value ordering, `kind: command` targets.
+//! Out of scope for schema extraction (these come from trace collection or body
+//! analysis): test `cases:`, `#[spec_mock]` dependency I/O, `spec_trace!`
+//! checkpoints, state-machine value ordering, `kind: command` targets.
 use specgate::*;
 use std::collections::{BTreeMap, BTreeSet};
 

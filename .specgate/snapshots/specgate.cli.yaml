@@ -29,6 +29,7 @@ types:
     spec_name: string
     operations: i32
     types: i32
+    cases: i32
     output_path: string
 
 operations:
@@ -73,13 +74,17 @@ operations:
 
   extract:
     desc: >
-      Deterministically extract a schema-only spec skeleton from an annotated
-      crate by reading its link-time operation/type registry (no source
-      parsing, no LLM). Writes a `.spec.yaml` to `out` and reports a summary.
-      Operations and types are sorted by name for determinism; param and field
-      order is preserved. `cases:` is left empty — test cases are produced
-      separately from trace collection (Part B), so a freshly-extracted
-      skeleton validates as sound except for the expected `no_cases` finding.
+      Deterministically extract a spec from an annotated crate by reading its
+      link-time operation/type registry (no source parsing, no LLM). Writes a
+      `.spec.yaml` to `out` and reports a summary. Operations and types are
+      sorted by name for determinism; param and field order is preserved.
+
+      By default `cases:` is left empty, so a freshly-extracted skeleton
+      validates as sound except for the expected `no_cases` finding. With
+      `cases: true`, the crate's existing
+      tests are run under trace-record mode and each passing test becomes a case
+      — named after the test, with recovered inputs and the full emitted trace —
+      producing a complete, runnable spec.
     inputs:
       package_root:
         type: string
@@ -89,10 +94,18 @@ operations:
         desc: Path to write the generated .spec.yaml
       component:
         type: string
+        default: ""
         desc: >
           Which declared component to extract when the crate hosts more than
-          one. Empty selects the sole component; an explicit name is required
-          (and is an error if absent) when several components are present.
+          one. Empty (the default) selects the sole component; an explicit name
+          is required (and is an error if absent) when several are present.
+      cases:
+        type: bool
+        default: false
+        desc: >
+          When true, also capture test cases by running the crate's existing
+          tests under record mode, recording each passing test as a case. When
+          false (the default), extract the schema only.
     outputs:
       - outcome:
           oneof:
@@ -957,7 +970,7 @@ cases:
             reason: "spec file is not valid YAML"
 
   # ================================================================
-  # Extract — schema-only spec skeleton from an annotated crate
+  # Extract — spec generation from an annotated crate
   # ================================================================
   # The exhaustive field-level correctness of the emitted spec is asserted by
   # the byte-exact golden diff (`just extract-check`) against
@@ -973,7 +986,6 @@ cases:
     inputs:
       package_root: test/rust/crates/specgate-extract-fixture
       out: rust/target/extract-fixture-out.spec.yaml
-      component: ""
     expected:
       - $result:
           Complete:
@@ -985,8 +997,8 @@ cases:
   - name: extract_roundtrip_validates
     desc: >
       The committed golden skeleton is schema-valid and semantically sound: a
-      full validate reports exactly one finding, no_cases (cases are produced
-      separately from trace collection, Part B). This is the extract round-trip.
+      full validate reports exactly one finding, no_cases (a schema-only
+      extraction has no cases). This is the extract round-trip.
     operation: validate
     inputs:
       spec_dir: test/rust/crates/specgate-extract-fixture/expected
@@ -1005,7 +1017,6 @@ cases:
     inputs:
       package_root: test/rust/crates/does-not-exist
       out: rust/target/extract-missing-out.spec.yaml
-      component: ""
     expected:
       - $result:
           Error:
@@ -1017,7 +1028,6 @@ cases:
     inputs:
       package_root: docs
       out: rust/target/extract-notcrate-out.spec.yaml
-      component: ""
     expected:
       - $result:
           Error:
@@ -1052,7 +1062,6 @@ cases:
     inputs:
       package_root: test/rust/crates/specgate-component-fixture
       out: rust/target/extract-ambiguous-out.spec.yaml
-      component: ""
     expected:
       - $result:
           Error:
@@ -1067,7 +1076,6 @@ cases:
     inputs:
       package_root: test/rust/crates/specgate-unresolved-fixture
       out: rust/target/extract-unresolved-out.spec.yaml
-      component: ""
     expected:
       - $result:
           Error:
@@ -1084,7 +1092,6 @@ cases:
     inputs:
       package_root: test/rust/crates/specgate-value-fixture
       out: rust/target/extract-value-out.spec.yaml
-      component: ""
     expected:
       - $result:
           Complete:
@@ -1092,6 +1099,48 @@ cases:
               spec_name: fixture.value
               operations: 2
               types: 1
+
+  - name: extract_with_cases
+    desc: >
+      Extracting the cases fixture with cases:true runs its existing
+      tests under record mode and captures one case per passing test — 2
+      operations, 0 types, 3 cases (adds_several, adds_two_and_three, greets).
+      The exact case content (recovered inputs + full emitted trace) is
+      byte-checked by `just extract-check` against the committed fixture.cases
+      golden.
+    operation: extract
+    inputs:
+      package_root: test/rust/crates/specgate-cases-fixture
+      out: rust/target/extract-cases-out.spec.yaml
+      cases: true
+    expected:
+      - $result:
+          Complete:
+            report:
+              spec_name: fixture.cases
+              operations: 2
+              types: 0
+              cases: 3
+
+  - name: run_extracted_cases_pass
+    desc: >
+      The dogfood: the spec extracted from the cases fixture's own tests,
+      when run back through the harness, passes every case. This proves the
+      captured cases are valid conformance cases — which requires operations to
+      self-emit their full trace (the same trace the harness matches).
+    operation: run
+    inputs:
+      spec: test/rust/crates/specgate-cases-fixture/expected/fixture.cases.spec.yaml
+    expected:
+      - $result:
+          Complete:
+            report:
+              spec_name: fixture.cases
+              total_cases: 3
+              passed: 3
+              failed: 0
+              skipped: 0
+              warned: 0
 
   - name: validate_value_escape_hatch_warns
     desc: >

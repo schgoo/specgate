@@ -386,7 +386,6 @@ pub fn spec_operation(attr: TokenStream, item: TokenStream) -> TokenStream {
     let OperationArg { op_name, spec } = parse_macro_input!(attr as OperationArg);
     let mut func = parse_macro_input!(item as ItemFn);
 
-    let return_kind = classify_return(&func.sig.output);
     let is_method = has_receiver(&func);
     let is_async = func.sig.asyncness.is_some();
     let params = extract_param_renames(&mut func);
@@ -399,12 +398,42 @@ pub fn spec_operation(attr: TokenStream, item: TokenStream) -> TokenStream {
     visitor.visit_block_mut(&mut func.block);
     let body = &func.block;
 
-    let _ = return_kind;
     let pre = build_pre_stmts(&op_name, &params, is_method, has_ref_param);
-    let new_body: Block = parse_quote!({
-        #(#pre)*
-        #body
-    });
+    // Post-body emission of `$result` (and, for struct returns, per-field
+    // events). Moving this into the macro makes an annotated operation
+    // self-emit its complete trace whether it is driven by the harness runner
+    // or called directly from an ordinary test — the latter is what `extract
+    // --cases` records. The body is wrapped so the emission runs on
+    // EVERY return path, including early `return`s and `?` short-circuits.
+    let post = build_post_emit(&func.sig.output);
+    let new_body: Block = if let Some(post) = post {
+        let ret_ty = match &func.sig.output {
+            ReturnType::Type(_, ty) => ty.clone(),
+            ReturnType::Default => unreachable!("post-emit only built for a non-unit return"),
+        };
+        if is_async {
+            parse_quote!({
+                #(#pre)*
+                #[allow(clippy::redundant_closure_call)]
+                let __sg_ret = (async move #body).await;
+                #post
+                __sg_ret
+            })
+        } else {
+            parse_quote!({
+                #(#pre)*
+                #[allow(clippy::redundant_closure_call)]
+                let __sg_ret = (move || -> #ret_ty #body)();
+                #post
+                __sg_ret
+            })
+        }
+    } else {
+        parse_quote!({
+            #(#pre)*
+            #body
+        })
+    };
     *func.block = new_body;
 
     // Registry entry for discovery.
@@ -481,9 +510,78 @@ fn build_pre_stmts(op_name: &str, params: &[(Ident, Type, Option<String>)], is_m
     out
 }
 
-// ---------------------------------------------------------------------------
-// #[spec_setup("name")]
-// ---------------------------------------------------------------------------
+/// Build the post-body `$result`/field emission for an operation, mirroring the
+/// harness runner's former `build_post_emit` (codegen.rs) so that traces stay
+/// byte-identical whether an op is driven by the runner or called directly.
+///
+/// Returns `None` for a unit/`()` return (nothing to emit). Otherwise returns
+/// statements that consume `__sg_ret` (the captured return value) and emit:
+/// - `Result<T, E>` → a tagged `{Ok|Err}` map `$result`.
+/// - `Option<T>`    → a tagged `{Some|None}` map `$result`.
+/// - a printable scalar (`i32`/`String`/`&str`/…) → a Display-string `$result`.
+/// - anything else  → the [`ReturnEmit`] autoref ladder, which emits per-field
+///   events + a structured `$result` for struct returns, or just a structured
+///   `$result` for enums/collections, or a Display `$result` as a last resort.
+fn build_post_emit(output: &ReturnType) -> Option<TokenStream2> {
+    let rt = rt();
+    let ty = match output {
+        ReturnType::Default => return None,
+        ReturnType::Type(_, t) => {
+            if matches!(&**t, Type::Tuple(tup) if tup.elems.is_empty()) {
+                return None;
+            }
+            t
+        }
+    };
+    Some(match classify_return(output) {
+        ReturnKind::Unit => return None,
+        ReturnKind::Result => quote! {
+            match &__sg_ret {
+                Ok(__sg_v) => {
+                    let mut __sg_m = ::std::collections::BTreeMap::new();
+                    __sg_m.insert("Ok".to_string(), #rt::ToSpecValue::to_spec_value(__sg_v));
+                    #rt::emit_event_v("$result", #rt::Value::Map(__sg_m));
+                }
+                Err(__sg_e) => {
+                    let mut __sg_m = ::std::collections::BTreeMap::new();
+                    __sg_m.insert("Err".to_string(), #rt::Value::String(::std::format!("{}", __sg_e)));
+                    #rt::emit_event_v("$result", #rt::Value::Map(__sg_m));
+                }
+            }
+        },
+        ReturnKind::Option => quote! {
+            match &__sg_ret {
+                Some(__sg_v) => {
+                    let mut __sg_m = ::std::collections::BTreeMap::new();
+                    __sg_m.insert("Some".to_string(), #rt::ToSpecValue::to_spec_value(__sg_v));
+                    #rt::emit_event_v("$result", #rt::Value::Map(__sg_m));
+                }
+                None => {
+                    let mut __sg_m = ::std::collections::BTreeMap::new();
+                    __sg_m.insert("None".to_string(), #rt::Value::Map(::std::collections::BTreeMap::new()));
+                    #rt::emit_event_v("$result", #rt::Value::Map(__sg_m));
+                }
+            }
+        },
+        ReturnKind::Other => {
+            if is_printable_param(ty) {
+                quote! {
+                    #rt::emit_event("$result", &::std::format!("{}", __sg_ret));
+                }
+            } else {
+                quote! {
+                    {
+                        use #rt::ReturnEmitStruct as _;
+                        use #rt::ReturnEmitToSpec as _;
+                        use #rt::ReturnEmitDisplay as _;
+                        use #rt::ReturnEmitNone as _;
+                        (&&&&#rt::ReturnEmit(&__sg_ret)).emit_result();
+                    }
+                }
+            }
+        }
+    })
+}
 
 #[proc_macro_attribute]
 pub fn spec_setup(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -802,6 +900,7 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
                 #rt::Value::Map(__sg_m)
             }
         }
+        impl #impl_g #rt::SpecEventStruct for #name #ty_g #where_c {}
         #reg
     };
     out.into()

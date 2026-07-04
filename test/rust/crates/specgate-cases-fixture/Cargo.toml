@@ -1,0 +1,9 @@
+[package]
+name = "specgate-cases-fixture"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+specgate = { path = "../../../../rust/crates/specgate" }
+
+[workspace]

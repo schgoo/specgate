@@ -1,0 +1,63 @@
+# Spec extracted from your code by `specgate extract --cases`.
+#
+# Captures the schema (types + operations) AND test cases observed by running
+# your existing tests: each case mirrors a test — its recovered inputs and the
+# full trace the operation emitted ($run, inputs, $result). Edit freely;
+# regenerate with `specgate extract <package_root> --cases -o <out>`.
+#
+# Docs: https://github.com/schgoo/specgate
+spec_version: "0.4.0"
+name: fixture.cases
+binding: fixture.cases.binding.yaml
+
+operations:
+  add:
+    inputs:
+      a: i32
+      b: i32
+    outputs:
+      - $result: i32
+  greet:
+    inputs:
+      name: string
+    outputs:
+      - $result: string
+
+cases:
+  - name: adds_several
+    steps:
+      - operation: add
+        inputs:
+          a: 2
+          b: 3
+      - operation: add
+        inputs:
+          a: 10
+          b: 20
+    expected:
+      - $run: add
+      - add.a: "2"
+      - add.b: "3"
+      - $result: "5"
+      - $run: add
+      - add.a: "10"
+      - add.b: "20"
+      - $result: "30"
+  - name: adds_two_and_three
+    operation: add
+    inputs:
+      a: 2
+      b: 3
+    expected:
+      - $run: add
+      - add.a: "2"
+      - add.b: "3"
+      - $result: "5"
+  - name: greets
+    operation: greet
+    inputs:
+      name: world
+    expected:
+      - $run: greet
+      - greet.name: "world"
+      - $result: "hello, world"

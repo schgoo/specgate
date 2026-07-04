@@ -1,5 +1,5 @@
 //! `specgate extract <package_root> -o <out>` — deterministically derive a
-//! schema-only spec skeleton from an annotated Rust crate.
+//! spec skeleton from an annotated Rust crate.
 //!
 //! Extraction reads the crate's *link-time* operation/type registry (the
 //! `#[spec_operation]` / `#[spec_setup]` / `SpecEvent` metadata collected via
@@ -8,17 +8,18 @@
 //! `specgate::__rt::discovery_json()`, and prints the registry as JSON; the
 //! JSON is then mapped to a `.spec.yaml` skeleton plus a sibling binding file.
 //!
-//! This is "Part A": only the schema (operations, inputs/outputs, types) is
-//! derived. Test `cases:` come from trace collection ("Part B") and are emitted
-//! empty here, so a freshly-extracted skeleton validates as sound except for the
-//! expected `no_cases` finding.
+//! By default only the schema (operations, inputs/outputs, types) is derived,
+//! leaving `cases:` empty — so a freshly-extracted skeleton validates as sound
+//! except for the expected `no_cases` finding. With `--cases`, the crate's
+//! existing tests are run under record mode and each passing test is captured
+//! as a case, producing a complete, runnable spec.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use specgate::{SpecEvent, spec_operation};
+use specgate::{SpecEvent, TraceEvent, Value, spec_operation};
 
 /// Summary of an extraction run.
 #[derive(Debug, Clone, PartialEq, Eq, SpecEvent)]
@@ -29,6 +30,8 @@ pub struct ExtractReport {
     pub operations: i32,
     #[spec_event]
     pub types: i32,
+    #[spec_event]
+    pub cases: i32,
     #[spec_event]
     pub output_path: String,
 }
@@ -45,8 +48,8 @@ impl std::fmt::Display for ExtractOutcome {
         match self {
             ExtractOutcome::Complete { report } => write!(
                 f,
-                "Complete(spec={}, operations={}, types={}, output={})",
-                report.spec_name, report.operations, report.types, report.output_path
+                "Complete(spec={}, operations={}, types={}, cases={}, output={})",
+                report.spec_name, report.operations, report.types, report.cases, report.output_path
             ),
             ExtractOutcome::Error { reason } => write!(f, "Error({reason})"),
         }
@@ -57,7 +60,7 @@ impl std::fmt::Display for ExtractOutcome {
 // Entry point
 // ---------------------------------------------------------------------------
 
-/// Extract a schema-only spec skeleton from the annotated crate at
+/// Extract a spec skeleton from the annotated crate at
 /// `package_root`, writing the `.spec.yaml` to `out` and a sibling binding file.
 ///
 /// Returns [`ExtractOutcome::Error`] (never panics) when `package_root` does not
@@ -65,7 +68,7 @@ impl std::fmt::Display for ExtractOutcome {
 /// the output cannot be written.
 #[must_use]
 #[spec_operation("extract")]
-pub fn extract(package_root: &str, out: &str, component: &str) -> ExtractOutcome {
+pub fn extract(package_root: &str, out: &str, component: &str, cases: bool) -> ExtractOutcome {
     let root = Path::new(package_root);
     if !root.exists() {
         return ExtractOutcome::Error {
@@ -119,10 +122,21 @@ pub fn extract(package_root: &str, out: &str, component: &str) -> ExtractOutcome
         Err(reason) => return ExtractOutcome::Error { reason },
     };
 
+    // Capture test cases by running the crate's existing tests under record
+    // mode. Schema-only extraction (the default) leaves this empty.
+    let captured = if cases {
+        match capture_cases(root, &registry, &selected) {
+            Ok(c) => c,
+            Err(reason) => return ExtractOutcome::Error { reason },
+        }
+    } else {
+        Vec::new()
+    };
+
     let spec_name = selected.clone();
     let out_path = Path::new(out);
     let binding_file_name = binding_file_name(out_path);
-    let spec_yaml = render_spec(&spec_name, &binding_file_name, &registry, &selected, &depends_on);
+    let spec_yaml = render_spec(&spec_name, &binding_file_name, &registry, &selected, &depends_on, &captured, cases);
 
     // Create the output directory first so the binding's relative package_root
     // can be computed against a path that exists on disk (canonicalize requires
@@ -157,6 +171,7 @@ pub fn extract(package_root: &str, out: &str, component: &str) -> ExtractOutcome
         spec_name,
         operations: i32::try_from(registry.operations_for(&selected).len()).unwrap_or(i32::MAX),
         types: i32::try_from(registry.local_types(&selected).len()).unwrap_or(i32::MAX),
+        cases: i32::try_from(captured.len()).unwrap_or(i32::MAX),
         output_path: out.to_string(),
     };
     ExtractOutcome::Complete { report }
@@ -261,6 +276,278 @@ fn cargo_package_name(package_root: &Path) -> Option<String> {
         }
     }
     None
+}
+
+// ---------------------------------------------------------------------------
+// Case capture — run the crate's existing tests under record mode and
+// reconstruct each PASSING test as a spec case.
+// ---------------------------------------------------------------------------
+
+/// One observed operation invocation within a captured test. `inputs` are the
+/// param name/value pairs recovered from the `<op>.<param>` echo events, in
+/// emission order (= declared param order for free functions).
+#[derive(Debug, Clone)]
+struct CaseInvocation {
+    operation: String,
+    inputs: Vec<(String, String)>,
+}
+
+/// A captured test turned into a spec case. `expected` is the FULL verbatim
+/// trace the test emitted ($run + input echoes + $result, per invocation).
+#[derive(Debug, Clone)]
+struct CaseData {
+    name: String,
+    invocations: Vec<CaseInvocation>,
+    expected: Vec<TraceEvent>,
+}
+
+/// Build the target crate's test binary, enumerate its tests, run each one in
+/// isolation under record mode, and reconstruct the passing tests as cases for
+/// `comp` (free-function ops only; method/setup-backed or empty tests skipped).
+fn capture_cases(package_root: &Path, registry: &Registry, comp: &str) -> Result<Vec<CaseData>, String> {
+    let crate_name = cargo_package_name(package_root).ok_or_else(|| "could not read crate name from Cargo.toml".to_string())?;
+    let scratch = workspace_root().join("target").join("specgate-extract-cases").join(&crate_name);
+    std::fs::create_dir_all(&scratch).map_err(|e| format!("failed to create case-capture scratch dir: {e}"))?;
+
+    let test_bin = build_test_binary(package_root, &scratch)?;
+    let test_names = list_tests(&test_bin)?;
+
+    let mut raw: Vec<(String, Vec<TraceEvent>)> = Vec::new();
+    for name in &test_names {
+        let record_file = scratch.join(format!("{}.jsonl", sanitize_file_stem(name)));
+        let _ = std::fs::remove_file(&record_file);
+        let passed = run_recorded_test(&test_bin, name, &record_file)?;
+        if !passed {
+            // A failing test is not a valid conformance case.
+            continue;
+        }
+        let events = read_record(&record_file)?;
+        raw.push((name.clone(), events));
+    }
+
+    Ok(build_cases(raw, registry, comp))
+}
+
+/// `cargo test --no-run` in the crate, returning the path to the compiled test
+/// executable (preferring the library's unit-test binary).
+fn build_test_binary(package_root: &Path, scratch: &Path) -> Result<PathBuf, String> {
+    let mut cmd = Command::new(cargo_bin());
+    cmd.arg("test").arg("--no-run").arg("--quiet").arg("--message-format=json");
+    cmd.current_dir(package_root);
+    cmd.env_remove("RUSTC_WORKSPACE_WRAPPER");
+    cmd.env_remove("CARGO");
+    cmd.env_remove("CARGO_MANIFEST_DIR");
+    cmd.env("CARGO_TARGET_DIR", scratch.join("target").as_os_str());
+
+    let output = cmd.output().map_err(|e| format!("failed to build test binary: {e}"))?;
+    if !output.status.success() {
+        return Err(format!("test build failed: {}", String::from_utf8_lossy(&output.stderr).trim()));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut fallback: Option<PathBuf> = None;
+    for line in stdout.lines() {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if v.get("reason").and_then(serde_json::Value::as_str) != Some("compiler-artifact") {
+            continue;
+        }
+        let is_test = v
+            .get("profile")
+            .and_then(|p| p.get("test"))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        if !is_test {
+            continue;
+        }
+        let Some(exe) = v.get("executable").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let is_lib = v
+            .get("target")
+            .and_then(|t| t.get("kind"))
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|ks| ks.iter().any(|k| k.as_str() == Some("lib")));
+        if is_lib {
+            return Ok(PathBuf::from(exe));
+        }
+        fallback.get_or_insert_with(|| PathBuf::from(exe));
+    }
+    fallback.ok_or_else(|| "no test binary was produced (crate has no tests?)".to_string())
+}
+
+/// Enumerate a libtest binary's test cases via `--list`. Returns the fully
+/// qualified test names (e.g. `tests::adds_several`).
+fn list_tests(test_bin: &Path) -> Result<Vec<String>, String> {
+    let output = Command::new(test_bin)
+        .arg("--list")
+        .arg("--format")
+        .arg("terse")
+        .output()
+        .map_err(|e| format!("failed to list tests: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "test enumeration failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut names = Vec::new();
+    for line in stdout.lines() {
+        if let Some(name) = line.strip_suffix(": test") {
+            names.push(name.trim().to_string());
+        }
+    }
+    Ok(names)
+}
+
+/// Run one test in isolation with record mode enabled. Returns whether it
+/// passed (exit success).
+fn run_recorded_test(test_bin: &Path, test_name: &str, record_file: &Path) -> Result<bool, String> {
+    let output = Command::new(test_bin)
+        .arg(test_name)
+        .arg("--exact")
+        .arg("--test-threads=1")
+        .env("SPECGATE_RECORD", record_file)
+        .output()
+        .map_err(|e| format!("failed to run test '{test_name}': {e}"))?;
+    Ok(output.status.success())
+}
+
+/// Parse a per-test JSONL record file into a trace. A missing file means the
+/// test emitted nothing (no annotated ops).
+fn read_record(path: &Path) -> Result<Vec<TraceEvent>, String> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let text = std::fs::read_to_string(path).map_err(|e| format!("failed to read record file {}: {e}", path.display()))?;
+    let mut events = Vec::new();
+    for line in text.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let ev: TraceEvent = serde_json::from_str(line).map_err(|e| format!("failed to parse recorded event: {e}"))?;
+        events.push(ev);
+    }
+    Ok(events)
+}
+
+/// Split a test's trace into invocations by `Run` events, recovering each
+/// invocation's inputs from its `<op>.<param>` echo events.
+fn segment_invocations(events: &[TraceEvent]) -> Vec<CaseInvocation> {
+    let mut invs: Vec<CaseInvocation> = Vec::new();
+    for ev in events {
+        match ev {
+            TraceEvent::Run { operation } => invs.push(CaseInvocation {
+                operation: operation.clone(),
+                inputs: Vec::new(),
+            }),
+            TraceEvent::Event { name, value } => {
+                if let Some(cur) = invs.last_mut() {
+                    let prefix = format!("{}.", cur.operation);
+                    if let Some(param) = name.strip_prefix(&prefix) {
+                        cur.inputs.push((param.to_string(), value_as_string(value)));
+                    }
+                }
+            }
+        }
+    }
+    invs
+}
+
+/// True when every op in `inv` is a free function of `comp` with all its
+/// declared params echoed (so its inputs are fully recoverable).
+fn is_free_fn_invocation(inv: &CaseInvocation, registry: &Registry, comp: &str) -> bool {
+    let Some(op) = registry
+        .ops
+        .iter()
+        .find(|o| !o.is_setup && o.name == inv.operation && o.component == comp)
+    else {
+        return false;
+    };
+    let echoed: BTreeSet<&str> = inv.inputs.iter().map(|(k, _)| k.as_str()).collect();
+    op.params.iter().all(|(pn, _)| echoed.contains(pn.as_str()))
+}
+
+/// Reconstruct eligible passing tests as cases: skip empty/method/setup tests,
+/// name each case after its test (qualifying collisions with the module path),
+/// and order alphabetically by case name.
+fn build_cases(raw: Vec<(String, Vec<TraceEvent>)>, registry: &Registry, comp: &str) -> Vec<CaseData> {
+    let mut eligible: Vec<(String, Vec<CaseInvocation>, Vec<TraceEvent>)> = Vec::new();
+    for (test_name, events) in raw {
+        let invs = segment_invocations(&events);
+        if invs.is_empty() {
+            // Test exercised no annotated operations — nothing to capture.
+            continue;
+        }
+        if !invs.iter().all(|inv| is_free_fn_invocation(inv, registry, comp)) {
+            eprintln!("extract --cases: skipping test '{test_name}' (calls a method/setup-backed op; free functions only in v1)");
+            continue;
+        }
+        eligible.push((test_name, invs, events));
+    }
+
+    // Bare (module-stripped) sanitized names, and how often each recurs.
+    let bare: Vec<String> = eligible.iter().map(|(tn, _, _)| sanitize_case_name(last_segment(tn))).collect();
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for b in &bare {
+        *counts.entry(b.clone()).or_default() += 1;
+    }
+
+    let mut cases: Vec<CaseData> = Vec::new();
+    for ((test_name, invocations, expected), b) in eligible.into_iter().zip(bare) {
+        // Qualify with the full module path only when the bare name collides.
+        let name = if counts.get(&b).copied().unwrap_or(0) > 1 {
+            sanitize_case_name(&test_name.replace("::", "_"))
+        } else {
+            b
+        };
+        cases.push(CaseData {
+            name,
+            invocations,
+            expected,
+        });
+    }
+    cases.sort_by(|a, b| a.name.cmp(&b.name));
+    cases
+}
+
+/// The last `::`-delimited segment of a test's fully qualified name.
+fn last_segment(full: &str) -> &str {
+    full.rsplit("::").next().unwrap_or(full)
+}
+
+/// Sanitize a name to the case-name pattern `^[a-z][a-z0-9_]*$`: lowercase,
+/// non-alphanumeric/underscore chars become `_`, and a leading non-letter is
+/// prefixed with `c`.
+fn sanitize_case_name(s: &str) -> String {
+    let mut out = String::new();
+    for c in s.chars() {
+        if c.is_ascii_alphanumeric() || c == '_' {
+            out.push(c.to_ascii_lowercase());
+        } else {
+            out.push('_');
+        }
+    }
+    if !out.chars().next().is_some_and(|c| c.is_ascii_lowercase()) {
+        out.insert(0, 'c');
+    }
+    out
+}
+
+/// Sanitize a test name into a filesystem-safe record-file stem.
+fn sanitize_file_stem(s: &str) -> String {
+    s.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect()
+}
+
+/// The raw string an event carries (echoes are always `Value::String`); other
+/// shapes fall back to their JSON form.
+fn value_as_string(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        other => serde_json::to_string(other).unwrap_or_default(),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -473,7 +760,7 @@ impl SpecType {
     }
 }
 
-/// Parsed Rust type AST (only the shapes Part-A extraction needs).
+/// Parsed Rust type AST (only the shapes schema extraction needs).
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum RustType {
     Named { name: String, args: Vec<RustType> },
@@ -843,6 +1130,15 @@ const SPEC_HEADER: &str = "# Spec skeleton extracted from your code by `specgate
 #\n\
 # Docs: https://github.com/schgoo/specgate\n";
 
+const CASES_HEADER: &str = "# Spec extracted from your code by `specgate extract --cases`.\n\
+#\n\
+# Captures the schema (types + operations) AND test cases observed by running\n\
+# your existing tests: each case mirrors a test — its recovered inputs and the\n\
+# full trace the operation emitted ($run, inputs, $result). Edit freely;\n\
+# regenerate with `specgate extract <package_root> --cases -o <out>`.\n\
+#\n\
+# Docs: https://github.com/schgoo/specgate\n";
+
 const BINDING_HEADER: &str = "# Binding extracted by `specgate extract`: links this spec to the code under\n\
 # test. Point `package_root` at the crate you want to run the spec against.\n\
 #\n\
@@ -854,11 +1150,21 @@ fn quote_ref(s: &str) -> String {
     if s.contains('<') { format!("\"{s}\"") } else { s.to_string() }
 }
 
-/// Render the full spec skeleton YAML.
-fn render_spec(spec_name: &str, binding_file: &str, registry: &Registry, comp: &str, depends_on: &[String]) -> String {
+/// Render the full spec skeleton YAML. When `cases_mode` is set, the cases
+/// header is used and `captured` cases are rendered; otherwise the schema-only
+/// header is used and an empty `cases: []` is emitted.
+fn render_spec(
+    spec_name: &str,
+    binding_file: &str,
+    registry: &Registry,
+    comp: &str,
+    depends_on: &[String],
+    captured: &[CaseData],
+    cases_mode: bool,
+) -> String {
     let type_names = registry.type_names();
     let mut s = String::new();
-    s.push_str(SPEC_HEADER);
+    s.push_str(if cases_mode { CASES_HEADER } else { SPEC_HEADER });
     s.push_str("spec_version: \"0.4.0\"\n");
     let _ = writeln!(s, "name: {spec_name}");
     let _ = writeln!(s, "binding: {binding_file}");
@@ -883,8 +1189,60 @@ fn render_spec(spec_name: &str, binding_file: &str, registry: &Registry, comp: &
         render_operation(&mut s, op, registry, &type_names);
     }
 
-    s.push_str("\ncases: []\n");
+    if cases_mode && !captured.is_empty() {
+        render_cases(&mut s, captured);
+    } else {
+        s.push_str("\ncases: []\n");
+    }
     s
+}
+
+/// Render captured test cases: one entry per case, a simple `operation`/`inputs`
+/// case for a single invocation or a `steps:` list for several, followed by the
+/// case-level flat `expected:` = the full verbatim trace.
+fn render_cases(s: &mut String, cases: &[CaseData]) {
+    s.push_str("\ncases:\n");
+    for c in cases {
+        let _ = writeln!(s, "  - name: {}", c.name);
+        if let [inv] = c.invocations.as_slice() {
+            let _ = writeln!(s, "    operation: {}", inv.operation);
+            if !inv.inputs.is_empty() {
+                s.push_str("    inputs:\n");
+                for (k, v) in &inv.inputs {
+                    let _ = writeln!(s, "      {k}: {v}");
+                }
+            }
+        } else {
+            s.push_str("    steps:\n");
+            for inv in &c.invocations {
+                let _ = writeln!(s, "      - operation: {}", inv.operation);
+                if !inv.inputs.is_empty() {
+                    s.push_str("        inputs:\n");
+                    for (k, v) in &inv.inputs {
+                        let _ = writeln!(s, "          {k}: {v}");
+                    }
+                }
+            }
+        }
+        s.push_str("    expected:\n");
+        for ev in &c.expected {
+            match ev {
+                TraceEvent::Run { operation } => {
+                    let _ = writeln!(s, "      - $run: {operation}");
+                }
+                TraceEvent::Event { name, value } => {
+                    let _ = writeln!(s, "      - {name}: {}", render_expected_value(value));
+                }
+            }
+        }
+    }
+}
+
+/// Render a captured event's value as inline flow YAML (JSON is a valid YAML
+/// subset). Scalars such as strings stay quoted (`"5"`), matching the trace the
+/// operation self-emits.
+fn render_expected_value(v: &Value) -> String {
+    serde_json::to_string(v).unwrap_or_default()
 }
 
 /// Render a `map`/`set` type ref as an inline object body (the `type:`/`keys:`/
@@ -1246,7 +1604,7 @@ mod tests {
                 },
             ],
         };
-        let yaml = render_spec("demo", "demo.binding.yaml", &reg, "", &[]);
+        let yaml = render_spec("demo", "demo.binding.yaml", &reg, "", &[], &[], false);
         assert!(yaml.contains("  Money:\n    cents: i64\n"), "{yaml}");
         assert!(
             yaml.contains("  Shape:\n    oneof:\n      Circle:\n        radius: f64\n      Point: {}\n"),
@@ -1264,7 +1622,7 @@ mod tests {
 
     #[test]
     fn error_when_package_root_missing() {
-        let out = extract("definitely/does/not/exist", "x.spec.yaml", "");
+        let out = extract("definitely/does/not/exist", "x.spec.yaml", "", false);
         match out {
             ExtractOutcome::Error { reason } => assert!(reason.contains("package_root not found"), "{reason}"),
             ExtractOutcome::Complete { report } => panic!("expected error, got {report:?}"),
@@ -1275,7 +1633,7 @@ mod tests {
     fn error_when_not_a_crate() {
         // `src` (this crate's source dir, the test CWD's child) exists but has
         // no Cargo.toml — extraction must reject it before writing anything.
-        let out = extract("src", "x.spec.yaml", "");
+        let out = extract("src", "x.spec.yaml", "", false);
         match out {
             ExtractOutcome::Error { reason } => assert!(reason.contains("no Cargo.toml"), "{reason}"),
             ExtractOutcome::Complete { report } => panic!("expected error, got {report:?}"),
@@ -1289,6 +1647,7 @@ mod tests {
                 spec_name: "x".into(),
                 operations: 2,
                 types: 1,
+                cases: 0,
                 output_path: "o".into(),
             },
         };
@@ -1387,5 +1746,221 @@ mod tests {
         let mut c = Vec::new();
         collect_named_refs("Option < Widget >", &mut c);
         assert_eq!(c, vec!["Widget".to_string()]);
+    }
+
+    // --- Case capture ---------------------------------------------------------
+
+    fn run(op: &str) -> TraceEvent {
+        TraceEvent::Run { operation: op.into() }
+    }
+
+    fn ev(name: &str, value: &str) -> TraceEvent {
+        TraceEvent::Event {
+            name: name.into(),
+            value: Value::String(value.into()),
+        }
+    }
+
+    #[test]
+    fn segments_single_invocation_and_recovers_inputs() {
+        let trace = vec![run("add"), ev("add.a", "2"), ev("add.b", "3"), ev("$result", "5")];
+        let invs = segment_invocations(&trace);
+        assert_eq!(invs.len(), 1);
+        assert_eq!(invs[0].operation, "add");
+        assert_eq!(
+            invs[0].inputs,
+            vec![("a".to_string(), "2".to_string()), ("b".to_string(), "3".to_string())]
+        );
+    }
+
+    #[test]
+    fn segments_multiple_invocations_by_run_events() {
+        let trace = vec![
+            run("add"),
+            ev("add.a", "2"),
+            ev("add.b", "3"),
+            ev("$result", "5"),
+            run("add"),
+            ev("add.a", "10"),
+            ev("add.b", "20"),
+            ev("$result", "30"),
+        ];
+        let invs = segment_invocations(&trace);
+        assert_eq!(invs.len(), 2);
+        assert_eq!(
+            invs[1].inputs,
+            vec![("a".to_string(), "10".to_string()), ("b".to_string(), "20".to_string())]
+        );
+    }
+
+    #[test]
+    fn segmentation_excludes_result_and_field_events_from_inputs() {
+        // `$result` and bare field events (no `<op>.` prefix) are not inputs.
+        let trace = vec![run("greet"), ev("greet.name", "world"), ev("$result", "hello, world")];
+        let invs = segment_invocations(&trace);
+        assert_eq!(invs[0].inputs, vec![("name".to_string(), "world".to_string())]);
+    }
+
+    #[test]
+    fn free_fn_invocation_detected_when_all_params_echoed() {
+        let reg = Registry {
+            ops: vec![op_c("add", "c", "i32", &[("a", "i32"), ("b", "i32")])],
+            types: vec![],
+        };
+        let inv = CaseInvocation {
+            operation: "add".into(),
+            inputs: vec![("a".into(), "2".into()), ("b".into(), "3".into())],
+        };
+        assert!(is_free_fn_invocation(&inv, &reg, "c"));
+    }
+
+    #[test]
+    fn method_invocation_rejected_when_a_param_has_no_echo() {
+        // `withdraw(amount)` with no `withdraw.amount` echo -> not a free fn.
+        let reg = Registry {
+            ops: vec![op_c("withdraw", "c", "()", &[("amount", "i32")])],
+            types: vec![],
+        };
+        let inv = CaseInvocation {
+            operation: "withdraw".into(),
+            inputs: vec![],
+        };
+        assert!(!is_free_fn_invocation(&inv, &reg, "c"));
+    }
+
+    #[test]
+    fn sanitize_case_name_normalizes_and_prefixes() {
+        assert_eq!(sanitize_case_name("adds_two_and_three"), "adds_two_and_three");
+        assert_eq!(sanitize_case_name("Adds-Two"), "adds_two");
+        assert_eq!(sanitize_case_name("tests::adds"), "tests__adds");
+        assert_eq!(sanitize_case_name("1abc"), "c1abc");
+        assert_eq!(sanitize_case_name("_hidden"), "c_hidden");
+    }
+
+    #[test]
+    fn last_segment_takes_final_module_component() {
+        assert_eq!(last_segment("tests::adds_several"), "adds_several");
+        assert_eq!(last_segment("adds_several"), "adds_several");
+        assert_eq!(last_segment("a::b::c"), "c");
+    }
+
+    #[test]
+    fn build_cases_orders_alphabetically_and_shapes_steps() {
+        let reg = Registry {
+            ops: vec![op_c("add", "c", "i32", &[("a", "i32"), ("b", "i32")])],
+            types: vec![],
+        };
+        let raw = vec![
+            (
+                "tests::adds_several".to_string(),
+                vec![
+                    run("add"),
+                    ev("add.a", "2"),
+                    ev("add.b", "3"),
+                    ev("$result", "5"),
+                    run("add"),
+                    ev("add.a", "10"),
+                    ev("add.b", "20"),
+                    ev("$result", "30"),
+                ],
+            ),
+            (
+                "tests::adds_two_and_three".to_string(),
+                vec![run("add"), ev("add.a", "2"), ev("add.b", "3"), ev("$result", "5")],
+            ),
+        ];
+        let cases = build_cases(raw, &reg, "c");
+        let names: Vec<&str> = cases.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, vec!["adds_several", "adds_two_and_three"]);
+        // Multi-invocation -> steps; single -> simple.
+        assert_eq!(cases[0].invocations.len(), 2);
+        assert_eq!(cases[1].invocations.len(), 1);
+    }
+
+    #[test]
+    fn build_cases_skips_empty_and_method_tests() {
+        let reg = Registry {
+            ops: vec![
+                op_c("add", "c", "i32", &[("a", "i32"), ("b", "i32")]),
+                op_c("withdraw", "c", "()", &[("amount", "i32")]),
+            ],
+            types: vec![],
+        };
+        let raw = vec![
+            ("tests::no_ops".to_string(), vec![]),
+            ("tests::uses_method".to_string(), vec![run("withdraw")]),
+            (
+                "tests::good".to_string(),
+                vec![run("add"), ev("add.a", "1"), ev("add.b", "2"), ev("$result", "3")],
+            ),
+        ];
+        let cases = build_cases(raw, &reg, "c");
+        let names: Vec<&str> = cases.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, vec!["good"]);
+    }
+
+    #[test]
+    fn build_cases_qualifies_colliding_bare_names() {
+        let reg = Registry {
+            ops: vec![op_c("add", "c", "i32", &[("a", "i32"), ("b", "i32")])],
+            types: vec![],
+        };
+        let raw = vec![
+            (
+                "mod_a::adds".to_string(),
+                vec![run("add"), ev("add.a", "1"), ev("add.b", "1"), ev("$result", "2")],
+            ),
+            (
+                "mod_b::adds".to_string(),
+                vec![run("add"), ev("add.a", "2"), ev("add.b", "2"), ev("$result", "4")],
+            ),
+        ];
+        let cases = build_cases(raw, &reg, "c");
+        let names: Vec<&str> = cases.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, vec!["mod_a_adds", "mod_b_adds"]);
+    }
+
+    #[test]
+    fn render_expected_value_quotes_strings() {
+        assert_eq!(render_expected_value(&Value::String("5".into())), "\"5\"");
+        assert_eq!(render_expected_value(&Value::String("hello, world".into())), "\"hello, world\"");
+    }
+
+    #[test]
+    fn render_cases_uses_cases_header_and_matches_shape() {
+        let reg = Registry {
+            ops: vec![op_c("add", "fixture.cases", "i32", &[("a", "i32"), ("b", "i32")])],
+            types: vec![],
+        };
+        let cases = vec![CaseData {
+            name: "adds_two_and_three".into(),
+            invocations: vec![CaseInvocation {
+                operation: "add".into(),
+                inputs: vec![("a".into(), "2".into()), ("b".into(), "3".into())],
+            }],
+            expected: vec![run("add"), ev("add.a", "2"), ev("add.b", "3"), ev("$result", "5")],
+        }];
+        let yaml = render_spec(
+            "fixture.cases",
+            "fixture.cases.binding.yaml",
+            &reg,
+            "fixture.cases",
+            &[],
+            &cases,
+            true,
+        );
+        assert!(
+            yaml.starts_with("# Spec extracted from your code by `specgate extract --cases`."),
+            "{yaml}"
+        );
+        assert!(
+            yaml.contains("cases:\n  - name: adds_two_and_three\n    operation: add\n    inputs:\n      a: 2\n      b: 3\n"),
+            "{yaml}"
+        );
+        assert!(
+            yaml.contains("    expected:\n      - $run: add\n      - add.a: \"2\"\n      - add.b: \"3\"\n      - $result: \"5\"\n"),
+            "{yaml}"
+        );
+        assert!(!yaml.contains("\ncases: []\n"), "{yaml}");
     }
 }

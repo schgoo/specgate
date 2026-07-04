@@ -1,0 +1,8 @@
+# Binding extracted by `specgate extract`: links this spec to the code under
+# test. Point `package_root` at the crate you want to run the spec against.
+#
+# Docs: https://github.com/schgoo/specgate
+language: rust
+targets:
+  default:
+    package_root: ..
