@@ -92,6 +92,9 @@
           "type": "object",
           "description": "For inline struct definitions. Keys are field names, values are type references."
         },
+        "default": {
+          "description": "Default value for an operation input. Declaring `default` makes the input OPTIONAL: a case may omit it, and the harness supplies this value (materialized like any case input, so scalar and complex/named-type defaults both work). Inputs without `default` remain required."
+        },
         "keys": {
           "description": "Key type for map types.",
           "$ref": "#/definitions/typeReference"

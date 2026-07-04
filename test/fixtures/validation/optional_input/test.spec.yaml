@@ -1,0 +1,28 @@
+spec_version: "0.4.0"
+name: test.optional_input
+binding: binding.yaml
+operations:
+  scale:
+    desc: Multiply value by factor; factor is optional (defaults to 2).
+    inputs:
+      value: i32
+      factor:
+        type: i32
+        default: 2
+    outputs:
+      - $result: i32
+cases:
+  # Omits the defaulted `factor` — must NOT raise an input_completeness error.
+  - name: omits_defaulted_factor
+    desc: A case may omit an input that declares a default
+    operation: scale
+    inputs: { value: 5 }
+    expected:
+      - $result: "10"
+  # Provides both — always valid.
+  - name: provides_factor
+    desc: Providing the input is still valid
+    operation: scale
+    inputs: { value: 5, factor: 3 }
+    expected:
+      - $result: "15"

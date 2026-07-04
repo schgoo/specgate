@@ -458,7 +458,8 @@ fn render_case(out: &mut String, case: &Case, spec: &Spec, annotated: &Annotated
 
     for op in ops {
         let decl = annotated.operations.get(op);
-        let mut call = render_op_call(op, decl, &case.inputs, &bindings, annotated);
+        let op_defaults = spec.op_input_defaults.get(op);
+        let mut call = render_op_call(op, decl, &case.inputs, &bindings, annotated, op_defaults);
         if spec.async_ops.contains(op) {
             call = format!("sg_block_on({call})");
         }
@@ -593,6 +594,7 @@ fn render_op_call(
     inputs: &BTreeMap<String, Value>,
     bindings: &[crate::scan::SetupBinding],
     annotated: &AnnotatedSource,
+    op_defaults: Option<&BTreeMap<String, Value>>,
 ) -> String {
     let Some(decl) = decl else {
         return format!("fut::{op_name}()");
@@ -604,16 +606,21 @@ fn render_op_call(
             .iter()
             .find(|b| matches!(b.target, crate::scan::SetupTarget::Receiver))
             .map_or_else(|| "/* missing receiver */".to_string(), |b| b.var.clone());
-        let args = render_op_args(decl, inputs, bindings);
+        let args = render_op_args(decl, inputs, bindings, op_defaults);
         return format!("{recv_var}.{}({args})", decl.sig.fn_ident);
     }
 
     let _ = annotated;
-    let args = render_op_args(decl, inputs, bindings);
+    let args = render_op_args(decl, inputs, bindings, op_defaults);
     format!("fut::{}({args})", decl.sig.fn_ident)
 }
 
-fn render_op_args(decl: &OpDecl, inputs: &BTreeMap<String, Value>, bindings: &[crate::scan::SetupBinding]) -> String {
+fn render_op_args(
+    decl: &OpDecl,
+    inputs: &BTreeMap<String, Value>,
+    bindings: &[crate::scan::SetupBinding],
+    op_defaults: Option<&BTreeMap<String, Value>>,
+) -> String {
     let mut parts = Vec::new();
     for (p, ty) in &decl.sig.params {
         // If a setup binding fills this parameter, pass its variable.
@@ -631,7 +638,10 @@ fn render_op_args(decl: &OpDecl, inputs: &BTreeMap<String, Value>, bindings: &[c
             parts.push(format!("{prefix}{}", b.var));
             continue;
         }
-        let v = inputs.get(p);
+        // Case-provided input wins; otherwise fall back to a declared default
+        // for this input, materialized through the same `value_to_rust` path so
+        // scalar and complex/named-type defaults both work.
+        let v = inputs.get(p).or_else(|| op_defaults.and_then(|d| d.get(p)));
         parts.push(value_to_rust(v, ty));
     }
     parts.join(", ")
@@ -738,6 +748,7 @@ mod tests {
             target: None,
             cases: vec![],
             async_ops: BTreeSet::new(),
+            op_input_defaults: BTreeMap::new(),
         }
     }
 
@@ -817,6 +828,73 @@ mod tests {
         assert!(
             manifest.contains("path ="),
             "manifest should contain path deps when is_local=true, got:\n{manifest}"
+        );
+    }
+
+    fn op_decl(params: &[(&str, &str)]) -> OpDecl {
+        OpDecl {
+            sig: crate::scan::FnSig {
+                fn_ident: "scale".into(),
+                params: params.iter().map(|(n, t)| ((*n).to_string(), (*t).to_string())).collect(),
+                return_type: "i32".into(),
+            },
+            method_of: None,
+            takes_self: false,
+        }
+    }
+
+    #[test]
+    fn render_op_args_uses_declared_default_when_case_omits_input() {
+        let decl = op_decl(&[("value", "i32"), ("factor", "i32")]);
+        let mut inputs = BTreeMap::new();
+        inputs.insert("value".to_string(), Value::Number(5.into()));
+        let mut defaults = BTreeMap::new();
+        defaults.insert("factor".to_string(), Value::Number(2.into()));
+
+        let args = render_op_args(&decl, &inputs, &[], Some(&defaults));
+        assert_eq!(args, "5i32, 2i32");
+    }
+
+    #[test]
+    fn render_op_args_case_value_overrides_default() {
+        let decl = op_decl(&[("value", "i32"), ("factor", "i32")]);
+        let mut inputs = BTreeMap::new();
+        inputs.insert("value".to_string(), Value::Number(5.into()));
+        inputs.insert("factor".to_string(), Value::Number(3.into()));
+        let mut defaults = BTreeMap::new();
+        defaults.insert("factor".to_string(), Value::Number(2.into()));
+
+        let args = render_op_args(&decl, &inputs, &[], Some(&defaults));
+        assert_eq!(args, "5i32, 3i32");
+    }
+
+    #[test]
+    fn render_op_args_no_default_falls_back_to_default_trait() {
+        let decl = op_decl(&[("value", "i32"), ("factor", "i32")]);
+        let mut inputs = BTreeMap::new();
+        inputs.insert("value".to_string(), Value::Number(5.into()));
+
+        // No declared default and case omits `factor` → prior behavior.
+        let args = render_op_args(&decl, &inputs, &[], None);
+        assert_eq!(args, "5i32, Default::default()");
+    }
+
+    #[test]
+    fn render_op_args_complex_default_materializes_via_yaml_deser() {
+        let decl = op_decl(&[("base", "i32"), ("by", "Offset")]);
+        let mut inputs = BTreeMap::new();
+        inputs.insert("base".to_string(), Value::Number(5.into()));
+        let default_by: Value = serde_yaml::from_str("{ dx: 1, dy: 1 }").unwrap();
+        let mut defaults = BTreeMap::new();
+        defaults.insert("by".to_string(), default_by);
+
+        let args = render_op_args(&decl, &inputs, &[], Some(&defaults));
+        // The complex default flows through the same `value_to_rust` path used
+        // for case-provided complex inputs (serde_yaml deserialization).
+        assert!(args.starts_with("5i32, "), "args={args}");
+        assert!(
+            args.contains("yaml_deser") || args.contains("Offset"),
+            "complex default not materialized: {args}"
         );
     }
 }

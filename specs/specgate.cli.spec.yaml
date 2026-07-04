@@ -247,6 +247,25 @@ cases:
                   check: input_completeness
                   message: "case 'missing_input' missing required input 'b' for operation 'add'"
 
+  - name: validate_optional_input_ok
+    desc: >
+      Omitting an input that declares a `default:` is allowed — the input is
+      optional, so input_completeness does not flag it. (Contrast the required
+      input above.) Validation passes with no findings.
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/optional_input
+      strict: false
+      assertions_dir: ""
+      spec_only: true
+    expected:
+      - $result:
+          Pass:
+            report:
+              errors: 0
+              warnings: 0
+              findings: []
+
   # ================================================================
   # Validate — 6. Expected format
   # ================================================================

@@ -1,0 +1,59 @@
+spec_version: "0.4.0"
+name: fixture.default_input
+binding: binding.yaml
+
+types:
+  Offset:
+    dx: i32
+    dy: i32
+
+operations:
+  scale:
+    inputs:
+      value: i32
+      factor:
+        type: i32
+        default: 2
+    outputs:
+      - $result: i32
+  shift:
+    inputs:
+      base: i32
+      by:
+        type: Offset
+        default: { dx: 1, dy: 1 }
+    outputs:
+      - $result: i32
+
+cases:
+  # Scalar default: omitting `factor` uses 2 -> 5 * 2 = 10.
+  - name: uses_default_factor
+    desc: Omitting a defaulted scalar input applies the default
+    operation: scale
+    inputs: { value: 5 }
+    expected:
+      - $result: "10"
+
+  # Overriding the default works as usual -> 5 * 3 = 15.
+  - name: explicit_factor
+    desc: Providing the input overrides the default
+    operation: scale
+    inputs: { value: 5, factor: 3 }
+    expected:
+      - $result: "15"
+
+  # Complex default: omitting `by` uses {dx:1, dy:1} -> 5 + 1 + 1 = 7.
+  - name: uses_default_offset
+    desc: Omitting a defaulted complex input applies the default
+    operation: shift
+    inputs: { base: 5 }
+    expected:
+      - $result: "7"
+
+  # Overriding the complex default -> 5 + 10 + 20 = 35.
+  - name: explicit_offset
+    desc: Providing the complex input overrides the default
+    operation: shift
+    inputs: { base: 5, by: { dx: 10, dy: 20 } }
+    expected:
+      - $result: "35"

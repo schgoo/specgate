@@ -16,6 +16,11 @@ pub struct Spec {
     pub cases: Vec<Case>,
     /// Names of operations declared `async: true` in the spec.
     pub async_ops: BTreeSet<String>,
+    /// Declared `default:` values for operation inputs, keyed by operation name
+    /// then input name. Declaring a default makes the input optional: when a
+    /// case omits it, the harness materializes this value as if the case had
+    /// provided it. Scalar and complex/named-type defaults are both captured.
+    pub op_input_defaults: BTreeMap<String, BTreeMap<String, YValue>>,
 }
 
 #[derive(Debug, Clone)]
@@ -62,6 +67,7 @@ fn parse_spec_value(v: &YValue) -> Result<Spec, ParseError> {
     let target = map.get(YValue::String("target".into())).and_then(|t| t.as_str()).map(String::from);
 
     let mut async_ops = BTreeSet::new();
+    let mut op_input_defaults: BTreeMap<String, BTreeMap<String, YValue>> = BTreeMap::new();
     if let Some(YValue::Mapping(ops)) = map.get(YValue::String("operations".into())) {
         for (k, v) in ops {
             let Some(name) = k.as_str() else { continue };
@@ -70,6 +76,22 @@ fn parse_spec_value(v: &YValue) -> Result<Spec, ParseError> {
                 && a.as_bool() == Some(true)
             {
                 async_ops.insert(name.to_string());
+            }
+            // Capture per-input `default:` values. An input may be a bare
+            // string (its type) or a mapping `{type, default, ...}`; only the
+            // mapping form can declare a default.
+            if let Some(YValue::Mapping(inputs)) = body.get(YValue::String("inputs".into())) {
+                for (ik, iv) in inputs {
+                    let Some(iname) = ik.as_str() else { continue };
+                    if let YValue::Mapping(idef) = iv
+                        && let Some(default) = idef.get(YValue::String("default".into()))
+                    {
+                        op_input_defaults
+                            .entry(name.to_string())
+                            .or_default()
+                            .insert(iname.to_string(), default.clone());
+                    }
+                }
             }
         }
     }
@@ -90,6 +112,7 @@ fn parse_spec_value(v: &YValue) -> Result<Spec, ParseError> {
         target,
         cases,
         async_ops,
+        op_input_defaults,
     })
 }
 
@@ -487,6 +510,38 @@ pub fn binding_path_resolved(spec_path: &Path, binding: &str) -> PathBuf {
     }
     // Fall back to the spec-relative path (will surface as "not found").
     direct
+}
+
+#[cfg(test)]
+mod op_input_default_tests {
+    use super::*;
+
+    fn spec(s: &str) -> Spec {
+        let v: YValue = serde_yaml::from_str(s).expect("valid yaml");
+        parse_spec(&v).expect("parse")
+    }
+
+    #[test]
+    fn captures_scalar_and_complex_defaults() {
+        let s = spec(
+            "operations:\n  scale:\n    inputs:\n      value: i32\n      factor:\n        type: i32\n        default: 2\n  shift:\n    inputs:\n      base: i32\n      by:\n        type: Offset\n        default: { dx: 1, dy: 1 }\ncases:\n  - name: c\n    operation: scale\n    inputs: { value: 5 }\n",
+        );
+        let scale = s.op_input_defaults.get("scale").expect("scale defaults");
+        assert_eq!(scale.get("factor"), Some(&YValue::Number(2.into())));
+        assert!(!scale.contains_key("value"), "non-defaulted input is not captured");
+
+        let shift = s.op_input_defaults.get("shift").expect("shift defaults");
+        let by = shift.get("by").expect("by default");
+        assert!(by.is_mapping(), "complex default preserved as a mapping");
+    }
+
+    #[test]
+    fn bare_string_inputs_have_no_defaults() {
+        let s = spec(
+            "operations:\n  add:\n    inputs:\n      a: i32\n      b: i32\ncases:\n  - name: c\n    operation: add\n    inputs: { a: 1, b: 2 }\n",
+        );
+        assert!(!s.op_input_defaults.contains_key("add"));
+    }
 }
 
 #[cfg(test)]

@@ -712,3 +712,30 @@ fn enum_event_spec() {
         )]
     )));
 }
+
+// ---------------------------------------------------------------------------
+// Optional operation inputs (spec-level `default:`)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn default_input_spec() {
+    // Declaring `default:` on an operation input makes it optional. A case may
+    // omit it (the harness materializes the declared default — scalar or
+    // complex) or provide it (the case value overrides the default).
+    let r = complete(run("test/rust/crates/specgate-fixtures/specs/default_input.spec.yaml"));
+    assert_eq!(r.len(), 4);
+    check_case(&r[0], "uses_default_factor", CaseStatus::Pass);
+    check_case(&r[1], "explicit_factor", CaseStatus::Pass);
+    check_case(&r[2], "uses_default_offset", CaseStatus::Pass);
+    check_case(&r[3], "explicit_offset", CaseStatus::Pass);
+
+    // Scalar default: omitting `factor` materializes 2 -> 5 * 2 = 10, and the
+    // applied default is echoed into the trace as a normal input.
+    assert!(r[0].traces.contains(&ev("scale.factor", "2")), "traces={:?}", r[0].traces);
+    assert!(r[0].traces.contains(&ev("$result", "10")));
+
+    // Complex default: omitting `by` materializes {dx:1, dy:1} -> 5 + 1 + 1 = 7.
+    assert!(r[2].traces.contains(&ev("$result", "7")), "traces={:?}", r[2].traces);
+    // Explicit complex value overrides the default -> 5 + 10 + 20 = 35.
+    assert!(r[3].traces.contains(&ev("$result", "35")));
+}

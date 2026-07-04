@@ -238,6 +238,9 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
 #[derive(Debug, Default)]
 struct OpDecl {
     declared_inputs: Vec<String>,
+    /// Inputs that declare a `default:` value are optional — a case may omit
+    /// them without tripping `input_completeness`.
+    defaulted_inputs: BTreeSet<String>,
 }
 
 fn check_file(
@@ -278,9 +281,16 @@ fn check_file(
             if let Some(body) = v.as_mapping()
                 && let Some(Value::Mapping(inputs)) = body.get(Value::String("inputs".into()))
             {
-                for (ik, _) in inputs {
+                for (ik, iv) in inputs {
                     if let Some(s) = ik.as_str() {
                         decl.declared_inputs.push(s.to_string());
+                        // A mapping-valued input that carries a `default:` key is
+                        // optional (may be omitted by a case).
+                        if let Some(body) = iv.as_mapping()
+                            && body.get(Value::String("default".into())).is_some()
+                        {
+                            decl.defaulted_inputs.insert(s.to_string());
+                        }
                     }
                 }
             }
@@ -390,7 +400,7 @@ fn check_file(
                 let declared_set: BTreeSet<String> = decl.declared_inputs.iter().cloned().collect();
 
                 for required in &decl.declared_inputs {
-                    if !provided.contains(required) {
+                    if !provided.contains(required) && !decl.defaulted_inputs.contains(required) {
                         findings.push(ValidationFinding {
                             severity: Severity::Error,
                             check: "input_completeness".into(),
@@ -1096,5 +1106,44 @@ mod tests {
     fn no_value_refs_yields_no_warnings() {
         let findings = warns("types:\n  Rec:\n    id: i32\n    name: string\n");
         assert!(findings.is_empty());
+    }
+
+    fn check_findings(yaml: &str) -> Vec<ValidationFinding> {
+        let spec: Value = serde_yaml::from_str(yaml).unwrap();
+        let mut findings = Vec::new();
+        check_file(
+            &spec,
+            "t.spec.yaml",
+            Path::new("t.spec.yaml"),
+            &BTreeMap::new(),
+            false,
+            true,
+            &mut findings,
+        );
+        findings
+    }
+
+    #[test]
+    fn omitting_defaulted_input_is_not_flagged() {
+        let findings = check_findings(
+            "spec_version: \"0.4.0\"\noperations:\n  scale:\n    inputs:\n      value: i32\n      factor:\n        type: i32\n        default: 2\n    outputs:\n      - $result: i32\ncases:\n  - name: omits_factor\n    operation: scale\n    inputs: { value: 5 }\n    expected:\n      - $result: \"10\"\n",
+        );
+        assert!(
+            !findings.iter().any(|f| f.check == "input_completeness"),
+            "defaulted input must not raise input_completeness: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn omitting_required_input_still_errors() {
+        let findings = check_findings(
+            "spec_version: \"0.4.0\"\noperations:\n  add:\n    inputs:\n      a: i32\n      b: i32\n    outputs:\n      - $result: i32\ncases:\n  - name: missing_b\n    operation: add\n    inputs: { a: 1 }\n    expected:\n      - $result: \"1\"\n",
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.check == "input_completeness" && f.message.contains("missing required input 'b'")),
+            "required input regression: {findings:?}"
+        );
     }
 }
