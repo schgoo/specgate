@@ -75,6 +75,58 @@ operations:
     outputs: [$result]
 ```
 
+### Inputs
+
+`inputs` is a map of parameter names to type references. A value is a scalar
+type (`i32`, `string`, …), a named type, or an inline complex type. Case
+`inputs:` bind values to these parameters by name.
+
+#### Optional inputs via `default:`
+
+An input written as a mapping with a `default:` key becomes **optional**: a
+case may omit it and the harness supplies the declared default. Inputs without
+`default:` remain required. Defaults are materialized like any case input, so
+both scalar and complex/named-type defaults work:
+
+```yaml
+types:
+  Offset: { dx: i32, dy: i32 }
+
+operations:
+  scale:
+    inputs:
+      value: i32
+      factor:
+        type: i32
+        default: 2            # scalar default → optional
+    outputs: [$result]
+  shift:
+    inputs:
+      base: i32
+      by:
+        type: Offset
+        default: { dx: 1, dy: 1 }   # complex default → optional
+    outputs: [$result]
+```
+
+A case that omits the defaulted input uses the default; providing it overrides
+the default:
+
+```yaml
+- name: uses_default_factor
+  operation: scale
+  inputs: { value: 5 }         # factor defaults to 2 → 10
+  expected:
+    - $result: "10"
+- name: explicit_factor
+  operation: scale
+  inputs: { value: 5, factor: 3 }   # override → 15
+  expected:
+    - $result: "15"
+```
+
+Canonical fixture: `default_input.spec.yaml`.
+
 ### Outputs
 
 Outputs is a list of event names the operation can produce. Each item is
@@ -104,9 +156,12 @@ declared in the operation's outputs.
 
 Auto-generated harness fields always use the `$` prefix:
 
+- `$run` — an operation invocation boundary (`{$run: <operation>}`)
 - `$result` — return value
-- `$outcome` — result / option / panic outcome
-- `$error` — error payload or panic message
+- `$outcome` — result / option / panic outcome (`Ok`/`Error`, `Some`/`None`, …)
+- `$error` — error payload for the `Err` arm of a `Result`
+- `$fault` — panic / unwind message for an unrecoverable operation
+  (canonical fixture: `unrecoverable.spec.yaml`)
 
 User-authored capture names stay bare (`count`, `shape.radius`,
 `db.request`).
@@ -151,6 +206,65 @@ runtime entry; the runtime is chosen by the binding target's `runtime:` field
 Reactor-backed futures (timers, I/O) need the matching runtime declared on the
 target. Canonical fixtures: `async_fetch.spec.yaml` (trivial async),
 `async_smol_timer.spec.yaml` and `async_tokio_timer.spec.yaml` (reactor-backed).
+
+## Type reference
+
+Type references appear in operation `inputs`, `outputs`, and named `types`. A
+reference is either a **string** (a scalar built-in or a named type) or an
+**inline object** (a complex/collection type).
+
+### Scalar built-ins
+
+| Type | Meaning |
+|------|---------|
+| `string` | UTF-8 string |
+| `i32`, `i64` | Signed integers |
+| `f64` | Floating point |
+| `bool` | Boolean |
+| `value` | The universal structured value (see below) |
+
+### `value` — the universal structured type
+
+`value` is a **first-class built-in**: the same value lattice the runtime uses
+for every trace observation. A `value` is any scalar, or a `List`, `Map`, or
+`Set` of `value`. Use it when an output/field is a heterogeneous or
+open-ended structured value rather than a fixed shape.
+
+The matcher compares a `value` by its runtime kind:
+
+- **strings** — by equality
+- **lists** — as an ordered subsequence (or in any order with `$unordered`)
+- **maps** — by matching each asserted key and its value
+- **sets** — by presence (membership), order-independent
+- an **absent event** represents a null/`None` field
+
+Because the runtime `Value` is the spec's own value lattice, `value` cannot
+itself be modelled as a `SpecEvent` type — it is built in. Source of truth:
+the `value` entry in `spec-schema.json` and
+`specs/specgate.harness.spec.yaml` (the harness models its own `TraceEvent`
+values as `value`).
+
+### Complex / collection types (inline objects)
+
+| `type:` | Extra keys | Meaning |
+|---------|-----------|---------|
+| `list` | `items` | Ordered list of the item type |
+| `set` | `items` | Unordered unique collection |
+| `map` | `keys`, `values` | Keyed collection |
+| `optional` | `items` | Optional value |
+| a scalar | — | Same as the bare scalar string form |
+
+```yaml
+outputs:
+  - readings: { type: list, items: i32 }
+  - attributes: { type: map, keys: string, values: string }
+```
+
+### Named types
+
+Define reusable structs and enums under `types:` and reference them by name.
+See [authoring.md](authoring.md#defining-types) for struct/enum syntax and
+guidance on when to decompose into primitives instead.
 
 ## `cases`
 
@@ -416,8 +530,7 @@ Canonical fixture: `anywhere_event.spec.yaml`.
 
 ### Structured values and assertion operators
 
-Observed values are structured `Value`s, not flat strings. The matcher
-supports:
+Observed values are structured `Value`s, not flat strings. A `Value` is one of:
 
 - `String`
 - `Integer`
@@ -450,28 +563,58 @@ expected:
       $matches: "^[A-Z]"
 ```
 
-| Operator | Meaning |
-|----------|---------|
-| `$eq` | Explicit equality |
-| `$ne` | Value inequality (not equal to the given value) |
-| `$size` | Collection size |
-| `$contains` | Contains one value |
-| `$containsAll` | Contains all listed values |
-| `$excludes` | Contains none of the listed values |
-| `$match` | Partial object / map match |
-| `$exists` | Field is present |
-| `$any` | At least one element matches |
-| `$every` | Every element matches |
-| `$type` | Value has the given type |
-| `$matches` | Regex match |
-| `$not` | Negates another operator expression (e.g. `{ $not: { $gt: 5 } }`) |
-| `$gt`, `$gte`, `$lt`, `$lte` | Numeric comparison |
+#### Complete operator catalog
 
-Following MongoDB semantics, `$not` negates an operator expression and never
-takes a bare value — use `$ne` for value inequality (`{ $ne: 100 }`), and
-`$not` to invert another operator (`{ $not: { $gt: 5 } }`).
+Operators are **MongoDB-aligned**. The full set the matcher parses
+(`rust/crates/specgate-harness/src/spec.rs`, `parse_single_op`):
 
-#### Nested matchers
+| Operator | Argument | Meaning |
+|----------|----------|---------|
+| `$eq` | value | Explicit deep equality |
+| `$ne` | value | Value inequality — not equal to the given value |
+| `$gt` | number | Greater than |
+| `$gte` | number | Greater than or equal |
+| `$lt` | number | Less than |
+| `$lte` | number | Less than or equal |
+| `$size` | integer | Collection (or string) length equals |
+| `$contains` | value or matcher | Collection contains one matching element |
+| `$containsAll` | list | Contains every listed value (order-independent) |
+| `$excludes` | list | Contains none of the listed values |
+| `$match` | map | Partial object match — asserts listed keys, ignores others |
+| `$exists` | bool | Field is present (`true`) / absent (`false`) |
+| `$any` | value or matcher | At least one element matches |
+| `$every` | value or matcher | Every element matches |
+| `$type` | string | Value has the given runtime type name |
+| `$matches` | string | Regex match (string values only) |
+| `$not` | operator expr | Negates **another operator expression** |
+
+Several operators may be combined in one mapping (implicitly AND-ed):
+`temperature: { $gt: 60, $lt: 100 }`.
+
+**`$type` accepts** the runtime type names: `string`, `int`, `float`, `bool`,
+`list`, `map`, `set`.
+
+**`$ne` vs `$not`** — following MongoDB semantics, `$not` negates an *operator
+expression* and never takes a bare value. Use `$ne` for value inequality
+(`{ $ne: 100 }`); use `$not` to invert another operator
+(`{ $not: { $gt: 5 } }`). Passing a bare value to `$not` is a parse error.
+
+`$contains`, `$any`, and `$every` accept either a literal value or a nested
+matcher (`readings: { $every: { $gt: 60 } }`).
+
+#### Trace-position assertions and event keys
+
+Alongside value operators, the `expected:` list uses these top-level keys
+(see the harness spec header, `specs/specgate.harness.spec.yaml:7-12`):
+
+| Key | Meaning |
+|-----|---------|
+| `$run` | Matches a `Run` for the named operation |
+| `$unordered` | A group of assertions that may match in any order at one point |
+| `$anywhere` | Assertions that match anywhere in the trace, position irrelevant |
+
+Auto-generated event keys addressable from `expected:` are `$result`,
+`$outcome`, `$error`, and `$fault` (see "Auto-generated harness fields" above).
 
 Operators may appear at any depth inside a structured value — a plain map that
 contains a nested operator is treated as an implicit `$match`, so you can mix
@@ -567,4 +710,10 @@ expected:
 **One spec = one state boundary.** Operations that share state belong in
 the same spec; operations with independent state belong in separate specs.
 Specs share **types** (not state) via `depends_on:`.
+
+`depends_on` lists the other components (spec names) whose types this spec
+references. A component is declared in code with `spec_component!("name")`,
+and a spec's `name` **is** its component. See
+[annotations.md](annotations.md#spec_component--the-component-axis) for how
+components are declared and how per-item overrides work.
 

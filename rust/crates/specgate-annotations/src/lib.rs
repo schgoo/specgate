@@ -1,8 +1,15 @@
-//! `SpecGate` annotations — public façade.
+//! `SpecGate` annotations — the public façade that annotated code depends on.
 //!
-//! Re-exports the proc-macros from `specgate-annotations-macros` and the
-//! runtime support from `specgate-runtime`. Fixture code typically does
-//! `use specgate_annotations::*;` to pull in everything in one shot.
+//! Re-exports the proc-macros from `specgate-annotations-macros`
+//! (`#[spec_operation]`, `#[spec_setup]`, `#[spec_mock]`,
+//! `#[derive(SpecEvent)]`, `#[spec_event]`, `#[spec_input]`,
+//! `spec_component!`, `spec_trace!`) and the runtime support from
+//! `specgate-runtime`. Annotated code typically does
+//! `use specgate_annotations::*;` (or `use specgate::*;` via the umbrella
+//! crate) to pull in everything at once.
+//!
+//! Annotations are zero-cost in production: without the trace feature the
+//! macros expand to no-ops.
 
 pub use specgate_annotations_macros::{SpecEvent, spec_component, spec_mock, spec_operation, spec_setup, spec_trace};
 // Re-export the SpecEvent trait under the same name — traits live in the

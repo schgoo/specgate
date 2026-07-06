@@ -43,6 +43,57 @@ contents of the spec's `expected:` list.
 `#[derive(SpecEvent)]` + `#[spec_event]` on fields; inline capture is
 `spec_trace!()`. Those two cover every observation pattern.
 
+**Operations must be public.** A spec is a contract over a component's *public*
+API, and the harness reaches each operation through the crate's public path —
+it links the target crate as a dependency, it does not read private internals.
+So a `#[spec_operation]` function must be `pub` and live in a `pub mod`-exposed
+module (or at the crate root). A non-public annotated operation is rejected with
+a "not publicly reachable" error rather than run.
+
+## `spec_component!` — the component axis
+
+Every annotated item belongs to a **component**. A component is a spec: a
+spec's `name` (e.g. `comp.core`) *is* a component name, and `depends_on:`
+lists other components. Each crate declares its default component once at the
+crate root:
+
+```rust
+// lib.rs / main.rs / an integration-test file root — invoke ONCE.
+specgate::spec_component!("comp.core");
+```
+
+`spec_component!` expands to a crate-root `pub(crate) const
+__SPECGATE_COMPONENT` that `#[spec_operation]`, `#[spec_setup]`, and
+`#[derive(SpecEvent)]` reference when no per-item override is given. **Omitting
+`spec_component!` in a crate that has annotations is a compile-time error**
+("cannot find value `__SPECGATE_COMPONENT` in the crate root").
+
+### Per-item override
+
+An item can belong to a different component via `spec = "…"`:
+
+```rust
+spec_component!("comp.core");                       // crate default
+
+#[spec_operation("make_widget")]                    // belongs to comp.core
+pub fn make_widget() -> Widget { /* … */ }
+
+#[spec_operation("assemble", spec = "comp.app")]    // override → comp.app
+pub fn assemble() -> Widget { /* … */ }
+```
+
+- `#[spec_operation("name", spec = "component")]` — operation override
+- `#[spec_setup("operation", spec = "component")]` — setup override (also
+  combinable with `fills = "param"`, order-independent)
+- `#[derive(SpecEvent)]` with `#[spec_component("component")]` on the type —
+  type override
+
+When one crate hosts operations/types across two components and a `$result`
+type is owned by another component, extraction derives a `depends_on` edge and
+references the foreign type by bare name (see
+[extract.md](extract.md)). Canonical fixture:
+`test/rust/crates/specgate-component-fixture/src/lib.rs`.
+
 ## `#[derive(SpecEvent)]`
 
 `SpecEvent` derive is how structured values become traceable without writing

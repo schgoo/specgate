@@ -11,6 +11,7 @@ Read this first. Then read only the topics relevant to your current task.
 | Binding files | [`bindings.md`](bindings.md) | When writing or reading a binding YAML |
 | Binding targets | [`targets.md`](targets.md) | When configuring multi-target bindings or per-case target overrides |
 | Validation & failure cases | [`validation.md`](validation.md) | When debugging why a case fails to load or match |
+| **Extracting a spec** | [`extract.md`](extract.md) | When deriving a `.spec.yaml` from annotated code (`specgate extract`) |
 | Rust conventions | [`rust.md`](rust.md) | When implementing in Rust |
 | C# conventions | [`csharp.md`](csharp.md) | When implementing in C# |
 | Greenfield workflow | [`greenfield.md`](greenfield.md) | When no implementation exists yet |

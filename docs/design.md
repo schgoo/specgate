@@ -357,6 +357,44 @@ The runtime stores trace events in a thread-local buffer. The generated
 test takes ownership of that buffer between operation invocations; this
 is what makes the harness reentrant across cases without coordination.
 
+### Public API only
+
+The harness reaches operations through the target crate's **public path**: it
+links the crate as a dependency and aliases it as `use <crate>[::<module>] as
+fut;`, rather than inlining source. This enforces the principle that a spec is a
+contract over a component's *public* API — an annotated operation that is not
+publicly reachable (a non-`pub` function, or an unexposed module) is rejected
+with a clear "not publicly reachable" diagnostic instead of being run. The
+generated runner is glue-only and carries `#![forbid(unsafe_code)]`; the linked
+target keeps whatever unsafe policy it defines.
+
+### Async operations
+
+An operation marked `async: true` in the spec has an asynchronous entry point.
+The generated runner drives its future to completion with a single top-level
+runtime entry. The runtime is chosen per binding target via the `runtime:`
+field: `smol` (the default, `smol::block_on`) or `tokio` (a current-thread
+runtime). Reactor-backed futures — timers, I/O — require the matching runtime
+declared on the target. See
+[spec-format.md](knowledge/spec-format.md#async-operations) and
+[bindings.md](knowledge/bindings.md#async-runtime).
+
+---
+
+## Reverse direction: `specgate extract`
+
+The harness normally runs **spec + code → results**. `specgate extract` runs
+the reverse — **annotated code → spec** — deriving a `.spec.yaml` (plus a
+sibling binding) from an already-annotated crate.
+
+Extraction is deterministic and LLM-free: a scaffolded discovery binary depends
+on the target crate, reads the operation/type registry the annotations register
+at link time, and prints it as JSON, which is mapped to a spec skeleton. By
+default only the schema (operations, inputs/outputs, types) is derived, leaving
+`cases:` empty; with `--cases`, the crate's existing tests are run under record
+mode and each passing test is captured as a case. See
+[extract.md](knowledge/extract.md).
+
 ---
 
 ## Spec boundaries = state boundaries

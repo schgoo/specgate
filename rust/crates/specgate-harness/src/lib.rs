@@ -1,15 +1,23 @@
-//! `SpecGate` harness — entry point.
+//! `SpecGate` harness — compiles annotated code, runs its operations, collects
+//! runtime traces, and matches them against a spec's expected assertions.
 //!
-//! `run_spec(path)` loads a spec, locates the fixture source via the
-//! binding, generates a temporary Cargo project that includes the
-//! fixture and invokes its annotated functions, shells out to
-//! `cargo run` to compile + execute, then reads emitted traces back
-//! and subsequence-matches against each case's `expected:` list.
+//! `run_spec(path)` loads a spec, resolves its binding, and for each case
+//! generates a temporary Cargo project (the "runner") that LINKS the target
+//! crate as a dependency and calls its public operations, shells out to
+//! `cargo run` to compile + execute, then reads the emitted traces back and
+//! subsequence-matches them against each case's `expected:` list.
 //!
-//! The harness **never** parses or interprets the fixture source itself.
-//! It only scans for attribute names and signatures (to validate the
-//! spec references real symbols and to know how to call them), and
-//! delegates everything else to the real Rust toolchain.
+//! Key design points:
+//! - A spec is a contract over a component's PUBLIC API, so the harness reaches
+//!   each operation only through the target crate's public path
+//!   (`use <crate>[::<module>] as fut;`) — it never inlines or interprets the
+//!   source. A non-public annotated operation is rejected up front with a
+//!   "not publicly reachable" diagnostic.
+//! - It scans source only for attribute names and signatures (to validate the
+//!   spec references real symbols and to know how to call them); everything
+//!   else is delegated to the real Rust toolchain.
+//! - Matching is a subsequence match with a rich operator set; async operations
+//!   are driven on a per-target runtime (`smol` or `tokio`).
 
 mod binding;
 mod codegen;

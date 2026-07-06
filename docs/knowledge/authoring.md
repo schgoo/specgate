@@ -55,6 +55,22 @@ operations:
 - Setups are invisible to the spec — never declare them; link a constructor in
   code with `#[spec_setup("operation")]` (see annotations.md)
 
+### Optional inputs with defaults
+
+Give an input a `default:` to make it optional — a case may omit it and the
+harness supplies the default (scalar or complex):
+
+```yaml
+operations:
+  scale:
+    inputs:
+      value: i32
+      factor: { type: i32, default: 2 }   # optional; omitting it uses 2
+    outputs: [$result]
+```
+
+See [spec-format.md](spec-format.md#optional-inputs-via-default) for details.
+
 ## Writing test cases
 
 A case exercises one operation and asserts on the trace:
@@ -85,6 +101,12 @@ expected:
       $size: 3
       $contains: "foo"
 ```
+
+The full, MongoDB-aligned operator catalog (`$eq $ne $gt $gte $lt $lte $size
+$contains $containsAll $excludes $match $exists $any $every $type $matches
+$not`) plus the trace-position keys (`$run $unordered $anywhere`) are
+documented in
+[spec-format.md](spec-format.md#complete-operator-catalog).
 
 ### Multi-step cases
 

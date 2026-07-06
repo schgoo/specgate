@@ -6,6 +6,18 @@
 //! providing a non-stochastic harness that validates implementations against
 //! specs using runtime traces.
 //!
+//! ## What `SpecGate` can do
+//!
+//! - Assert on the runtime traces operations emit, with a rich set of matcher
+//!   operators (`$gt`, `$contains`, `$match`, `$type`, `$not`, ...) and position
+//!   directives (`$unordered`, `$anywhere`).
+//! - Model state via setups, mock dependencies, and capture structured values —
+//!   structs, enums, lists/maps/sets, and the built-in `value` type.
+//! - Optional inputs with defaults, property-based cases, and async operations
+//!   (driven on a `smol` or `tokio` runtime).
+//! - Group a crate's public API into components, and run in reverse with
+//!   `specgate extract` to derive a spec from annotated code.
+//!
 //! ## Usage
 //!
 //! Add to your `Cargo.toml`:
@@ -21,14 +33,52 @@
 //! Annotate your code:
 //!
 //! ```rust,ignore
-//! use specgate::{spec_operation, SpecEvent};
+//! use specgate::*;
 //!
+//! // Declare the component this crate implements (once, at the crate root).
+//! spec_component!("counter.service");
+//!
+//! // Capture selected fields of a struct into the trace.
 //! #[derive(SpecEvent)]
-//! struct Point { x: i32, y: i32 }
+//! struct Count {
+//!     #[spec_event]
+//!     value: i32,
+//! }
 //!
-//! #[spec_operation("add_points")]
-//! fn add_points(a: Point, b: Point) -> Point {
-//!     Point { x: a.x + b.x, y: a.y + b.y }
+//! struct Counter {
+//!     value: i32,
+//! }
+//!
+//! // A setup builds the receiver for stateful (method) operations;
+//! // `#[spec_input]` gives a parameter a language-neutral spec name.
+//! #[spec_setup("counter")]
+//! fn new_counter(#[spec_input("start")] initial: i32) -> Counter {
+//!     Counter { value: initial }
+//! }
+//!
+//! impl Counter {
+//!     #[spec_operation("increment")]
+//!     fn increment(&mut self, #[spec_input("by")] delta: i32) -> Count {
+//!         self.value += delta;
+//!         spec_trace!("after_add", &self.value); // inline trace checkpoint
+//!         Count { value: self.value }
+//!     }
+//! }
+//!
+//! // A free-function operation whose dependency call is mocked: the spec
+//! // supplies the response, so the real `Directory` is never hit under test.
+//! #[spec_operation("lookup")]
+//! fn lookup(dir: &Directory, id: &str) -> String {
+//!     #[spec_mock("dir")]
+//!     let name = dir.find(id);
+//!     name
+//! }
+//!
+//! struct Directory;
+//! impl Directory {
+//!     fn find(&self, _id: &str) -> String {
+//!         unreachable!("mocked under test")
+//!     }
 //! }
 //! ```
 //!
@@ -41,6 +91,16 @@
 //!     assert!(matches!(result, specgate::RunOutcome::Complete { .. }));
 //! }
 //! ```
+//!
+//! ## Annotation surface
+//!
+//! - `#[spec_operation("name")]` — mark a function as a spec operation.
+//! - `#[spec_setup("name")]` — build the receiver for stateful operations.
+//! - `#[spec_mock(...)]` — inject a table-driven mock dependency.
+//! - `#[derive(SpecEvent)]` + `#[spec_event]` — capture struct/enum fields.
+//! - `#[spec_input("name")]` — give a parameter a language-neutral spec name.
+//! - `spec_component!("name")` — declare the crate's component.
+//! - `spec_trace!(...)` — emit an inline trace checkpoint.
 //!
 //! ## Property Tests
 //!
@@ -79,12 +139,20 @@
 //! cargo install specgate-cli
 //! specgate validate specs/
 //! specgate run specs/my-component.spec.yaml
+//! specgate extract path/to/crate -o specs/derived.spec.yaml
 //! ```
 //!
 //! ## Features
 //!
 //! - **`harness`** — enables `run_spec()` and the test harness (add to `[dev-dependencies]`)
 //! - **`trace`** — enables runtime trace collection (required for harness, zero-cost when off)
+//!
+//! ## Learn more
+//!
+//! - [Knowledge base](https://github.com/schgoo/specgate/tree/main/docs/knowledge)
+//!   — spec format, annotations, bindings, extraction, and more.
+//! - [Fixture Catalog](https://github.com/schgoo/specgate/blob/main/docs/knowledge/fixtures.md)
+//!   — every feature demonstrated by a runnable fixture (the source-of-truth examples).
 
 // Public API — annotations
 pub use specgate_annotations::{SpecEvent, emit_event, spec_component, spec_mock, spec_operation, spec_setup, spec_trace};
