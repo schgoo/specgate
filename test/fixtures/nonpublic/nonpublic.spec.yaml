@@ -1,0 +1,17 @@
+spec_version: "0.4.0"
+name: fixture.nonpublic
+binding: binding.yaml
+
+operations:
+  secret:
+    outputs:
+      - $result: i32
+
+cases:
+  - name: secret_runs
+    desc: >
+      The `secret` operation is annotated but private (not publicly reachable).
+      Running it must fail with a clear "not publicly reachable" diagnostic.
+    operation: secret
+    expected:
+      - $result: "42"

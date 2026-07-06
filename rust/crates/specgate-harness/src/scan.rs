@@ -299,6 +299,11 @@ pub struct OpDecl {
     /// `Some(struct)` if the op is a method on that struct, `None` if free fn.
     pub method_of: Option<String>,
     pub takes_self: bool,
+    /// Whether the implementing function carries an unrestricted `pub`
+    /// visibility. A non-`pub` (or `pub(crate)`) operation is not publicly
+    /// reachable through the target crate's public path, so the link-only
+    /// harness rejects it.
+    pub is_pub: bool,
 }
 
 /// Tokenise into significant Rust tokens, ignoring comments and string
@@ -459,6 +464,10 @@ pub fn scan(src: &str) -> AnnotatedSource {
                 let mut pending: Vec<PendingAttr> = vec![first_attr];
                 // Find the following `fn ident(...) -> ret`.
                 let mut pp = jj;
+                // Whether the item carries a `pub` visibility (any `pub`,
+                // including `pub(crate)` etc.). Used to gate public reachability
+                // of the linked target.
+                let mut saw_pub = false;
                 // Skip whitespace and other outer attributes / visibility,
                 // collecting any additional spec attributes (stacked setups).
                 loop {
@@ -491,6 +500,9 @@ pub fn scan(src: &str) -> AnnotatedSource {
                             pp += 1;
                         }
                         if pp < total && chars[pp] == '(' {
+                            // A restricted visibility such as `pub(crate)` /
+                            // `pub(super)` is NOT publicly reachable across the
+                            // crate boundary, so it does not count as `pub`.
                             let mut dd = 1;
                             pp += 1;
                             while pp < total && dd > 0 {
@@ -502,6 +514,8 @@ pub fn scan(src: &str) -> AnnotatedSource {
                                 }
                                 pp += 1;
                             }
+                        } else {
+                            saw_pub = true;
                         }
                         continue;
                     }
@@ -631,6 +645,7 @@ pub fn scan(src: &str) -> AnnotatedSource {
                                     sig: sig.clone(),
                                     method_of: method_of.clone(),
                                     takes_self,
+                                    is_pub: saw_pub,
                                 },
                             );
                         }

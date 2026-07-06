@@ -316,9 +316,53 @@ fn run_group(
         .collect();
     let needs_async = cases_to_run.iter().any(|c| case_uses_async(c, spec));
 
+    // Link-only pre-flight: every operation the cases run must be publicly
+    // reachable through the target crate's public path
+    // (`use <crate>[::<module>] as fut;`). An operation whose module IS a public
+    // path (`pub mod`-declared or the crate root) but whose implementing fn is
+    // not `pub` is rejected here with a clean "not publicly reachable"
+    // diagnostic, BEFORE any scaffolding/compilation — rather than surfacing as
+    // a raw cargo compile error.
+    //
+    // A module that is NOT a public path (e.g. an undeclared or commented-out
+    // `pub mod`) is intentionally NOT rejected here: linking it produces the
+    // target's own compiler diagnostics (a "source failed to compile" error),
+    // preserving the compile-failure contract.
+    let mut required_ops: Vec<&str> = Vec::new();
+    for c in &cases_to_run {
+        let ops: Vec<&str> = if c.steps.is_empty() {
+            c.operation.as_deref().into_iter().collect()
+        } else {
+            c.steps.iter().map(String::as_str).collect()
+        };
+        for op in ops {
+            if !required_ops.contains(&op) {
+                required_ops.push(op);
+            }
+        }
+    }
+    for src in &fixture_srcs {
+        let module = src.file_stem().and_then(|s| s.to_str()).unwrap_or("fixture");
+        if !codegen::module_publicly_linkable(&target.package_root, module) {
+            continue;
+        }
+        let src_annotated = scan(&load_fixture_text(src)?);
+        for op in &required_ops {
+            if let Some(decl) = src_annotated.operations.get(*op)
+                && !decl.is_pub
+            {
+                return Err(format!(
+                    "spec operation '{op}' is not publicly reachable in crate '{}': \
+                     its implementing function is not declared `pub`",
+                    codegen::crate_label(&target.package_root)
+                ));
+            }
+        }
+    }
+    let fixture_crates = codegen::resolve_fixture_crates(&target.package_root, &fixture_srcs)?;
+
     let proj = codegen::generate(
         scratch_dir,
-        &fixture_srcs,
         &codegen::GenerateConfig {
             spec,
             cases_to_run: &cases_to_run,
@@ -326,7 +370,7 @@ fn run_group(
             workspace_root,
             needs_async,
             runtime: target.runtime,
-            fixture_pkg_root: Some(&target.package_root),
+            fixture_crates: &fixture_crates,
             is_local: is_local_workspace(),
         },
     )

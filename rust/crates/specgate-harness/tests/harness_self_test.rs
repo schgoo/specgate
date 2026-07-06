@@ -23,96 +23,6 @@ fn repo_root() -> std::path::PathBuf {
     p
 }
 
-/// Runs every fixture spec in the test/rust/crates/specgate-fixtures/specs/
-/// directory and verifies each one completes without error. Cases may have
-/// status Fail (intentional mismatch tests) — that's fine. We only catch
-/// specs that error out entirely (bad YAML, missing source, etc).
-///
-/// For specs where ALL cases should pass, we verify that explicitly.
-#[test]
-fn all_fixture_specs_complete() {
-    let specs_dir = repo_root().join("test/rust/crates/specgate-fixtures/specs");
-    let mut failures: Vec<(String, String)> = Vec::new();
-    let mut total = 0;
-
-    // Specs that are expected to ERROR (not Complete) — harness-level failures
-    let expected_errors: &[&str] = &[
-        "bad_yaml",
-        "bad_binding",
-        "compile_error",
-        "missing_operation",
-        "missing_setup",
-        "missing_target",
-        "no_cases",
-        // Schema violations: a case asserts on an output the operation never
-        // declares — caught pre-flight as an error, not a case failure.
-        "shape_mismatch",
-        "mismatch_wrong_field",
-    ];
-
-    // Specs not yet implemented — skip entirely
-    let skip: &[&str] = &[
-        // Property tests not yet implemented in codegen
-        "property_add",
-        "property_types",
-        "property_counterexamples",
-        "property_invalid",
-        "property_invalid_range",
-        "property_no_generators",
-        "property_no_calls",
-        "property_no_assert",
-        "property_bad_ref",
-    ];
-
-    for entry in std::fs::read_dir(&specs_dir).unwrap() {
-        let entry = entry.unwrap();
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("yaml") {
-            continue;
-        }
-        let stem = path.file_stem().unwrap().to_str().unwrap();
-        let Some(name) = stem.strip_suffix(".spec") else {
-            continue;
-        };
-        if skip.contains(&name) {
-            continue;
-        }
-        if expected_errors.contains(&name) {
-            // These should return Error — verify that
-            total += 1;
-            let result = run_spec(path.to_str().unwrap());
-            if matches!(result, RunOutcome::Complete { .. }) {
-                failures.push((name.to_string(), "expected Error, got Complete".to_string()));
-            }
-            continue;
-        }
-
-        total += 1;
-        let result = run_spec(path.to_str().unwrap());
-        match result {
-            RunOutcome::Complete { .. } => {
-                // Completed — cases may be Pass or Fail (intentional mismatches)
-            }
-            RunOutcome::Error { reason } => {
-                failures.push((name.to_string(), reason));
-            }
-        }
-    }
-
-    assert!(
-        failures.is_empty(),
-        "{} fixture spec failures (of {} tested):\n{}",
-        failures.len(),
-        total,
-        failures
-            .iter()
-            .map(|(spec, msg)| format!("  {spec}: {msg}"))
-            .collect::<Vec<_>>()
-            .join("\n")
-    );
-    assert!(total > 30, "expected 30+ fixture specs, got {total}");
-}
-
 #[test]
 fn self_test_stateless_add_produces_real_traces() {
     let spec = repo_root().join("test/rust/crates/specgate-fixtures/specs/stateless_add.spec.yaml");
@@ -175,6 +85,31 @@ fn self_test_error_case_returns_error() {
         }
         RunOutcome::Complete { .. } => {
             panic!("bad YAML should produce Error, not Complete");
+        }
+    }
+}
+
+#[test]
+fn self_test_nonpublic_operation_is_rejected() {
+    // Link-only harness: an annotated operation that is not publicly reachable
+    // (a private fn in a `pub mod`-declared module) cannot be linked as
+    // `use <crate>::<module>::<op>`. The run must be rejected BEFORE compiling
+    // with a clean "not publicly reachable" diagnostic — never a raw cargo
+    // compile failure.
+    let spec = repo_root().join("test/fixtures/nonpublic/nonpublic.spec.yaml");
+    match run_spec(spec.to_str().unwrap()) {
+        RunOutcome::Error { reason } => {
+            assert!(
+                reason.contains("not publicly reachable"),
+                "nonpublic op must be rejected with a 'not publicly reachable' diagnostic, got: {reason}"
+            );
+            assert!(
+                !reason.contains("source failed to compile"),
+                "reachability must be detected before compiling, not via a raw compile error, got: {reason}"
+            );
+        }
+        RunOutcome::Complete { .. } => {
+            panic!("a non-publicly-reachable operation must produce Error, not Complete");
         }
     }
 }

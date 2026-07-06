@@ -982,6 +982,62 @@ cases:
                   - Event: { name: fetch.url, value: "https://example.com" }
                   - Event: { name: $result, value: "response from https://example.com" }
 
+  - name: async_smol_timer_completes
+    desc: Reactor-backed async op (smol timer) runs to completion under the default smol runtime entry.
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/async_smol_timer.spec.yaml
+    expected:
+      - $result:
+          Complete:
+            results:
+              - name: smol_delay_completes
+                status: pass
+
+  - name: async_tokio_timer_completes
+    desc: "Reactor-backed async op (tokio timer) runs under a tokio runtime (binding runtime: tokio)."
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/async_tokio_timer.spec.yaml
+    expected:
+      - $result:
+          Complete:
+            results:
+              - name: tokio_delay_completes
+                status: pass
+
+  - name: default_inputs_apply
+    desc: Omitted defaulted inputs (scalar and complex) apply their defaults; provided values override.
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/default_input.spec.yaml
+    expected:
+      - $result:
+          Complete:
+            results:
+              - name: uses_default_factor
+                status: pass
+              - name: explicit_factor
+                status: pass
+              - name: uses_default_offset
+                status: pass
+              - name: explicit_offset
+                status: pass
+
+  - name: multi_toplevel_ops
+    desc: Operations split across two top-level source files are both linked and run.
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/multi_toplevel.spec.yaml
+    expected:
+      - $result:
+          Complete:
+            results:
+              - name: alpha_increments
+                status: pass
+              - name: beta_doubles
+                status: pass
+
   - name: stateless_return_value
     desc: Stateless function captures return value
     operation: run_spec
@@ -2267,3 +2323,16 @@ cases:
       - $result:
           Error:
             reason: "expected event 'answer' is not a declared output of operation 'add'"
+
+  - name: nonpublic_operation_is_rejected
+    desc: >
+      An annotated operation that is not publicly reachable (private fn) cannot
+      be linked; run_spec must reject it with a clear "not publicly reachable"
+      diagnostic rather than a raw compile failure.
+    operation: run_spec
+    inputs:
+      spec: test/fixtures/nonpublic/nonpublic.spec.yaml
+    expected:
+      - $result:
+          Error:
+            reason: { $matches: "not publicly reachable" }
