@@ -43,6 +43,7 @@ missing_debug_implementations = "warn"
 redundant_imports = "warn"
 redundant_lifetimes = "warn"
 trivial_numeric_casts = "warn"
+unsafe_code = "forbid"
 unsafe_op_in_unsafe_fn = "warn"
 unused_extern_crates = "warn"
 unused_import_braces = "warn"
@@ -59,12 +60,19 @@ style = { level = "warn", priority = -1 }
 
 # Restriction lints worth enabling
 clone_on_ref_ptr = "warn"
+dbg_macro = "deny"
 empty_drop = "warn"
 empty_enum_variants_with_brackets = "warn"
 empty_structs_with_brackets = "warn"
 map_err_ignore = "warn"
 redundant_type_annotations = "warn"
 semicolon_outside_block = "warn"
+
+# Banned-API mechanism — configured in clippy.toml (disallowed-methods /
+# disallowed-types). Denied here so a banned call/type is a hard error under
+# `-D warnings`.
+disallowed_methods = "deny"
+disallowed_types = "deny"
 
 # Allow these — too noisy or not applicable
 too_many_lines = "allow"

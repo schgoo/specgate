@@ -3,3 +3,21 @@ allow-panic-in-tests = true
 allow-unwrap-in-tests = true
 avoid-breaking-exported-api = false
 semicolon-outside-block-ignore-multiline = true
+
+# Banned-API mechanism. `disallowed_methods` / `disallowed_types` are denied in
+# [workspace.lints.clippy] (rust/Cargo.toml), so any use of a path listed here
+# is a hard error under `cargo clippy -- -D warnings` (the `just clippy` gate).
+#
+# To ban an API, add an entry with a `reason`. Prefer this over hoping reviewers
+# spot it. Note: `unsafe` is handled separately by `unsafe_code = "forbid"`
+# (workspace lint) and `#![forbid(unsafe_code)]` in the generated runner — not
+# here (it is a keyword, not a method/type).
+disallowed-methods = [
+    { path = "std::mem::forget", reason = "leaks without running Drop; use ManuallyDrop or an explicit drop with justification" },
+    { path = "std::process::exit", reason = "bypasses destructors and unwinding; return an ExitCode / propagate an error instead" },
+]
+
+disallowed-types = [
+    # Example (none banned yet):
+    # { path = "std::sync::Mutex", reason = "prefer parking_lot::Mutex" },
+]
