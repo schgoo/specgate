@@ -1,6 +1,7 @@
 //! Generate a temporary Cargo project that compiles + executes a fixture
 //! against the spec's cases and writes a JSON trace to disk.
 
+use crate::binding::Runtime;
 use crate::scan::{AnnotatedSource, OpDecl};
 use crate::spec::{Case, Spec};
 use serde_yaml::Value;
@@ -20,6 +21,9 @@ pub struct GenerateConfig<'a> {
     pub annotated: &'a AnnotatedSource,
     pub workspace_root: &'a Path,
     pub needs_async: bool,
+    /// Async runtime the runner uses to drive async ops (only relevant when
+    /// `needs_async`).
+    pub runtime: Runtime,
     pub fixture_pkg_root: Option<&'a Path>,
     pub is_local: bool,
 }
@@ -134,6 +138,17 @@ pub fn generate(scratch_dir: &Path, fixture_srcs: &[PathBuf], config: &GenerateC
         )
     };
 
+    // Only pull an async runtime into the runner when a case actually awaits.
+    // Non-async runners stay dependency-identical to before.
+    let runtime_dep = if config.needs_async {
+        match config.runtime {
+            Runtime::Smol => "\nsmol = \"2\"",
+            Runtime::Tokio => "\ntokio = { version = \"1\", features = [\"rt\", \"time\"] }",
+        }
+    } else {
+        ""
+    };
+
     let manifest = format!(
         r#"[package]
 name = "sg-runner"
@@ -146,7 +161,7 @@ path = "src/main.rs"
 
 [dependencies]
 {specgate_deps}
-serde_yaml = "0.9"{fixture_dep}
+serde_yaml = "0.9"{fixture_dep}{runtime_dep}
 
 [workspace]
 "#,
@@ -169,7 +184,7 @@ serde_yaml = "0.9"{fixture_dep}
         config.cases_to_run,
         config.annotated,
         &trace_file,
-        config.needs_async,
+        config.needs_async.then_some(config.runtime),
         fixture_crates.as_deref(),
     )?;
     std::fs::write(scratch_dir.join("src").join("main.rs"), main_rs)?;
@@ -186,11 +201,17 @@ fn render_main(
     cases_to_run: &[&Case],
     annotated: &AnnotatedSource,
     trace_out: &Path,
-    needs_async: bool,
+    async_runtime: Option<Runtime>,
     fixture_crates: Option<&[FixtureCrateInfo]>,
 ) -> std::io::Result<String> {
     let mut out = String::new();
+    let needs_async = async_runtime.is_some();
     out.push_str("#![allow(unused, unused_mut, unused_variables, dead_code, clippy::all)]\n");
+    // `deny` (not `forbid`) so raw target/fixture source inlined below via
+    // `#[path] mod ...` can locally override with `#[allow(unsafe_code)]`;
+    // `forbid` cannot be overridden. This keeps the emitted glue unsafe-free
+    // while still permitting legitimately-unsafe real-target source.
+    out.push_str("#![deny(unsafe_code)]\n");
     out.push_str("use specgate::{TraceEvent, Value, take_traces, reset, set_mock, SpecEvent};\n");
     out.push_str("use std::collections::HashMap;\n");
 
@@ -224,7 +245,12 @@ fn render_main(
             let abs = std::fs::canonicalize(&fixture_srcs[0])?;
             let abs_str = abs.display().to_string();
             let abs_str = abs_str.strip_prefix(r"\\?\").unwrap_or(&abs_str);
-            writeln!(out, "#[path = \"{}\"] mod fut;", abs_str.replace('\\', "\\\\")).expect("fmt");
+            writeln!(
+                out,
+                "#[allow(unsafe_code)]\n#[path = \"{}\"] mod fut;",
+                abs_str.replace('\\', "\\\\")
+            )
+            .expect("fmt");
         }
         // Raw multiple files: include each, then re-export into `fut`.
         None => {
@@ -232,7 +258,13 @@ fn render_main(
                 let abs = std::fs::canonicalize(src)?;
                 let abs_str = abs.display().to_string();
                 let abs_str = abs_str.strip_prefix(r"\\?\").unwrap_or(&abs_str);
-                writeln!(out, "#[path = \"{}\"] mod __fut_{};", abs_str.replace('\\', "\\\\"), i).expect("fmt");
+                writeln!(
+                    out,
+                    "#[allow(unsafe_code)]\n#[path = \"{}\"] mod __fut_{};",
+                    abs_str.replace('\\', "\\\\"),
+                    i
+                )
+                .expect("fmt");
             }
             out.push_str("mod fut {\n");
             for i in 0..fixture_srcs.len() {
@@ -250,12 +282,23 @@ fn render_main(
     out.push_str("}\n\n");
 
     if needs_async {
-        out.push_str(ASYNC_BLOCK_ON);
+        out.push_str(ASYNC_CATCH_UNWIND);
     }
 
     out.push_str("fn main() {\n");
     out.push_str("    let out_path = std::env::args().nth(1).expect(\"missing output path\");\n");
     out.push_str("    let mut all: std::collections::BTreeMap<String, Vec<TraceEvent>> = std::collections::BTreeMap::new();\n");
+
+    // Async runners drive every case inside ONE top-level runtime entry, so
+    // reactor-backed awaits (tokio timers/IO, smol timers) make progress. Sync
+    // runners keep the plain body (byte-identical to the pre-async output).
+    if let Some(rt) = async_runtime {
+        let entry = match rt {
+            Runtime::Smol => "    smol::block_on(async {\n",
+            Runtime::Tokio => "    tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {\n",
+        };
+        out.push_str(entry);
+    }
 
     for case in cases_to_run {
         writeln!(out, "    // ---- case: {} ----", case.name).expect("fmt");
@@ -264,6 +307,10 @@ fn render_main(
         render_case(&mut out, case, spec, annotated);
         writeln!(out, "        all.insert({:?}.to_string(), take_traces());", case.name).expect("fmt");
         out.push_str("    }\n");
+    }
+
+    if needs_async {
+        out.push_str("    });\n");
     }
 
     write!(
@@ -281,27 +328,31 @@ fn render_main(
     Ok(out)
 }
 
-/// A minimal no-op-waker `block_on`. Sufficient for fixture async fns that
-/// don't yield to a real reactor — they complete on the first poll.
-const ASYNC_BLOCK_ON: &str = r"
-fn sg_block_on<F: ::std::future::Future>(fut: F) -> F::Output {
-    use ::std::pin::pin;
-    use ::std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
-    const VT: RawWakerVTable = RawWakerVTable::new(
-        |_| RawWaker::new(::std::ptr::null(), &VT),
-        |_| {},
-        |_| {},
-        |_| {},
-    );
-    let raw = RawWaker::new(::std::ptr::null(), &VT);
-    let waker = unsafe { Waker::from_raw(raw) };
-    let mut cx = Context::from_waker(&waker);
-    let mut fut = pin!(fut);
-    loop {
-        if let Poll::Ready(v) = fut.as_mut().poll(&mut cx) {
-            return v;
+/// A future-aware `catch_unwind` used to isolate panics from an awaited op
+/// without letting a `std::panic::catch_unwind` span an `.await` (which is
+/// unsound). Each poll is wrapped so a panic during polling is captured and
+/// surfaced as `$fault`, matching the sync path's behavior. Self-contained so
+/// the runner needs no extra `futures*` dependency.
+///
+/// Safe / std-only: built on `std::future::poll_fn` (stable since 1.64) plus
+/// `Box::pin`, so it contains no `unsafe` and pulls in no `futures*` crate. The
+/// real `cx`/waker is passed through to the inner future on every poll (so
+/// reactor-backed futures still get woken), panics are captured per-poll, and
+/// the future is dropped on panic (never re-polled).
+const ASYNC_CATCH_UNWIND: &str = r"
+async fn sg_catch_unwind<F: ::std::future::Future>(fut: F)
+    -> ::std::result::Result<F::Output, ::std::boxed::Box<dyn ::std::any::Any + ::std::marker::Send>>
+{
+    use ::std::task::Poll;
+    use ::std::panic::{catch_unwind, AssertUnwindSafe};
+    let mut fut = ::std::boxed::Box::pin(fut);
+    ::std::future::poll_fn(move |cx| {
+        match catch_unwind(AssertUnwindSafe(|| fut.as_mut().poll(cx))) {
+            Ok(Poll::Pending)  => Poll::Pending,
+            Ok(Poll::Ready(v)) => Poll::Ready(Ok(v)),
+            Err(e)             => Poll::Ready(Err(e)),
         }
-    }
+    }).await
 }
 ";
 
@@ -470,17 +521,24 @@ fn render_case(out: &mut String, case: &Case, spec: &Spec, annotated: &Annotated
         } else {
             &case.inputs
         };
-        let mut call = render_op_call(op, decl, inputs, &bindings, annotated, op_defaults);
-        if spec.async_ops.contains(op) {
-            call = format!("sg_block_on({call})");
-        }
+        let call = render_op_call(op, decl, inputs, &bindings, annotated, op_defaults);
+        let is_async = spec.async_ops.contains(op);
         // The annotated operation self-emits its full trace (`$run`, input
         // echoes, and `$result`/field events) via `#[spec_operation]`, so the
         // runner only needs to invoke it and discard the value.
         out.push_str("        {\n");
-        write!(out,
-            "            let __r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {{\n                let __sg_ret = {call};\n                let _ = __sg_ret;\n            }}));\n"
-        ).expect("fmt");
+        if is_async {
+            // Async op: await directly inside the top-level runtime entry, with
+            // a future-aware catch_unwind so one panicking op can't abort the
+            // other cases (a plain catch_unwind can't span an `.await`).
+            write!(out,
+                "            let __r = sg_catch_unwind(async {{\n                let __sg_ret = {call}.await;\n                let _ = __sg_ret;\n            }}).await;\n"
+            ).expect("fmt");
+        } else {
+            write!(out,
+                "            let __r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {{\n                let __sg_ret = {call};\n                let _ = __sg_ret;\n            }}));\n"
+            ).expect("fmt");
+        }
         out.push_str("            if let Err(__e) = __r {\n");
         out.push_str("                let msg = panic_msg(&__e);\n                specgate::emit_event(\"$fault\", &msg);\n");
         out.push_str("            }\n");
@@ -697,6 +755,7 @@ mod tests {
             annotated: &annotated,
             workspace_root: &workspace_root,
             needs_async: false,
+            runtime: Runtime::Smol,
             fixture_pkg_root: None,
             is_local: false,
         };
@@ -734,6 +793,7 @@ mod tests {
             annotated: &annotated,
             workspace_root: &workspace_root,
             needs_async: false,
+            runtime: Runtime::Smol,
             fixture_pkg_root: None,
             is_local: true,
         };

@@ -31,6 +31,11 @@
           "type": "string",
           "description": "Path to the package/crate/project root, relative to the binding file. The harness runs builds and resolves source from here."
         },
+        "runtime": {
+          "type": "string",
+          "description": "Async runtime the generated runner uses to drive async operations to completion. 'smol' (the default when omitted) uses smol::block_on; 'tokio' establishes a current-thread tokio runtime. Rust targets only.",
+          "enum": ["smol", "tokio"]
+        },
         "test_root": {
           "type": "string",
           "description": "Path where generated test files are written, relative to the binding file. Defaults to package_root/tests if omitted."

@@ -11,3 +11,9 @@ publish = false
 specgate = { path = "../../../../rust/crates/specgate" }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
+
+# Async runtimes exercised by the reactor-backed async fixtures
+# (async_smol_timer / async_tokio_timer). Needed to COMPILE those fixture
+# sources; the generated runner establishes the actual runtime.
+smol = "2"
+tokio = { version = "1", features = ["rt", "time"] }

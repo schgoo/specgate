@@ -3,3 +3,6 @@ language: rust
 targets:
   default:
     package_root: ..
+  tokio:
+    package_root: ..
+    runtime: tokio

@@ -4,10 +4,23 @@ use serde_yaml::Value;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+/// Async runtime the generated runner uses to drive async operations to
+/// completion (Rust targets only). Defaults to [`Runtime::Smol`] when a target
+/// declares no `runtime:` field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Runtime {
+    /// `smol::block_on` — real executor + on-demand reactor (the default).
+    #[default]
+    Smol,
+    /// A current-thread tokio runtime (`tokio::runtime::Builder`).
+    Tokio,
+}
+
 #[derive(Debug, Clone)]
 pub struct Target {
     pub package_root: PathBuf,
     pub command: Option<String>,
+    pub runtime: Runtime,
 }
 
 #[derive(Debug)]
@@ -54,11 +67,18 @@ pub fn load_binding(path: &Path) -> Option<Binding> {
             .get(Value::String("command".into()))
             .and_then(|v| v.as_str())
             .map(String::from);
+        let runtime = match entry_map.get(Value::String("runtime".into())).and_then(|v| v.as_str()) {
+            Some("tokio") => Runtime::Tokio,
+            // Unknown / absent → default smol. (Schema validation constrains the
+            // accepted values; the parser is permissive.)
+            _ => Runtime::Smol,
+        };
         targets.insert(
             name.to_string(),
             Target {
                 package_root: normalize(&dir.join(pkg)),
                 command,
+                runtime,
             },
         );
     }

@@ -1,0 +1,19 @@
+spec_version: 0.4.0
+name: fixture.async_tokio_timer
+binding: binding.yaml
+target: tokio
+operations:
+  tokio_delay:
+    async: true
+    outputs:
+    - $result: string
+cases:
+- name: tokio_delay_completes
+  desc: >
+    Reactor-backed async op (tokio timer) completes under a tokio runtime
+    entry, selected via the binding target's `runtime: tokio`. Fails under the
+    old no-op-waker busy-loop runner.
+  operation: tokio_delay
+  expected:
+  - $run: tokio_delay
+  - $result: tokio done

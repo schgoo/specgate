@@ -1,0 +1,17 @@
+spec_version: 0.4.0
+name: fixture.async_smol_timer
+binding: binding.yaml
+operations:
+  smol_delay:
+    async: true
+    outputs:
+    - $result: string
+cases:
+- name: smol_delay_completes
+  desc: >
+    Reactor-backed async op (smol timer) completes under the default smol
+    runtime entry. Fails under the old no-op-waker busy-loop runner.
+  operation: smol_delay
+  expected:
+  - $run: smol_delay
+  - $result: smol done

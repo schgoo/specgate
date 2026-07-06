@@ -325,6 +325,7 @@ fn run_group(
             annotated: &annotated,
             workspace_root,
             needs_async,
+            runtime: target.runtime,
             fixture_pkg_root: Some(&target.package_root),
             is_local: is_local_workspace(),
         },

@@ -3,6 +3,8 @@ specgate::spec_component!("fixture");
 
 pub mod anywhere_event;
 pub mod async_fetch;
+pub mod async_smol_timer;
+pub mod async_tokio_timer;
 pub mod checkpoint_inline;
 pub mod complex_inputs;
 pub mod cross_dep;

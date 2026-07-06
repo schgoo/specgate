@@ -144,8 +144,13 @@ operations:
     outputs: [$result]
 ```
 
-The implementation must use an async operation entry point. Canonical
-fixture: `async_fetch.spec.yaml`.
+The implementation must use an async operation entry point. The generated
+runner drives the operation's future to completion with a single top-level
+runtime entry; the runtime is chosen by the binding target's `runtime:` field
+(`smol` by default, or `tokio` — see [bindings.md](bindings.md#async-runtime)).
+Reactor-backed futures (timers, I/O) need the matching runtime declared on the
+target. Canonical fixtures: `async_fetch.spec.yaml` (trivial async),
+`async_smol_timer.spec.yaml` and `async_tokio_timer.spec.yaml` (reactor-backed).
 
 ## `cases`
 
