@@ -21,10 +21,12 @@ you're implementing.
 4. **Map spec → code.**
    - One `#[spec_operation("<name>")]` per operation referenced by a
      `operation:` or `steps[].operation:` field.
-   - One `#[spec_setup("<name>")]` per setup referenced by `setup:`.
+   - One `#[spec_setup("<operation>")]` per setup that builds an operation's
+     receiver/parameter (linked by the operation name; construction inputs
+     come from the case's `setup:` map).
    - One `#[spec_event]` per field whose value the spec asserts via a
      `- <field>: …` entry.
-   - One `spec_event!("<name>", expr)` per inline checkpoint the spec
+   - One `spec_trace!("<name>", expr)` per inline checkpoint the spec
      asserts (e.g. `after_upper` in `checkpoint_inline`).
    - One `#[spec_mock("<name>")]` per mock referenced from the case's
      `inputs.<mock>` table.

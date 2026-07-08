@@ -9,18 +9,6 @@ Engineers write specs. LLMs implement them. SpecGate closes the gap by providing
 a non-stochastic harness that validates implementations against specs using
 runtime traces.
 
-## Crates
-
-| Crate | Description |
-|-------|-------------|
-| [`specgate`](./rust/crates/specgate/README.md) | Umbrella crate — annotations + harness in one dependency |
-| [`specgate-cli`](./rust/crates/specgate-cli/README.md) | CLI: `specgate validate`, `run`, and `extract` |
-| [`specgate-harness`](./rust/crates/specgate-harness/README.md) | Test harness: codegen, trace collection, matching |
-| [`specgate-annotations`](./rust/crates/specgate-annotations/README.md) | Annotation facade |
-| [`specgate-annotations-macros`](./rust/crates/specgate-annotations-macros/README.md) | Proc macros |
-| [`specgate-runtime`](./rust/crates/specgate-runtime/README.md) | Runtime trace buffer |
-| [`specgate-types`](./rust/crates/specgate-types/README.md) | Spec/binding parsing |
-
 ## How It Works
 
 ```
@@ -28,7 +16,7 @@ Spec YAML  +  Annotated Source  →  Harness  →  Pass / Fail per case
 ```
 
 1. Write a spec (`.spec.yaml`) declaring operations, types, and expected behavior
-2. Annotate source with `#[spec_operation]`, `#[derive(SpecEvent)]`, `spec_trace!`
+2. Annotate the source so operations, state, and inline checkpoints emit traces
 3. The harness generates a runner, compiles it, collects traces, and compares
 
 See the [`specgate` crate docs](./rust/crates/specgate/README.md) for usage,
@@ -60,8 +48,8 @@ canonical runnable example in the [Fixture Catalog](./docs/knowledge/fixtures.md
 - **Property-based cases** — run an operation over generated inputs and assert
   invariants, reporting a counterexample on failure.
   ([spec-format](./docs/knowledge/spec-format.md))
-- **Async operations** — driven on a per-target runtime (`smol` or `tokio`).
-  ([bindings](./docs/knowledge/bindings.md#async-runtime))
+- **Async operations** — driven on a per-target async runtime selected in the
+  binding. ([bindings](./docs/knowledge/bindings.md#async-runtime))
 - **Components** — group a crate's public API and relate components via
   `depends_on`. ([annotations](./docs/knowledge/annotations.md))
 - **Spec extraction** — derive a spec from annotated code, schema-only or with
@@ -101,7 +89,7 @@ specgate extract <package-root> -o|--out <spec.yaml> [--component <name>] [--cas
 1. **Spec is the single source of truth**
 2. **Conformance checking is deterministic** — no LLM in the verification loop
 3. **Traces are the evidence** — generated tests have zero domain knowledge
-4. **Zero-cost in production** — annotations are no-ops without the `trace` feature
+4. **Zero-cost in production** — annotations compile to no-ops in production builds
 
 ## Documentation
 
@@ -153,6 +141,11 @@ Several are tracked as [GitHub issues](https://github.com/schgoo/specgate/issues
   ([#23](https://github.com/schgoo/specgate/issues/23)).
 - **Binding execution context** — per-target `cwd`/`env`
   ([#18](https://github.com/schgoo/specgate/issues/18)).
+- **Observable globals** — a wrapper type (e.g. `SpecCell<T>`) whose accessor
+  methods emit trace events, so a global/ambient value can be declared observed
+  once at its definition and traced on every mutation — instead of an inline
+  `spec_trace!` at each site. (Establishing global state already works via a
+  side-effect setup with a `setup:` input; this covers observing it.)
 - **Concurrent trace isolation** — scoped trace buffers per operation
   ([#2](https://github.com/schgoo/specgate/issues/2)).
 - **Inspectable run artifacts** — retain the generated runner/scratch dir for

@@ -16,7 +16,7 @@ example.
 ## Common dependencies
 
 - `specgate-annotations` — provides the five `#[spec_*]` proc macros and
-  the `spec_event!()` macro.
+  the `spec_trace!()` macro.
 - `serde` + `serde_yaml` — when the implementation parses spec/binding files.
 - `ohno` — error types (project convention — never use `thiserror` /
   `anyhow`).
@@ -31,8 +31,8 @@ use specgate_annotations::*;
 #[spec_operation("add")]
 fn add(a: i32, b: i32) -> i32 { a + b }
 
-// Setup constructs the system-under-test
-#[spec_setup("make_counter")]
+// Setup constructs the system-under-test (arg is the OPERATION it prepares)
+#[spec_setup("increment")]
 fn make_counter() -> Counter { Counter { count: 0 } }
 
 struct Counter {
@@ -50,7 +50,7 @@ impl Counter {
 #[spec_operation("process")]
 fn process(data: &str) -> String {
     let upper = data.to_uppercase();
-    spec_event!("after_upper", &upper);
+    spec_trace!("after_upper", &upper);
     upper.trim().to_string()
 }
 

@@ -23,9 +23,9 @@ pub mod __rt {
     pub use specgate_runtime::{
         OpMeta, ReturnEmit, ReturnEmitDisplay, ReturnEmitNone, ReturnEmitStruct, ReturnEmitToSpec, SPECGATE_OPS, SPECGATE_TYPES, SpecEvent,
         SpecEventStruct, ToSpecValue, TraceEvent, TypeMeta, Value, VariantMeta, discovery_json, emit_event, emit_event_v, emit_run,
-        mock_lookup, reset, set_mock, take_traces,
+        mock_lookup, record_event_only, reset, set_mock, take_traces,
     };
 }
 
 // Re-export auxiliary runtime helpers under their plain names too.
-pub use specgate_runtime::{emit_event, emit_event_v, emit_run, mock_lookup, reset, set_mock};
+pub use specgate_runtime::{emit_event, emit_event_v, emit_run, mock_lookup, record_event_only, reset, set_mock};

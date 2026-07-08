@@ -503,6 +503,19 @@ pub fn emit_run(operation: &str) {
     });
 }
 
+/// Like [`emit_event_v`] but writes ONLY to the record file (when
+/// `SPECGATE_RECORD` is set) — not to the in-process [`BUFFER`]. Used by
+/// `#[spec_setup]` to echo construction inputs so `specgate extract --cases`
+/// can reconstruct the case's `setup:` map without polluting the harness trace.
+/// No-op when `SPECGATE_RECORD` is unset, matching the natural no-op of
+/// `record_event` under the same condition.
+pub fn record_event_only(name: &str, value: Value) {
+    record_event(&TraceEvent::Event {
+        name: name.to_string(),
+        value,
+    });
+}
+
 /// Record-mode sink. When the `SPECGATE_RECORD` environment variable names a
 /// (non-empty) file, every emitted event is also appended to that file as one
 /// JSON object per line (JSONL of [`TraceEvent`], which is `#[serde(tag =

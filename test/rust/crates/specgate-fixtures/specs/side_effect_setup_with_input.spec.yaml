@@ -1,0 +1,17 @@
+spec_version: "0.4.0"
+name: fixture.side_effect_setup_with_input
+binding: binding.yaml
+
+operations:
+  check_limit:
+    inputs: { limit: i32 }
+    outputs:
+    - $result: i32
+
+cases:
+  - name: setup_sets_global_from_input
+    desc: A parameterized side-effect setup writes its input into global state, which the operation reads
+    operation: check_limit
+    inputs: { limit: 42 }
+    expected:
+      - $result: "42"

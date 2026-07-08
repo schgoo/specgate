@@ -15,7 +15,7 @@ already exists.
    - Are there new `operation:` names? Add `#[spec_operation]` markers.
    - New `setup:` names? Add `#[spec_setup]` factories.
    - New trace names in `expected:` that don't match an existing
-     `#[spec_event]` / `spec_event!()` / `#[spec_mock]`? Add the
+     `#[spec_event]` / `spec_trace!()` / `#[spec_mock]`? Add the
      missing annotation.
    - Removed names? Leave the annotation in place if the symbol is
      still useful for other specs; otherwise remove it.

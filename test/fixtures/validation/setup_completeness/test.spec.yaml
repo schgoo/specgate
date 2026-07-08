@@ -1,0 +1,14 @@
+spec_version: "0.4.0"
+name: test.setup_completeness
+binding: binding.yaml
+operations:
+  increment:
+    inputs: { initial: i32 }
+    outputs: [result]
+cases:
+  - name: increment_case
+    desc: A typo in an input that the harness routes to a setup is caught by input_completeness
+    operation: increment
+    inputs: { intial: 10 }
+    expected:
+      - result: "11"

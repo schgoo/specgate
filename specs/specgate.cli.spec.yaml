@@ -811,6 +811,27 @@ cases:
                   check: setup_wiring
                   message: "case 'increment_case': operation 'increment' is a method on 'Counter' but no #[spec_setup(\"increment\")] returns 'Counter' to construct the receiver"
 
+  - name: validate_setup_input_typo_fail
+    desc: A typo in an input routed to a setup is caught by input_completeness (no separate setup check)
+    operation: validate
+    inputs:
+      spec_dir: test/fixtures/validation/setup_completeness
+      strict: false
+      assertions_dir: ""
+      spec_only: false
+    expected:
+      - $result:
+          Fail:
+            report:
+              errors: 2
+              findings:
+                - severity: error
+                  check: input_completeness
+                  message: "case 'increment_case' missing required input 'initial' for operation 'increment'"
+                - severity: error
+                  check: input_completeness
+                  message: "case 'increment_case' has extra input 'intial' not declared in operation 'increment'"
+
   # ================================================================
   # Validate — full runnability pass (every check at once)
   # ================================================================
@@ -1103,11 +1124,16 @@ cases:
   - name: extract_with_cases
     desc: >
       Extracting the cases fixture with cases:true runs its existing
-      tests under record mode and captures one case per passing test — 2
-      operations, 0 types, 3 cases (adds_several, adds_two_and_three, greets).
-      The exact case content (recovered inputs + full emitted trace) is
-      byte-checked by `just extract-check` against the committed fixture.cases
-      golden.
+      tests under record mode and captures one case per passing test — 4
+      operations (add, greet, adjust, check_limit), 1 type (Tally), 5 cases
+      (adds_several, adds_two_and_three, adjusts_from_ten, checks_limit_of_seven,
+      greets). The adjusts_from_ten case recovers a setup-backed receiver's
+      construction input as a case-level input and method args as per-step
+      inputs; checks_limit_of_seven recovers a side-effect setup's global-state
+      input as a case-level input. All recovered values are plain `inputs:` (the
+      harness routes each to its constructor or the call by name). The exact case
+      content is byte-checked by `just extract-check` against the committed
+      fixture.cases golden.
     operation: extract
     inputs:
       package_root: test/rust/crates/specgate-cases-fixture
@@ -1118,9 +1144,9 @@ cases:
           Complete:
             report:
               spec_name: fixture.cases
-              operations: 2
-              types: 0
-              cases: 3
+              operations: 4
+              types: 1
+              cases: 5
 
   - name: run_extracted_cases_pass
     desc: >
@@ -1136,8 +1162,8 @@ cases:
           Complete:
             report:
               spec_name: fixture.cases
-              total_cases: 3
-              passed: 3
+              total_cases: 5
+              passed: 5
               failed: 0
               skipped: 0
               warned: 0

@@ -388,10 +388,13 @@ agents but not executed by the harness:
 
 ### Setups are invisible
 
-Setups never appear in a spec. A spec describes only operations, their
-inputs, and their observable outputs — it never names a constructor, declares
-`kind: setup`, or carries a `setup:` field on a case. How an operation's
-receiver or state objects get built is an implementation concern.
+Setups never appear in a trace: a setup is never an operation (`$run`) and
+emits no setup-named events. A spec describes only operations, their inputs,
+and their observable outputs — it never names a constructor or declares
+`kind: setup`. How an operation's receiver or state objects get built is an
+implementation concern, resolved from code. A setup's construction inputs are
+declared as ordinary operation inputs and supplied in the case's `inputs:` (see
+below); the harness routes them to the setup by name.
 
 In code, a setup is a function annotated with the **operation** it prepares:
 
@@ -413,13 +416,22 @@ or a parameter **by type**. The spec just runs the operation:
 ```
 
 **Construction inputs** a setup needs are declared as ordinary operation
-inputs and routed to the setup by parameter name:
+inputs and supplied in the case's `inputs:`; the harness routes each value to
+the setup or the call by name:
 
 ```yaml
 operations:
   increment:
-    inputs: { initial: i32 }   # consumed by the setup that builds the counter
+    inputs: { initial: i32 }   # routed to the setup that builds the counter
     outputs: [count]
+cases:
+  - name: start_at_10
+    operation: increment
+    inputs: { initial: 10 }
+    expected:
+      - count: "10"
+      - $run: increment
+      - count: "11"
 ```
 
 **Disambiguation with `fills`** — when an operation has more than one
@@ -448,9 +460,10 @@ fn make_target() -> Account { Account { balance: 0 } }
 
 Multiple `#[spec_setup(..., fills = ...)]` attributes may be stacked on one
 function to build several same-typed parameters. When such parameters need
-distinct construction inputs, give each as a flat input named
-`<param>_<fills>` — e.g. for `make_box(start)` filling `left` and `right`,
-declare `inputs: { start_left: i32, start_right: i32 }`.
+distinct construction inputs, declare each as a flat `<param>_<fills>`
+operation input — e.g. for `make_box(start)` filling `left` and `right`,
+declare `inputs: { start_left: i32, start_right: i32 }` and write
+`inputs: { start_left: 10, start_right: 5 }` in the case.
 
 ### `inputs`
 

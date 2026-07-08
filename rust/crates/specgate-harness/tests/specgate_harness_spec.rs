@@ -110,6 +110,7 @@ fn multi_field_capture() {
             ev("balance", 100i64),
             ev("transaction_count", 0i64),
             run_op("withdraw"),
+            ev("withdraw.amount", "50"),
             ev("balance", 50i64),
             ev("transaction_count", 1i64),
         ]
@@ -152,9 +153,12 @@ fn nested_operations() {
         vec![
             ev("balance", 100i64),
             run_op("transfer"),
+            ev("transfer.amount", "50"),
             run_op("withdraw"),
+            ev("withdraw.amount", "50"),
             ev("balance", 50i64),
             run_op("deposit"),
+            ev("deposit.amount", "50"),
             ev("balance", 100i64),
         ]
     );
@@ -211,6 +215,7 @@ fn renamed_inputs_via_spec_input() {
     // input by its spec name; the method input ("value") binds too (3 * 4 = 12).
     check_case(&r[1], "scale_3_by_4", CaseStatus::Pass);
     assert!(r[1].traces.contains(&ev("factor", 3i64)));
+    assert!(r[1].traces.contains(&ev("scale.value", "4")));
     assert!(r[1].traces.contains(&ev("$result", "12")));
 }
 
@@ -250,6 +255,7 @@ fn mock_call_site() {
         r[0].traces,
         vec![
             run_op("get_user"),
+            ev("get_user.id", "user_1"),
             ev("db.request", "user_1"),
             ev("db.response", "Alice"),
             ev("$result", "Alice"),
@@ -265,6 +271,8 @@ fn mock_multi_response() {
         r[0].traces,
         vec![
             run_op("get_users"),
+            ev("get_users.id_a", "user_1"),
+            ev("get_users.id_b", "user_2"),
             ev("db.request", "user_1"),
             ev("db.response", "Alice"),
             ev("db.request", "user_2"),
@@ -324,7 +332,10 @@ fn unrecoverable_panic() {
 fn void_operation() {
     let r = complete(run("test/rust/crates/specgate-fixtures/specs/void_operation.spec.yaml"));
     check_case(&r[0], "log_a_message", CaseStatus::Pass);
-    assert_eq!(r[0].traces, vec![ev("count", 0i64), run_op("log"), ev("count", 1i64)]);
+    assert_eq!(
+        r[0].traces,
+        vec![ev("count", 0i64), run_op("log"), ev("log.msg", "hello"), ev("count", 1i64)]
+    );
 }
 
 #[test]

@@ -156,6 +156,25 @@ specgate extract path/to/crate -o specs/derived.spec.yaml
 
 ### Learn more
 
+#### Workspace crates
+
+`SpecGate` ships as a set of crates. Most users depend only on this umbrella
+crate (annotations + harness in one dependency), plus `specgate-cli` as a
+command-line tool.
+
+* `specgate` — this umbrella crate: annotations + harness in one dependency.
+* `specgate-cli` — the `specgate validate`, `run`, and `extract` CLI.
+* `specgate-harness` — the test harness: codegen, trace collection, matching.
+* `specgate-annotations` — the annotation facade.
+* `specgate-annotations-macros` — the proc macros behind the annotations.
+* `specgate-runtime` — the runtime trace buffer.
+* `specgate-types` — spec and binding parsing.
+
+Each crate’s README lives under
+<https://github.com/schgoo/specgate/tree/main/rust/crates>
+
+#### Reference
+
 * [Knowledge base][__link0]
   — spec format, annotations, bindings, extraction, and more.
 * [Fixture Catalog][__link1]

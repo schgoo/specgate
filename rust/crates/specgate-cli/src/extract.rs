@@ -292,18 +292,22 @@ struct CaseInvocation {
     inputs: Vec<(String, String)>,
 }
 
-/// A captured test turned into a spec case. `expected` is the FULL verbatim
-/// trace the test emitted ($run + input echoes + $result, per invocation).
+/// A captured test turned into a spec case. `expected` is the filtered
+/// trace the test emitted (`$run` + input echoes + `$result`, per invocation);
+/// `setup` holds construction inputs recovered from `$setup.<key>` record-only
+/// events (empty for free-function cases).
 #[derive(Debug, Clone)]
 struct CaseData {
     name: String,
+    setup: BTreeMap<String, String>,
     invocations: Vec<CaseInvocation>,
     expected: Vec<TraceEvent>,
 }
 
 /// Build the target crate's test binary, enumerate its tests, run each one in
 /// isolation under record mode, and reconstruct the passing tests as cases for
-/// `comp` (free-function ops only; method/setup-backed or empty tests skipped).
+/// `comp`. Free-function ops and method ops are both eligible once their params
+/// are echoed (A2 ensures method params emit just like free-function params).
 fn capture_cases(package_root: &Path, registry: &Registry, comp: &str) -> Result<Vec<CaseData>, String> {
     let crate_name = cargo_package_name(package_root).ok_or_else(|| "could not read crate name from Cargo.toml".to_string())?;
     let scratch = workspace_root().join("target").join("specgate-extract-cases").join(&crate_name);
@@ -456,8 +460,47 @@ fn segment_invocations(events: &[TraceEvent]) -> Vec<CaseInvocation> {
     invs
 }
 
-/// True when every op in `inv` is a free function of `comp` with all its
-/// declared params echoed (so its inputs are fully recoverable).
+/// Split a test's trace into a setup map and invocations. `$setup.<key>`
+/// events written by `#[spec_setup]` echo statements are consumed into the
+/// map (key = part after `$setup.`); remaining events are forwarded to
+/// [`segment_invocations`].
+fn segment_trace(events: &[TraceEvent]) -> (BTreeMap<String, String>, Vec<CaseInvocation>) {
+    let mut setup: BTreeMap<String, String> = BTreeMap::new();
+    for ev in events {
+        if let TraceEvent::Event { name, value } = ev
+            && let Some(key) = name.strip_prefix("$setup.")
+        {
+            setup.insert(key.to_string(), value_as_string(value));
+        }
+    }
+    (setup, segment_invocations(events))
+}
+
+/// Filter a test's raw trace down to only the events that belong in
+/// `expected:`: `Run` events, `$result` events, and per-param echo events
+/// (`<op>.<param>` for any non-setup operation of `comp`). Discards
+/// `$setup.*` events and bare field-mutation events emitted by the
+/// `BodyInstrumenter`.
+fn filter_expected(events: &[TraceEvent], registry: &Registry, comp: &str) -> Vec<TraceEvent> {
+    let op_prefixes: Vec<String> = registry
+        .ops
+        .iter()
+        .filter(|o| !o.is_setup && o.component == comp)
+        .map(|o| format!("{}.", o.name))
+        .collect();
+    events
+        .iter()
+        .filter(|ev| match ev {
+            TraceEvent::Run { .. } => true,
+            TraceEvent::Event { name, .. } => name == "$result" || op_prefixes.iter().any(|p| name.starts_with(p.as_str())),
+        })
+        .cloned()
+        .collect()
+}
+
+/// True when every op in `inv` is a non-setup operation of `comp` with all its
+/// declared params echoed. After A2, method ops also emit param echoes, so this
+/// check accepts both free functions and methods once their params are recorded.
 fn is_free_fn_invocation(inv: &CaseInvocation, registry: &Registry, comp: &str) -> bool {
     let Some(op) = registry
         .ops
@@ -470,33 +513,37 @@ fn is_free_fn_invocation(inv: &CaseInvocation, registry: &Registry, comp: &str) 
     op.params.iter().all(|(pn, _)| echoed.contains(pn.as_str()))
 }
 
-/// Reconstruct eligible passing tests as cases: skip empty/method/setup tests,
-/// name each case after its test (qualifying collisions with the module path),
-/// and order alphabetically by case name.
+/// Pending eligible case data collected before name-dedup.
+type EligibleCase = (String, BTreeMap<String, String>, Vec<CaseInvocation>, Vec<TraceEvent>);
+
+/// Reconstruct eligible passing tests as cases: skip empty tests and tests
+/// where any invocation has un-echoed params; name each case after its test
+/// (qualifying collisions with the module path); order alphabetically.
 fn build_cases(raw: Vec<(String, Vec<TraceEvent>)>, registry: &Registry, comp: &str) -> Vec<CaseData> {
-    let mut eligible: Vec<(String, Vec<CaseInvocation>, Vec<TraceEvent>)> = Vec::new();
+    let mut eligible: Vec<EligibleCase> = Vec::new();
     for (test_name, events) in raw {
-        let invs = segment_invocations(&events);
+        let (setup, invs) = segment_trace(&events);
         if invs.is_empty() {
             // Test exercised no annotated operations — nothing to capture.
             continue;
         }
         if !invs.iter().all(|inv| is_free_fn_invocation(inv, registry, comp)) {
-            eprintln!("extract --cases: skipping test '{test_name}' (calls a method/setup-backed op; free functions only in v1)");
+            eprintln!("extract --cases: skipping test '{test_name}' (some invocations have un-echoed params)");
             continue;
         }
-        eligible.push((test_name, invs, events));
+        let expected = filter_expected(&events, registry, comp);
+        eligible.push((test_name, setup, invs, expected));
     }
 
     // Bare (module-stripped) sanitized names, and how often each recurs.
-    let bare: Vec<String> = eligible.iter().map(|(tn, _, _)| sanitize_case_name(last_segment(tn))).collect();
+    let bare: Vec<String> = eligible.iter().map(|(tn, _, _, _)| sanitize_case_name(last_segment(tn))).collect();
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for b in &bare {
         *counts.entry(b.clone()).or_default() += 1;
     }
 
     let mut cases: Vec<CaseData> = Vec::new();
-    for ((test_name, invocations, expected), b) in eligible.into_iter().zip(bare) {
+    for ((test_name, setup, invocations, expected), b) in eligible.into_iter().zip(bare) {
         // Qualify with the full module path only when the bare name collides.
         let name = if counts.get(&b).copied().unwrap_or(0) > 1 {
             sanitize_case_name(&test_name.replace("::", "_"))
@@ -505,6 +552,7 @@ fn build_cases(raw: Vec<(String, Vec<TraceEvent>)>, registry: &Registry, comp: &
         };
         cases.push(CaseData {
             name,
+            setup,
             invocations,
             expected,
         });
@@ -1197,22 +1245,45 @@ fn render_spec(
     s
 }
 
-/// Render captured test cases: one entry per case, a simple `operation`/`inputs`
-/// case for a single invocation or a `steps:` list for several, followed by the
-/// case-level flat `expected:` = the full verbatim trace.
+/// Render captured test cases: one entry per case. Construction inputs (from
+/// `$setup.*` echoes) are placed in a case-level `inputs:` block; call inputs
+/// go either in the same block (single invocation) or per-step (multi-step).
+/// Construction keys come first, then call keys. No `setup:` block anywhere.
 fn render_cases(s: &mut String, cases: &[CaseData]) {
     s.push_str("\ncases:\n");
     for c in cases {
         let _ = writeln!(s, "  - name: {}", c.name);
         if let [inv] = c.invocations.as_slice() {
-            let _ = writeln!(s, "    operation: {}", inv.operation);
-            if !inv.inputs.is_empty() {
+            // Single invocation: merge construction + call inputs at case level.
+            // If setup keys exist, emit the merged `inputs:` block BEFORE
+            // `operation:` (construction context precedes the call). If there
+            // are only call inputs, emit `operation:` first then `inputs:`.
+            if c.setup.is_empty() {
+                let _ = writeln!(s, "    operation: {}", inv.operation);
+                if !inv.inputs.is_empty() {
+                    s.push_str("    inputs:\n");
+                    for (k, v) in &inv.inputs {
+                        let _ = writeln!(s, "      {k}: {v}");
+                    }
+                }
+            } else {
                 s.push_str("    inputs:\n");
+                for (k, v) in &c.setup {
+                    let _ = writeln!(s, "      {k}: {v}");
+                }
                 for (k, v) in &inv.inputs {
                     let _ = writeln!(s, "      {k}: {v}");
                 }
+                let _ = writeln!(s, "    operation: {}", inv.operation);
             }
         } else {
+            // Multi-step: construction inputs at case level, per-step call inputs at step level.
+            if !c.setup.is_empty() {
+                s.push_str("    inputs:\n");
+                for (k, v) in &c.setup {
+                    let _ = writeln!(s, "      {k}: {v}");
+                }
+            }
             s.push_str("    steps:\n");
             for inv in &c.invocations {
                 let _ = writeln!(s, "      - operation: {}", inv.operation);
@@ -1816,16 +1887,24 @@ mod tests {
 
     #[test]
     fn method_invocation_rejected_when_a_param_has_no_echo() {
-        // `withdraw(amount)` with no `withdraw.amount` echo -> not a free fn.
+        // `withdraw(amount)` with no `withdraw.amount` echo → rejected
+        // (param is declared but not echoed, so inputs are not fully recoverable).
         let reg = Registry {
             ops: vec![op_c("withdraw", "c", "()", &[("amount", "i32")])],
             types: vec![],
         };
-        let inv = CaseInvocation {
+        let inv_missing = CaseInvocation {
             operation: "withdraw".into(),
             inputs: vec![],
         };
-        assert!(!is_free_fn_invocation(&inv, &reg, "c"));
+        assert!(!is_free_fn_invocation(&inv_missing, &reg, "c"));
+
+        // With the echo present the invocation IS accepted (method params now echo).
+        let inv_echoed = CaseInvocation {
+            operation: "withdraw".into(),
+            inputs: vec![("amount".into(), "50".into())],
+        };
+        assert!(is_free_fn_invocation(&inv_echoed, &reg, "c"));
     }
 
     #[test]
@@ -1887,8 +1966,15 @@ mod tests {
             types: vec![],
         };
         let raw = vec![
+            // Empty trace — no operations exercised.
             ("tests::no_ops".to_string(), vec![]),
-            ("tests::uses_method".to_string(), vec![run("withdraw")]),
+            // Method invocation with no param echo → still rejected.
+            ("tests::uses_method_missing_echo".to_string(), vec![run("withdraw")]),
+            // Method invocation WITH param echo → now accepted.
+            (
+                "tests::uses_method_echoed".to_string(),
+                vec![run("withdraw"), ev("withdraw.amount", "50")],
+            ),
             (
                 "tests::good".to_string(),
                 vec![run("add"), ev("add.a", "1"), ev("add.b", "2"), ev("$result", "3")],
@@ -1896,7 +1982,7 @@ mod tests {
         ];
         let cases = build_cases(raw, &reg, "c");
         let names: Vec<&str> = cases.iter().map(|c| c.name.as_str()).collect();
-        assert_eq!(names, vec!["good"]);
+        assert_eq!(names, vec!["good", "uses_method_echoed"]);
     }
 
     #[test]
@@ -1934,6 +2020,7 @@ mod tests {
         };
         let cases = vec![CaseData {
             name: "adds_two_and_three".into(),
+            setup: BTreeMap::new(),
             invocations: vec![CaseInvocation {
                 operation: "add".into(),
                 inputs: vec![("a".into(), "2".into()), ("b".into(), "3".into())],
@@ -1962,5 +2049,124 @@ mod tests {
             "{yaml}"
         );
         assert!(!yaml.contains("\ncases: []\n"), "{yaml}");
+    }
+
+    // --- setup extraction and filtering -----------------------------------
+
+    fn ev_int(name: &str, i: i64) -> TraceEvent {
+        TraceEvent::Event {
+            name: name.into(),
+            value: Value::Integer(i),
+        }
+    }
+
+    #[test]
+    fn segment_trace_extracts_setup_events() {
+        let trace = vec![
+            TraceEvent::Event {
+                name: "$setup.start".into(),
+                value: Value::String("10".into()),
+            },
+            run("adjust"),
+            ev("adjust.amount", "5"),
+            ev("$result", "15"),
+        ];
+        let (setup, invs) = segment_trace(&trace);
+        assert_eq!(setup.get("start").map(String::as_str), Some("10"));
+        assert_eq!(invs.len(), 1);
+        assert_eq!(invs[0].inputs, vec![("amount".to_string(), "5".to_string())]);
+    }
+
+    #[test]
+    fn filter_expected_keeps_run_result_and_op_echoes() {
+        let reg = Registry {
+            ops: vec![op_c("adjust", "c", "i32", &[("amount", "i32")])],
+            types: vec![],
+        };
+        let trace = vec![
+            TraceEvent::Event {
+                name: "$setup.start".into(),
+                value: Value::String("10".into()),
+            },
+            run("adjust"),
+            ev("adjust.amount", "5"),
+            ev_int("total", 15),
+            ev("$result", "15"),
+        ];
+        let filtered = filter_expected(&trace, &reg, "c");
+        assert_eq!(filtered.len(), 3, "setup and bare field events must be excluded");
+        assert!(matches!(&filtered[0], TraceEvent::Run { operation } if operation == "adjust"));
+        assert!(matches!(&filtered[1], TraceEvent::Event { name, .. } if name == "adjust.amount"));
+        assert!(matches!(&filtered[2], TraceEvent::Event { name, .. } if name == "$result"));
+    }
+
+    #[test]
+    fn render_cases_with_setup_map() {
+        let cases = vec![CaseData {
+            name: "adjusts_from_ten".into(),
+            setup: {
+                let mut m = BTreeMap::new();
+                m.insert("start".to_string(), "10".to_string());
+                m
+            },
+            invocations: vec![CaseInvocation {
+                operation: "adjust".into(),
+                inputs: vec![("amount".into(), "5".into())],
+            }],
+            expected: vec![run("adjust"), ev("adjust.amount", "5"), ev("$result", "15")],
+        }];
+        let mut s = String::new();
+        render_cases(&mut s, &cases);
+        // Construction inputs merged with call inputs into one case-level inputs: block
+        assert!(s.contains("    inputs:\n      start: 10\n      amount: 5\n"), "{s}");
+        assert!(s.contains("    operation: adjust\n"), "{s}");
+        assert!(!s.contains("    setup:"), "no setup: block should appear: {s}");
+    }
+
+    #[test]
+    fn build_cases_with_setup_backed_method() {
+        let reg = Registry {
+            ops: vec![
+                op_c("adjust", "c", "i32", &[("amount", "i32")]),
+                // setup for adjust (is_setup = true)
+                {
+                    let mut o = op("adjust", true, "Tally", "", &[("start", "i32")]);
+                    o.component = "c".into();
+                    o
+                },
+            ],
+            types: vec![],
+        };
+        let raw = vec![(
+            "tests::adjusts_from_ten".to_string(),
+            vec![
+                TraceEvent::Event {
+                    name: "$setup.start".into(),
+                    value: Value::String("10".into()),
+                },
+                run("adjust"),
+                ev("adjust.amount", "5"),
+                ev_int("total", 15),
+                ev("$result", "15"),
+            ],
+        )];
+        let cases = build_cases(raw, &reg, "c");
+        assert_eq!(cases.len(), 1);
+        assert_eq!(cases[0].name, "adjusts_from_ten");
+        assert_eq!(cases[0].setup.get("start").map(String::as_str), Some("10"));
+        assert_eq!(cases[0].invocations.len(), 1);
+        assert_eq!(cases[0].invocations[0].inputs, vec![("amount".to_string(), "5".to_string())]);
+        // expected must not contain $setup.start or total
+        let exp_names: Vec<&str> = cases[0]
+            .expected
+            .iter()
+            .map(|e| match e {
+                TraceEvent::Run { operation } => operation.as_str(),
+                TraceEvent::Event { name, .. } => name.as_str(),
+            })
+            .collect();
+        assert!(!exp_names.contains(&"$setup.start"), "setup event must not be in expected");
+        assert!(!exp_names.contains(&"total"), "bare field event must not be in expected");
+        assert!(exp_names.contains(&"adjust.amount"), "param echo must be in expected");
     }
 }

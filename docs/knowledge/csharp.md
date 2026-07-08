@@ -24,7 +24,7 @@ The C# attributes mirror the five Rust macros one-for-one:
 | `#[spec_operation("name")]` | `[SpecOperation("name")]` | Method |
 | `#[spec_setup("name")]` | `[SpecSetup("name")]` | Static factory method (no `this`) |
 | `#[spec_event]` on a field | `[SpecEvent]` on a property | Property with a setter |
-| `spec_event!("name", expr)` | `SpecEvent.Record("name", expr)` | Inline expression |
+| `spec_trace!("name", expr)` | `SpecEvent.Record("name", expr)` | Inline expression |
 | `#[spec_mock("name")]` | `[SpecMock("name")]` | Call site or method |
 
 No `Kind` parameter. The shape of the operation is expressed through

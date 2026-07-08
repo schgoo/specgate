@@ -152,40 +152,6 @@ cases:
       - A command target passes when its shell command exits 0
       - run_spec is source-oriented and does not execute command targets
 
-  - name: language_neutral_input_names
-    kind: narrative
-    desc: >
-      A spec names operation and setup inputs in its own language-neutral
-      vocabulary, independent of the implementation's parameter names. Code
-      annotates a parameter with #[spec_input("name")] to bind it to the spec
-      name; the harness binds case inputs and emits `op.<name>` events using
-      that name. Without the attribute the spec name defaults to the code
-      parameter name.
-    verify:
-      - named_inputs completes — divide's params a/b are addressed as numerator/denominator
-      - The echoed input events use the spec names (divide.numerator, divide.denominator)
-      - A setup param renamed with #[spec_input] binds its construction input by the spec name
-
-  - name: invisible_setups
-    kind: narrative
-    desc: >
-      Setups are invisible to the spec: a spec never names a setup function,
-      declares `kind: setup`, or carries `setup:` on a case. A setup is linked
-      in code via #[spec_setup("operation")] and constructs the operation's
-      receiver or a parameter, matched by return type. When several parameters
-      share that type, or several setups produce it, each setup pins its target
-      with fills = "<param>" (which may be stacked to fill several params from
-      one function). Construction inputs are declared as ordinary operation
-      inputs, scoped by parameter role when needed. Side-effect setups (no
-      consumed return) are simply invoked before the operation.
-    verify:
-      - statemachine_counter completes — a method receiver is built by its linked setup
-      - setup_with_params completes — a setup's construction input is a declared operation input
-      - multi_setup completes — two same-typed setups pinned with fills build source and target
-      - shared_setup completes — one stacked-fills setup builds multiple same-typed params
-      - side_effect_setup completes — a non-consumed setup is still invoked before the operation
-      - A method operation with no setup for its receiver fails pre-flight with a precise error
-
   - name: multi_file_operations
     kind: narrative
     desc: >
@@ -1097,11 +1063,12 @@ cases:
                   - Event: { name: balance, value: "100" }
                   - Event: { name: transaction_count, value: "0" }
                   - Run: { operation: withdraw }
+                  - Event: { name: withdraw.amount, value: "50" }
                   - Event: { name: balance, value: "50" }
                   - Event: { name: transaction_count, value: "1" }
 
   - name: inline_checkpoint
-    desc: spec_event!() emits an event at invocation point
+    desc: spec_trace!() emits an event at invocation point
     operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/checkpoint_inline.spec.yaml
@@ -1164,9 +1131,12 @@ cases:
                 traces:
                   - Event: { name: balance, value: "100" }
                   - Run: { operation: transfer }
+                  - Event: { name: transfer.amount, value: "50" }
                   - Run: { operation: withdraw }
+                  - Event: { name: withdraw.amount, value: "50" }
                   - Event: { name: balance, value: "50" }
                   - Run: { operation: deposit }
+                  - Event: { name: deposit.amount, value: "50" }
                   - Event: { name: balance, value: "100" }
 
   # ================================================================
@@ -1174,7 +1144,7 @@ cases:
   # ================================================================
 
   - name: setup_with_input_params
-    desc: A setup constructs state from a declared operation input (setup stays invisible)
+    desc: A setup constructs the receiver from an input the harness routes to it by name (setup stays invisible)
     operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/setup_with_params.spec.yaml
@@ -1260,6 +1230,7 @@ cases:
                 expected:
                   - factor: "3"
                   - $run: scale
+                  - scale.value: "4"
                   - $result: "12"
 
   - name: shared_setup_fills_many_params
@@ -1300,6 +1271,20 @@ cases:
                 status: pass
                 expected:
                   - $result: "1"
+
+  - name: side_effect_setup_with_input_runs
+    desc: A parameterized side-effect setup writes its input into global state the operation reads
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/side_effect_setup_with_input.spec.yaml
+    expected:
+      - $result:
+          Complete:
+            results:
+              - name: setup_sets_global_from_input
+                status: pass
+                expected:
+                  - $result: "42"
 
   - name: simple_output_setup_fills_param
     desc: A setup returning a primitive fills an operation parameter by type
@@ -1383,6 +1368,7 @@ cases:
                   - $result: "Alice"
                 traces:
                   - Run: { operation: get_user }
+                  - Event: { name: get_user.id, value: "user_1" }
                   - Event: { name: db.request, value: "user_1" }
                   - Event: { name: db.response, value: "Alice" }
                   - Event: { name: $result, value: "Alice" }
@@ -1407,6 +1393,8 @@ cases:
                   - $result: "Alice and Bob"
                 traces:
                   - Run: { operation: get_users }
+                  - Event: { name: get_users.id_a, value: "user_1" }
+                  - Event: { name: get_users.id_b, value: "user_2" }
                   - Event: { name: db.request, value: "user_1" }
                   - Event: { name: db.response, value: "Alice" }
                   - Event: { name: db.request, value: "user_2" }
@@ -1539,6 +1527,7 @@ cases:
                 traces:
                   - Event: { name: count, value: "0" }
                   - Run: { operation: log }
+                  - Event: { name: log.msg, value: "hello" }
                   - Event: { name: count, value: "1" }
 
   - name: readonly_operation
@@ -1714,6 +1703,7 @@ cases:
                   - Event: { name: balance, value: "100" }
                   - Event: { name: transaction_count, value: "0" }
                   - Run: { operation: withdraw }
+                  - Event: { name: withdraw.amount, value: "50" }
                   - Event: { name: balance, value: "50" }
                   - Event: { name: transaction_count, value: "1" }
               - name: unordered_reversed_still_passes
@@ -1727,6 +1717,7 @@ cases:
                   - Event: { name: balance, value: "100" }
                   - Event: { name: transaction_count, value: "0" }
                   - Run: { operation: withdraw }
+                  - Event: { name: withdraw.amount, value: "50" }
                   - Event: { name: balance, value: "50" }
                   - Event: { name: transaction_count, value: "1" }
               - name: unordered_wrong_value_fails
@@ -1740,6 +1731,7 @@ cases:
                   - Event: { name: balance, value: "100" }
                   - Event: { name: transaction_count, value: "0" }
                   - Run: { operation: withdraw }
+                  - Event: { name: withdraw.amount, value: "50" }
                   - Event: { name: balance, value: "50" }
                   - Event: { name: transaction_count, value: "1" }
               - name: unordered_multiple_blocks
@@ -1756,6 +1748,7 @@ cases:
                   - Event: { name: balance, value: "100" }
                   - Event: { name: transaction_count, value: "0" }
                   - Run: { operation: withdraw }
+                  - Event: { name: withdraw.amount, value: "50" }
                   - Event: { name: balance, value: "50" }
                   - Event: { name: transaction_count, value: "1" }
 

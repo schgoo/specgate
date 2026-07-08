@@ -24,10 +24,11 @@ cases:
       - $result: "5"
 
   - name: scale_3_by_4
-    desc: A setup param and an operation param both renamed via spec_input
+    desc: A method op echoes its renamed arg; a construction input is routed to the setup by name
     operation: scale
     inputs: { factor: 3, value: 4 }
     expected:
       - factor: "3"
       - $run: scale
+      - scale.value: "4"
       - $result: "12"

@@ -10,11 +10,26 @@ spec_version: "0.4.0"
 name: fixture.cases
 binding: fixture.cases.binding.yaml
 
+types:
+  Tally:
+    total: i32
+
 operations:
   add:
     inputs:
       a: i32
       b: i32
+    outputs:
+      - $result: i32
+  adjust:
+    inputs:
+      start: i32
+      amount: i32
+    outputs:
+      - $result: i32
+  check_limit:
+    inputs:
+      limit: i32
     outputs:
       - $result: i32
   greet:
@@ -53,6 +68,30 @@ cases:
       - add.a: "2"
       - add.b: "3"
       - $result: "5"
+  - name: adjusts_from_ten
+    inputs:
+      start: 10
+    steps:
+      - operation: adjust
+        inputs:
+          amount: 5
+      - operation: adjust
+        inputs:
+          amount: -3
+    expected:
+      - $run: adjust
+      - adjust.amount: "5"
+      - $result: "15"
+      - $run: adjust
+      - adjust.amount: "-3"
+      - $result: "12"
+  - name: checks_limit_of_seven
+    inputs:
+      limit: 7
+    operation: check_limit
+    expected:
+      - $run: check_limit
+      - $result: "7"
   - name: greets
     operation: greet
     inputs:

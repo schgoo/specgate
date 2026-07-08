@@ -437,6 +437,73 @@ fn check_file(
             }
         }
 
+        // 5b. input_completeness for multi-step cases: each step's required
+        // inputs must be satisfied by the union of case-level inputs and that
+        // step's own inputs. Construction inputs sit at case level; call inputs
+        // at step level. Extra step-level inputs not declared for the step
+        // operation are also flagged.
+        if let Some(Value::Sequence(steps)) = cm.get(Value::String("steps".into())) {
+            let case_inputs_map = cm.get(Value::String("inputs".into())).and_then(|v| v.as_mapping());
+            let case_inputs: BTreeSet<String> = case_inputs_map
+                .map(|m| m.iter().filter_map(|(k, _)| k.as_str().map(String::from)).collect())
+                .unwrap_or_default();
+            let mut declared_case_inputs = BTreeSet::new();
+            for step in steps {
+                let Some(sm) = step.as_mapping() else { continue };
+                let Some(step_op) = sm.get(Value::String("operation".into())).and_then(|v| v.as_str()) else {
+                    continue;
+                };
+                let Some(decl) = ops.get(step_op) else { continue };
+                declared_case_inputs.extend(decl.declared_inputs.iter().cloned());
+                let step_inputs_map = sm.get(Value::String("inputs".into())).and_then(|v| v.as_mapping());
+                let step_inputs: BTreeSet<String> = step_inputs_map
+                    .map(|m| m.iter().filter_map(|(k, _)| k.as_str().map(String::from)).collect())
+                    .unwrap_or_default();
+                // Union of case-level and step-level inputs satisfies the op.
+                let provided: BTreeSet<String> = case_inputs.union(&step_inputs).cloned().collect();
+                let declared_set: BTreeSet<String> = decl.declared_inputs.iter().cloned().collect();
+                for required in &decl.declared_inputs {
+                    if !provided.contains(required) && !decl.defaulted_inputs.contains(required) {
+                        findings.push(ValidationFinding {
+                            severity: Severity::Error,
+                            check: "input_completeness".into(),
+                            file: file.into(),
+                            message: format!("case '{name}' step '{step_op}' missing required input '{required}'"),
+                        });
+                    }
+                }
+                // Extra inputs in this step that aren't declared for the step op.
+                for extra in step_inputs.difference(&declared_set) {
+                    let is_mapping = step_inputs_map
+                        .and_then(|m| m.get(Value::String(extra.clone())))
+                        .is_some_and(|v| v.as_mapping().is_some());
+                    if is_mapping {
+                        continue;
+                    }
+                    findings.push(ValidationFinding {
+                        severity: Severity::Error,
+                        check: "input_completeness".into(),
+                        file: file.into(),
+                        message: format!("case '{name}' step '{step_op}' has extra input '{extra}' not declared in operation '{step_op}'"),
+                    });
+                }
+            }
+            for extra in case_inputs.difference(&declared_case_inputs) {
+                let is_mapping = case_inputs_map
+                    .and_then(|m| m.get(Value::String(extra.clone())))
+                    .is_some_and(|v| v.as_mapping().is_some());
+                if is_mapping {
+                    continue;
+                }
+                findings.push(ValidationFinding {
+                    severity: Severity::Error,
+                    check: "input_completeness".into(),
+                    file: file.into(),
+                    message: format!("case '{name}' has extra input '{extra}' not declared in any step operation"),
+                });
+            }
+        }
+
         // 6. expected_format: each entry must have exactly one key.
         if let Some(Value::Sequence(items)) = cm.get(Value::String("expected".into())) {
             for entry in items {
@@ -1144,6 +1211,36 @@ mod tests {
                 .iter()
                 .any(|f| f.check == "input_completeness" && f.message.contains("missing required input 'b'")),
             "required input regression: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn multi_step_inputs_are_satisfied_by_case_and_step_union() {
+        let findings = check_findings(
+            "spec_version: \"0.4.0\"\noperations:\n  adjust:\n    inputs:\n      start: i32\n      amount: i32\n    outputs:\n      - $result: i32\ncases:\n  - name: adjusts_from_ten\n    inputs: { start: 10 }\n    steps:\n      - operation: adjust\n        inputs: { amount: 5 }\n      - operation: adjust\n        inputs: { amount: -3 }\n    expected:\n      - $run: adjust\n      - $result: \"15\"\n",
+        );
+        assert!(
+            !findings.iter().any(|f| f.check == "input_completeness"),
+            "case-level construction input plus step call inputs must satisfy multi-step ops: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn multi_step_case_level_extra_input_errors() {
+        let findings = check_findings(
+            "spec_version: \"0.4.0\"\noperations:\n  adjust:\n    inputs:\n      start: i32\n      amount: i32\n    outputs:\n      - $result: i32\ncases:\n  - name: typo_start\n    inputs: { strt: 10 }\n    steps:\n      - operation: adjust\n        inputs: { amount: 5 }\n    expected:\n      - $run: adjust\n      - $result: \"15\"\n",
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.check == "input_completeness" && f.message.contains("missing required input 'start'")),
+            "case-level typo must miss required input: {findings:?}"
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.check == "input_completeness" && f.message.contains("extra input 'strt'")),
+            "case-level typo must be reported as extra input: {findings:?}"
         );
     }
 }

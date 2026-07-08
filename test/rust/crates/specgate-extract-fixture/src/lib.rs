@@ -107,7 +107,8 @@ pub fn double(x: i32) -> i32 {
 }
 
 /// Setup that fills the receiver of an impl-method operation; the setup's own
-/// construction param (`factor`) becomes an operation input.
+/// construction param (`factor`) becomes an operation input (the harness routes
+/// it to this setup by name).
 #[spec_setup("scale")]
 pub fn make_scaler(#[spec_input("factor")] f: i32) -> Scaler {
     Scaler { factor: f }

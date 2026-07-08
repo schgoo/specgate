@@ -263,16 +263,9 @@
           "type": "string",
           "description": "Operation to invoke (must match a key in the operations block)."
         },
-        "setup": {
-          "description": "Setup operation name (string) or map of named setups with inputs.",
-          "oneOf": [
-            { "type": "string" },
-            { "type": "object" }
-          ]
-        },
         "inputs": {
           "type": "object",
-          "description": "Input values for this case."
+          "description": "Input values for this case. A single undifferentiated map: the harness routes each value by name to the operation call or to a #[spec_setup] constructor. In a multi-step case, values shared across steps (e.g. a receiver's construction input) sit at case level; values that vary per call sit in each step's inputs."
         },
         "expected": {
           "description": "Expected trace assertions or structured outcome.",

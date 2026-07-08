@@ -39,6 +39,7 @@ pub mod scalar_operators;
 pub mod setup_with_params;
 pub mod shared_setup;
 pub mod side_effect_setup;
+pub mod side_effect_setup_with_input;
 pub mod simple_output_setup;
 pub mod stateless_add;
 pub mod statemachine_counter;

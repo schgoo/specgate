@@ -4,7 +4,9 @@ binding: binding.yaml
 
 operations:
   combine:
-    inputs: { start_left: i32, start_right: i32 }
+    inputs:
+      start_left: i32
+      start_right: i32
     outputs:
     - left.value
     - right.value

@@ -494,17 +494,18 @@ pub fn spec_operation(attr: TokenStream, item: TokenStream) -> TokenStream {
     .into()
 }
 
-fn build_pre_stmts(op_name: &str, params: &[(Ident, Type, Option<String>)], is_method: bool, _has_ref_param: bool) -> Vec<Stmt> {
+fn build_pre_stmts(op_name: &str, params: &[(Ident, Type, Option<String>)], _is_method: bool, _has_ref_param: bool) -> Vec<Stmt> {
     let rt = rt();
     let mut out: Vec<Stmt> = vec![parse_quote!(#rt::emit_run(#op_name);)];
-    if is_method {
-        return out;
-    }
     // Emit every parameter as an `op.<spec_name>` event. Printable primitives
     // go through Display; complex types (structs, enums, collections) emit a
     // structured Value via ToSpecValue. A single complex parameter must not
     // suppress emission of its primitive siblings. The event uses the
     // language-neutral `#[spec_input]` name when present.
+    // Self receivers and `&mut T` params are excluded from input-echo emission:
+    // receivers are `FnArg::Receiver` and are never present in `params`; mutable
+    // reference params represent state objects threaded through an operation and
+    // are skipped by the `is_mut_ref` guard below.
     for (id, ty, spec_name) in params {
         let name = spec_param_name(id, spec_name.as_ref());
         let event_name = format!("{op_name}.{name}");
@@ -594,6 +595,36 @@ fn build_post_emit(output: &ReturnType) -> Option<TokenStream2> {
     })
 }
 
+/// Build record-only echo statements prepended to a `#[spec_setup]` body.
+/// Each construction parameter gets a `$setup.<spec_name>` event written to
+/// the record file (via [`record_event_only`]) so `specgate extract --cases`
+/// can recover the case's `setup:` map without pushing anything into the
+/// in-process trace buffer. When the setup has a `fills` pin, the event name
+/// is suffixed with `_<fills>` to avoid key collisions when two setups share a
+/// param name.
+fn build_setup_echo_stmts(fills: Option<&str>, params: &[(Ident, Type, Option<String>)]) -> Vec<Stmt> {
+    let rt = rt();
+    let fills_suffix = fills.filter(|s| !s.is_empty()).map(|s| format!("_{s}")).unwrap_or_default();
+    let mut out: Vec<Stmt> = Vec::new();
+    for (id, ty, spec_name) in params {
+        if is_mut_ref(ty) {
+            continue;
+        }
+        let name = spec_param_name(id, spec_name.as_ref());
+        let event_name = format!("$setup.{name}{fills_suffix}");
+        if is_printable_param(ty) {
+            out.push(parse_quote!(
+                #rt::record_event_only(#event_name, #rt::Value::String(::std::format!("{}", #id)));
+            ));
+        } else {
+            out.push(parse_quote!(
+                #rt::record_event_only(#event_name, #rt::ToSpecValue::to_spec_value(&#id));
+            ));
+        }
+    }
+    out
+}
+
 #[proc_macro_attribute]
 pub fn spec_setup(attr: TokenStream, item: TokenStream) -> TokenStream {
     let SetupArg { op_name, fills, spec } = parse_macro_input!(attr as SetupArg);
@@ -602,9 +633,14 @@ pub fn spec_setup(attr: TokenStream, item: TokenStream) -> TokenStream {
     let rt = rt();
     let component = component_tokens(spec.as_deref());
 
-    // Setups are invisible to the spec: they emit no input-echo events. The
-    // function body is left unchanged — it just constructs/prepares state.
-    // `#[spec_input]` attributes on parameters are consumed (stripped) here.
+    // Prepend record-only echo statements so `specgate extract --cases` can
+    // recover each setup's construction inputs as the case's `setup:` map.
+    // `#[spec_input]` attributes on parameters are consumed (stripped) by
+    // `extract_param_renames`; the echo uses the language-neutral spec name.
+    let echo_stmts = build_setup_echo_stmts(fills.as_deref(), &params);
+    let original_stmts: Vec<Stmt> = std::mem::take(&mut func.block.stmts);
+    func.block.stmts = echo_stmts;
+    func.block.stmts.extend(original_stmts);
 
     // Registry entry — same const-wrapping trick as spec_operation so this
     // compiles whether the function is at module scope or inside an impl block.

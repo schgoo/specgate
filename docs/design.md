@@ -110,17 +110,15 @@ name: fixture.statemachine_counter   # dotted component name (required)
 binding: binding.yaml                # path to binding file (relative to this spec)
 
 operations:
-  make_counter:
-    kind: setup
   increment:
+    inputs: { initial: i32 }         # routed to the setup that builds the receiver
     outputs: [count]
 
 cases:                               # required, non-empty
   - name: increment_once
     desc: Incrementing counter from 0 produces count 1
-    setup: make_counter              # optional — names a #[spec_setup] fn
     operation: increment             # required for single-step cases
-    inputs: { initial: 0 }           # optional — values passed to setup/operation
+    inputs: { initial: 0 }           # optional — routed to op call or setup by name
     expected:                        # required — list of single-entry maps
       - count: "0"                   # Event match: name=count, value="0"
       - $run: increment              # Run match: operation=increment
@@ -177,37 +175,38 @@ setup, use `steps:` instead of `operation:`:
 ```yaml
 - name: increment_then_decrement
   desc: Count goes 0 to 1 to 0
-  setup: make_counter
+  inputs: { initial: 0 }         # case-level: shared across steps (receiver ctor)
   steps:
     - operation: increment
     - operation: decrement
   expected:
     - count: "0"
-    - run: increment
+    - $run: increment
     - count: "1"
-    - run: decrement
+    - $run: decrement
     - count: "0"
 ```
 
-The `expected:` list is still a single flat subsequence across all steps.
+The `expected:` list is still a single flat subsequence across all steps. In a
+multi-step case, inputs shared across steps (such as a receiver's construction
+input) sit at case level; inputs that vary per call sit in each step's `inputs:`.
 
 ### Multi-setup cases
 
-When an operation takes multiple objects, declare them as a map of
-aliases to setup function names. The aliases become parameter names for
-the operation:
+When an operation takes multiple objects of the same type, each setup pins
+its target parameter in code with `#[spec_setup("op", fills = "param")]` — the
+spec never names a setup. If those setups take construction inputs, declare them
+as ordinary operation inputs (flat `<param>_<fills>` keys) and supply them in
+the case's `inputs:`; parameterless setups need no inputs:
 
 ```yaml
 - name: transfer_between_accounts
-  setup:
-    source: make_source
-    target: make_target
   operation: transfer
-  inputs: { amount: 50 }
+  inputs: { amount: 50 }        # the operation's own input
   expected:
     - source.balance: "100"
     - target.balance: "0"
-    - run: transfer
+    - $run: transfer
     - source.balance: "50"
     - target.balance: "50"
 ```
@@ -221,14 +220,13 @@ provided under the mock's name in `inputs`:
 
 ```yaml
 - name: find_user_1
-  setup: make_service
   operation: get_user
   inputs:
     id: "user_1"
     db:                     # name of the spec_mock
       "user_1": "Alice"     # input → mocked response
   expected:
-    - run: get_user
+    - $run: get_user
     - db.request: "user_1"
     - db.response: "Alice"
     - get_user.result: "Alice"
@@ -248,11 +246,11 @@ Run   { operation: string }              // the boundary of an operation call
 ```
 
 Everything observable — field mutations, return values, mock requests,
-mock responses, inline checkpoints, setup arguments — is an `Event`.
-Operation entries are `Run`. Position in the sequence is significant
-(events before a `Run` for op X are "pre-X"; events after are "post-X")
-but the spec author never has to think in those terms — they simply list
-the events they care about, in order.
+mock responses, inline checkpoints — is an `Event`. Operation entries are
+`Run`. Setups emit nothing to the trace (they are *arrange*, not *act*).
+Position in the sequence is significant (events before a `Run` for op X are
+"pre-X"; events after are "post-X") but the spec author never has to think in
+those terms — they simply list the events they care about, in order.
 
 ### Subsequence matching semantics
 
@@ -290,9 +288,9 @@ Five annotations cover the entire model. Every fixture in
 | Annotation | Placed on | Effect | Trace emitted |
 |------------|-----------|--------|---------------|
 | `#[spec_operation("name")]` | Free function or method | Marks the operation the spec invokes. | `Run { operation: name }` at the entry point. |
-| `#[spec_setup("name")]` | Free function (no `self`) | Names a factory the case can invoke by `setup:`. | `Event { name: "<setup>.<param>", value }` per parameter. |
-| `#[spec_event]` | Struct field | Every write to the field emits an event. | `Event { name: "<field>", value: new_value }` on each mutation. The field name is the trace name; multi-setup cases get the alias prefix (e.g. `source.balance`). |
-| `spec_event!("name", expr)` | Inline expression | Records the value of `expr` at this point in execution. | `Event { name, value: format!("{}", expr) }`. |
+| `#[spec_setup("name")]` | Free function (no `self`) | Links a factory to the operation it builds a receiver/parameter for, matched by return type. Construction inputs are ordinary operation inputs, routed to the setup by name. | None — setups are invisible in the trace. |
+| `#[spec_event]` | Struct field | Every write to the field emits an event. | `Event { name: "<field>", value: new_value }` on each mutation. The field name is the trace name; multi-receiver cases get the `fills` role prefix (e.g. `source.balance`). |
+| `spec_trace!("name", expr)` | Inline expression | Records the value of `expr` at this point in execution. | `Event { name, value: format!("{}", expr) }`. |
 | `#[spec_mock("name")]` | Local binding around a method call | Replaces the call with the case's mock table lookup. Emits both the request and the response. | `Event { name: "<mock>.request", value: input }`, then `Event { name: "<mock>.response", value: mocked_response }`. |
 
 **No `kind` parameter.** `#[spec_operation]` takes a single name; the
@@ -300,7 +298,7 @@ shape of the operation (pure, stateful, multi-step, error-returning…) is
 expressed entirely by what events the spec lists in `expected:`.
 
 **No `spec_capture` or `spec_checkpoint!()`.** Field capture is
-`#[spec_event]`; inline capture is `spec_event!()`. Those two names
+`#[spec_event]`; inline capture is `spec_trace!()`. Those two names
 cover every observation pattern in the fixtures.
 
 ### Naming conventions used by fixtures
@@ -309,12 +307,12 @@ cover every observation pattern in the fixtures.
 - `<operation>.result` — return value (`add.result`).
 - `<operation>.outcome` — `Ok` / `Error` for `Result<T,E>` returns.
 - `<operation>.error` — error message string for the `Err` arm.
-- `<field>` — bare field name for `#[spec_event]` captures on the
-  single-setup case (`count`, `balance`).
-- `<alias>.<field>` — field captures under a multi-setup alias
-  (`source.balance`, `target.balance`).
+- `<field>` — bare field name for `#[spec_event]` captures on a
+  single-receiver case (`count`, `balance`).
+- `<param>.<field>` — field captures prefixed by the `fills` parameter
+  role when several same-typed receivers exist (`source.balance`,
+  `target.balance`).
 - `<mock>.request` / `<mock>.response` — mock interactions.
-- `<setup>.<param>` — setup arguments (`make_counter.initial`).
 
 These are conventions enforced by the runtime macros, not by the
 matcher. The spec author just writes the names; the matcher compares
@@ -421,7 +419,7 @@ The spec is YAML; the binding picks a backend (`language: rust` or
 | Operation | `#[spec_operation("name")]` | `[SpecOperation("name")]` |
 | Setup | `#[spec_setup("name")]` | `[SpecSetup("name")]` |
 | Field event | `#[spec_event]` on field | `[SpecEvent]` on property |
-| Inline event | `spec_event!("name", expr)` | `SpecEvent.Record("name", expr)` |
+| Inline event | `spec_trace!("name", expr)` | `SpecEvent.Record("name", expr)` |
 | Mock | `#[spec_mock("name")]` | `[SpecMock("name")]` |
 
 C# support is planned; current fixtures are Rust-only.
