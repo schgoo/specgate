@@ -554,7 +554,7 @@ fn render_case(out: &mut String, case: &Case, spec: &Spec, annotated: &Annotated
             ).expect("fmt");
         }
         out.push_str("            if let Err(__e) = __r {\n");
-        out.push_str("                let msg = panic_msg(&__e);\n                specgate::emit_event(\"$fault\", &msg);\n");
+        out.push_str("                let msg = panic_msg(&__e);\n                specgate::emit_event_v(\"$fault\", specgate::Value::String(msg));\n");
         out.push_str("            }\n");
         out.push_str("        }\n");
     }

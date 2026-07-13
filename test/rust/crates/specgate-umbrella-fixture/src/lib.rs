@@ -3,12 +3,12 @@
 // expansion path ::specgate_annotations::__rt::... resolves through
 // the umbrella's `pub extern crate specgate_annotations` re-export.
 
-use specgate::{emit_event, spec_operation};
+use specgate::{spec_operation, spec_trace};
 
 specgate::spec_component!("fixture.umbrella");
 
 #[spec_operation("echo")]
 pub fn echo(msg: &str) -> String {
-    emit_event("input", msg);
+    spec_trace!("input", msg.to_string());
     msg.to_string()
 }

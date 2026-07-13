@@ -174,7 +174,14 @@
 //!   — every feature demonstrated by a runnable fixture (the source-of-truth examples).
 
 // Public API — annotations
-pub use specgate_annotations::{SpecEvent, emit_event, spec_component, spec_mock, spec_operation, spec_setup, spec_trace};
+pub use specgate_annotations::{SpecEvent, spec_component, spec_mock, spec_operation, spec_setup, spec_trace};
+
+#[doc(hidden)]
+/// ```compile_fail
+/// use specgate::*;
+/// emit_event("x", "y"); // emit_event is not part of the public API
+/// ```
+pub mod __public_api_contract {}
 
 // Internal — needed by macro expansions but not user-facing
 #[doc(hidden)]

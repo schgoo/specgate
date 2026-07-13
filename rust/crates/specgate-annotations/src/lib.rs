@@ -28,4 +28,4 @@ pub mod __rt {
 }
 
 // Re-export auxiliary runtime helpers under their plain names too.
-pub use specgate_runtime::{emit_event, emit_event_v, emit_run, mock_lookup, record_event_only, reset, set_mock};
+pub use specgate_runtime::{emit_event_v, emit_run, mock_lookup, record_event_only, reset, set_mock};
