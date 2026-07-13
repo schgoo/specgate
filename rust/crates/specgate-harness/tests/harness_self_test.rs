@@ -49,6 +49,7 @@ fn self_test_stateless_add_produces_real_traces() {
                 .collect();
             assert!(trace_names.contains(&"add"), "must contain Run event for 'add'");
             assert!(trace_names.contains(&"$result"), "must contain Event for '$result'");
+            assert!(case.target_failures.is_empty(), "all bindings must agree for stateless_add");
         }
         RunOutcome::Error { reason } => {
             panic!("self-test failed: {reason}");

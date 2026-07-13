@@ -11,4 +11,4 @@ cases:
     desc: References an operation not annotated in source
     operation: increment
     expected:
-      - count: "1"
+      - count: 1

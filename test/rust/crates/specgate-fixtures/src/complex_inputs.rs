@@ -64,9 +64,9 @@ pub struct Person {
 
 #[spec_operation("create_enum_type")]
 pub fn create_enum_type(name: &str, members: Vec<EnumMemberInput>) -> String {
-    emit_event("member_count", &format!("{}", members.len()));
+    spec_trace!("member_count", &(members.len() as i32));
     let first = members.first().map_or("".to_string(), |m| m.name.clone());
-    emit_event("first_member", &first);
+    spec_trace!("first_member", &first);
     name.to_string()
 }
 
@@ -79,14 +79,9 @@ pub fn sum_points(points: Vec<Point>) -> Point {
 
 #[spec_operation("describe_config")]
 pub fn describe_config(config: AppConfig) -> String {
-    let result = config.name.clone();
-    // Emit $result before retry_info so the spec's expected order is satisfied.
-    emit_event("$result", &result);
-    emit_event(
-        "retry_info",
-        &format!("retries={}, verbose={}", config.max_retries, config.verbose),
-    );
-    result
+    // The `describe_config.config` input echo already witnesses that every
+    // AppConfig field deserialized, so no derived observation is needed.
+    config.name.clone()
 }
 
 #[spec_operation("area_of_shape")]
@@ -149,11 +144,9 @@ pub fn find_shape(sides: i32) -> Option<Shape> {
 
 #[spec_operation("describe_person")]
 pub fn describe_person(person: Person) -> String {
-    let result = format!("{}, age {}", person.name, person.age);
-    // Emit $result before city so the spec's expected order is satisfied.
-    emit_event("$result", &result);
-    emit_event("city", &person.address.city);
-    result
+    // The `describe_person.person` input echo already witnesses the nested
+    // Address (incl. city), so no derived `city` observation is needed.
+    format!("{}, age {}", person.name, person.age)
 }
 
 #[spec_operation("create_person")]

@@ -46,6 +46,7 @@ pub mod statemachine_counter;
 pub mod structured_map;
 pub mod structured_output;
 pub mod structured_set;
+pub mod type_exact;
 pub mod unordered_fields;
 pub mod unrecoverable;
 pub mod void_operation;

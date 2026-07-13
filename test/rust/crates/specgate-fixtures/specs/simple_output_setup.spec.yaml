@@ -12,4 +12,4 @@ cases:
     desc: A setup returning a primitive fills the operation parameter by type
     operation: double
     expected:
-      - $result: "42"
+      - $result: 42

@@ -15,8 +15,8 @@ cases:
       - operation: increment
       - operation: decrement
     expected:
-      - count: "0"
+      - count: 0
       - $run: increment
-      - count: "1"
+      - count: 1
       - $run: decrement
-      - count: "0"
+      - count: 0

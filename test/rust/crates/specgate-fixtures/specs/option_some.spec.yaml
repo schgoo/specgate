@@ -20,4 +20,4 @@ cases:
     target: 20
   expected:
   - $result:
-      Some: '1'
+      Some: 1

@@ -232,7 +232,8 @@ open-ended structured value rather than a fixed shape.
 
 The matcher compares a `value` by its runtime kind:
 
-- **strings** — by equality
+- **strings**, **integers**, and **bools** — by type-exact equality
+- **integers** and **floats** — numeric-equivalent when their numeric value is equal
 - **lists** — as an ordered subsequence (or in any order with `$unordered`)
 - **maps** — by matching each asserted key and its value
 - **sets** — by presence (membership), order-independent
@@ -553,6 +554,10 @@ Observed values are structured `Value`s, not flat strings. A `Value` is one of:
 - `Map`
 - `Set`
 
+Scalar equality is type-exact: `String("5")` does not match `Integer(5)`,
+and `String("true")` does not match `Bool(true)`. `Integer(5)` still
+matches `Float(5.0)` by numeric equivalence.
+
 Collections emit as single structured events, not flattened per element.
 
 You can assert exact values directly:
@@ -729,4 +734,3 @@ references. A component is declared in code with `spec_component!("name")`,
 and a spec's `name` **is** its component. See
 [annotations.md](annotations.md#spec_component--the-component-axis) for how
 components are declared and how per-item overrides work.
-

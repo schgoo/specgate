@@ -86,10 +86,14 @@ fn stateless_return_value() {
     let r = complete(run("test/rust/crates/specgate-fixtures/specs/stateless_add.spec.yaml"));
     assert_eq!(r.len(), 1);
     check_case(&r[0], "add_2_3", CaseStatus::Pass);
-    assert_eq!(r[0].expected, vec![aev("$result", "5")]);
+    assert_eq!(r[0].expected, vec![aev("$result", 5i64)]);
     assert_eq!(
         r[0].traces,
-        vec![run_op("add"), ev("add.a", "2"), ev("add.b", "3"), ev("$result", "5"),]
+        vec![run_op("add"), ev("add.a", 2i64), ev("add.b", 3i64), ev("$result", 5i64),]
+    );
+    assert!(
+        r[0].target_failures.is_empty(),
+        "target_failures must be empty when all bindings agree"
     );
 }
 
@@ -110,7 +114,7 @@ fn multi_field_capture() {
             ev("balance", 100i64),
             ev("transaction_count", 0i64),
             run_op("withdraw"),
-            ev("withdraw.amount", "50"),
+            ev("withdraw.amount", 50i64),
             ev("balance", 50i64),
             ev("transaction_count", 1i64),
         ]
@@ -153,12 +157,12 @@ fn nested_operations() {
         vec![
             ev("balance", 100i64),
             run_op("transfer"),
-            ev("transfer.amount", "50"),
+            ev("transfer.amount", 50i64),
             run_op("withdraw"),
-            ev("withdraw.amount", "50"),
+            ev("withdraw.amount", 50i64),
             ev("balance", 50i64),
             run_op("deposit"),
-            ev("deposit.amount", "50"),
+            ev("deposit.amount", 50i64),
             ev("balance", 100i64),
         ]
     );
@@ -185,7 +189,7 @@ fn multiple_setups() {
             ev("source.balance", 100i64),
             ev("target.balance", 0i64),
             run_op("transfer"),
-            ev("transfer.amount", "50"),
+            ev("transfer.amount", 50i64),
             ev("source.balance", 50i64),
             ev("target.balance", 50i64),
         ]
@@ -206,17 +210,17 @@ fn renamed_inputs_via_spec_input() {
         r[0].traces,
         vec![
             run_op("divide"),
-            ev("divide.numerator", "10"),
-            ev("divide.denominator", "2"),
-            ev("$result", "5"),
+            ev("divide.numerator", 10i64),
+            ev("divide.denominator", 2i64),
+            ev("$result", 5i64),
         ]
     );
     // A setup param renamed via #[spec_input] ("factor") binds the construction
     // input by its spec name; the method input ("value") binds too (3 * 4 = 12).
     check_case(&r[1], "scale_3_by_4", CaseStatus::Pass);
     assert!(r[1].traces.contains(&ev("factor", 3i64)));
-    assert!(r[1].traces.contains(&ev("scale.value", "4")));
-    assert!(r[1].traces.contains(&ev("$result", "12")));
+    assert!(r[1].traces.contains(&ev("scale.value", 4i64)));
+    assert!(r[1].traces.contains(&ev("$result", 12i64)));
 }
 
 #[test]
@@ -300,8 +304,8 @@ fn result_ok_path() {
         r[0].traces,
         vec![
             run_op("divide"),
-            ev("divide.a", "10"),
-            ev("divide.b", "2"),
+            ev("divide.a", 10i64),
+            ev("divide.b", 2i64),
             ev_map("$result", vec![("Ok", specgate_harness::Value::Integer(5))]),
         ]
     );
@@ -315,8 +319,8 @@ fn result_err_path() {
         r[0].traces,
         vec![
             run_op("divide"),
-            ev("divide.a", "10"),
-            ev("divide.b", "0"),
+            ev("divide.a", 10i64),
+            ev("divide.b", 0i64),
             ev_map("$result", vec![("Err", specgate_harness::Value::String("division by zero".into()))]),
         ]
     );
@@ -553,7 +557,7 @@ fn paths_resolve_from_nested_spec() {
     check_case(&r[0], "add_from_nested_path", CaseStatus::Pass);
     assert_eq!(
         r[0].traces,
-        vec![run_op("add"), ev("add.a", "10"), ev("add.b", "20"), ev("$result", "30"),]
+        vec![run_op("add"), ev("add.a", 10i64), ev("add.b", 20i64), ev("$result", 30i64),]
     );
 }
 
@@ -742,11 +746,11 @@ fn default_input_spec() {
 
     // Scalar default: omitting `factor` materializes 2 -> 5 * 2 = 10, and the
     // applied default is echoed into the trace as a normal input.
-    assert!(r[0].traces.contains(&ev("scale.factor", "2")), "traces={:?}", r[0].traces);
-    assert!(r[0].traces.contains(&ev("$result", "10")));
+    assert!(r[0].traces.contains(&ev("scale.factor", 2i64)), "traces={:?}", r[0].traces);
+    assert!(r[0].traces.contains(&ev("$result", 10i64)));
 
     // Complex default: omitting `by` materializes {dx:1, dy:1} -> 5 + 1 + 1 = 7.
-    assert!(r[2].traces.contains(&ev("$result", "7")), "traces={:?}", r[2].traces);
+    assert!(r[2].traces.contains(&ev("$result", 7i64)), "traces={:?}", r[2].traces);
     // Explicit complex value overrides the default -> 5 + 10 + 20 = 35.
-    assert!(r[3].traces.contains(&ev("$result", "35")));
+    assert!(r[3].traces.contains(&ev("$result", 35i64)));
 }

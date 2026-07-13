@@ -11,7 +11,8 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
 pub struct Spec {
-    pub binding_path: Option<String>,
+    /// All binding paths declared on this spec (resolved from string or list).
+    pub binding_paths: Vec<String>,
     pub target: Option<String>,
     pub cases: Vec<Case>,
     /// Names of operations declared `async: true` in the spec.
@@ -67,7 +68,11 @@ fn parse_spec_value(v: &YValue) -> Result<Spec, ParseError> {
         .as_mapping()
         .ok_or_else(|| ParseError::Shape("top-level is not a mapping".into()))?;
 
-    let binding_path = map.get(YValue::String("binding".into())).and_then(|b| b.as_str()).map(String::from);
+    let binding_paths = match map.get(YValue::String("binding".into())) {
+        Some(YValue::String(s)) => vec![s.clone()],
+        Some(YValue::Sequence(seq)) => seq.iter().filter_map(|v| v.as_str()).map(String::from).collect(),
+        _ => Vec::new(),
+    };
 
     let target = map.get(YValue::String("target".into())).and_then(|t| t.as_str()).map(String::from);
 
@@ -113,7 +118,7 @@ fn parse_spec_value(v: &YValue) -> Result<Spec, ParseError> {
         cases.push(parse_case(c)?);
     }
     Ok(Spec {
-        binding_path,
+        binding_paths,
         target,
         cases,
         async_ops,

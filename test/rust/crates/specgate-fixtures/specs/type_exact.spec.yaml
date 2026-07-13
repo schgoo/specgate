@@ -1,0 +1,50 @@
+spec_version: "0.4.0"
+name: fixture.type_exact
+binding: binding.yaml
+
+operations:
+  get_scalars:
+    outputs:
+      - count: i32
+      - enabled: bool
+      - code: string
+
+cases:
+  # --- int ---
+  - name: int_exact
+    desc: An int assertion matches an int trace value
+    operation: get_scalars
+    expected:
+      - count: 5
+
+  - name: int_as_string_fails
+    desc: A string assertion must NOT match an int trace value
+    operation: get_scalars
+    expected:
+      - count: '5'
+
+  # --- bool ---
+  - name: bool_exact
+    desc: A bool assertion matches a bool trace value
+    operation: get_scalars
+    expected:
+      - enabled: true
+
+  - name: bool_as_string_fails
+    desc: A string assertion must NOT match a bool trace value
+    operation: get_scalars
+    expected:
+      - enabled: 'true'
+
+  # --- string ---
+  - name: string_exact
+    desc: A string assertion matches a string trace value
+    operation: get_scalars
+    expected:
+      - code: '7'
+
+  - name: string_as_int_fails
+    desc: An int assertion must NOT match a numeric-looking string trace value
+    operation: get_scalars
+    expected:
+      - code: 7

@@ -158,14 +158,16 @@ A list of at least one test case. Each case has:
 
 Each entry is either:
 
-- `{<name>: <value>}` — matches an `Event` with that `name` and stringified `value`
+- `{<name>: <value>}` — matches an `Event` with that `name` and typed `value`
 - `{$run: <operation>}` — matches a `Run` for that operation
 - `{$unordered: [...]}` — matches contained items in any order
 - `{$anywhere: [...]}` — matches contained items anywhere in the stream
 
-Values are always stringified for comparison (the harness coerces both
-sides). The list is matched as an **in-order subsequence** of the actual
-trace stream — see "Subsequence matching" below.
+Scalar equality is type-exact for strings, integers, and bools; quoted
+`"5"` does not match numeric `5`. Integer and float values remain
+numeric-equivalent when their numeric value is equal. The list is matched
+as an **in-order subsequence** of the actual trace stream — see
+"Subsequence matching" below.
 
 ### Multi-step cases
 
@@ -241,7 +243,7 @@ See `test/rust/crates/specgate-fixtures/specs/mock_field.spec.yaml`.
 The runtime emits a flat stream of events; there are exactly two variants:
 
 ```
-Event { name: string, value: string }   // any value observation
+Event { name: string, value: value }    // any typed value observation
 Run   { operation: string }              // the boundary of an operation call
 ```
 

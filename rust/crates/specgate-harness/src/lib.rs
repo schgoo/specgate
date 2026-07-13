@@ -28,7 +28,7 @@ mod spec;
 mod types;
 
 // Public API — what users need for run_spec() results
-pub use types::{CaseLevel, CaseResult, CaseStatus, CoverageOutcome, CoverageReport, FileCoverage, RunOutcome, Source};
+pub use types::{CaseLevel, CaseResult, CaseStatus, CoverageOutcome, CoverageReport, FileCoverage, RunOutcome, Source, TargetFailure};
 
 // Internal types — exposed for integration tests within this crate,
 // but hidden from public docs. Not part of the stable API.
@@ -48,9 +48,14 @@ pub use spec::binding_path_resolved;
 /// `specgate` umbrella's public API.
 pub use scan::{AnnotatedSource, RunnabilityIssue, RunnabilityProblem, RunnableCase, scan};
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Per-process counter for unique C# scratch directory names, avoiding
+/// conflicts when multiple test threads run the same spec concurrently.
+static CSHARP_SCRATCH_ID: AtomicU64 = AtomicU64::new(0);
 
 /// Loads and validates the spec at `spec_path`, generates a temporary Cargo
 /// project, compiles and runs it, then matches traces against each case's
@@ -128,13 +133,20 @@ fn execute_spec(spec_path: &str, coverage: bool) -> ExecResult {
         return err("spec has no test cases".into());
     }
 
-    let Some(binding_path) = parsed.binding_path.as_deref() else {
+    if parsed.binding_paths.is_empty() {
         return err("spec has no binding".into());
-    };
-    let binding_full = binding_path_resolved(&path, binding_path);
-    let Some(binding) = binding::load_binding(&binding_full) else {
-        return err(format!("binding '{binding_path}' not found"));
-    };
+    }
+
+    // Load all bindings. First is canonical.
+    let mut bindings: Vec<(String, binding::Binding)> = Vec::new();
+    for bp in &parsed.binding_paths {
+        let binding_full = binding_path_resolved(&path, bp);
+        let Some(b) = binding::load_binding(&binding_full) else {
+            return err(format!("binding '{bp}' not found"));
+        };
+        let name = Path::new(bp).file_stem().and_then(|s| s.to_str()).unwrap_or(bp).to_string();
+        bindings.push((name, b));
+    }
 
     // Shape check: spec-level event key validation.
     if let Some(reason) = check_shape(&parsed, &yaml_value) {
@@ -162,60 +174,118 @@ fn execute_spec(spec_path: &str, coverage: bool) -> ExecResult {
         }
     }
 
-    // Validate every target exists before doing any IO-heavy work.
-    for (eff_target, _) in &groups {
-        let target_name = eff_target.as_deref();
-        if binding.target(target_name).is_none() {
-            return err(format!("target '{}' not found in binding", target_name.unwrap_or("<default>")));
+    // Validate every target exists in every binding before doing any IO-heavy work.
+    for (_binding_name, binding) in &bindings {
+        for (eff_target, _) in &groups {
+            let target_name = eff_target.as_deref();
+            if binding.target(target_name).is_none() {
+                return err(format!("target '{}' not found in binding", target_name.unwrap_or("<default>")));
+            }
         }
     }
 
-    // Process each target group and accumulate results by original case index.
-    let mut results_by_index: Vec<Option<CaseResult>> = vec![None; parsed.cases.len()];
+    // Process each binding and accumulate per-case results indexed by case index.
+    // all_binding_results[binding_idx][case_idx] = Option<CaseResult>
+    let mut all_binding_results: Vec<Vec<Option<CaseResult>>> = Vec::new();
+    let mut all_target_labels: Vec<Vec<Option<String>>> = Vec::new();
     let mut group_cov: Vec<coverage::GroupCoverage> = Vec::new();
 
-    for (eff_target, case_indices) in &groups {
-        let target = binding.target(eff_target.as_deref()).unwrap();
-        let group_cases: Vec<&spec::Case> = case_indices.iter().map(|&i| &parsed.cases[i]).collect();
+    for (binding_idx, (binding_name, binding)) in bindings.iter().enumerate() {
+        let mut results_by_index: Vec<Option<CaseResult>> = vec![None; parsed.cases.len()];
+        let mut target_labels_by_index: Vec<Option<String>> = vec![None; parsed.cases.len()];
 
-        // Give each target group a distinct scratch directory.
-        let scratch_suffix = match eff_target.as_deref() {
-            None => fixture_basename.clone(),
-            Some(t) => format!("{fixture_basename}_{t}"),
-        };
-        let scratch_dir = scratch_for(&scratch_suffix);
+        for (eff_target, case_indices) in &groups {
+            let target = binding.target(eff_target.as_deref()).unwrap();
+            let group_cases: Vec<&spec::Case> = case_indices.iter().map(|&i| &parsed.cases[i]).collect();
 
-        match run_group(
-            target,
-            &group_cases,
-            &parsed,
-            &fixture_basename,
-            &workspace_root,
-            &scratch_dir,
-            coverage,
-        ) {
-            Ok((group_results, cov)) => {
-                for (&case_idx, result) in case_indices.iter().zip(group_results) {
-                    results_by_index[case_idx] = Some(result);
+            // Give each (binding, target) pair a distinct scratch directory.
+            // The canonical (index 0) binding uses the original naming for backward compat.
+            // Non-canonical bindings (e.g. C#) get a per-invocation unique ID to prevent
+            // concurrent test runs from colliding on the same build artifacts.
+            let scratch_suffix = if binding_idx == 0 {
+                match eff_target.as_deref() {
+                    None => fixture_basename.clone(),
+                    Some(t) => format!("{fixture_basename}_{t}"),
                 }
-                if let Some(cov) = cov {
-                    group_cov.push(cov);
+            } else {
+                let uid = CSHARP_SCRATCH_ID.fetch_add(1, Ordering::Relaxed);
+                let pid = std::process::id();
+                match eff_target.as_deref() {
+                    None => format!("{fixture_basename}_{binding_name}_{pid}_{uid}"),
+                    Some(t) => format!("{fixture_basename}_{binding_name}_{t}_{pid}_{uid}"),
                 }
-            }
-            Err(reason) => {
-                return ExecResult {
-                    outcome: Err(reason),
-                    group_cov,
-                    scratch_root: scratch_for(&fixture_basename),
-                };
+            };
+            let scratch_dir = scratch_for(&scratch_suffix);
+
+            let group_result = if binding.language == "csharp" {
+                run_csharp_group(target, &group_cases, &parsed, &fixture_basename, &scratch_dir).map(|r| (r, None))
+            } else {
+                run_group(
+                    target,
+                    &group_cases,
+                    &parsed,
+                    &fixture_basename,
+                    &workspace_root,
+                    &scratch_dir,
+                    coverage,
+                )
+            };
+
+            match group_result {
+                Ok((group_results, cov)) => {
+                    for (&case_idx, result) in case_indices.iter().zip(group_results) {
+                        results_by_index[case_idx] = Some(result);
+                        target_labels_by_index[case_idx] = Some(target_label(binding_name, eff_target.as_deref()));
+                    }
+                    if let Some(cov) = cov {
+                        group_cov.push(cov);
+                    }
+                }
+                Err(reason) => {
+                    return ExecResult {
+                        outcome: Err(reason),
+                        group_cov,
+                        scratch_root: scratch_for(&fixture_basename),
+                    };
+                }
             }
         }
+
+        all_binding_results.push(results_by_index);
+        all_target_labels.push(target_labels_by_index);
     }
 
-    let results = results_by_index
-        .into_iter()
-        .map(|r| r.expect("all case indices covered by groups"))
-        .collect();
+    // Merge results: the canonical binding (index 0) supplies the primary traces.
+    // Non-canonical bindings contribute TargetFailure entries when they disagree.
+    let n = parsed.cases.len();
+    let (canonical_results, other_results) = all_binding_results.split_first_mut().expect("at least one binding");
+    let (_, other_target_labels) = all_target_labels.split_first_mut().expect("at least one binding");
+
+    let mut results = Vec::with_capacity(n);
+    for i in 0..n {
+        let mut result = canonical_results[i].take().expect("all case indices covered by groups");
+
+        let mut target_failures = Vec::new();
+        for (j, other_binding_results) in other_results.iter_mut().enumerate() {
+            if let Some(other) = other_binding_results[i].take()
+                && other.status == CaseStatus::Fail
+            {
+                let mismatch = describe_first_mismatch(&result.expected, &other.traces);
+                target_failures.push(TargetFailure {
+                    target: other_target_labels[j][i].clone().unwrap_or_else(|| "<unknown>".to_string()),
+                    traces: other.traces,
+                    mismatch,
+                });
+            }
+        }
+
+        if result.status == CaseStatus::Pass && !target_failures.is_empty() {
+            result.status = CaseStatus::Fail;
+        }
+        result.target_failures = target_failures;
+        results.push(result);
+    }
+
     ExecResult {
         outcome: Ok(results),
         group_cov,
@@ -427,7 +497,7 @@ fn run_group(
     }
 
     let trace_text = std::fs::read_to_string(&proj.trace_file).map_err(|e| format!("runner produced no trace output: {e}"))?;
-    let trace_map: std::collections::BTreeMap<String, Vec<TraceEvent>> =
+    let trace_map: BTreeMap<String, Vec<TraceEvent>> =
         serde_yaml::from_str(&trace_text).map_err(|e| format!("failed to parse traces: {e}"))?;
 
     let mut results = Vec::with_capacity(group_cases.len());
@@ -440,6 +510,7 @@ fn run_group(
                 source: case.source.clone(),
                 expected: Vec::new(),
                 traces: Vec::new(),
+                target_failures: Vec::new(),
             }),
             CaseDisposition::Warn => results.push(CaseResult {
                 name: case.name.clone(),
@@ -448,6 +519,7 @@ fn run_group(
                 source: case.source.clone(),
                 expected: Vec::new(),
                 traces: Vec::new(),
+                target_failures: Vec::new(),
             }),
             CaseDisposition::Run => {
                 let traces = trace_map.get(&case.name).cloned().unwrap_or_default();
@@ -459,6 +531,7 @@ fn run_group(
                     source: case.source.clone(),
                     expected: case.expected.clone(),
                     traces,
+                    target_failures: Vec::new(),
                 });
             }
         }
@@ -504,6 +577,7 @@ fn run_command_group(command: &str, package_root: &Path, group_cases: &[&spec::C
                 source: case.source.clone(),
                 expected: case.expected.clone(),
                 traces: traces.clone(),
+                target_failures: Vec::new(),
             }
         })
         .collect())
@@ -524,6 +598,482 @@ fn run_shell_command(command: &str, cwd: &Path) -> std::io::Result<bool> {
     };
     cmd.arg(command).current_dir(cwd);
     Ok(cmd.output()?.status.success())
+}
+
+fn target_label(binding_name: &str, target_name: Option<&str>) -> String {
+    match target_name {
+        Some(target) => format!("{binding_name}:{target}"),
+        None => binding_name.to_string(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// C# targets
+// ---------------------------------------------------------------------------
+
+/// Metadata about a C# operation found by scanning source files.
+struct CsOp {
+    op_name: String,
+    class_name: String,
+    method_name: String,
+    /// `(parameter_name, cs_type)`
+    params: Vec<(String, String)>,
+    return_type: String,
+}
+
+/// Scan all `.cs` files under `package_root` recursively for `[SpecOperation("name")]`
+/// annotations and extract the annotated method's class, name, params, and return type.
+fn scan_csharp(package_root: &Path) -> Vec<CsOp> {
+    let mut ops = Vec::new();
+    scan_csharp_dir(package_root, &mut ops);
+    ops
+}
+
+fn scan_csharp_dir(dir: &Path, ops: &mut Vec<CsOp>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if p.is_dir() {
+            scan_csharp_dir(&p, ops);
+        } else if p.extension().and_then(|e| e.to_str()) == Some("cs")
+            && let Ok(text) = std::fs::read_to_string(&p)
+        {
+            scan_csharp_file(&text, ops);
+        }
+    }
+}
+
+fn scan_csharp_file(text: &str, ops: &mut Vec<CsOp>) {
+    let mut current_class: Option<String> = None;
+    let mut pending_op: Option<String> = None;
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+
+        // Detect class declaration: look for keyword "class" followed by the name.
+        if let Some(class_name) = extract_cs_class(trimmed) {
+            current_class = Some(class_name);
+        }
+
+        // Detect [SpecOperation("name")]
+        if let Some(op_name) = extract_spec_operation_attr(trimmed) {
+            pending_op = Some(op_name);
+            continue;
+        }
+
+        // If we have a pending [SpecOperation], try to parse the next method signature.
+        if let Some(op_name) = pending_op.take()
+            && let Some((method_name, params, return_type)) = extract_cs_method_sig(trimmed)
+        {
+            ops.push(CsOp {
+                op_name,
+                class_name: current_class.clone().unwrap_or_default(),
+                method_name,
+                params,
+                return_type,
+            });
+            // If the line wasn't a method signature, the pending op is discarded.
+        }
+    }
+}
+
+fn extract_cs_class(line: &str) -> Option<String> {
+    let words: Vec<&str> = line.split_whitespace().collect();
+    let idx = words.iter().position(|&w| w == "class")?;
+    let raw = words.get(idx + 1)?;
+    // Strip trailing '{', ':', '<T>' etc.
+    let name: String = raw.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+    if name.is_empty() { None } else { Some(name) }
+}
+
+fn extract_spec_operation_attr(line: &str) -> Option<String> {
+    let s = line.trim();
+    let rest = s.strip_prefix("[SpecOperation(\"")?;
+    let name = rest.split('"').next()?;
+    Some(name.to_string())
+}
+
+#[allow(clippy::type_complexity)]
+fn extract_cs_method_sig(line: &str) -> Option<(String, Vec<(String, String)>, String)> {
+    let paren_open = line.find('(')?;
+    let paren_close = find_matching_paren(line, paren_open)?;
+
+    let before = line[..paren_open].trim();
+    let parts: Vec<&str> = before.split_whitespace().collect();
+    if parts.len() < 2 {
+        return None;
+    }
+
+    let method_name = parts.last()?.to_string();
+    let return_type = parts[parts.len() - 2].to_string();
+
+    // Must look like an identifier (not a keyword like "if", "{" etc.)
+    if !method_name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        return None;
+    }
+
+    let params_str = line[paren_open + 1..paren_close].trim();
+    let params = if params_str.is_empty() {
+        Vec::new()
+    } else {
+        params_str.split(',').filter_map(parse_cs_param).collect()
+    };
+
+    Some((method_name, params, return_type))
+}
+
+fn find_matching_paren(s: &str, open: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (idx, ch) in s.char_indices().skip_while(|(idx, _)| *idx < open) {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_string = true,
+            '(' => depth += 1,
+            ')' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(idx);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn parse_cs_param(param: &str) -> Option<(String, String)> {
+    let (spec_name, without_attrs) = peel_spec_input_attrs(param.trim());
+    let parts: Vec<&str> = without_attrs.split_whitespace().collect();
+    if parts.len() < 2 {
+        return None;
+    }
+    let code_name = parts.last()?.trim_start_matches('@');
+    let name = spec_name.unwrap_or_else(|| code_name.to_string());
+    Some((name, parts[..parts.len() - 1].join(" ")))
+}
+
+fn peel_spec_input_attrs(mut param: &str) -> (Option<String>, &str) {
+    let mut spec_name = None;
+    loop {
+        let p = param.trim_start();
+        if !p.starts_with('[') {
+            return (spec_name, p);
+        }
+        let Some(end) = p.find(']') else {
+            return (spec_name, p);
+        };
+        let attr = &p[..=end];
+        if spec_name.is_none()
+            && let Some(name) = extract_spec_input_attr(attr)
+        {
+            spec_name = Some(name);
+        }
+        param = &p[end + 1..];
+    }
+}
+
+fn extract_spec_input_attr(attr: &str) -> Option<String> {
+    let open = attr.find("SpecInput(\"")?;
+    let rest = &attr[open + "SpecInput(\"".len()..];
+    let name = rest.split('"').next()?;
+    Some(name.to_string())
+}
+
+/// Convert a YAML value to a C# literal string for the given C# parameter type.
+fn yaml_to_csharp_literal(val: Option<&serde_yaml::Value>, _param_type: &str) -> String {
+    let Some(v) = val else { return "default".to_string() };
+    if let Some(i) = v.as_i64() {
+        return i.to_string();
+    }
+    if let Some(f) = v.as_f64() {
+        return f.to_string();
+    }
+    if let Some(b) = v.as_bool() {
+        return if b { "true".to_string() } else { "false".to_string() };
+    }
+    if let Some(s) = v.as_str() {
+        let escaped = s.replace('\\', "\\\\").replace('"', "\\\"");
+        return format!("\"{escaped}\"");
+    }
+    "default".to_string()
+}
+
+/// True when `cs_type` is a C# integer primitive that maps to the `EmitEvent(string, int)`
+/// overload. Integer types other than `int` are cast to `int` because the overload
+/// serializes them as unquoted JSON numbers, matching Rust's `Value::Integer` wire format.
+fn is_cs_integer_type(cs_type: &str) -> bool {
+    matches!(
+        cs_type.trim(),
+        "int" | "long" | "uint" | "ulong" | "short" | "ushort" | "byte" | "sbyte" | "Int32" | "Int64"
+    )
+}
+
+/// Generate a typed `SpecGateRuntime.EmitEvent(…)` call for the given C# variable
+/// and type. Integers use the `(string, int)` overload (unquoted JSON number);
+/// booleans use the `(string, bool)` overload (unquoted `true`/`false`);
+/// strings use the `(string, string)` overload (quoted JSON string).
+/// All other types fall back to `.ToString()` via the string overload.
+fn cs_typed_emit(event_name: &str, var: &str, cs_type: &str) -> String {
+    let name_lit = format!("\"{event_name}\"");
+    let t = cs_type.trim();
+    if t == "int" {
+        format!("SpecGateRuntime.EmitEvent({name_lit}, {var});")
+    } else if is_cs_integer_type(t) {
+        format!("SpecGateRuntime.EmitEvent({name_lit}, (int){var});")
+    } else if t == "bool" || t == "string" || t == "String" {
+        format!("SpecGateRuntime.EmitEvent({name_lit}, {var});")
+    } else {
+        format!("SpecGateRuntime.EmitEvent({name_lit}, {var}.ToString());")
+    }
+}
+
+/// Convert a Path to a forward-slash string (for use in C# project files).
+fn path_to_forward_slash(p: &Path) -> String {
+    let path = if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        std::env::current_dir().map_or_else(|_| p.to_path_buf(), |cwd| cwd.join(p))
+    };
+    let s = path.display().to_string();
+    let s = s.strip_prefix(r"\\?\").unwrap_or(&s);
+    s.replace('\\', "/")
+}
+
+/// Walk up from `package_root` to find the nearest ancestor that contains a `csharp` child
+/// directory holding the `SpecGate` production library projects.
+/// Returns the path to `<ancestor>/csharp` if found, or `None` if no such ancestor exists.
+fn find_csharp_libs_dir(package_root: &Path) -> Option<PathBuf> {
+    let mut dir = package_root.to_path_buf();
+    loop {
+        let candidate = dir.join("csharp");
+        if candidate.join("SpecGate.Annotations").join("SpecGate.Annotations.csproj").exists() {
+            return Some(candidate);
+        }
+        if !dir.pop() {
+            return None;
+        }
+    }
+}
+
+/// Generate the `Program.cs` content for the C# runner.
+fn generate_csharp_program(cases: &[&spec::Case], cs_ops: &[CsOp]) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    out.push_str("using SpecGate.Annotations;\n");
+    out.push_str("using SpecGate.Runtime;\n");
+    out.push_str("using SpecGateFixtures;\n");
+    out.push_str("using System.Collections.Generic;\n");
+    out.push_str("using System.IO;\n");
+    out.push_str("using System.Text;\n\n");
+    out.push_str("var all = new SortedDictionary<string, string>();\n");
+
+    for case in cases {
+        let op_name = case.operation.as_deref().unwrap_or("");
+        if let Some(cs_op) = cs_ops.iter().find(|o| o.op_name == op_name) {
+            writeln!(out, "// case: {}", case.name).expect("fmt");
+            out.push_str("{\n");
+            out.push_str("    SpecGateRuntime.Reset();\n");
+            writeln!(out, "    SpecGateRuntime.EmitRun(\"{op_name}\");").expect("fmt");
+
+            for (param_name, param_type) in &cs_op.params {
+                let lit = yaml_to_csharp_literal(case.inputs.get(param_name), param_type);
+                writeln!(out, "    {param_type} __{param_name} = {lit};").expect("fmt");
+            }
+            for (param_name, param_type) in &cs_op.params {
+                let emit = cs_typed_emit(&format!("{op_name}.{param_name}"), &format!("__{param_name}"), param_type);
+                writeln!(out, "    {emit}").expect("fmt");
+            }
+
+            let args = cs_op.params.iter().map(|(n, _)| format!("__{n}")).collect::<Vec<_>>().join(", ");
+            writeln!(
+                out,
+                "    {} __result = {}.{}({args});",
+                cs_op.return_type, cs_op.class_name, cs_op.method_name
+            )
+            .expect("fmt");
+            let result_emit = cs_typed_emit("$result", "__result", &cs_op.return_type);
+            writeln!(out, "    {result_emit}").expect("fmt");
+            writeln!(out, "    all[\"{}\"] = SpecGateRuntime.GetTracesJson();", case.name).expect("fmt");
+            out.push_str("}\n");
+        }
+    }
+
+    out.push_str("var sb = new StringBuilder(\"{\");\n");
+    out.push_str("bool first = true;\n");
+    out.push_str("foreach (var kv in all) {\n");
+    out.push_str("    if (!first) sb.Append(',');\n");
+    out.push_str("    first = false;\n");
+    out.push_str("    sb.Append('\"');\n");
+    out.push_str("    AppendJsonString(sb, kv.Key);\n");
+    out.push_str("    sb.Append(\"\\\":\");\n");
+    out.push_str("    sb.Append(kv.Value);\n");
+    out.push_str("}\n");
+    out.push_str("sb.Append('}');\n");
+    out.push_str("File.WriteAllText(args[0], sb.ToString());\n\n");
+    out.push_str("static void AppendJsonString(StringBuilder sb, string s) {\n");
+    out.push_str("    foreach (char c in s) {\n");
+    out.push_str("        switch (c) {\n");
+    out.push_str("            case '\"': sb.Append(\"\\\\\\\"\"); break;\n");
+    out.push_str("            case '\\\\': sb.Append(\"\\\\\\\\\"); break;\n");
+    out.push_str("            case '\\n': sb.Append(\"\\\\n\"); break;\n");
+    out.push_str("            case '\\r': sb.Append(\"\\\\r\"); break;\n");
+    out.push_str("            case '\\t': sb.Append(\"\\\\t\"); break;\n");
+    out.push_str("            default: sb.Append(c); break;\n");
+    out.push_str("        }\n");
+    out.push_str("    }\n");
+    out.push_str("}\n");
+    out
+}
+
+/// Run one C# target group: scan annotated operations, generate and execute a
+/// temporary C# runner, parse its trace output, and return per-case results.
+fn run_csharp_group(
+    target: &binding::Target,
+    group_cases: &[&spec::Case],
+    _spec: &spec::Spec,
+    _fixture_basename: &str,
+    scratch_dir: &Path,
+) -> Result<Vec<CaseResult>, String> {
+    let cs_ops = scan_csharp(&target.package_root);
+
+    // Verify all required operations have C# annotations.
+    let mut required_ops: Vec<&str> = Vec::new();
+    for case in group_cases {
+        let ops: Vec<&str> = if case.steps.is_empty() {
+            case.operation.as_deref().into_iter().collect()
+        } else {
+            case.steps.iter().map(String::as_str).collect()
+        };
+        for op in ops {
+            if !required_ops.contains(&op) {
+                required_ops.push(op);
+            }
+        }
+    }
+    for op in &required_ops {
+        if !cs_ops.iter().any(|co| co.op_name == *op) {
+            return Err(format!("C# operation '{op}' not found in source annotations"));
+        }
+    }
+
+    std::fs::create_dir_all(scratch_dir).map_err(|e| format!("failed to create C# scratch dir: {e}"))?;
+    let trace_file = scratch_dir.join("traces.json");
+
+    // Write Runner.csproj that compiles the fixture source directly. This keeps
+    // concurrent harness runs from contending on the fixture project's obj/bin.
+    let pkg_path = path_to_forward_slash(&target.package_root);
+    let csharp_libs_dir = find_csharp_libs_dir(&target.package_root);
+    let project_references = match &csharp_libs_dir {
+        Some(libs) => {
+            let annotations = path_to_forward_slash(&libs.join("SpecGate.Annotations").join("SpecGate.Annotations.csproj"));
+            let runtime = path_to_forward_slash(&libs.join("SpecGate.Runtime").join("SpecGate.Runtime.csproj"));
+            format!(
+                "  <ItemGroup>\n    \
+                 <ProjectReference Include=\"{annotations}\" />\n    \
+                 <ProjectReference Include=\"{runtime}\" />\n  \
+                 </ItemGroup>\n"
+            )
+        }
+        None => String::new(),
+    };
+    let csproj = format!(
+        "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    \
+         <OutputType>Exe</OutputType>\n    <TargetFramework>net10.0</TargetFramework>\n    \
+         <Nullable>enable</Nullable>\n  </PropertyGroup>\n  <ItemGroup>\n    \
+         <Compile Include=\"{pkg_path}/**/*.cs\" Exclude=\"{pkg_path}/Tests/**/*.cs;{pkg_path}/bin/**/*.cs;{pkg_path}/obj/**/*.cs\" LinkBase=\"Fixture\" />\n  \
+         </ItemGroup>\n{project_references}</Project>\n"
+    );
+    std::fs::write(scratch_dir.join("Runner.csproj"), csproj).map_err(|e| format!("failed to write Runner.csproj: {e}"))?;
+
+    // Write Program.cs.
+    let program_cs = generate_csharp_program(group_cases, &cs_ops);
+    std::fs::write(scratch_dir.join("Program.cs"), program_cs).map_err(|e| format!("failed to write Program.cs: {e}"))?;
+
+    // Run: dotnet run --project Runner.csproj -- <trace_file>
+    let mut cmd = Command::new("dotnet");
+    cmd.arg("run")
+        .arg("--project")
+        .arg(scratch_dir.join("Runner.csproj"))
+        .arg("--")
+        .arg(&trace_file)
+        // Anchor working dir to scratch so dotnet is independent of process cwd.
+        .current_dir(scratch_dir);
+
+    let output = cmd.output().map_err(|e| format!("failed to invoke dotnet: {e}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let combined = format!("{stderr}\n{stdout}");
+        return Err(format!(
+            "C# runner failed:\n{}",
+            combined.lines().take(30).collect::<Vec<_>>().join("\n")
+        ));
+    }
+
+    let trace_text = std::fs::read_to_string(&trace_file).map_err(|e| format!("C# runner produced no trace output: {e}"))?;
+    let trace_map: BTreeMap<String, Vec<TraceEvent>> =
+        serde_yaml::from_str(&trace_text).map_err(|e| format!("failed to parse C# traces: {e}"))?;
+
+    let mut results = Vec::with_capacity(group_cases.len());
+    for case in group_cases {
+        let traces = trace_map.get(&case.name).cloned().unwrap_or_default();
+        let pass = match_traces::matches(&case.expected, &traces);
+        results.push(CaseResult {
+            name: case.name.clone(),
+            status: if pass { CaseStatus::Pass } else { CaseStatus::Fail },
+            level: case.level,
+            source: case.source.clone(),
+            expected: case.expected.clone(),
+            traces,
+            target_failures: Vec::new(),
+        });
+    }
+    Ok(results)
+}
+
+// ---------------------------------------------------------------------------
+// Mismatch description for TargetFailure
+// ---------------------------------------------------------------------------
+
+/// Produce a human-readable description of why a non-canonical binding's traces
+/// did not satisfy the expected assertions. Used to populate `TargetFailure.mismatch`.
+fn describe_first_mismatch(expected: &[Assertion], traces: &[TraceEvent]) -> String {
+    for assertion in expected {
+        match assertion {
+            Assertion::Run { operation } => {
+                let found = traces
+                    .iter()
+                    .any(|t| matches!(t, TraceEvent::Run { operation: op } if op == operation));
+                if !found {
+                    return format!("expected Run('{operation}') not found in traces");
+                }
+            }
+            Assertion::Event {
+                name,
+                value: AssertValue::Exact(v),
+            } => {
+                let found = traces
+                    .iter()
+                    .any(|t| matches!(t, TraceEvent::Event { name: n, value: tv } if n == name && tv == v));
+                if !found {
+                    return format!("expected event '{name}' not found in traces");
+                }
+            }
+            _ => {}
+        }
+    }
+    "traces did not satisfy expected assertions".to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -570,6 +1120,7 @@ fn short_circuit_non_must(cases: &[&spec::Case], _annotated: Option<&AnnotatedSo
             source: c.source.clone(),
             expected: Vec::new(),
             traces: Vec::new(),
+            target_failures: Vec::new(),
         });
     }
     Some(out)
@@ -592,6 +1143,7 @@ fn build_short_circuit_results(cases: &[&spec::Case], disp: &[CaseDisposition]) 
                 source: c.source.clone(),
                 expected: Vec::new(),
                 traces: Vec::new(),
+                target_failures: Vec::new(),
             }
         })
         .collect()
@@ -876,8 +1428,8 @@ struct OpMeta {
     outputs: Vec<String>,
 }
 
-fn ops_metadata(raw: &serde_yaml::Value) -> std::collections::BTreeMap<String, OpMeta> {
-    let mut out = std::collections::BTreeMap::new();
+fn ops_metadata(raw: &serde_yaml::Value) -> BTreeMap<String, OpMeta> {
+    let mut out = BTreeMap::new();
     let Some(map) = raw.as_mapping() else { return out };
     let Some(serde_yaml::Value::Mapping(ops)) = map.get(serde_yaml::Value::String("operations".into())) else {
         return out;

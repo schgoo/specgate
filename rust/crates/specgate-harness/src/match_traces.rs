@@ -71,15 +71,14 @@ fn leaf_matches(a: &Assertion, ev: &TraceEvent) -> bool {
     }
 }
 
-/// Compare two `Value`s with the harness's slightly relaxed equality:
-/// Integer/Float coerce when compared to String numerics (so YAML `value: 4`
-/// matches a trace `Value::Integer(4)`).
+/// Compare two [`Value`]s for equality with type-exact scalar semantics:
+/// `String`, `Integer`, and `Bool` must match by type — `"5"` does **not** equal `5`.
+/// `Integer`/`Float` numeric equivalence is preserved: `Integer(4)` equals `Float(4.0)`.
 fn values_equal(expected: &Value, actual: &Value) -> bool {
     if expected == actual {
         return true;
     }
     match (expected, actual) {
-        (Value::String(s), other) | (other, Value::String(s)) => string_matches_scalar(s, other),
         (Value::List(a), Value::List(b)) => a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| values_equal(x, y)),
         (Value::List(a), Value::Set(b)) | (Value::Set(b), Value::List(a)) => {
             a.len() == b.len() && a.iter().all(|x| b.iter().any(|y| values_equal(x, y)))
@@ -92,18 +91,6 @@ fn values_equal(expected: &Value, actual: &Value) -> bool {
             // passes against a fuller actual map.
             a.iter().all(|(k, v)| b.get(k).is_some_and(|bv| values_equal(v, bv)))
         }
-        _ => false,
-    }
-}
-
-/// True if `s` is the string form of `actual` (used to make `value: "5"`
-/// match a trace `Value::Integer(5)`).
-fn string_matches_scalar(s: &str, actual: &Value) -> bool {
-    match actual {
-        Value::String(a) => a == s,
-        Value::Integer(i) => i.to_string() == s,
-        Value::Float(f) => f.to_string() == s,
-        Value::Bool(b) => b.to_string() == s,
         _ => false,
     }
 }

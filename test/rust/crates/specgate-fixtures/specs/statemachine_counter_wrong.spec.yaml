@@ -11,4 +11,4 @@ cases:
     desc: Wrong expected — 999 instead of 1
     operation: increment
     expected:
-      - count: "999"
+      - count: 999

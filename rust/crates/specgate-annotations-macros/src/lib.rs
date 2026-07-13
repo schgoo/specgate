@@ -497,11 +497,10 @@ pub fn spec_operation(attr: TokenStream, item: TokenStream) -> TokenStream {
 fn build_pre_stmts(op_name: &str, params: &[(Ident, Type, Option<String>)], _is_method: bool, _has_ref_param: bool) -> Vec<Stmt> {
     let rt = rt();
     let mut out: Vec<Stmt> = vec![parse_quote!(#rt::emit_run(#op_name);)];
-    // Emit every parameter as an `op.<spec_name>` event. Printable primitives
-    // go through Display; complex types (structs, enums, collections) emit a
-    // structured Value via ToSpecValue. A single complex parameter must not
-    // suppress emission of its primitive siblings. The event uses the
-    // language-neutral `#[spec_input]` name when present.
+    // Emit every parameter as an `op.<spec_name>` typed event via `ToSpecValue`.
+    // All value-bearing params (primitives, structs, enums, collections) emit a
+    // structured `Value` that round-trips correctly through the matcher. The event
+    // uses the language-neutral `#[spec_input]` name when present.
     // Self receivers and `&mut T` params are excluded from input-echo emission:
     // receivers are `FnArg::Receiver` and are never present in `params`; mutable
     // reference params represent state objects threaded through an operation and
@@ -509,11 +508,7 @@ fn build_pre_stmts(op_name: &str, params: &[(Ident, Type, Option<String>)], _is_
     for (id, ty, spec_name) in params {
         let name = spec_param_name(id, spec_name.as_ref());
         let event_name = format!("{op_name}.{name}");
-        if is_printable_param(ty) {
-            out.push(parse_quote!(
-                #rt::emit_event(#event_name, &::std::format!("{}", #id));
-            ));
-        } else if !is_mut_ref(ty) {
+        if !is_mut_ref(ty) {
             out.push(parse_quote!(
                 #rt::emit_event_v(#event_name, #rt::ToSpecValue::to_spec_value(&#id));
             ));
@@ -578,7 +573,7 @@ fn build_post_emit(output: &ReturnType) -> Option<TokenStream2> {
         ReturnKind::Other => {
             if is_printable_param(ty) {
                 quote! {
-                    #rt::emit_event("$result", &::std::format!("{}", __sg_ret));
+                    #rt::emit_event_v("$result", #rt::ToSpecValue::to_spec_value(&__sg_ret));
                 }
             } else {
                 quote! {
@@ -1008,7 +1003,7 @@ pub fn spec_trace(input: TokenStream) -> TokenStream {
     let TraceCall { name, expr } = parse_macro_input!(input as TraceCall);
     let rt = rt();
     let out = quote_spanned! { name.span() =>
-        #rt::emit_event(#name, &::std::format!("{}", #expr))
+        #rt::emit_event_v(#name, #rt::ToSpecValue::to_spec_value(&#expr))
     };
     out.into()
 }

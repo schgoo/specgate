@@ -20,11 +20,11 @@ cases:
     inputs:
       x: 10
     expected:
-      - $result: "11"
+      - $result: 11
 
   - name: beta_doubles
     operation: beta
     inputs:
       x: 10
     expected:
-      - $result: "20"
+      - $result: 20

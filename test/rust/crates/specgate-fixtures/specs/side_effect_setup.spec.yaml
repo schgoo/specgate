@@ -12,4 +12,4 @@ cases:
     desc: The side-effect setup is invoked before the operation
     operation: read_flag
     expected:
-      - $result: "1"
+      - $result: 1

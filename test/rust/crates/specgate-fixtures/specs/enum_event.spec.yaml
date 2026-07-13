@@ -24,7 +24,7 @@ cases:
   expected:
   - $result:
       Circle:
-        radius: '5'
+        radius: 5
 - name: multi_field_variant
   desc: Struct variant with multiple fields
   operation: classify
@@ -33,5 +33,5 @@ cases:
   expected:
   - $result:
       Rectangle:
-        width: '3'
-        height: '4'
+        width: 3
+        height: 4

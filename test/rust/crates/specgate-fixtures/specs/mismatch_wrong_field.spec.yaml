@@ -11,4 +11,4 @@ cases:
     desc: Expects 'total' but source produces 'count'
     operation: increment
     expected:
-      - total: "1"
+      - total: 1

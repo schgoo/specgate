@@ -797,7 +797,20 @@ fn check_runnability(map: &serde_yaml::Mapping, file: &str, spec_path: &Path, sp
     }
 
     // binding_present: without a binding there is nothing to compile/run.
-    let Some(binding_rel) = map.get(key("binding")).and_then(|v| v.as_str()) else {
+    let binding_rels: Vec<&str> = match map.get(key("binding")) {
+        Some(Value::String(s)) => vec![s.as_str()],
+        Some(Value::Sequence(seq)) => seq.iter().filter_map(|v| v.as_str()).collect(),
+        _ => {
+            findings.push(ValidationFinding {
+                severity: Severity::Error,
+                check: "binding_present".into(),
+                file: file.into(),
+                message: "spec has no binding".into(),
+            });
+            return;
+        }
+    };
+    if binding_rels.is_empty() {
         findings.push(ValidationFinding {
             severity: Severity::Error,
             check: "binding_present".into(),
@@ -805,24 +818,29 @@ fn check_runnability(map: &serde_yaml::Mapping, file: &str, spec_path: &Path, sp
             message: "spec has no binding".into(),
         });
         return;
-    };
-
-    // binding_resolves: the binding path (resolved the same way the harness
+    }
+    // binding_resolves: each binding path (resolved the same way the harness
     // resolves it — spec-relative first, then walking up) must point at a
-    // parseable binding file.
-    let binding_path = specgate_harness::binding_path_resolved(spec_path, binding_rel);
-    let Some(binding) = std::fs::read_to_string(&binding_path)
-        .ok()
-        .and_then(|raw| serde_yaml::from_str::<Value>(&raw).ok())
-    else {
-        findings.push(ValidationFinding {
-            severity: Severity::Error,
-            check: "binding_resolves".into(),
-            file: file.into(),
-            message: format!("binding '{binding_rel}' not found"),
-        });
-        return;
-    };
+    // parseable binding file. The first binding remains the source for legacy
+    // Rust runnability checks below, preserving single-binding behavior.
+    let mut loaded_bindings: Vec<(&str, PathBuf, Value)> = Vec::new();
+    for binding_rel in &binding_rels {
+        let binding_path = specgate_harness::binding_path_resolved(spec_path, binding_rel);
+        let Some(binding) = std::fs::read_to_string(&binding_path)
+            .ok()
+            .and_then(|raw| serde_yaml::from_str::<Value>(&raw).ok())
+        else {
+            findings.push(ValidationFinding {
+                severity: Severity::Error,
+                check: "binding_resolves".into(),
+                file: file.into(),
+                message: format!("binding '{binding_rel}' not found"),
+            });
+            return;
+        };
+        loaded_bindings.push((*binding_rel, binding_path, binding));
+    }
+    let (_binding_rel, binding_path, binding) = &loaded_bindings[0];
     let targets = binding
         .as_mapping()
         .and_then(|bm| bm.get(key("targets")))
@@ -856,6 +874,22 @@ fn check_runnability(map: &serde_yaml::Mapping, file: &str, spec_path: &Path, sp
                 file: file.into(),
                 message: format!("target '{t}' not found in binding"),
             });
+        }
+    }
+    for (other_rel, _, other_binding) in loaded_bindings.iter().skip(1) {
+        let other_targets = other_binding
+            .as_mapping()
+            .and_then(|bm| bm.get(key("targets")))
+            .and_then(|v| v.as_mapping());
+        for t in &referenced {
+            if other_targets.is_none_or(|m| m.get(key(t)).is_none()) {
+                findings.push(ValidationFinding {
+                    severity: Severity::Error,
+                    check: "target_exists".into(),
+                    file: file.into(),
+                    message: format!("target '{t}' not found in binding '{other_rel}'"),
+                });
+            }
         }
     }
 

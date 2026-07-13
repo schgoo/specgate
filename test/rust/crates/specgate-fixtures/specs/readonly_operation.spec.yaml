@@ -10,4 +10,4 @@ cases:
   desc: Read-only operation returns value without state change
   operation: get_count
   expected:
-  - $result: '42'
+  - $result: 42

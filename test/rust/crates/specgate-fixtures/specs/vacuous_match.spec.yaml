@@ -13,7 +13,7 @@ cases:
     operation: add
     inputs: { a: 2, b: 3 }
     expected:
-      - $result: "999"
+      - $result: 999
 
   - name: wrong_run_fails
     desc: $run for non-matching operation must fail

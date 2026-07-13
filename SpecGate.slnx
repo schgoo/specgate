@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/csharp/">
+    <Project Path="csharp/SpecGate.Annotations/SpecGate.Annotations.csproj" />
+    <Project Path="csharp/SpecGate.Runtime/SpecGate.Runtime.csproj" />
+  </Folder>
+  <Folder Name="/test/" />
+  <Folder Name="/test/csharp/">
+    <Project Path="test/csharp/SpecGateFixtures/SpecGateFixtures.csproj" />
+  </Folder>
+  <Folder Name="/test/csharp/SpecGateFixtures/" />
+  <Folder Name="/test/csharp/SpecGateFixtures/Tests/">
+    <Project Path="test/csharp/SpecGateFixtures/Tests/SpecGateFixtures.Tests.csproj" />
+  </Folder>
+</Solution>

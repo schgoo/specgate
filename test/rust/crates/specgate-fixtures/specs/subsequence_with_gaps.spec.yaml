@@ -11,5 +11,5 @@ cases:
     desc: Assert count=0 then count=2, skipping the intermediate count=1
     operation: increment_twice
     expected:
-      - count: "0"
-      - count: "2"
+      - count: 0
+      - count: 2

@@ -13,8 +13,8 @@ cases:
     operation: transfer
     inputs: { amount: 50 }
     expected:
-      - source.balance: "100"
-      - target.balance: "0"
+      - source.balance: 100
+      - target.balance: 0
       - $run: transfer
-      - source.balance: "50"
-      - target.balance: "50"
+      - source.balance: 50
+      - target.balance: 50

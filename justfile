@@ -84,5 +84,13 @@ readme-check:
     cd rust && cargo doc2readme -p specgate --lib --template crates/README.j2 --out crates/specgate/README.md --check
     cd rust && cargo doc2readme -p specgate-cli --lib --template crates/README.j2 --out crates/specgate-cli/README.md --check
 
+# Build C# fixtures
+dotnet-build:
+    dotnet build
+
+# Run C# tests
+dotnet-test:
+    dotnet test
+
 # Run all pre-PR checks
-check: build test clippy format-check deny validate extract-check readme-check self-host cli-self-host coverage
+check: build test clippy format-check deny validate extract-check readme-check self-host cli-self-host coverage dotnet-build dotnet-test

@@ -32,7 +32,7 @@ cases:
     operation: scale
     inputs: { value: 5 }
     expected:
-      - $result: "10"
+      - $result: 10
 
   # Overriding the default works as usual -> 5 * 3 = 15.
   - name: explicit_factor
@@ -40,7 +40,7 @@ cases:
     operation: scale
     inputs: { value: 5, factor: 3 }
     expected:
-      - $result: "15"
+      - $result: 15
 
   # Complex default: omitting `by` uses {dx:1, dy:1} -> 5 + 1 + 1 = 7.
   - name: uses_default_offset
@@ -48,7 +48,7 @@ cases:
     operation: shift
     inputs: { base: 5 }
     expected:
-      - $result: "7"
+      - $result: 7
 
   # Overriding the complex default -> 5 + 10 + 20 = 35.
   - name: explicit_offset
@@ -56,4 +56,4 @@ cases:
     operation: shift
     inputs: { base: 5, by: { dx: 10, dy: 20 } }
     expected:
-      - $result: "35"
+      - $result: 35

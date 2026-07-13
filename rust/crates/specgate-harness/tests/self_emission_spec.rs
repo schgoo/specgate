@@ -27,15 +27,15 @@ fn free_function_self_emits_full_trace_including_result() {
         },
         TraceEvent::Event {
             name: "add.a".to_string(),
-            value: Value::String("2".to_string()),
+            value: Value::Integer(2),
         },
         TraceEvent::Event {
             name: "add.b".to_string(),
-            value: Value::String("3".to_string()),
+            value: Value::Integer(3),
         },
         TraceEvent::Event {
             name: "$result".to_string(),
-            value: Value::String("5".to_string()),
+            value: Value::Integer(5),
         },
     ];
 

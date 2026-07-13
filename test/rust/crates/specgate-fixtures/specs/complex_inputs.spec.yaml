@@ -55,7 +55,6 @@ operations:
       config: AppConfig
     outputs:
     - $result: string
-    - retry_info: string
   area_of_shape:
     inputs:
       shape: Shape
@@ -113,7 +112,6 @@ operations:
       person: Person
     outputs:
     - $result: string
-    - city: string
   create_person:
     inputs:
       name: string
@@ -136,7 +134,7 @@ cases:
     - name: Blue
       value: '2'
   expected:
-  - member_count: '3'
+  - member_count: 3
   - first_member: Red
   - $result: Colors
 - name: sum_two_points
@@ -153,8 +151,8 @@ cases:
       $size: 2
   - $result:
       $match:
-        x: '4'
-        y: '6'
+        x: 4
+        y: 6
 - name: sum_three_points
   desc: Three points summed
   operation: sum_points
@@ -169,8 +167,8 @@ cases:
   expected:
   - $result:
       $match:
-        x: '15'
-        y: '15'
+        x: 15
+        y: 15
 - name: nested_config_object
   desc: Nested mapping input deserialized into struct, operation formats it
   operation: describe_config
@@ -182,10 +180,9 @@ cases:
   expected:
   - describe_config.config:
       name: my-app
-      max_retries: '3'
-      verbose: 'true'
+      max_retries: 3
+      verbose: true
   - $result: my-app
-  - retry_info: retries=3, verbose=true
 - name: area_of_circle
   desc: Enum variant with data deserialized from YAML mapping
   operation: area_of_shape
@@ -196,8 +193,8 @@ cases:
   expected:
   - area_of_shape.shape:
       Circle:
-        radius: '5'
-  - $result: '78'
+        radius: 5
+  - $result: 78
 - name: area_of_rectangle
   desc: Different enum variant deserialized
   operation: area_of_shape
@@ -207,14 +204,14 @@ cases:
         width: 3
         height: 4
   expected:
-  - $result: '12'
+  - $result: 12
 - name: area_of_point
   desc: Unit enum variant deserialized
   operation: area_of_shape
   inputs:
     shape: Point
   expected:
-  - $result: '0'
+  - $result: 0
 - name: classify_circle
   desc: Operation returns enum variant with fields
   operation: classify
@@ -223,7 +220,7 @@ cases:
   expected:
   - $result:
       Circle:
-        radius: '5'
+        radius: 5
 - name: classify_rectangle
   desc: Multi-field enum variant
   operation: classify
@@ -232,8 +229,8 @@ cases:
   expected:
   - $result:
       Rectangle:
-        width: '3'
-        height: '4'
+        width: 3
+        height: 4
 - name: classify_point
   desc: Unit enum variant
   operation: classify
@@ -252,12 +249,12 @@ cases:
       $size: 3
       $contains:
         $match:
-          x: '0'
-          y: '0'
+          x: 0
+          y: 0
       $any:
         $match:
-          x: '2'
-          y: '2'
+          x: 2
+          y: 2
 - name: lookup_in_map
   desc: Map input deserialized, key looked up
   operation: lookup
@@ -269,11 +266,11 @@ cases:
     key: beta
   expected:
   - lookup.table:
-      alpha: '1'
-      beta: '2'
-      gamma: '3'
+      alpha: 1
+      beta: 2
+      gamma: 3
   - lookup.key: beta
-  - $result: '2'
+  - $result: 2
 - name: invert_string_int_map
   desc: Map output serialized as structured Value
   operation: invert_map
@@ -313,8 +310,8 @@ cases:
   expected:
   - $result:
       Some:
-        x: '3'
-        y: '4'
+        x: 3
+        y: 4
 - name: find_point_missing
   desc: Returns None
   operation: find_point
@@ -335,7 +332,7 @@ cases:
   - $result:
       Some:
         Circle:
-          radius: '5'
+          radius: 5
 - name: find_shape_some_point
   desc: Option<Shape> returning Some(Point) — unit variant nested
   operation: find_shape
@@ -366,12 +363,11 @@ cases:
   expected:
   - describe_person.person:
       name: Alice
-      age: '30'
+      age: 30
       address:
         street: 123 Main St
         city: Portland
   - $result: Alice, age 30
-  - city: Portland
 - name: create_person_struct
   desc: Returns nested struct (Person with Address) as structured Value
   operation: create_person
@@ -384,7 +380,7 @@ cases:
   - $result:
       $match:
         name: Bob
-        age: '25'
+        age: 25
         address:
           $match:
             street: 456 Oak Ave

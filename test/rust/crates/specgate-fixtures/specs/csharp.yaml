@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=../../../../../binding-schema.json
+# C# binding for multi-target conformance. Selects the harness's C#
+# backend: scan the C# fixtures project for [SpecOperation]/[SpecEvent]
+# annotations, generate a C# runner, build+run it via `dotnet`, and collect the
+# same canonical TraceEvent/Value stream the Rust backend produces. Paths are
+# relative to this file.
+language: csharp
+
+targets:
+  default:
+    package_root: ../../../../csharp/SpecGateFixtures

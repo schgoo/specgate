@@ -13,5 +13,5 @@ cases:
     operation: add
     inputs: { a: 2, b: 3 }
     expected:
-      - $result: "5"
+      - $result: 5
       - add.extra: "bonus"

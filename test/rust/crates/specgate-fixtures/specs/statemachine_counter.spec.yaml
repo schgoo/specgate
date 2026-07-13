@@ -11,6 +11,6 @@ cases:
     desc: Incrementing counter from 0 produces count 1
     operation: increment
     expected:
-      - count: "0"
+      - count: 0
       - $run: increment
-      - count: "1"
+      - count: 1

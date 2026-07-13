@@ -17,4 +17,4 @@ cases:
     b: 2
   expected:
   - $result:
-      Ok: '5'
+      Ok: 5

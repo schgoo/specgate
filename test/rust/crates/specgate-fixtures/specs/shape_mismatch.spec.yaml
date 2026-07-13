@@ -13,4 +13,4 @@ cases:
     operation: add
     inputs: { a: 2, b: 3 }
     expected:
-      - answer: "5"
+      - answer: 5

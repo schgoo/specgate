@@ -112,6 +112,18 @@ pub struct Source {
     pub section: String,
 }
 
+/// A failure reported by a non-canonical (e.g. C#) binding when its traces
+/// do not satisfy the expected assertions for a case.
+#[derive(Debug, Clone)]
+pub struct TargetFailure {
+    /// File stem of the binding that failed (e.g. `"csharp"` from `csharp.yaml`).
+    pub target: String,
+    /// Traces emitted by the failing binding.
+    pub traces: Vec<TraceEvent>,
+    /// Human-readable description of the first unmet assertion.
+    pub mismatch: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct CaseResult {
     pub name: String,
@@ -120,6 +132,9 @@ pub struct CaseResult {
     pub source: Option<Source>,
     pub expected: Vec<Assertion>,
     pub traces: Vec<TraceEvent>,
+    /// Failures from non-canonical bindings. Empty when all bindings agree or
+    /// when the spec has only a single binding.
+    pub target_failures: Vec<TargetFailure>,
 }
 
 #[derive(Debug, Clone)]

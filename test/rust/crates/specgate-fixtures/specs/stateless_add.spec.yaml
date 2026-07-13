@@ -1,6 +1,8 @@
 spec_version: 0.4.0
 name: fixture.stateless_add
-binding: binding.yaml
+binding:
+  - binding.yaml
+  - csharp.yaml
 operations:
   add:
     inputs:
@@ -16,4 +18,4 @@ cases:
     a: 2
     b: 3
   expected:
-  - $result: '5'
+  - $result: 5

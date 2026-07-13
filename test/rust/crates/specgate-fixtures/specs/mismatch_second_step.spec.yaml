@@ -16,4 +16,4 @@ cases:
       - operation: decrement
     expected:
       - $run: decrement
-      - count: "999"
+      - count: 999

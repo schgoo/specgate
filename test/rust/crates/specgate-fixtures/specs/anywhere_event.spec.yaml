@@ -12,40 +12,40 @@ cases:
     operation: increment_twice
     expected:
       - $run: increment_twice
-      - count: "2"
+      - count: 2
       - $anywhere:
-        - count: "0"
+        - count: 0
 
   - name: anywhere_matches_late_event
     desc: Assert on count=2 (which appears after the Run) via $anywhere
     operation: increment_twice
     expected:
-      - count: "0"
+      - count: 0
       - $run: increment_twice
       - $anywhere:
-        - count: "2"
+        - count: 2
 
   - name: anywhere_matches_middle_event
     desc: Assert on count=1 (intermediate) via $anywhere regardless of position in expected list
     operation: increment_twice
     expected:
       - $anywhere:
-        - count: "1"
+        - count: 1
       - $run: increment_twice
-      - count: "2"
+      - count: 2
 
   - name: anywhere_multiple_items
     desc: Multiple items in $anywhere — all must be present somewhere
     operation: increment_twice
     expected:
       - $anywhere:
-        - count: "0"
-        - count: "1"
-        - count: "2"
+        - count: 0
+        - count: 1
+        - count: 2
 
   - name: anywhere_missing_fails
     desc: $anywhere item not in trace produces failure
     operation: increment_twice
     expected:
       - $anywhere:
-        - count: "999"
+        - count: 999

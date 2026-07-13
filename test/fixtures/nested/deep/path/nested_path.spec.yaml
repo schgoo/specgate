@@ -13,4 +13,4 @@ cases:
     operation: add
     inputs: { a: 10, b: 20 }
     expected:
-      - $result: "30"
+      - $result: 30

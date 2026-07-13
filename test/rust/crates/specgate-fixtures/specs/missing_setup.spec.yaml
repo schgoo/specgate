@@ -11,4 +11,4 @@ cases:
     desc: A method operation whose receiver type has no linked setup
     operation: increment
     expected:
-      - count: "1"
+      - count: 1

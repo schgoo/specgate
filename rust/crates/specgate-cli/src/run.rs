@@ -204,6 +204,7 @@ mod coverage_exit_tests {
             source: None,
             expected: Vec::new(),
             traces: Vec::new(),
+            target_failures: Vec::new(),
         }
     }
 

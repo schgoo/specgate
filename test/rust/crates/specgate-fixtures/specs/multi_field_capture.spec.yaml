@@ -13,7 +13,7 @@ cases:
     operation: withdraw
     inputs: { amount: 50 }
     expected:
-      - balance: "100"
+      - balance: 100
       - $run: withdraw
-      - balance: "50"
-      - transaction_count: "1"
+      - balance: 50
+      - transaction_count: 1

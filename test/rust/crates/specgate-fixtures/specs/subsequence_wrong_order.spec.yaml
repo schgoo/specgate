@@ -11,5 +11,5 @@ cases:
     desc: Expected events in reverse order
     operation: increment
     expected:
-      - count: "1"
-      - count: "0"
+      - count: 1
+      - count: 0

@@ -51,13 +51,13 @@ cases:
           b: 20
     expected:
       - $run: add
-      - add.a: "2"
-      - add.b: "3"
-      - $result: "5"
+      - add.a: 2
+      - add.b: 3
+      - $result: 5
       - $run: add
-      - add.a: "10"
-      - add.b: "20"
-      - $result: "30"
+      - add.a: 10
+      - add.b: 20
+      - $result: 30
   - name: adds_two_and_three
     operation: add
     inputs:
@@ -65,9 +65,9 @@ cases:
       b: 3
     expected:
       - $run: add
-      - add.a: "2"
-      - add.b: "3"
-      - $result: "5"
+      - add.a: 2
+      - add.b: 3
+      - $result: 5
   - name: adjusts_from_ten
     inputs:
       start: 10
@@ -80,18 +80,18 @@ cases:
           amount: -3
     expected:
       - $run: adjust
-      - adjust.amount: "5"
-      - $result: "15"
+      - adjust.amount: 5
+      - $result: 15
       - $run: adjust
-      - adjust.amount: "-3"
-      - $result: "12"
+      - adjust.amount: -3
+      - $result: 12
   - name: checks_limit_of_seven
     inputs:
       limit: 7
     operation: check_limit
     expected:
       - $run: check_limit
-      - $result: "7"
+      - $result: 7
   - name: greets
     operation: greet
     inputs:

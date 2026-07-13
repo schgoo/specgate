@@ -11,7 +11,7 @@ cases:
     desc: Count goes from 0 to 2 via two mutations
     operation: increment_twice
     expected:
-      - count: "0"
+      - count: 0
       - $run: increment_twice
-      - count: "1"
-      - count: "2"
+      - count: 1
+      - count: 2

@@ -19,16 +19,16 @@ cases:
     operation: divide
     inputs: { numerator: 10, denominator: 2 }
     expected:
-      - divide.numerator: "10"
-      - divide.denominator: "2"
-      - $result: "5"
+      - divide.numerator: 10
+      - divide.denominator: 2
+      - $result: 5
 
   - name: scale_3_by_4
     desc: A method op echoes its renamed arg; a construction input is routed to the setup by name
     operation: scale
     inputs: { factor: 3, value: 4 }
     expected:
-      - factor: "3"
+      - factor: 3
       - $run: scale
-      - scale.value: "4"
-      - $result: "12"
+      - scale.value: 4
+      - $result: 12

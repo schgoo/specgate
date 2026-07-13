@@ -734,7 +734,7 @@ mod tests {
 
     fn empty_spec() -> Spec {
         Spec {
-            binding_path: None,
+            binding_paths: vec![],
             target: None,
             cases: vec![],
             async_ops: BTreeSet::new(),

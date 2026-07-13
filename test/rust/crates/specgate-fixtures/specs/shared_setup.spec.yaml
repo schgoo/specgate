@@ -24,17 +24,17 @@ cases:
     operation: combine
     inputs: { start_left: 10, start_right: 5 }
     expected:
-      - left.value: "10"
-      - right.value: "5"
+      - left.value: 10
+      - right.value: 5
       - $run: combine
-      - $result: "15"
+      - $result: 15
 
   - name: one_setup_fills_three_params
     desc: A single parameterless setup, stacked with fills, builds three params
     operation: combine_three
     expected:
-      - a.value: "1"
-      - b.value: "1"
-      - c.value: "1"
+      - a.value: 1
+      - b.value: 1
+      - c.value: 1
       - $run: combine_three
-      - $result: "3"
+      - $result: 3

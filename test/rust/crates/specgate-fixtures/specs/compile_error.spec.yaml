@@ -11,4 +11,4 @@ cases:
     desc: Source has a syntax error
     operation: broken
     expected:
-      - $result: "42"
+      - $result: 42
