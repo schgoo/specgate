@@ -1,6 +1,8 @@
 spec_version: "0.4.0"
 name: fixture.cross_dep
-binding: binding.yaml
+binding:
+  - binding.yaml
+  - csharp.yaml
 
 operations:
   parse_yaml_key:

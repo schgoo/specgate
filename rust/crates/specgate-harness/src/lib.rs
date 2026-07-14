@@ -803,7 +803,12 @@ fn yaml_to_csharp_literal(val: Option<&serde_yaml::Value>, _param_type: &str) ->
         return if b { "true".to_string() } else { "false".to_string() };
     }
     if let Some(s) = v.as_str() {
-        let escaped = s.replace('\\', "\\\\").replace('"', "\\\"");
+        let escaped = s
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\n', "\\n")
+            .replace('\r', "\\r")
+            .replace('\t', "\\t");
         return format!("\"{escaped}\"");
     }
     "default".to_string()
@@ -867,7 +872,11 @@ fn find_csharp_libs_dir(package_root: &Path) -> Option<PathBuf> {
 }
 
 /// Generate the `Program.cs` content for the C# runner.
-fn generate_csharp_program(cases: &[&spec::Case], cs_ops: &[CsOp]) -> String {
+fn generate_csharp_program(
+    cases: &[&spec::Case],
+    cs_ops: &[CsOp],
+    op_input_defaults: &BTreeMap<String, BTreeMap<String, serde_yaml::Value>>,
+) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
     out.push_str("using SpecGate.Annotations;\n");
@@ -881,13 +890,16 @@ fn generate_csharp_program(cases: &[&spec::Case], cs_ops: &[CsOp]) -> String {
     for case in cases {
         let op_name = case.operation.as_deref().unwrap_or("");
         if let Some(cs_op) = cs_ops.iter().find(|o| o.op_name == op_name) {
+            let op_defaults = op_input_defaults.get(op_name);
             writeln!(out, "// case: {}", case.name).expect("fmt");
             out.push_str("{\n");
             out.push_str("    SpecGateRuntime.Reset();\n");
             writeln!(out, "    SpecGateRuntime.EmitRun(\"{op_name}\");").expect("fmt");
 
             for (param_name, param_type) in &cs_op.params {
-                let lit = yaml_to_csharp_literal(case.inputs.get(param_name), param_type);
+                let case_val = case.inputs.get(param_name);
+                let val = case_val.or_else(|| op_defaults.and_then(|d| d.get(param_name)));
+                let lit = yaml_to_csharp_literal(val, param_type);
                 writeln!(out, "    {param_type} __{param_name} = {lit};").expect("fmt");
             }
             for (param_name, param_type) in &cs_op.params {
@@ -896,14 +908,18 @@ fn generate_csharp_program(cases: &[&spec::Case], cs_ops: &[CsOp]) -> String {
             }
 
             let args = cs_op.params.iter().map(|(n, _)| format!("__{n}")).collect::<Vec<_>>().join(", ");
+            out.push_str("    try {\n");
             writeln!(
                 out,
-                "    {} __result = {}.{}({args});",
+                "        {} __result = {}.{}({args});",
                 cs_op.return_type, cs_op.class_name, cs_op.method_name
             )
             .expect("fmt");
             let result_emit = cs_typed_emit("$result", "__result", &cs_op.return_type);
-            writeln!(out, "    {result_emit}").expect("fmt");
+            writeln!(out, "        {result_emit}").expect("fmt");
+            out.push_str("    } catch (System.Exception __ex) {\n");
+            out.push_str("        SpecGateRuntime.EmitEvent(\"$fault\", __ex.Message);\n");
+            out.push_str("    }\n");
             writeln!(out, "    all[\"{}\"] = SpecGateRuntime.GetTracesJson();", case.name).expect("fmt");
             out.push_str("}\n");
         }
@@ -941,7 +957,7 @@ fn generate_csharp_program(cases: &[&spec::Case], cs_ops: &[CsOp]) -> String {
 fn run_csharp_group(
     target: &binding::Target,
     group_cases: &[&spec::Case],
-    _spec: &spec::Spec,
+    spec: &spec::Spec,
     _fixture_basename: &str,
     scratch_dir: &Path,
 ) -> Result<Vec<CaseResult>, String> {
@@ -997,7 +1013,7 @@ fn run_csharp_group(
     std::fs::write(scratch_dir.join("Runner.csproj"), csproj).map_err(|e| format!("failed to write Runner.csproj: {e}"))?;
 
     // Write Program.cs.
-    let program_cs = generate_csharp_program(group_cases, &cs_ops);
+    let program_cs = generate_csharp_program(group_cases, &cs_ops, &spec.op_input_defaults);
     std::fs::write(scratch_dir.join("Program.cs"), program_cs).map_err(|e| format!("failed to write Program.cs: {e}"))?;
 
     // Run: dotnet run --project Runner.csproj -- <trace_file>
@@ -1474,9 +1490,10 @@ fn ops_metadata(raw: &serde_yaml::Value) -> BTreeMap<String, OpMeta> {
 
 #[cfg(test)]
 mod tests {
-    use super::ops_metadata;
+    use super::{CsOp, generate_csharp_program, ops_metadata, yaml_to_csharp_literal};
+    use std::collections::BTreeMap;
 
-    fn meta(yaml: &str) -> std::collections::BTreeMap<String, super::OpMeta> {
+    fn meta(yaml: &str) -> BTreeMap<String, super::OpMeta> {
         let raw: serde_yaml::Value = serde_yaml::from_str(yaml).expect("valid yaml");
         ops_metadata(&raw)
     }
@@ -1563,5 +1580,71 @@ mod tests {
         // every key must be registered so none is silently dropped.
         let m = meta("operations:\n  op:\n    outputs:\n      - { a: i32, b: i32 }\n");
         assert_eq!(m["op"].outputs, vec!["a".to_string(), "b".to_string()]);
+    }
+
+    #[test]
+    fn csharp_program_uses_declared_default_when_case_omits_input() {
+        let mut inputs = BTreeMap::new();
+        inputs.insert("value".to_string(), serde_yaml::Value::Number(5.into()));
+        let case = super::spec::Case {
+            name: "uses_default_factor".to_string(),
+            target: None,
+            operation: Some("scale".to_string()),
+            steps: Vec::new(),
+            step_inputs: Vec::new(),
+            inputs,
+            expected: Vec::new(),
+            level: super::CaseLevel::Must,
+            source: None,
+        };
+        let op = CsOp {
+            op_name: "scale".to_string(),
+            class_name: "ScaleOps".to_string(),
+            method_name: "Scale".to_string(),
+            params: vec![("value".to_string(), "int".to_string()), ("factor".to_string(), "int".to_string())],
+            return_type: "int".to_string(),
+        };
+        let mut scale_defaults = BTreeMap::new();
+        scale_defaults.insert("factor".to_string(), serde_yaml::Value::Number(2.into()));
+        let mut defaults = BTreeMap::new();
+        defaults.insert("scale".to_string(), scale_defaults);
+
+        let program = generate_csharp_program(&[&case], &[op], &defaults);
+
+        assert!(program.contains("int __value = 5;"));
+        assert!(program.contains("int __factor = 2;"));
+    }
+
+    #[test]
+    fn csharp_program_emits_fault_from_exception_message() {
+        let case = super::spec::Case {
+            name: "divide_by_zero_panics".to_string(),
+            target: None,
+            operation: Some("divide".to_string()),
+            steps: Vec::new(),
+            step_inputs: Vec::new(),
+            inputs: BTreeMap::new(),
+            expected: Vec::new(),
+            level: super::CaseLevel::Must,
+            source: None,
+        };
+        let op = CsOp {
+            op_name: "divide".to_string(),
+            class_name: "DivideOps".to_string(),
+            method_name: "Divide".to_string(),
+            params: Vec::new(),
+            return_type: "int".to_string(),
+        };
+        let program = generate_csharp_program(&[&case], &[op], &BTreeMap::new());
+
+        assert!(program.contains("catch (System.Exception __ex)"));
+        assert!(program.contains("SpecGateRuntime.EmitEvent(\"$fault\", __ex.Message);"));
+    }
+
+    #[test]
+    fn csharp_literal_escapes_control_characters() {
+        let value = serde_yaml::Value::String("name: Customer\nid: 42".to_string());
+
+        assert_eq!(yaml_to_csharp_literal(Some(&value), "string"), "\"name: Customer\\nid: 42\"");
     }
 }
