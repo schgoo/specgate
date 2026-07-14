@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../../../../binding-schema.json
+# C# binding pinned to an ALTERNATE .NET version (net8.0) — the regression
+# witness for cross-framework conformance. Proves the harness builds/runs the
+# generated runner against a target on a different TFM than net10.0, and that
+# the SpecGate annotation/runtime libraries are consumable from it. Paths are
+# relative to this file.
+language: csharp
+
+targets:
+  default:
+    package_root: ../../../../csharp/SpecGateFixtures.Net8
+    framework: net8.0

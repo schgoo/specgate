@@ -21,6 +21,7 @@ pub struct Target {
     pub package_root: PathBuf,
     pub command: Option<String>,
     pub runtime: Runtime,
+    pub framework: Option<String>,
 }
 
 #[derive(Debug)]
@@ -73,12 +74,17 @@ pub fn load_binding(path: &Path) -> Option<Binding> {
             // accepted values; the parser is permissive.)
             _ => Runtime::Smol,
         };
+        let framework = entry_map
+            .get(Value::String("framework".into()))
+            .and_then(|v| v.as_str())
+            .map(String::from);
         targets.insert(
             name.to_string(),
             Target {
                 package_root: normalize(&dir.join(pkg)),
                 command,
                 runtime,
+                framework,
             },
         );
     }
@@ -100,4 +106,57 @@ fn normalize(p: &Path) -> PathBuf {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(yaml: &str) -> Option<Binding> {
+        let tmp = tempfile_yaml(yaml);
+        load_binding(Path::new(&tmp))
+    }
+
+    /// Write YAML content to a NamedTempFile-equivalent inside the test's
+    /// scratch space. Because we cannot use /tmp, we write to a fixed path
+    /// under the cargo target directory.
+    fn tempfile_yaml(content: &str) -> String {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("target")
+            .join("specgate-harness-unit-tests")
+            .join("binding_test_scratch");
+        std::fs::create_dir_all(&dir).expect("create scratch dir");
+        let path = dir.join(format!("binding_test_{id}.yaml"));
+        std::fs::write(&path, content).expect("write temp yaml");
+        path.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn parses_framework_field() {
+        let b = parse("language: csharp\ntargets:\n  default:\n    package_root: .\n    framework: net8.0\n").expect("binding");
+        let t = b.target(None).expect("default target");
+        assert_eq!(t.framework.as_deref(), Some("net8.0"));
+    }
+
+    #[test]
+    fn framework_absent_is_none() {
+        let b = parse("language: csharp\ntargets:\n  default:\n    package_root: .\n").expect("binding");
+        let t = b.target(None).expect("default target");
+        assert!(t.framework.is_none());
+    }
+
+    #[test]
+    fn parses_multiple_targets_framework_independent() {
+        let yaml = "language: csharp\ntargets:\n  v8:\n    package_root: .\n    framework: net8.0\n  v10:\n    package_root: .\n";
+        let b = parse(yaml).expect("binding");
+        assert_eq!(b.target(Some("v8")).unwrap().framework.as_deref(), Some("net8.0"));
+        assert!(b.target(Some("v10")).unwrap().framework.is_none());
+    }
 }

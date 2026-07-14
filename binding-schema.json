@@ -36,6 +36,10 @@
           "description": "Async runtime the generated runner uses to drive async operations to completion. 'smol' (the default when omitted) uses smol::block_on; 'tokio' establishes a current-thread tokio runtime. Rust targets only.",
           "enum": ["smol", "tokio"]
         },
+        "framework": {
+          "type": "string",
+          "description": "Target framework moniker (TFM) the generated runner builds and runs against, e.g. 'net8.0' or 'net10.0'. When omitted, the harness reads the target project's declared TargetFramework. C# targets only."
+        },
         "test_root": {
           "type": "string",
           "description": "Path where generated test files are written, relative to the binding file. Defaults to package_root/tests if omitted."

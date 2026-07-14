@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>SpecGateFixtures</RootNamespace>
+    <AssemblyName>SpecGateFixtures.Net8</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\csharp\SpecGate.Annotations\SpecGate.Annotations.csproj" />
+    <ProjectReference Include="..\..\..\csharp\SpecGate.Runtime\SpecGate.Runtime.csproj" />
+  </ItemGroup>
+</Project>

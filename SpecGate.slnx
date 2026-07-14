@@ -6,6 +6,7 @@
   <Folder Name="/test/" />
   <Folder Name="/test/csharp/">
     <Project Path="test/csharp/SpecGateFixtures/SpecGateFixtures.csproj" />
+    <Project Path="test/csharp/SpecGateFixtures.Net8/SpecGateFixtures.Net8.csproj" />
   </Folder>
   <Folder Name="/test/csharp/SpecGateFixtures/" />
   <Folder Name="/test/csharp/SpecGateFixtures/Tests/">

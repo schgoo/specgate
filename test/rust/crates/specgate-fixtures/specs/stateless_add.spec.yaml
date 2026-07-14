@@ -3,6 +3,7 @@ name: fixture.stateless_add
 binding:
   - binding.yaml
   - csharp.yaml
+  - csharp-net8.yaml
 operations:
   add:
     inputs:

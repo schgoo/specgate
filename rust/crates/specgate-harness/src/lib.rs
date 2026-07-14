@@ -952,6 +952,61 @@ fn generate_csharp_program(
     out
 }
 
+/// Extract the value of a single XML element `<tag>content</tag>` from a
+/// `.csproj`-style XML string. Returns `None` when the tag is absent.
+/// Whitespace around the content is trimmed.
+pub(crate) fn extract_csproj_xml_tag(text: &str, tag: &str) -> Option<String> {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let start = text.find(&open)?;
+    let inner_start = start + open.len();
+    let end = text[inner_start..].find(&close)?;
+    Some(text[inner_start..inner_start + end].trim().to_string())
+}
+
+/// Find the first `.csproj` in `package_root` and return the effective
+/// target framework moniker declared in it.
+///
+/// Checks `<TargetFramework>` first; then `<TargetFrameworks>` (returns
+/// the first semicolon-delimited item). Returns `None` when no `.csproj`
+/// exists or neither element is present.
+pub(crate) fn read_csproj_framework(package_root: &Path) -> Option<String> {
+    let entries = std::fs::read_dir(package_root).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) == Some("csproj") {
+            let text = std::fs::read_to_string(&path).ok()?;
+            if let Some(fw) = extract_csproj_xml_tag(&text, "TargetFramework") {
+                return Some(fw);
+            }
+            if let Some(fws) = extract_csproj_xml_tag(&text, "TargetFrameworks") {
+                return fws.split(';').next().map(|s| s.trim().to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Resolve the `<TargetFramework>` to use in the generated `Runner.csproj`.
+///
+/// Resolution order:
+/// 1. `target.framework` if set in the binding.
+/// 2. The framework declared in the target project's `.csproj`
+///    (`<TargetFramework>` or first item of `<TargetFrameworks>`).
+/// 3. Default: `net10.0`.
+///
+/// If the resolved value starts with `netstandard` (a library-only TFM that
+/// cannot produce an executable), the runner falls back to `net10.0`.
+pub(crate) fn resolve_framework_for_runner(target: &binding::Target) -> String {
+    const DEFAULT: &str = "net10.0";
+    let fw = target
+        .framework
+        .clone()
+        .or_else(|| read_csproj_framework(&target.package_root))
+        .unwrap_or_else(|| DEFAULT.to_string());
+    if fw.starts_with("netstandard") { DEFAULT.to_string() } else { fw }
+}
+
 /// Run one C# target group: scan annotated operations, generate and execute a
 /// temporary C# runner, parse its trace output, and return per-case results.
 fn run_csharp_group(
@@ -986,6 +1041,10 @@ fn run_csharp_group(
     std::fs::create_dir_all(scratch_dir).map_err(|e| format!("failed to create C# scratch dir: {e}"))?;
     let trace_file = scratch_dir.join("traces.json");
 
+    // Resolve the target framework for the runner (binding > csproj > default,
+    // with netstandard falling back to net10.0 since it can't produce an exe).
+    let runner_tfm = resolve_framework_for_runner(target);
+
     // Write Runner.csproj that compiles the fixture source directly. This keeps
     // concurrent harness runs from contending on the fixture project's obj/bin.
     let pkg_path = path_to_forward_slash(&target.package_root);
@@ -1005,7 +1064,7 @@ fn run_csharp_group(
     };
     let csproj = format!(
         "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    \
-         <OutputType>Exe</OutputType>\n    <TargetFramework>net10.0</TargetFramework>\n    \
+         <OutputType>Exe</OutputType>\n    <TargetFramework>{runner_tfm}</TargetFramework>\n    \
          <Nullable>enable</Nullable>\n  </PropertyGroup>\n  <ItemGroup>\n    \
          <Compile Include=\"{pkg_path}/**/*.cs\" Exclude=\"{pkg_path}/Tests/**/*.cs;{pkg_path}/bin/**/*.cs;{pkg_path}/obj/**/*.cs\" LinkBase=\"Fixture\" />\n  \
          </ItemGroup>\n{project_references}</Project>\n"
@@ -1491,6 +1550,7 @@ fn ops_metadata(raw: &serde_yaml::Value) -> BTreeMap<String, OpMeta> {
 #[cfg(test)]
 mod tests {
     use super::{CsOp, generate_csharp_program, ops_metadata, yaml_to_csharp_literal};
+    use crate::binding;
     use std::collections::BTreeMap;
 
     fn meta(yaml: &str) -> BTreeMap<String, super::OpMeta> {
@@ -1646,5 +1706,131 @@ mod tests {
         let value = serde_yaml::Value::String("name: Customer\nid: 42".to_string());
 
         assert_eq!(yaml_to_csharp_literal(Some(&value), "string"), "\"name: Customer\\nid: 42\"");
+    }
+
+    // -----------------------------------------------------------------------
+    // Framework resolution tests
+    // -----------------------------------------------------------------------
+
+    fn make_target(framework: Option<&str>, pkg: &std::path::Path) -> binding::Target {
+        binding::Target {
+            package_root: pkg.to_path_buf(),
+            command: None,
+            runtime: binding::Runtime::Smol,
+            framework: framework.map(String::from),
+        }
+    }
+
+    #[test]
+    fn extract_csproj_xml_tag_parses_target_framework() {
+        let xml = "<Project><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>";
+        assert_eq!(super::extract_csproj_xml_tag(xml, "TargetFramework"), Some("net10.0".to_string()));
+    }
+
+    #[test]
+    fn extract_csproj_xml_tag_parses_target_frameworks_raw() {
+        let xml = "<Project><PropertyGroup><TargetFrameworks>net8.0;net10.0</TargetFrameworks></PropertyGroup></Project>";
+        // Returns the raw value; callers split on ';' to take the first item.
+        assert_eq!(
+            super::extract_csproj_xml_tag(xml, "TargetFrameworks"),
+            Some("net8.0;net10.0".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_csproj_xml_tag_absent_returns_none() {
+        let xml = "<Project><PropertyGroup><OutputType>Exe</OutputType></PropertyGroup></Project>";
+        assert_eq!(super::extract_csproj_xml_tag(xml, "TargetFramework"), None);
+    }
+
+    #[test]
+    fn resolve_framework_uses_binding_framework_field() {
+        let target = make_target(Some("net8.0"), std::path::Path::new("."));
+        assert_eq!(super::resolve_framework_for_runner(&target), "net8.0");
+    }
+
+    #[test]
+    fn resolve_framework_falls_back_from_netstandard_in_binding() {
+        let target = make_target(Some("netstandard2.0"), std::path::Path::new("."));
+        assert_eq!(super::resolve_framework_for_runner(&target), "net10.0");
+    }
+
+    #[test]
+    fn resolve_framework_reads_target_framework_from_csproj() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static ID: AtomicU64 = AtomicU64::new(0);
+        let scratch = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("target")
+            .join("specgate-harness-unit-tests")
+            .join(format!("fw_test_{}", ID.fetch_add(1, Ordering::Relaxed)));
+        std::fs::create_dir_all(&scratch).unwrap();
+        std::fs::write(
+            scratch.join("Test.csproj"),
+            "<Project><PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup></Project>",
+        )
+        .unwrap();
+        let target = make_target(None, &scratch);
+        assert_eq!(super::resolve_framework_for_runner(&target), "net9.0");
+    }
+
+    #[test]
+    fn resolve_framework_reads_first_target_frameworks_from_csproj() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static ID: AtomicU64 = AtomicU64::new(0);
+        let scratch = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("target")
+            .join("specgate-harness-unit-tests")
+            .join(format!("fw_multi_test_{}", ID.fetch_add(1, Ordering::Relaxed)));
+        std::fs::create_dir_all(&scratch).unwrap();
+        std::fs::write(
+            scratch.join("Multi.csproj"),
+            "<Project><PropertyGroup><TargetFrameworks>net8.0;net10.0</TargetFrameworks></PropertyGroup></Project>",
+        )
+        .unwrap();
+        let target = make_target(None, &scratch);
+        assert_eq!(super::resolve_framework_for_runner(&target), "net8.0");
+    }
+
+    #[test]
+    fn resolve_framework_falls_back_from_netstandard_in_csproj() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static ID: AtomicU64 = AtomicU64::new(0);
+        let scratch = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("target")
+            .join("specgate-harness-unit-tests")
+            .join(format!("fw_ns_test_{}", ID.fetch_add(1, Ordering::Relaxed)));
+        std::fs::create_dir_all(&scratch).unwrap();
+        std::fs::write(
+            scratch.join("Lib.csproj"),
+            "<Project><PropertyGroup><TargetFramework>netstandard2.0</TargetFramework></PropertyGroup></Project>",
+        )
+        .unwrap();
+        let target = make_target(None, &scratch);
+        assert_eq!(super::resolve_framework_for_runner(&target), "net10.0");
+    }
+
+    #[test]
+    fn resolve_framework_defaults_to_net10_when_no_csproj() {
+        let nonexistent = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("nonexistent")
+            .join("path")
+            .join("that")
+            .join("does")
+            .join("not")
+            .join("exist");
+        let target = make_target(None, &nonexistent);
+        assert_eq!(super::resolve_framework_for_runner(&target), "net10.0");
     }
 }
