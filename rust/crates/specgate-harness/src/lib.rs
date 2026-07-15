@@ -256,34 +256,24 @@ fn execute_spec(spec_path: &str, coverage: bool) -> ExecResult {
     }
 
     // Merge results: the canonical binding (index 0) supplies the primary traces.
-    // Non-canonical bindings contribute TargetFailure entries when they disagree.
+    // Non-canonical bindings contribute TargetFailure entries when their traces
+    // diverge from the canonical traces.
     let n = parsed.cases.len();
     let (canonical_results, other_results) = all_binding_results.split_first_mut().expect("at least one binding");
     let (_, other_target_labels) = all_target_labels.split_first_mut().expect("at least one binding");
 
     let mut results = Vec::with_capacity(n);
     for i in 0..n {
-        let mut result = canonical_results[i].take().expect("all case indices covered by groups");
-
-        let mut target_failures = Vec::new();
-        for (j, other_binding_results) in other_results.iter_mut().enumerate() {
-            if let Some(other) = other_binding_results[i].take()
-                && other.status == CaseStatus::Fail
-            {
-                let mismatch = describe_first_mismatch(&result.expected, &other.traces);
-                target_failures.push(TargetFailure {
-                    target: other_target_labels[j][i].clone().unwrap_or_else(|| "<unknown>".to_string()),
-                    traces: other.traces,
-                    mismatch,
-                });
-            }
-        }
-
-        if result.status == CaseStatus::Pass && !target_failures.is_empty() {
-            result.status = CaseStatus::Fail;
-        }
-        result.target_failures = target_failures;
-        results.push(result);
+        let canonical = canonical_results[i].take().expect("all case indices covered by groups");
+        let others: Vec<(String, CaseResult)> = other_results
+            .iter_mut()
+            .zip(other_target_labels.iter())
+            .filter_map(|(binding_results, labels)| {
+                let label = labels[i].clone().unwrap_or_else(|| "<unknown>".to_string());
+                binding_results[i].take().map(|r| (label, r))
+            })
+            .collect();
+        results.push(merge_target_results(canonical, others));
     }
 
     ExecResult {
@@ -1171,37 +1161,36 @@ fn run_csharp_group(
 }
 
 // ---------------------------------------------------------------------------
-// Mismatch description for TargetFailure
+// Multi-binding result merge
 // ---------------------------------------------------------------------------
 
-/// Produce a human-readable description of why a non-canonical binding's traces
-/// did not satisfy the expected assertions. Used to populate `TargetFailure.mismatch`.
-fn describe_first_mismatch(expected: &[Assertion], traces: &[TraceEvent]) -> String {
-    for assertion in expected {
-        match assertion {
-            Assertion::Run { operation } => {
-                let found = traces
-                    .iter()
-                    .any(|t| matches!(t, TraceEvent::Run { operation: op } if op == operation));
-                if !found {
-                    return format!("expected Run('{operation}') not found in traces");
-                }
-            }
-            Assertion::Event {
-                name,
-                value: AssertValue::Exact(v),
-            } => {
-                let found = traces
-                    .iter()
-                    .any(|t| matches!(t, TraceEvent::Event { name: n, value: tv } if n == name && tv == v));
-                if !found {
-                    return format!("expected event '{name}' not found in traces");
-                }
-            }
-            _ => {}
+/// Merge results from multiple bindings for a single case.
+///
+/// A [`TargetFailure`] is recorded whenever a non-canonical target's traces
+/// diverge from the canonical traces (`other.traces != canonical.traces`).
+/// If any divergence is found, the merged status is set to [`CaseStatus::Fail`]
+/// regardless of the canonical binding's original status.
+fn merge_target_results(mut canonical: CaseResult, others: Vec<(String, CaseResult)>) -> CaseResult {
+    let mut target_failures = Vec::new();
+    for (target_label, other) in others {
+        if other.traces != canonical.traces {
+            let mismatch = format!(
+                "trace diverges from canonical: canonical has {} events, target has {}",
+                canonical.traces.len(),
+                other.traces.len()
+            );
+            target_failures.push(TargetFailure {
+                target: target_label,
+                traces: other.traces,
+                mismatch,
+            });
         }
     }
-    "traces did not satisfy expected assertions".to_string()
+    if !target_failures.is_empty() {
+        canonical.status = CaseStatus::Fail;
+    }
+    canonical.target_failures = target_failures;
+    canonical
 }
 
 // ---------------------------------------------------------------------------
@@ -1780,8 +1769,70 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Framework resolution tests
+    // merge_target_results unit tests
     // -----------------------------------------------------------------------
+
+    fn make_case_result(status: super::CaseStatus, traces: Vec<super::TraceEvent>) -> super::CaseResult {
+        super::CaseResult {
+            name: "test_case".to_string(),
+            status,
+            level: super::CaseLevel::Must,
+            source: None,
+            expected: Vec::new(),
+            traces,
+            target_failures: Vec::new(),
+        }
+    }
+
+    fn ev_trace(name: &str, v: i64) -> super::TraceEvent {
+        super::TraceEvent::Event {
+            name: name.to_string(),
+            value: super::Value::Integer(v),
+        }
+    }
+
+    #[test]
+    fn merge_both_fail_identical_traces_no_target_failures() {
+        let traces = vec![ev_trace("result", 42)];
+        let canonical = make_case_result(super::CaseStatus::Fail, traces.clone());
+        let other = make_case_result(super::CaseStatus::Fail, traces.clone());
+        let merged = super::merge_target_results(canonical, vec![("csharp".to_string(), other)]);
+        assert!(
+            merged.target_failures.is_empty(),
+            "identical traces must not produce target_failures"
+        );
+        assert_eq!(merged.status, super::CaseStatus::Fail);
+    }
+
+    #[test]
+    fn merge_non_canonical_different_traces_produces_target_failure() {
+        let canonical_traces = vec![ev_trace("result", 1)];
+        let other_traces = vec![ev_trace("result", 2), ev_trace("extra", 0)];
+        let canonical = make_case_result(super::CaseStatus::Pass, canonical_traces.clone());
+        let other = make_case_result(super::CaseStatus::Fail, other_traces.clone());
+        let merged = super::merge_target_results(canonical, vec![("csharp".to_string(), other)]);
+        assert_eq!(merged.target_failures.len(), 1, "diverging traces must produce one TargetFailure");
+        assert_eq!(merged.target_failures[0].target, "csharp");
+        assert_eq!(merged.target_failures[0].traces, other_traces);
+        assert!(
+            merged.target_failures[0].mismatch.contains("canonical"),
+            "mismatch must describe canonical-vs-target divergence"
+        );
+        assert_eq!(merged.status, super::CaseStatus::Fail, "status must be Fail on divergence");
+    }
+
+    #[test]
+    fn merge_both_pass_identical_traces_no_target_failures_status_pass() {
+        let traces = vec![ev_trace("result", 7)];
+        let canonical = make_case_result(super::CaseStatus::Pass, traces.clone());
+        let other = make_case_result(super::CaseStatus::Pass, traces.clone());
+        let merged = super::merge_target_results(canonical, vec![("csharp".to_string(), other)]);
+        assert!(
+            merged.target_failures.is_empty(),
+            "identical passing traces must not produce target_failures"
+        );
+        assert_eq!(merged.status, super::CaseStatus::Pass);
+    }
 
     fn make_target(framework: Option<&str>, pkg: &std::path::Path) -> binding::Target {
         binding::Target {

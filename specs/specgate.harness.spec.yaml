@@ -685,6 +685,7 @@ cases:
                   - Event: { name: $result, value: ["Address", "Contacts", "Orders"] }
               - name: set_missing_item_fails
                 status: fail
+                target_failures: []
                 expected:
                   - $result: { $containsAll: [ "Orders", "NonexistentNav" ] }
                 traces:
@@ -704,6 +705,20 @@ cases:
                 traces:
                   - Run: { operation: get_navigation_properties }
                   - Event: { name: $result, value: ["Address", "Contacts", "Orders"] }
+
+  - name: multi_target_divergence
+    desc: A non-asserted field differing across targets is reported as a TargetFailure
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/divergence_witness.spec.yaml
+    expected:
+      - $result:
+          Complete:
+            results:
+              - name: targets_diverge_on_engine
+                status: fail
+                target_failures:
+                  - target: csharp
 
   - name: nested_structured_matching
     desc: List of maps — nested operators ($any with $match, $contains with $match)

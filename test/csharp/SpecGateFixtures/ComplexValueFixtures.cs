@@ -46,11 +46,14 @@ public sealed class EntityType
     public List<string> StructuralProperties { get; set; } = new();
 }
 
+[SpecEvent]
 public sealed class Offset
 {
+    [SpecEvent("dx")]
     [JsonPropertyName("dx")]
     public int Dx { get; set; }
 
+    [SpecEvent("dy")]
     [JsonPropertyName("dy")]
     public int Dy { get; set; }
 }

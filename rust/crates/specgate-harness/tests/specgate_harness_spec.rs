@@ -743,6 +743,13 @@ fn default_input_spec() {
     check_case(&r[1], "explicit_factor", CaseStatus::Pass);
     check_case(&r[2], "uses_default_offset", CaseStatus::Pass);
     check_case(&r[3], "explicit_offset", CaseStatus::Pass);
+    for case in &r {
+        assert!(
+            case.target_failures.is_empty(),
+            "target_failures must be empty for default_input case '{}'",
+            case.name
+        );
+    }
 
     // Scalar default: omitting `factor` materializes 2 -> 5 * 2 = 10, and the
     // applied default is echoed into the trace as a normal input.

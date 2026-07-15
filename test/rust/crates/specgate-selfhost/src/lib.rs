@@ -20,6 +20,16 @@ pub enum SelfHostTrace {
 }
 
 #[derive(Debug, SpecEvent)]
+pub struct SelfHostTargetFailure {
+    #[spec_event]
+    pub target: String,
+    #[spec_event]
+    pub traces: Vec<SelfHostTrace>,
+    #[spec_event]
+    pub mismatch: String,
+}
+
+#[derive(Debug, SpecEvent)]
 pub struct SelfHostCaseResult {
     #[spec_event]
     pub name: String,
@@ -33,6 +43,8 @@ pub struct SelfHostCaseResult {
     pub expected: Vec<Value>,
     #[spec_event]
     pub traces: Vec<SelfHostTrace>,
+    #[spec_event]
+    pub target_failures: Vec<SelfHostTargetFailure>,
 }
 
 #[derive(Debug, SpecEvent)]
@@ -162,6 +174,14 @@ fn source_to_value(s: &Option<specgate_harness::Source>) -> Value {
     Value::Map(m)
 }
 
+fn convert_target_failure(tf: specgate_harness::TargetFailure) -> SelfHostTargetFailure {
+    SelfHostTargetFailure {
+        target: tf.target,
+        traces: tf.traces.into_iter().map(convert_trace).collect(),
+        mismatch: tf.mismatch,
+    }
+}
+
 // --- run_spec wrapper ------------------------------------------------------
 
 #[spec_operation("run_spec")]
@@ -195,6 +215,7 @@ pub fn run_spec(#[spec_input("spec")] spec_path: &str) -> SelfHostOutcome {
                     source: source_to_value(&r.source),
                     expected: r.expected.iter().map(assertion_to_value).collect(),
                     traces: r.traces.into_iter().map(convert_trace).collect(),
+                    target_failures: r.target_failures.into_iter().map(convert_target_failure).collect(),
                 })
                 .collect(),
         },

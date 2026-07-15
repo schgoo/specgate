@@ -9,6 +9,7 @@ pub mod checkpoint_inline;
 pub mod complex_inputs;
 pub mod cross_dep;
 pub mod default_input;
+pub mod divergence_witness;
 pub mod enum_event;
 pub mod keyword_collision;
 pub mod missing_operation;

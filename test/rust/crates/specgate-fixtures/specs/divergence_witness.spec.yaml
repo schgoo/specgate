@@ -1,0 +1,22 @@
+spec_version: "0.4.0"
+name: fixture.divergence_witness
+binding:
+  - binding.yaml
+  - csharp.yaml
+
+operations:
+  engine_info:
+    outputs:
+      - value: i32
+      - engine: string
+
+cases:
+  # Both targets return value: 10 (asserted) but a different `engine` (not
+  # asserted). Each target satisfies `expected:`, so status-agreement alone
+  # would report no divergence; trace-agreement must report a csharp
+  # TargetFailure because the full traces differ.
+  - name: targets_diverge_on_engine
+    desc: Targets agree on the asserted value but differ on a non-asserted field
+    operation: engine_info
+    expected:
+      - value: 10
