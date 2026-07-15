@@ -1,6 +1,8 @@
 spec_version: "0.4.0"
 name: fixture.default_input
-binding: binding.yaml
+binding:
+  - binding.yaml
+  - csharp.yaml
 
 types:
   Offset:

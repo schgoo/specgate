@@ -716,10 +716,54 @@ fn extract_cs_method_sig(line: &str) -> Option<(String, Vec<(String, String)>, S
     let params = if params_str.is_empty() {
         Vec::new()
     } else {
-        params_str.split(',').filter_map(parse_cs_param).collect()
+        split_cs_params(params_str).into_iter().filter_map(parse_cs_param).collect()
     };
 
     Some((method_name, params, return_type))
+}
+
+fn split_cs_params(params: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut start = 0usize;
+    let mut generic_depth = 0usize;
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+
+    for (idx, ch) in params.char_indices() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+
+        match ch {
+            '"' => in_string = true,
+            '<' => generic_depth += 1,
+            '>' => generic_depth = generic_depth.saturating_sub(1),
+            '(' => paren_depth += 1,
+            ')' => paren_depth = paren_depth.saturating_sub(1),
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth = bracket_depth.saturating_sub(1),
+            ',' if generic_depth == 0 && paren_depth == 0 && bracket_depth == 0 => {
+                out.push(params[start..idx].trim());
+                start = idx + ch.len_utf8();
+            }
+            _ => {}
+        }
+    }
+
+    let tail = params[start..].trim();
+    if !tail.is_empty() {
+        out.push(tail);
+    }
+    out
 }
 
 fn find_matching_paren(s: &str, open: usize) -> Option<usize> {
@@ -791,8 +835,12 @@ fn extract_spec_input_attr(attr: &str) -> Option<String> {
 }
 
 /// Convert a YAML value to a C# literal string for the given C# parameter type.
-fn yaml_to_csharp_literal(val: Option<&serde_yaml::Value>, _param_type: &str) -> String {
-    let Some(v) = val else { return "default".to_string() };
+fn yaml_to_csharp_literal(val: Option<&serde_yaml::Value>, param_type: &str) -> String {
+    let Some(v) = val else { return "default!".to_string() };
+    if v.as_mapping().is_some() || v.as_sequence().is_some() {
+        let json = serde_json::to_string(v).unwrap_or_else(|_| "null".to_string());
+        return format!("FromJson<{}>({})", param_type.trim(), csharp_string_literal(&json));
+    }
     if let Some(i) = v.as_i64() {
         return i.to_string();
     }
@@ -803,15 +851,19 @@ fn yaml_to_csharp_literal(val: Option<&serde_yaml::Value>, _param_type: &str) ->
         return if b { "true".to_string() } else { "false".to_string() };
     }
     if let Some(s) = v.as_str() {
-        let escaped = s
-            .replace('\\', "\\\\")
-            .replace('"', "\\\"")
-            .replace('\n', "\\n")
-            .replace('\r', "\\r")
-            .replace('\t', "\\t");
-        return format!("\"{escaped}\"");
+        return csharp_string_literal(s);
     }
-    "default".to_string()
+    "default!".to_string()
+}
+
+fn csharp_string_literal(s: &str) -> String {
+    let escaped = s
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t");
+    format!("\"{escaped}\"")
 }
 
 /// True when `cs_type` is a C# integer primitive that maps to the `EmitEvent(string, int)`
@@ -836,10 +888,8 @@ fn cs_typed_emit(event_name: &str, var: &str, cs_type: &str) -> String {
         format!("SpecGateRuntime.EmitEvent({name_lit}, {var});")
     } else if is_cs_integer_type(t) {
         format!("SpecGateRuntime.EmitEvent({name_lit}, (int){var});")
-    } else if t == "bool" || t == "string" || t == "String" {
-        format!("SpecGateRuntime.EmitEvent({name_lit}, {var});")
     } else {
-        format!("SpecGateRuntime.EmitEvent({name_lit}, {var}.ToString());")
+        format!("SpecGateRuntime.EmitEvent({name_lit}, {var});")
     }
 }
 
@@ -885,6 +935,7 @@ fn generate_csharp_program(
     out.push_str("using System.Collections.Generic;\n");
     out.push_str("using System.IO;\n");
     out.push_str("using System.Text;\n\n");
+    out.push_str("using System.Text.Json;\n\n");
     out.push_str("var all = new SortedDictionary<string, string>();\n");
 
     for case in cases {
@@ -915,8 +966,9 @@ fn generate_csharp_program(
                 cs_op.return_type, cs_op.class_name, cs_op.method_name
             )
             .expect("fmt");
-            let result_emit = cs_typed_emit("$result", "__result", &cs_op.return_type);
-            writeln!(out, "        {result_emit}").expect("fmt");
+            if cs_op.return_type.trim() != "void" {
+                writeln!(out, "        SpecGateRuntime.EmitResult(__result);").expect("fmt");
+            }
             out.push_str("    } catch (System.Exception __ex) {\n");
             out.push_str("        SpecGateRuntime.EmitEvent(\"$fault\", __ex.Message);\n");
             out.push_str("    }\n");
@@ -937,6 +989,7 @@ fn generate_csharp_program(
     out.push_str("}\n");
     out.push_str("sb.Append('}');\n");
     out.push_str("File.WriteAllText(args[0], sb.ToString());\n\n");
+    out.push_str("static T FromJson<T>(string json) => JsonSerializer.Deserialize<T>(json, new JsonSerializerOptions { IncludeFields = true })!;\n\n");
     out.push_str("static void AppendJsonString(StringBuilder sb, string s) {\n");
     out.push_str("    foreach (char c in s) {\n");
     out.push_str("        switch (c) {\n");
@@ -1049,14 +1102,14 @@ fn run_csharp_group(
     // concurrent harness runs from contending on the fixture project's obj/bin.
     let pkg_path = path_to_forward_slash(&target.package_root);
     let csharp_libs_dir = find_csharp_libs_dir(&target.package_root);
-    let project_references = match &csharp_libs_dir {
+    let runtime_sources = match &csharp_libs_dir {
         Some(libs) => {
-            let annotations = path_to_forward_slash(&libs.join("SpecGate.Annotations").join("SpecGate.Annotations.csproj"));
-            let runtime = path_to_forward_slash(&libs.join("SpecGate.Runtime").join("SpecGate.Runtime.csproj"));
+            let annotations = path_to_forward_slash(&libs.join("SpecGate.Annotations").join("SpecGateAnnotations.cs"));
+            let runtime = path_to_forward_slash(&libs.join("SpecGate.Runtime").join("SpecGateRuntime.cs"));
             format!(
                 "  <ItemGroup>\n    \
-                 <ProjectReference Include=\"{annotations}\" />\n    \
-                 <ProjectReference Include=\"{runtime}\" />\n  \
+                 <Compile Include=\"{annotations}\" Link=\"SpecGateAnnotations.cs\" />\n    \
+                 <Compile Include=\"{runtime}\" Link=\"SpecGateRuntime.cs\" />\n  \
                  </ItemGroup>\n"
             )
         }
@@ -1067,7 +1120,7 @@ fn run_csharp_group(
          <OutputType>Exe</OutputType>\n    <TargetFramework>{runner_tfm}</TargetFramework>\n    \
          <Nullable>enable</Nullable>\n  </PropertyGroup>\n  <ItemGroup>\n    \
          <Compile Include=\"{pkg_path}/**/*.cs\" Exclude=\"{pkg_path}/Tests/**/*.cs;{pkg_path}/bin/**/*.cs;{pkg_path}/obj/**/*.cs\" LinkBase=\"Fixture\" />\n  \
-         </ItemGroup>\n{project_references}</Project>\n"
+         </ItemGroup>\n{runtime_sources}</Project>\n"
     );
     std::fs::write(scratch_dir.join("Runner.csproj"), csproj).map_err(|e| format!("failed to write Runner.csproj: {e}"))?;
 
@@ -1549,7 +1602,7 @@ fn ops_metadata(raw: &serde_yaml::Value) -> BTreeMap<String, OpMeta> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CsOp, generate_csharp_program, ops_metadata, yaml_to_csharp_literal};
+    use super::{CsOp, generate_csharp_program, ops_metadata, split_cs_params, yaml_to_csharp_literal};
     use crate::binding;
     use std::collections::BTreeMap;
 
@@ -1706,6 +1759,24 @@ mod tests {
         let value = serde_yaml::Value::String("name: Customer\nid: 42".to_string());
 
         assert_eq!(yaml_to_csharp_literal(Some(&value), "string"), "\"name: Customer\\nid: 42\"");
+    }
+
+    #[test]
+    fn csharp_literal_deserializes_complex_yaml_from_json() {
+        let value: serde_yaml::Value = serde_yaml::from_str("{ dx: 1, dy: 2 }").expect("valid yaml");
+
+        assert_eq!(
+            yaml_to_csharp_literal(Some(&value), "Offset"),
+            "FromJson<Offset>(\"{\\\"dx\\\":1,\\\"dy\\\":2}\")"
+        );
+    }
+
+    #[test]
+    fn csharp_param_split_keeps_generic_commas() {
+        assert_eq!(
+            split_cs_params("[SpecInput(\"m\")] Dictionary<string,string> m, int count"),
+            vec!["[SpecInput(\"m\")] Dictionary<string,string> m", "int count"]
+        );
     }
 
     // -----------------------------------------------------------------------

@@ -15,3 +15,11 @@ public sealed class SpecInputAttribute : Attribute
     public string Name { get; }
     public SpecInputAttribute(string name) => Name = name;
 }
+
+[AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct | AttributeTargets.Field | AttributeTargets.Property)]
+public sealed class SpecEventAttribute : Attribute
+{
+    public string? Name { get; }
+    public SpecEventAttribute() { }
+    public SpecEventAttribute(string name) => Name = name;
+}

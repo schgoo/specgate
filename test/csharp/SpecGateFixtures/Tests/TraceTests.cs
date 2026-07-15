@@ -37,4 +37,30 @@ public class TraceTests
             + ",{\"kind\":\"Event\",\"name\":\"string\",\"value\":\"two\"}]";
         Assert.Equal(expected, SpecGateRuntime.GetTracesJson());
     }
+
+    [Fact]
+    public void StructuredValues_SerializeWithCanonicalOrdering()
+    {
+        SpecGateRuntime.Reset();
+        SpecGateRuntime.EmitResult(ComplexValueFixtures.GetProduct());
+
+        const string expected =
+            "[{\"kind\":\"Event\",\"name\":\"product_name\",\"value\":\"Milk\"}"
+            + ",{\"kind\":\"Event\",\"name\":\"price\",\"value\":4}"
+            + ",{\"kind\":\"Event\",\"name\":\"tags\",\"value\":[\"dairy\",\"organic\",\"local\"]}"
+            + ",{\"kind\":\"Event\",\"name\":\"attributes\",\"value\":{\"category\":\"food\",\"origin\":\"local\"}}"
+            + ",{\"kind\":\"Event\",\"name\":\"$result\",\"value\":{\"attributes\":{\"category\":\"food\",\"origin\":\"local\"},\"price\":4,\"product_name\":\"Milk\",\"tags\":[\"dairy\",\"organic\",\"local\"]}}]";
+        Assert.Equal(expected, SpecGateRuntime.GetTracesJson());
+    }
+
+    [Fact]
+    public void Sets_SerializeSortedAndDeduplicated()
+    {
+        SpecGateRuntime.Reset();
+        SpecGateRuntime.EmitResult(new HashSet<string> { "Orders", "Address", "Contacts", "Orders" });
+
+        const string expected =
+            "[{\"kind\":\"Event\",\"name\":\"$result\",\"value\":[\"Address\",\"Contacts\",\"Orders\"]}]";
+        Assert.Equal(expected, SpecGateRuntime.GetTracesJson());
+    }
 }
