@@ -215,7 +215,11 @@ pub fn run_spec(#[spec_input("spec")] spec_path: &str) -> SelfHostOutcome {
                     source: source_to_value(&r.source),
                     expected: r.expected.iter().map(assertion_to_value).collect(),
                     traces: r.traces.into_iter().map(convert_trace).collect(),
-                    target_failures: r.target_failures.into_iter().map(convert_target_failure).collect(),
+                    target_failures: r
+                        .target_failures
+                        .into_iter()
+                        .map(convert_target_failure)
+                        .collect(),
                 })
                 .collect(),
         },

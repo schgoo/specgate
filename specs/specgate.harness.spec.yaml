@@ -1531,9 +1531,9 @@ cases:
                 expected:
                   - $result: { Ok: 5 }
                 traces:
-                  - Run: { operation: divide }
-                  - Event: { name: divide.a, value: 10 }
-                  - Event: { name: divide.b, value: 2 }
+                  - Run: { operation: try_divide }
+                  - Event: { name: try_divide.a, value: 10 }
+                  - Event: { name: try_divide.b, value: 2 }
                   - Event: { name: $result, value: { Ok: 5 } }
 
   - name: result_err_path
@@ -1550,9 +1550,9 @@ cases:
                 expected:
                   - $result: { Err: "division by zero" }
                 traces:
-                  - Run: { operation: divide }
-                  - Event: { name: divide.a, value: 10 }
-                  - Event: { name: divide.b, value: 0 }
+                  - Run: { operation: try_divide }
+                  - Event: { name: try_divide.a, value: 10 }
+                  - Event: { name: try_divide.b, value: 0 }
                   - Event: { name: $result, value: { Err: "division by zero" } }
 
   - name: unrecoverable_panic

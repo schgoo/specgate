@@ -1,7 +1,7 @@
 // Operation returns Result — Err path.
 use specgate::*;
 
-#[spec_operation("divide")]
+#[spec_operation("try_divide")]
 pub fn divide(a: i32, b: i32) -> Result<i32, String> {
     if b == 0 {
         Err("division by zero".to_string())

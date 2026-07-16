@@ -303,9 +303,9 @@ fn result_ok_path() {
     assert_eq!(
         r[0].traces,
         vec![
-            run_op("divide"),
-            ev("divide.a", 10i64),
-            ev("divide.b", 2i64),
+            run_op("try_divide"),
+            ev("try_divide.a", 10i64),
+            ev("try_divide.b", 2i64),
             ev_map("$result", vec![("Ok", specgate_harness::Value::Integer(5))]),
         ]
     );
@@ -318,9 +318,9 @@ fn result_err_path() {
     assert_eq!(
         r[0].traces,
         vec![
-            run_op("divide"),
-            ev("divide.a", 10i64),
-            ev("divide.b", 0i64),
+            run_op("try_divide"),
+            ev("try_divide.a", 10i64),
+            ev("try_divide.b", 0i64),
             ev_map("$result", vec![("Err", specgate_harness::Value::String("division by zero".into()))]),
         ]
     );

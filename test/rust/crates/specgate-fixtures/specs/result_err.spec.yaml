@@ -1,8 +1,10 @@
 spec_version: 0.4.0
 name: fixture.result_err
-binding: binding.yaml
+binding:
+  - binding.yaml
+  - csharp.yaml
 operations:
-  divide:
+  try_divide:
     inputs:
       a: i32
       b: i32
@@ -11,7 +13,7 @@ operations:
 cases:
 - name: divide_by_zero
   desc: Division by zero returns Err variant
-  operation: divide
+  operation: try_divide
   inputs:
     a: 10
     b: 0

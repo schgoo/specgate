@@ -42,10 +42,45 @@ public static class SpecGateRuntime
         Events.Add("{\"kind\":\"Event\",\"name\":" + QuoteJson(name) + ",\"value\":" + ToSpecValue(value).ToJson() + "}");
     }
 
+    public static void EmitResult<T>(T value)
+    {
+        var nullableInner = Nullable.GetUnderlyingType(typeof(T));
+        if (nullableInner is not null)
+        {
+            EmitEvent("$result", TaggedMap(value is null ? "None" : "Some", value is null ? EmptyMap() : ToSpecValue(value)));
+            return;
+        }
+
+        EmitResult((object?)value);
+    }
+
     public static void EmitResult(object? value)
+    {
+        if (value is null)
+        {
+            EmitEvent("$result", TaggedMap("None", EmptyMap()));
+            return;
+        }
+
+        if (TryOptionToSpecValue(value, out var optionValue) || TryResultToSpecValue(value, out optionValue))
+        {
+            EmitEvent("$result", optionValue);
+            return;
+        }
+
+        EmitResultObject(value);
+    }
+
+    private static void EmitResultObject(object value)
     {
         if (value is not null && IsSpecEventType(value.GetType()))
         {
+            if (IsSpecVariantType(value.GetType()))
+            {
+                EmitEvent("$result", value);
+                return;
+            }
+
             foreach (var member in SpecEventMembers(value.GetType()).OrderBy(m => m.Token))
             {
                 EmitEvent(member.EventName, member.GetValue(value));
@@ -115,6 +150,16 @@ public static class SpecGateRuntime
         }
 
         var type = value.GetType();
+        if (TryOptionToSpecValue(value, out var optionValue) || TryResultToSpecValue(value, out optionValue))
+        {
+            return optionValue;
+        }
+
+        if (IsSpecVariantType(type))
+        {
+            return SpecVariantToSpecValue(value, type);
+        }
+
         if (IsGenericKeyValueEnumerable(type))
         {
             return MapFromKeyValueEnumerable((IEnumerable)value);
@@ -154,6 +199,60 @@ public static class SpecGateRuntime
         }
 
         return new StringValue(Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty);
+    }
+
+    private static SpecValue SpecVariantToSpecValue(object value, Type type)
+    {
+        var payload = new SortedDictionary<string, SpecValue>(Utf8StringComparer.Instance);
+        foreach (var member in SpecEventMembers(type))
+        {
+            payload[member.EventName] = ToSpecValue(member.GetValue(value));
+        }
+
+        return TaggedMap(SpecEventName(type), new MapValue(payload));
+    }
+
+    private static SpecValue TaggedMap(string tag, SpecValue payload)
+    {
+        var map = new SortedDictionary<string, SpecValue>(Utf8StringComparer.Instance)
+        {
+            [tag] = payload,
+        };
+        return new MapValue(map);
+    }
+
+    private static SpecValue EmptyMap() => new MapValue(new SortedDictionary<string, SpecValue>(Utf8StringComparer.Instance));
+
+    private static bool TryOptionToSpecValue(object value, out SpecValue specValue)
+    {
+        var type = value.GetType();
+        if (!type.IsGenericType || type.GetGenericTypeDefinition() != typeof(Option<>))
+        {
+            specValue = EmptyMap();
+            return false;
+        }
+
+        bool hasValue = (bool)(type.GetProperty(nameof(Option<int>.HasValue))?.GetValue(value) ?? false);
+        specValue = hasValue
+            ? TaggedMap("Some", ToSpecValue(type.GetProperty(nameof(Option<int>.Value))?.GetValue(value)))
+            : TaggedMap("None", EmptyMap());
+        return true;
+    }
+
+    private static bool TryResultToSpecValue(object value, out SpecValue specValue)
+    {
+        var type = value.GetType();
+        if (!type.IsGenericType || type.GetGenericTypeDefinition() != typeof(Result<,>))
+        {
+            specValue = EmptyMap();
+            return false;
+        }
+
+        bool isOk = (bool)(type.GetProperty(nameof(Result<int, string>.IsOk))?.GetValue(value) ?? false);
+        specValue = isOk
+            ? TaggedMap("Ok", ToSpecValue(type.GetProperty(nameof(Result<int, string>.OkValue))?.GetValue(value)))
+            : TaggedMap("Err", ToSpecValue(type.GetProperty(nameof(Result<int, string>.ErrValue))?.GetValue(value)));
+        return true;
     }
 
     private static SpecValue MapFromDictionary(IDictionary dict)
@@ -196,7 +295,12 @@ public static class SpecGateRuntime
             .Any(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(ISet<>));
 
     private static bool IsSpecEventType(Type type) =>
-        type.GetCustomAttributes(false).Any(a => a.GetType().FullName == "SpecGate.Annotations.SpecEventAttribute");
+        SpecEventAttribute(type) is not null;
+
+    private static bool IsSpecVariantType(Type type) =>
+        type.BaseType is not null
+        && type.BaseType.IsAbstract
+        && IsSpecEventType(type.BaseType);
 
     private static IEnumerable<EventMember> SpecEventMembers(Type type)
     {
@@ -229,6 +333,12 @@ public static class SpecGateRuntime
         member.GetCustomAttributes(false)
             .OfType<Attribute>()
             .FirstOrDefault(a => a.GetType().FullName == "SpecGate.Annotations.SpecEventAttribute");
+
+    private static string SpecEventName(Type type)
+    {
+        var attr = SpecEventAttribute(type);
+        return attr is null ? type.Name : EventName(type.Name, attr);
+    }
 
     private static string EventName(string fallback, Attribute attr)
     {
@@ -382,4 +492,39 @@ public static class SpecGateRuntime
             return xb.Length.CompareTo(yb.Length);
         }
     }
+}
+
+public readonly struct Option<T>
+{
+    private readonly T? _value;
+
+    private Option(T? value, bool hasValue)
+    {
+        _value = value;
+        HasValue = hasValue;
+    }
+
+    public bool HasValue { get; }
+    public T? Value => HasValue ? _value : throw new InvalidOperationException("Option has no value");
+    public static Option<T> Some(T value) => new(value, true);
+    public static Option<T> None() => new(default, false);
+}
+
+public readonly struct Result<T, E>
+{
+    private readonly T? _ok;
+    private readonly E? _err;
+
+    private Result(T? ok, E? err, bool isOk)
+    {
+        _ok = ok;
+        _err = err;
+        IsOk = isOk;
+    }
+
+    public bool IsOk { get; }
+    public T? OkValue => IsOk ? _ok : throw new InvalidOperationException("Result is Err");
+    public E? ErrValue => !IsOk ? _err : throw new InvalidOperationException("Result is Ok");
+    public static Result<T, E> Ok(T value) => new(value, default, true);
+    public static Result<T, E> Err(E error) => new(default, error, false);
 }

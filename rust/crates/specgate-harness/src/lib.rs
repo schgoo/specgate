@@ -1079,6 +1079,10 @@ fn run_csharp_group(
         if !cs_ops.iter().any(|co| co.op_name == *op) {
             return Err(format!("C# operation '{op}' not found in source annotations"));
         }
+        let matching = cs_ops.iter().filter(|co| co.op_name == *op).count();
+        if matching > 1 {
+            return Err(format!("C# operation '{op}' has {matching} matching source annotations"));
+        }
     }
 
     std::fs::create_dir_all(scratch_dir).map_err(|e| format!("failed to create C# scratch dir: {e}"))?;

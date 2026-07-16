@@ -63,4 +63,23 @@ public class TraceTests
             "[{\"kind\":\"Event\",\"name\":\"$result\",\"value\":[\"Address\",\"Contacts\",\"Orders\"]}]";
         Assert.Equal(expected, SpecGateRuntime.GetTracesJson());
     }
+
+    [Fact]
+    public void SumTypes_SerializeAsTaggedMaps()
+    {
+        SpecGateRuntime.Reset();
+        SpecGateRuntime.EmitResult(new Circle { Radius = 5.0 });
+        SpecGateRuntime.EmitResult(Option<int>.Some(1));
+        SpecGateRuntime.EmitResult(Option<int>.None());
+        SpecGateRuntime.EmitResult(Result<int,string>.Ok(5));
+        SpecGateRuntime.EmitResult(Result<int,string>.Err("division by zero"));
+
+        const string expected =
+            "[{\"kind\":\"Event\",\"name\":\"$result\",\"value\":{\"Circle\":{\"radius\":5}}}"
+            + ",{\"kind\":\"Event\",\"name\":\"$result\",\"value\":{\"Some\":1}}"
+            + ",{\"kind\":\"Event\",\"name\":\"$result\",\"value\":{\"None\":{}}}"
+            + ",{\"kind\":\"Event\",\"name\":\"$result\",\"value\":{\"Ok\":5}}"
+            + ",{\"kind\":\"Event\",\"name\":\"$result\",\"value\":{\"Err\":\"division by zero\"}}]";
+        Assert.Equal(expected, SpecGateRuntime.GetTracesJson());
+    }
 }
