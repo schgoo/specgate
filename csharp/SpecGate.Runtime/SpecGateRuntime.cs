@@ -438,7 +438,7 @@ public static class SpecGateRuntime
             .Any(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(ISet<>));
 
     private static bool IsSpecEventType(Type type) =>
-        SpecEventAttribute(type) is not null;
+        SpecEventAttribute(type) is not null || SpecEventMembers(type).Any();
 
     private static bool IsSpecVariantType(Type type) =>
         type.BaseType is not null

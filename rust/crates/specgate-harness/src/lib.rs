@@ -661,7 +661,8 @@ fn scan_csharp_for_fixture(package_root: &Path, fixture_basename: &str) -> (Vec<
     let mut files = Vec::new();
     collect_matching_csharp_files(package_root, fixture_basename, &mut files);
     if files.is_empty() {
-        return scan_csharp(package_root);
+        let (ops, setups) = scan_csharp(package_root);
+        return (dedupe_csharp_ops_by_shallowest_source(ops), setups);
     }
     let mut ops = Vec::new();
     let mut setups = Vec::new();
@@ -671,6 +672,23 @@ fn scan_csharp_for_fixture(package_root: &Path, fixture_basename: &str) -> (Vec<
         }
     }
     (ops, setups)
+}
+
+fn dedupe_csharp_ops_by_shallowest_source(ops: Vec<CsOp>) -> Vec<CsOp> {
+    let mut selected: BTreeMap<String, CsOp> = BTreeMap::new();
+    for op in ops {
+        match selected.get(&op.op_name) {
+            Some(existing) if path_component_count(&existing.source_path) <= path_component_count(&op.source_path) => {}
+            _ => {
+                selected.insert(op.op_name.clone(), op);
+            }
+        }
+    }
+    selected.into_values().collect()
+}
+
+fn path_component_count(path: &Path) -> usize {
+    path.components().count()
 }
 
 fn collect_matching_csharp_files(dir: &Path, fixture_basename: &str, files: &mut Vec<PathBuf>) {
@@ -713,6 +731,7 @@ fn scan_csharp_file(text: &str, source_path: &Path, ops: &mut Vec<CsOp>, setups:
     let mut current_class: Option<String> = None;
     let mut current_namespace: Option<String> = None;
     let mut pending_attrs: Vec<CsPendingAttr> = Vec::new();
+    let mut pending_sig = String::new();
 
     for line in text.lines() {
         let trimmed = line.trim();
@@ -729,16 +748,24 @@ fn scan_csharp_file(text: &str, source_path: &Path, ops: &mut Vec<CsOp>, setups:
         // Detect [SpecOperation("name")] / [SpecSetup("name", Fills = "...")].
         if let Some(op_name) = extract_spec_operation_attr(trimmed) {
             pending_attrs.push(CsPendingAttr::Operation(op_name));
+            pending_sig.clear();
             continue;
         }
         if let Some((operation, fills)) = extract_spec_setup_attr(trimmed) {
             pending_attrs.push(CsPendingAttr::Setup { operation, fills });
+            pending_sig.clear();
             continue;
         }
 
         // If we have pending spec attributes, try to parse the next method signature.
+        if !pending_attrs.is_empty() && !trimmed.is_empty() {
+            if !pending_sig.is_empty() {
+                pending_sig.push(' ');
+            }
+            pending_sig.push_str(trimmed);
+        }
         if !pending_attrs.is_empty()
-            && let Some((method_name, params, return_type, is_static)) = extract_cs_method_sig(trimmed)
+            && let Some((method_name, params, return_type, is_static)) = extract_cs_method_sig(&pending_sig)
         {
             let bare_class = current_class.clone().unwrap_or_default();
             let class_name = qualify_cs_class(current_namespace.as_deref(), &bare_class);
@@ -765,8 +792,15 @@ fn scan_csharp_file(text: &str, source_path: &Path, ops: &mut Vec<CsOp>, setups:
                     }),
                 }
             }
-        } else if !pending_attrs.is_empty() && !trimmed.starts_with('[') && !trimmed.is_empty() {
+            pending_sig.clear();
+        } else if !pending_attrs.is_empty()
+            && !trimmed.starts_with('[')
+            && !trimmed.is_empty()
+            && (trimmed.ends_with(';') || trimmed.ends_with('{'))
+            && !pending_sig.contains('(')
+        {
             pending_attrs.clear();
+            pending_sig.clear();
         }
     }
 }
@@ -1211,9 +1245,41 @@ fn extract_spec_input_attr(attr: &str) -> Option<String> {
 /// Convert a YAML value to a C# literal string for the given C# parameter type.
 fn yaml_to_csharp_literal(val: Option<&serde_yaml::Value>, param_type: &str) -> String {
     let Some(v) = val else { return "default!".to_string() };
+    if is_cs_option_type(param_type) {
+        let json = serde_json::to_string(v).unwrap_or_else(|_| "null".to_string());
+        return format!("FromSpecInput<{}>({})", param_type.trim(), csharp_string_literal(&json));
+    }
+    if matches!(v, serde_yaml::Value::Null) {
+        let json = serde_json::to_string(v).unwrap_or_else(|_| "null".to_string());
+        return format!("FromSpecInput<{}>({})", param_type.trim(), csharp_string_literal(&json));
+    }
     if v.as_mapping().is_some() || v.as_sequence().is_some() {
         let json = serde_json::to_string(v).unwrap_or_else(|_| "null".to_string());
-        return format!("FromJson<{}>({})", param_type.trim(), csharp_string_literal(&json));
+        return format!("FromSpecInput<{}>({})", param_type.trim(), csharp_string_literal(&json));
+    }
+    if let Some(i) = v.as_i64() {
+        return i.to_string();
+    }
+    if let Some(f) = v.as_f64() {
+        return f.to_string();
+    }
+    if let Some(b) = v.as_bool() {
+        return if b { "true".to_string() } else { "false".to_string() };
+    }
+    if let Some(s) = v.as_str() {
+        if !matches!(param_type.trim(), "string" | "String") {
+            let json = serde_json::to_string(v).unwrap_or_else(|_| "null".to_string());
+            return format!("FromSpecInput<{}>({})", param_type.trim(), csharp_string_literal(&json));
+        }
+        return csharp_string_literal(s);
+    }
+    "default!".to_string()
+}
+
+fn yaml_to_csharp_echo_literal(val: Option<&serde_yaml::Value>) -> String {
+    let Some(v) = val else { return "(object?)null".to_string() };
+    if matches!(v, serde_yaml::Value::Null) {
+        return "(object?)null".to_string();
     }
     if let Some(i) = v.as_i64() {
         return i.to_string();
@@ -1227,7 +1293,12 @@ fn yaml_to_csharp_literal(val: Option<&serde_yaml::Value>, param_type: &str) -> 
     if let Some(s) = v.as_str() {
         return csharp_string_literal(s);
     }
-    "default!".to_string()
+    let json = serde_json::to_string(v).unwrap_or_else(|_| "null".to_string());
+    format!("FromSpecInput<object>({})", csharp_string_literal(&json))
+}
+
+fn is_cs_option_type(cs_type: &str) -> bool {
+    cs_type.trim_start().starts_with("Option<")
 }
 
 fn csharp_string_literal(s: &str) -> String {
@@ -1321,9 +1392,35 @@ fn generate_csharp_program(
     let mut out = String::new();
     out.push_str("using SpecGate.Annotations;\n");
     out.push_str("using SpecGate.Runtime;\n");
+    out.push_str("using System;\n");
+    out.push_str("using System.Collections;\n");
     out.push_str("using SpecGateFixtures;\n");
+    let mut namespaces = BTreeSet::new();
+    for case in cases {
+        let case_ops = csharp_case_ops(case);
+        for op_name in &case_ops {
+            if let Some(op) = cs_ops.iter().find(|op| op.op_name == *op_name)
+                && let Some((ns, _)) = op.class_name.rsplit_once('.')
+                && ns != "SpecGateFixtures"
+            {
+                namespaces.insert(ns.to_string());
+            }
+        }
+        for binding in resolve_csharp_case(cs_ops, cs_setups, &case_ops)? {
+            if let Some((ns, _)) = binding.setup.class_name.rsplit_once('.')
+                && ns != "SpecGateFixtures"
+            {
+                namespaces.insert(ns.to_string());
+            }
+        }
+    }
+    for ns in namespaces {
+        writeln!(out, "using {ns};").expect("fmt");
+    }
     out.push_str("using System.Collections.Generic;\n");
     out.push_str("using System.IO;\n");
+    out.push_str("using System.Linq;\n");
+    out.push_str("using System.Reflection;\n");
     out.push_str("using System.Text;\n\n");
     out.push_str("using System.Text.Json;\n\n");
     out.push_str("var all = new SortedDictionary<string, string>();\n");
@@ -1400,7 +1497,7 @@ fn generate_csharp_program(
     out.push_str("}\n");
     out.push_str("sb.Append('}');\n");
     out.push_str("File.WriteAllText(args[0], sb.ToString());\n\n");
-    out.push_str("static T FromJson<T>(string json) => JsonSerializer.Deserialize<T>(json, new JsonSerializerOptions { IncludeFields = true })!;\n\n");
+    out.push_str(csharp_materialization_helpers());
     out.push_str("static void AppendJsonString(StringBuilder sb, string s) {\n");
     out.push_str("    foreach (char c in s) {\n");
     out.push_str("        switch (c) {\n");
@@ -1422,6 +1519,115 @@ fn csharp_case_ops(case: &spec::Case) -> Vec<&str> {
     } else {
         case.steps.iter().map(String::as_str).collect()
     }
+}
+
+fn csharp_materialization_helpers() -> &'static str {
+    r#"static T FromSpecInput<T>(string json) => (T)FromSpecInputValue(typeof(T), JsonSerializer.Deserialize<JsonElement>(json))!;
+
+static object? FromSpecInputValue(Type targetType, JsonElement value) {
+    if (targetType == typeof(string)) return value.ValueKind == JsonValueKind.Null ? null : value.GetString();
+    if (targetType == typeof(int)) return value.GetInt32();
+    if (targetType == typeof(long)) return value.GetInt64();
+    if (targetType == typeof(bool)) return value.GetBoolean();
+    if (targetType == typeof(double)) return value.GetDouble();
+    if (targetType == typeof(float)) return value.GetSingle();
+
+    if (targetType.IsGenericType && targetType.GetGenericTypeDefinition() == typeof(Option<>)) {
+        if (value.ValueKind == JsonValueKind.Null) {
+            return targetType.GetMethod("None", BindingFlags.Public | BindingFlags.Static)!.Invoke(null, Array.Empty<object>());
+        }
+
+        Type innerType = targetType.GetGenericArguments()[0];
+        object? inner = FromSpecInputValue(innerType, value);
+        return targetType.GetMethod("Some", BindingFlags.Public | BindingFlags.Static)!.Invoke(null, new[] { inner });
+    }
+
+    if (targetType.IsGenericType && targetType.GetGenericTypeDefinition() == typeof(List<>)) {
+        Type itemType = targetType.GetGenericArguments()[0];
+        var list = (IList)Activator.CreateInstance(targetType)!;
+        foreach (JsonElement item in value.EnumerateArray()) {
+            list.Add(FromSpecInputValue(itemType, item));
+        }
+        return list;
+    }
+
+    if (targetType.IsGenericType && targetType.GetGenericTypeDefinition() == typeof(Dictionary<,>)) {
+        Type[] args = targetType.GetGenericArguments();
+        var dict = (IDictionary)Activator.CreateInstance(targetType)!;
+        foreach (JsonProperty property in value.EnumerateObject()) {
+            object key = args[0] == typeof(string) ? property.Name : Convert.ChangeType(property.Name, args[0], System.Globalization.CultureInfo.InvariantCulture);
+            dict.Add(key, FromSpecInputValue(args[1], property.Value));
+        }
+        return dict;
+    }
+
+    if (targetType.IsAbstract) {
+        string tag;
+        JsonElement payload;
+        if (value.ValueKind == JsonValueKind.String) {
+            tag = value.GetString()!;
+            payload = default;
+        } else {
+            JsonProperty property = value.EnumerateObject().Single();
+            tag = property.Name;
+            payload = property.Value;
+        }
+
+        Type variantType = targetType.Assembly.GetTypes()
+            .Where(t => !t.IsAbstract && targetType.IsAssignableFrom(t))
+            .Single(t => SpecEventName(t) == tag || t.Name == tag);
+        return payload.ValueKind == JsonValueKind.Undefined || payload.ValueKind == JsonValueKind.Null
+            ? Activator.CreateInstance(variantType)
+            : FromSpecInputValue(variantType, payload);
+    }
+
+    if (value.ValueKind == JsonValueKind.Object) {
+        object instance = Activator.CreateInstance(targetType)!;
+        foreach (PropertyInfo property in targetType.GetProperties(BindingFlags.Instance | BindingFlags.Public)) {
+            if (!property.CanWrite || property.GetIndexParameters().Length != 0) continue;
+            if (TryGetProperty(value, SpecMemberName(property), out JsonElement propertyValue)
+                || TryGetProperty(value, property.Name, out propertyValue)) {
+                property.SetValue(instance, FromSpecInputValue(property.PropertyType, propertyValue));
+            }
+        }
+        foreach (FieldInfo field in targetType.GetFields(BindingFlags.Instance | BindingFlags.Public)) {
+            if (TryGetProperty(value, SpecMemberName(field), out JsonElement fieldValue)
+                || TryGetProperty(value, field.Name, out fieldValue)) {
+                field.SetValue(instance, FromSpecInputValue(field.FieldType, fieldValue));
+            }
+        }
+        return instance;
+    }
+
+    return JsonSerializer.Deserialize(value.GetRawText(), targetType, new JsonSerializerOptions { IncludeFields = true, PropertyNameCaseInsensitive = true });
+}
+
+static bool TryGetProperty(JsonElement obj, string name, out JsonElement value) {
+    foreach (JsonProperty property in obj.EnumerateObject()) {
+        if (property.Name == name || string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase)) {
+            value = property.Value;
+            return true;
+        }
+    }
+    value = default;
+    return false;
+}
+
+static string SpecMemberName(MemberInfo member) {
+    Attribute? attr = member.GetCustomAttributes(false)
+        .OfType<Attribute>()
+        .FirstOrDefault(a => a.GetType().FullName == "SpecGate.Annotations.SpecEventAttribute");
+    return (attr?.GetType().GetProperty("Name")?.GetValue(attr) as string) ?? member.Name;
+}
+
+static string SpecEventName(Type type) {
+    Attribute? attr = type.GetCustomAttributes(false)
+        .OfType<Attribute>()
+        .FirstOrDefault(a => a.GetType().FullName == "SpecGate.Annotations.SpecEventAttribute");
+    return (attr?.GetType().GetProperty("Name")?.GetValue(attr) as string) ?? type.Name;
+}
+
+"#
 }
 
 fn render_csharp_construct_args(
@@ -1473,8 +1679,13 @@ fn render_csharp_op_args(
         let lit = yaml_to_csharp_literal(value, param_type);
         let var = format!("__sg_arg_{step_idx}_{}", csharp_ident(param_name));
         writeln!(out, "    {param_type} {var} = {lit};").expect("fmt");
-        let emit = cs_typed_emit(&format!("{}.{param_name}", cs_op.op_name), &var, param_type);
-        writeln!(out, "    {emit}").expect("fmt");
+        if is_cs_option_type(param_type) {
+            let echo = yaml_to_csharp_echo_literal(value);
+            writeln!(out, "    SpecGateRuntime.EmitEvent(\"{}.{param_name}\", {echo});", cs_op.op_name).expect("fmt");
+        } else {
+            let emit = cs_typed_emit(&format!("{}.{param_name}", cs_op.op_name), &var, param_type);
+            writeln!(out, "    {emit}").expect("fmt");
+        }
         args.push(var);
     }
     args.join(", ")
@@ -2556,7 +2767,7 @@ mod tests {
 
         assert_eq!(
             yaml_to_csharp_literal(Some(&value), "Offset"),
-            "FromJson<Offset>(\"{\\\"dx\\\":1,\\\"dy\\\":2}\")"
+            "FromSpecInput<Offset>(\"{\\\"dx\\\":1,\\\"dy\\\":2}\")"
         );
     }
 
