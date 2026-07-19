@@ -1,5 +1,4 @@
 using SpecGate.Runtime;
-using SpecGateFixtures;
 using Xunit;
 
 namespace SpecGateFixtures.Tests;
@@ -71,8 +70,8 @@ public class TraceTests
         SpecGateRuntime.EmitResult(new Circle { Radius = 5.0 });
         SpecGateRuntime.EmitResult(Option<int>.Some(1));
         SpecGateRuntime.EmitResult(Option<int>.None());
-        SpecGateRuntime.EmitResult(Result<int,string>.Ok(5));
-        SpecGateRuntime.EmitResult(Result<int,string>.Err("division by zero"));
+        SpecGateRuntime.EmitResult(Result<int, string>.Ok(5));
+        SpecGateRuntime.EmitResult(Result<int, string>.Err("division by zero"));
 
         const string expected =
             "[{\"kind\":\"Event\",\"name\":\"$result\",\"value\":{\"Circle\":{\"radius\":5}}}"

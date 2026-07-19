@@ -8,40 +8,101 @@ using System.Text;
 
 namespace SpecGate.Runtime;
 
+/// <summary>
+/// Provides the trace-emission primitives used by generated SpecGate C# runners
+/// and by fixtures that explicitly emit observable events.
+/// </summary>
+/// <remarks>
+/// The runtime stores trace records in thread-local state so each spec case can
+/// be reset and collected independently. Values are serialized into SpecGate's
+/// deterministic JSON trace representation, including annotated structured
+/// event objects, option/result shims, lists, sets, and maps.
+/// </remarks>
 public static class SpecGateRuntime
 {
     [ThreadStatic]
     private static List<string>? _events;
 
-    private static List<string> Events => _events ??= new List<string>();
+    [ThreadStatic]
+    private static Dictionary<object, string?>? _objectPrefixes;
 
-    public static void Reset() => Events.Clear();
+    private static List<string> Events => _events ??= [];
 
+    private static Dictionary<object, string?> ObjectPrefixes => _objectPrefixes ??= new Dictionary<object, string?>(ReferenceComparer.Instance);
+
+    /// <summary>
+    /// Clears the current thread's accumulated trace records and registered
+    /// object prefixes before starting a new spec case.
+    /// </summary>
+    public static void Reset()
+    {
+        Events.Clear();
+        ObjectPrefixes.Clear();
+    }
+
+    /// <summary>
+    /// Emits a SpecGate <c>Run</c> trace record for the operation currently being
+    /// invoked.
+    /// </summary>
+    /// <param name="operation">The spec operation name being executed.</param>
     public static void EmitRun(string operation)
     {
         Events.Add("{\"kind\":\"Run\",\"operation\":" + QuoteJson(operation) + "}");
     }
 
+    /// <summary>
+    /// Emits a string-valued SpecGate event trace record.
+    /// </summary>
+    /// <param name="name">The event name expected by the spec.</param>
+    /// <param name="value">The string value to serialize.</param>
     public static void EmitEvent(string name, string value)
     {
         Events.Add("{\"kind\":\"Event\",\"name\":" + QuoteJson(name) + ",\"value\":" + QuoteJson(value) + "}");
     }
 
+    /// <summary>
+    /// Emits an integer-valued SpecGate event trace record.
+    /// </summary>
+    /// <param name="name">The event name expected by the spec.</param>
+    /// <param name="value">The integer value to serialize.</param>
     public static void EmitEvent(string name, int value)
     {
-        Events.Add("{\"kind\":\"Event\",\"name\":" + QuoteJson(name) + ",\"value\":" + value.ToString(System.Globalization.CultureInfo.InvariantCulture) + "}");
+        Events.Add("{\"kind\":\"Event\",\"name\":" + QuoteJson(name) + ",\"value\":" + value.ToString(CultureInfo.InvariantCulture) + "}");
     }
 
+    /// <summary>
+    /// Emits a Boolean-valued SpecGate event trace record.
+    /// </summary>
+    /// <param name="name">The event name expected by the spec.</param>
+    /// <param name="value">The Boolean value to serialize.</param>
     public static void EmitEvent(string name, bool value)
     {
         Events.Add("{\"kind\":\"Event\",\"name\":" + QuoteJson(name) + ",\"value\":" + (value ? "true" : "false") + "}");
     }
 
+    /// <summary>
+    /// Emits a SpecGate event trace record for an arbitrary value.
+    /// </summary>
+    /// <param name="name">The event name expected by the spec.</param>
+    /// <param name="value">
+    /// The value to serialize using SpecGate's deterministic value conversion.
+    /// Annotated event types are serialized as structured maps.
+    /// </param>
     public static void EmitEvent(string name, object? value)
     {
         Events.Add("{\"kind\":\"Event\",\"name\":" + QuoteJson(name) + ",\"value\":" + ToSpecValue(value).ToJson() + "}");
     }
 
+    /// <summary>
+    /// Emits the return value of an operation as a <c>$result</c> event.
+    /// </summary>
+    /// <typeparam name="T">The static return type of the operation.</typeparam>
+    /// <param name="value">The operation return value.</param>
+    /// <remarks>
+    /// Nullable value types are represented as SpecGate option values. Other
+    /// values are delegated to the object overload so option/result shims and
+    /// annotated structured values keep their canonical trace shape.
+    /// </remarks>
     public static void EmitResult<T>(T value)
     {
         var nullableInner = Nullable.GetUnderlyingType(typeof(T));
@@ -54,6 +115,15 @@ public static class SpecGateRuntime
         EmitResult((object?)value);
     }
 
+    /// <summary>
+    /// Emits the return value of an operation as a <c>$result</c> event.
+    /// </summary>
+    /// <param name="value">The operation return value, or <see langword="null"/>.</param>
+    /// <remarks>
+    /// Annotated non-variant event objects emit their annotated members as
+    /// top-level events, matching the Rust <c>SpecEvent</c> behavior. Variant,
+    /// option, and result values are emitted as structured <c>$result</c> maps.
+    /// </remarks>
     public static void EmitResult(object? value)
     {
         if (value is null)
@@ -69,6 +139,72 @@ public static class SpecGateRuntime
         }
 
         EmitResultObject(value);
+    }
+
+    /// <summary>
+    /// Registers an object with an optional event-name prefix for subsequent
+    /// state capture.
+    /// </summary>
+    /// <param name="value">The object whose annotated members may be emitted.</param>
+    /// <param name="prefix">
+    /// The prefix to prepend to emitted member names, or <see langword="null"/>
+    /// to emit bare member names.
+    /// </param>
+    /// <remarks>
+    /// Generated stateful runners use this to distinguish multiple setup objects
+    /// of the same type, for example <c>source.balance</c> and
+    /// <c>target.balance</c>.
+    /// </remarks>
+    public static void RegisterObject(object? value, string? prefix)
+    {
+        if (value is not null)
+        {
+            ObjectPrefixes[value] = prefix;
+        }
+    }
+
+    /// <summary>
+    /// Emits a registered object's member value using that object's configured
+    /// prefix.
+    /// </summary>
+    /// <param name="owner">The object instance that owns the member.</param>
+    /// <param name="name">The annotated member event name.</param>
+    /// <param name="value">The new member value to serialize.</param>
+    /// <remarks>
+    /// If <paramref name="owner"/> has not been registered, no event is emitted.
+    /// This allows instrumented fixture copies to remain quiet outside harnessed
+    /// setup objects.
+    /// </remarks>
+    public static void EmitMember(object? owner, string name, object? value)
+    {
+        if (owner is null || !ObjectPrefixes.TryGetValue(owner, out var prefix))
+        {
+            return;
+        }
+
+        EmitEvent(prefix is null ? name : prefix + "." + name, value);
+    }
+
+    /// <summary>
+    /// Emits every annotated public field or property on an object.
+    /// </summary>
+    /// <param name="value">The object whose annotated members should be captured.</param>
+    /// <param name="prefix">
+    /// An optional prefix to prepend to each member event name, such as an
+    /// operation parameter name.
+    /// </param>
+    public static void EmitFields(object? value, string? prefix = null)
+    {
+        if (value is null)
+        {
+            return;
+        }
+
+        foreach (var member in SpecEventMembers(value.GetType()).OrderBy(m => m.Token))
+        {
+            var name = prefix is null ? member.EventName : prefix + "." + member.EventName;
+            EmitEvent(name, member.GetValue(value));
+        }
     }
 
     private static void EmitResultObject(object value)
@@ -90,9 +226,16 @@ public static class SpecGateRuntime
         EmitEvent("$result", value);
     }
 
+    /// <summary>
+    /// Gets the current thread's accumulated trace records as a JSON array.
+    /// </summary>
+    /// <returns>
+    /// A JSON array string containing the trace records emitted since the last
+    /// call to <see cref="Reset"/>.
+    /// </returns>
     public static string GetTracesJson()
     {
-        var sb = new System.Text.StringBuilder("[");
+        var sb = new StringBuilder("[");
         for (int i = 0; i < Events.Count; i++)
         {
             if (i > 0) sb.Append(',');
@@ -173,7 +316,7 @@ public static class SpecGateRuntime
                 set.Add(ToSpecValue(item));
             }
 
-            return new SetValue(set.ToList());
+            return new SetValue([.. set]);
         }
 
         if (value is IEnumerable enumerable)
@@ -201,7 +344,7 @@ public static class SpecGateRuntime
         return new StringValue(Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty);
     }
 
-    private static SpecValue SpecVariantToSpecValue(object value, Type type)
+    private static MapValue SpecVariantToSpecValue(object value, Type type)
     {
         var payload = new SortedDictionary<string, SpecValue>(Utf8StringComparer.Instance);
         foreach (var member in SpecEventMembers(type))
@@ -212,7 +355,7 @@ public static class SpecGateRuntime
         return TaggedMap(SpecEventName(type), new MapValue(payload));
     }
 
-    private static SpecValue TaggedMap(string tag, SpecValue payload)
+    private static MapValue TaggedMap(string tag, SpecValue payload)
     {
         var map = new SortedDictionary<string, SpecValue>(Utf8StringComparer.Instance)
         {
@@ -221,7 +364,7 @@ public static class SpecGateRuntime
         return new MapValue(map);
     }
 
-    private static SpecValue EmptyMap() => new MapValue(new SortedDictionary<string, SpecValue>(Utf8StringComparer.Instance));
+    private static MapValue EmptyMap() => new(new SortedDictionary<string, SpecValue>(Utf8StringComparer.Instance));
 
     private static bool TryOptionToSpecValue(object value, out SpecValue specValue)
     {
@@ -255,7 +398,7 @@ public static class SpecGateRuntime
         return true;
     }
 
-    private static SpecValue MapFromDictionary(IDictionary dict)
+    private static MapValue MapFromDictionary(IDictionary dict)
     {
         var map = new SortedDictionary<string, SpecValue>(Utf8StringComparer.Instance);
         foreach (DictionaryEntry entry in dict)
@@ -266,7 +409,7 @@ public static class SpecGateRuntime
         return new MapValue(map);
     }
 
-    private static SpecValue MapFromKeyValueEnumerable(IEnumerable enumerable)
+    private static MapValue MapFromKeyValueEnumerable(IEnumerable enumerable)
     {
         var map = new SortedDictionary<string, SpecValue>(Utf8StringComparer.Instance);
         foreach (var item in enumerable)
@@ -282,7 +425,7 @@ public static class SpecGateRuntime
 
     private static bool IsGenericKeyValueEnumerable(Type type) =>
         type.GetInterfaces()
-            .Concat(new[] { type })
+            .Concat([type])
             .Any(i => i.IsGenericType
                 && i.GetGenericTypeDefinition() == typeof(IEnumerable<>)
                 && i.GetGenericArguments()[0].IsGenericType
@@ -291,7 +434,7 @@ public static class SpecGateRuntime
 
     private static bool IsSet(Type type) =>
         type.GetInterfaces()
-            .Concat(new[] { type })
+            .Concat([type])
             .Any(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(ISet<>));
 
     private static bool IsSpecEventType(Type type) =>
@@ -492,8 +635,27 @@ public static class SpecGateRuntime
             return xb.Length.CompareTo(yb.Length);
         }
     }
+
+    private sealed class ReferenceComparer : IEqualityComparer<object>
+    {
+        public static readonly ReferenceComparer Instance = new();
+
+        public new bool Equals(object? x, object? y) => ReferenceEquals(x, y);
+
+        public int GetHashCode(object obj) => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(obj);
+    }
 }
 
+/// <summary>
+/// Represents an optional SpecGate value for C# fixtures.
+/// </summary>
+/// <typeparam name="T">The type of the contained value when the option is present.</typeparam>
+/// <remarks>
+/// The runtime serializes <see cref="Option{T}"/> as a SpecGate tagged map with
+/// either <c>Some</c> containing the converted value or <c>None</c> containing
+/// an empty map. This mirrors the Rust option trace shape used for cross-target
+/// comparison.
+/// </remarks>
 public readonly struct Option<T>
 {
     private readonly T? _value;
@@ -504,12 +666,42 @@ public readonly struct Option<T>
         HasValue = hasValue;
     }
 
+    /// <summary>
+    /// Gets a value indicating whether this option contains a value.
+    /// </summary>
     public bool HasValue { get; }
+
+    /// <summary>
+    /// Gets the contained value when <see cref="HasValue"/> is <see langword="true"/>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when the option is <see cref="None"/>.
+    /// </exception>
     public T? Value => HasValue ? _value : throw new InvalidOperationException("Option has no value");
+
+    /// <summary>
+    /// Creates an option containing a value.
+    /// </summary>
+    /// <param name="value">The value to include in the option.</param>
+    /// <returns>An option represented in traces as <c>Some</c>.</returns>
     public static Option<T> Some(T value) => new(value, true);
+
+    /// <summary>
+    /// Creates an option with no value.
+    /// </summary>
+    /// <returns>An option represented in traces as <c>None</c>.</returns>
     public static Option<T> None() => new(default, false);
 }
 
+/// <summary>
+/// Represents a SpecGate result value for C# fixtures.
+/// </summary>
+/// <typeparam name="T">The type of the successful value.</typeparam>
+/// <typeparam name="E">The type of the error value.</typeparam>
+/// <remarks>
+/// The runtime serializes <see cref="Result{T, E}"/> as a SpecGate tagged map
+/// with either <c>Ok</c> or <c>Err</c>, matching the Rust result trace shape.
+/// </remarks>
 public readonly struct Result<T, E>
 {
     private readonly T? _ok;
@@ -522,9 +714,38 @@ public readonly struct Result<T, E>
         IsOk = isOk;
     }
 
+    /// <summary>
+    /// Gets a value indicating whether this result is an <c>Ok</c> value.
+    /// </summary>
     public bool IsOk { get; }
+
+    /// <summary>
+    /// Gets the successful value when <see cref="IsOk"/> is <see langword="true"/>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when the result is an <c>Err</c> value.
+    /// </exception>
     public T? OkValue => IsOk ? _ok : throw new InvalidOperationException("Result is Err");
+
+    /// <summary>
+    /// Gets the error value when <see cref="IsOk"/> is <see langword="false"/>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when the result is an <c>Ok</c> value.
+    /// </exception>
     public E? ErrValue => !IsOk ? _err : throw new InvalidOperationException("Result is Ok");
+
+    /// <summary>
+    /// Creates a successful result.
+    /// </summary>
+    /// <param name="value">The success value to include in the result.</param>
+    /// <returns>A result represented in traces as <c>Ok</c>.</returns>
     public static Result<T, E> Ok(T value) => new(value, default, true);
+
+    /// <summary>
+    /// Creates an error result.
+    /// </summary>
+    /// <param name="error">The error value to include in the result.</param>
+    /// <returns>A result represented in traces as <c>Err</c>.</returns>
     public static Result<T, E> Err(E error) => new(default, error, false);
 }

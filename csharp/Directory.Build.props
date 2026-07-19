@@ -1,0 +1,15 @@
+<Project>
+  <!--
+    C# quality gates for SpecGate's shipped libraries — the analog of the Rust
+    workspace's clippy (deny warnings) plus rustfmt checking. Scoped to csharp/
+    (NOT the repo root) so the harness's generated scratch runners under
+    rust/target/specgate-harness/ never inherit warnings-as-errors.
+  -->
+  <PropertyGroup>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+</Project>

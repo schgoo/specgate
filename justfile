@@ -92,5 +92,15 @@ dotnet-build:
 dotnet-test:
     dotnet test
 
+# Apply C# formatting + analyzer fixes (analog of `just format` / clippy --fix)
+format-cs:
+    dotnet format SpecGate.slnx
+
+# Check C# formatting, style, and analyzers (analog of clippy -D warnings +
+# fmt --check). Build already enforces analyzers as errors; this also gates
+# whitespace/style. Fails if any file would change.
+format-check-cs:
+    dotnet format SpecGate.slnx --verify-no-changes
+
 # Run all pre-PR checks
-check: build test clippy format-check deny validate extract-check readme-check self-host cli-self-host coverage dotnet-build dotnet-test
+check: build test clippy format-check deny validate extract-check readme-check self-host cli-self-host coverage dotnet-build dotnet-test format-check-cs

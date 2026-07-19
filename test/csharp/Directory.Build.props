@@ -1,0 +1,17 @@
+<Project>
+  <!--
+    C# quality gates for SpecGate's test/fixture projects. Same standards as the
+    shipped libraries (see csharp/Directory.Build.props). Scoped to test/csharp/
+    (NOT the repo root) so the harness's generated scratch runners under
+    rust/target/specgate-harness/ never inherit warnings-as-errors. Fixtures are
+    author-owned conformance inputs; test-appropriate rule relaxations live in
+    the .editorconfig, mirroring the pattern used across the org.
+  -->
+  <PropertyGroup>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+</Project>

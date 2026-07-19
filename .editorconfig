@@ -23,3 +23,41 @@ indent_size = 2
 
 [*.json]
 indent_size = 2
+
+[*.cs]
+# SpecGate's C# runtime deliberately mirrors Rust's sum types (Option<T>,
+# Result<T, E>) cross-language so traces stay byte-identical. Several C#-naming
+# analyzers fight that intentional design; disable them for the mirror to hold.
+# CA1716: Option/Result collide with reserved keywords (that is the point).
+dotnet_diagnostic.CA1716.severity = none
+# CA1715: generic parameter E mirrors Rust's Result<T, E>.
+dotnet_diagnostic.CA1715.severity = none
+# CA1000: Some/None/Ok/Err are the idiomatic Rust-mirror factory methods.
+dotnet_diagnostic.CA1000.severity = none
+
+# Roslyn code-style fixes, enforced as warnings so `just format-cs` applies them
+# and `just format-check-cs` gates them (the C# analog of clippy's lints).
+# IDE0005: remove unnecessary using directives.
+dotnet_diagnostic.IDE0005.severity = warning
+# IDE0001: simplify type names.
+dotnet_diagnostic.IDE0001.severity = warning
+# IDE0002: simplify member access.
+dotnet_diagnostic.IDE0002.severity = warning
+# IDE0004: remove unnecessary casts.
+dotnet_diagnostic.IDE0004.severity = warning
+# IDE0035: remove unreachable code.
+dotnet_diagnostic.IDE0035.severity = warning
+# IDE0051/IDE0052: remove unused private members.
+dotnet_diagnostic.IDE0051.severity = warning
+dotnet_diagnostic.IDE0052.severity = warning
+# IDE0130: namespace must match folder structure.
+dotnet_diagnostic.IDE0130.severity = warning
+# Collection-expression and object-creation modernizations (auto-fixable).
+# IDE0028: use collection initializer.
+dotnet_diagnostic.IDE0028.severity = warning
+# IDE0300: use collection expression for arrays.
+dotnet_diagnostic.IDE0300.severity = warning
+# IDE0305: use collection expression for fluent construction.
+dotnet_diagnostic.IDE0305.severity = warning
+# IDE0090: simplify `new T()` to `new()` where the type is inferable.
+dotnet_diagnostic.IDE0090.severity = warning

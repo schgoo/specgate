@@ -1,0 +1,21 @@
+# Analyzer relaxations for SpecGate's C# fixture/test tree.
+#
+# These projects are author-owned CONFORMANCE INPUTS, not shipping code: they
+# deliberately contain edge-case patterns (throwing to exercise $fault capture,
+# unused parameters to mirror Rust signatures, etc.) whose whole purpose is to
+# drive the harness. Design/correctness analyzers that assume production code
+# fight that intent, so they are relaxed here while formatting and style
+# enforcement stay on. Mirrors the org pattern of a test-tree .editorconfig.
+[*.cs]
+
+# CA2201: fixtures throw System.Exception on purpose to produce a $fault trace
+# whose message mirrors the Rust reference byte-for-byte.
+dotnet_diagnostic.CA2201.severity = none
+
+# IDE0060: fixture operation signatures mirror the Rust reference (e.g. an
+# input echoed into the trace but not otherwise used by the body).
+dotnet_diagnostic.IDE0060.severity = none
+
+# CA1707: xunit test methods use the conventional Method_Scenario_Expected
+# naming; underscores are idiomatic for test names.
+dotnet_diagnostic.CA1707.severity = none

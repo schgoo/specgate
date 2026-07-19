@@ -2,8 +2,16 @@ using SpecGate.Annotations;
 
 namespace SpecGateFixtures;
 
+/// <summary>
+/// String-processing fixture: <c>parse_yaml_key</c> extracts the value of a
+/// named key from a newline-delimited <c>key: value</c> document.
+/// </summary>
 public static class ParseYamlKeyOps
 {
+    /// <summary>Looks up <paramref name="key"/> in a simple YAML-like document.</summary>
+    /// <param name="input">The document text, one <c>key: value</c> pair per line (spec input <c>input</c>).</param>
+    /// <param name="key">The key whose value to return (spec input <c>key</c>).</param>
+    /// <returns>The trimmed value for <paramref name="key"/>, or the string <c>"null"</c> if absent.</returns>
     [SpecOperation("parse_yaml_key")]
     public static string ParseYamlKey([SpecInput("input")] string input, [SpecInput("key")] string key)
     {

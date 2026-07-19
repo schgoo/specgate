@@ -1,6 +1,8 @@
 spec_version: 0.4.0
 name: fixture.readonly_operation
-binding: binding.yaml
+binding:
+  - binding.yaml
+  - csharp.yaml
 operations:
   get_count:
     outputs:
@@ -10,4 +12,5 @@ cases:
   desc: Read-only operation returns value without state change
   operation: get_count
   expected:
+  - count: 42
   - $result: 42

@@ -1,6 +1,8 @@
 spec_version: "0.4.0"
 name: fixture.setup_with_params
-binding: binding.yaml
+binding:
+  - binding.yaml
+  - csharp.yaml
 
 operations:
   increment:
