@@ -3,10 +3,29 @@
 use std::fmt::Write as _;
 use std::path::Path;
 
+use serde::Serialize;
 use specgate::{SpecEvent, spec_operation};
 use specgate_harness::{CaseStatus, CoverageOutcome, RunOutcome as HarnessOutcome};
 
-#[derive(Debug, Clone, PartialEq, Eq, SpecEvent)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, SpecEvent)]
+pub struct TargetDivergence {
+    #[spec_event]
+    pub target: String,
+    #[spec_event]
+    pub mismatch: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, SpecEvent)]
+pub struct CaseReport {
+    #[spec_event]
+    pub name: String,
+    #[spec_event]
+    pub status: String,
+    #[spec_event]
+    pub divergences: Vec<TargetDivergence>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, SpecEvent)]
 pub struct RunReport {
     #[spec_event]
     pub spec_name: String,
@@ -20,9 +39,11 @@ pub struct RunReport {
     pub skipped: i32,
     #[spec_event]
     pub warned: i32,
+    #[spec_event]
+    pub cases: Vec<CaseReport>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, SpecEvent)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, SpecEvent)]
 pub enum RunOutcome {
     Complete { report: RunReport },
     Error { reason: String },
@@ -42,7 +63,8 @@ impl std::fmt::Display for RunOutcome {
 }
 
 #[spec_operation("run")]
-pub fn run(spec: &str) -> RunOutcome {
+pub fn run(spec: &str, verbose: bool, json: bool) -> RunOutcome {
+    let _ = (verbose, json);
     let spec_path = spec;
     if !Path::new(spec_path).exists() {
         return RunOutcome::Error {
@@ -62,6 +84,7 @@ pub fn run(spec: &str) -> RunOutcome {
                 failed: 0,
                 skipped: 0,
                 warned: 0,
+                cases: results.iter().map(case_report).collect(),
             };
             for r in &results {
                 match r.status {
@@ -73,6 +96,21 @@ pub fn run(spec: &str) -> RunOutcome {
             }
             RunOutcome::Complete { report }
         }
+    }
+}
+
+fn case_report(result: &specgate_harness::CaseResult) -> CaseReport {
+    CaseReport {
+        name: result.name.clone(),
+        status: result.status.as_str().to_string(),
+        divergences: result
+            .target_failures
+            .iter()
+            .map(|failure| TargetDivergence {
+                target: failure.target.clone(),
+                mismatch: failure.mismatch.clone(),
+            })
+            .collect(),
     }
 }
 
@@ -172,7 +210,7 @@ fn write_case_summary(s: &mut String, results: &[specgate_harness::CaseResult]) 
 /// Render a run outcome to a colored, human-readable string for the
 /// terminal (used by the binary).
 #[must_use]
-pub fn format_outcome(outcome: &RunOutcome) -> String {
+pub fn format_outcome(outcome: &RunOutcome, verbose: bool) -> String {
     let mut s = String::new();
     match outcome {
         RunOutcome::Error { reason } => {
@@ -186,9 +224,35 @@ pub fn format_outcome(outcome: &RunOutcome) -> String {
                 report.passed, report.failed, report.warned, report.skipped, report.total_cases
             )
             .unwrap();
+            for case in &report.cases {
+                if case.status == "fail" || (verbose && case.status == "pass") {
+                    writeln!(s, "case: {} status: {}", case.name, case.status).unwrap();
+                    for divergence in &case.divergences {
+                        writeln!(s, "  divergence target: {}", divergence.target).unwrap();
+                        writeln!(s, "  mismatch: {}", divergence.mismatch).unwrap();
+                    }
+                }
+            }
         }
     }
     s
+}
+
+/// Render a run outcome as JSON for machine consumers.
+///
+/// The complete form includes the full [`RunReport`], including per-case
+/// status and divergence detail.
+///
+/// # Panics
+///
+/// Panics only if the in-memory run report cannot be serialized as JSON.
+/// The report contains ordinary strings, numbers, and lists, so serialization
+/// failure indicates an unexpected programming error.
+#[must_use]
+pub fn format_json(outcome: &RunOutcome) -> String {
+    let mut json = serde_json::to_string(outcome).expect("run outcome serializes to JSON");
+    json.push('\n');
+    json
 }
 
 #[cfg(test)]

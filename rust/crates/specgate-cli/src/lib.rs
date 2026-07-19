@@ -8,7 +8,7 @@
 //!
 //! ```text
 //! specgate validate <spec-dir> [--strict] [--spec-only] [--assertions-dir <dir>]
-//! specgate run <spec.yaml> [--coverage] [--coverage-threshold <pct>]
+//! specgate run <spec.yaml> [--coverage] [--coverage-threshold <pct>] [--verbose] [--json]
 //! specgate extract <package-root> -o|--out <spec.yaml> [--component <name>] [--cases]
 //! ```
 //!
@@ -36,6 +36,8 @@
 //! - `--coverage` — measure the implementation crate's code coverage.
 //! - `--coverage-threshold <pct>` — fail the run if coverage falls below
 //!   `<pct>` (implies `--coverage`).
+//! - `--verbose` — include passing cases in the human-readable case list.
+//! - `--json` — emit the full structured run report as JSON.
 //!
 //! Exit code `0` when all cases pass, `1` on any failure or error.
 //!
@@ -64,5 +66,5 @@ pub mod run;
 pub mod validate;
 
 pub use extract::{ExtractOutcome, ExtractReport, extract};
-pub use run::{RunOutcome, RunReport, run};
+pub use run::{CaseReport, RunOutcome, RunReport, TargetDivergence, run};
 pub use validate::{Severity, ValidateOutcome, ValidationFinding, ValidationReport, validate};

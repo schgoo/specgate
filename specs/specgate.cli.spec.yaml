@@ -24,6 +24,16 @@ types:
     failed: i32
     skipped: i32
     warned: i32
+    cases: List<CaseReport>
+
+  TargetDivergence:
+    target: string
+    mismatch: string
+
+  CaseReport:
+    name: string
+    status: string
+    divergences: List<TargetDivergence>
 
   ExtractReport:
     spec_name: string
@@ -62,8 +72,22 @@ operations:
   run:
     desc: >
       Run all test cases in a spec through the harness and report results.
+      Following unit-test convention, failing cases are always shown with
+      detail (their status and any cross-target divergences), so failures are
+      never hidden behind a flag. `verbose` additionally lists passing cases;
+      `json` emits the full structured report to stdout for machine use. The
+      structured RunReport always carries per-case detail (`cases`) regardless
+      of the output flags.
     inputs:
       spec: string
+      verbose:
+        type: bool
+        default: false
+        desc: Also list passing cases (failing cases are always shown)
+      json:
+        type: bool
+        default: false
+        desc: Emit the full structured report as JSON to stdout
     outputs:
       - outcome:
           oneof:
@@ -923,6 +947,42 @@ cases:
               failed: 0
               skipped: 0
               warned: 0
+
+  - name: run_reports_assertion_fail_no_divergence
+    desc: >
+      A case that fails its assertion is reported by name with an empty
+      divergences list — an assertion mismatch, not a cross-target divergence.
+    operation: run
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/structured_output.spec.yaml
+    expected:
+      - $result:
+          Complete:
+            report:
+              cases:
+                $contains:
+                  $match:
+                    name: list_wrong_value_fails
+                    status: fail
+                    divergences: []
+
+  - name: run_reports_divergence
+    desc: >
+      A cross-target trace divergence is surfaced per case with the diverging
+      target — distinct from a plain assertion failure, which has none.
+    operation: run
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/divergence_witness.spec.yaml
+    expected:
+      - $result:
+          Complete:
+            report:
+              failed: 1
+              cases:
+                - name: targets_diverge_on_engine
+                  status: fail
+                  divergences:
+                    - target: csharp
 
   - name: run_with_failure
     desc: Running a failing spec reports failure count

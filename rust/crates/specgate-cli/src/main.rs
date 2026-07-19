@@ -8,7 +8,7 @@ fn print_usage() {
     eprintln!(
         "usage: specgate <command> [options] <args>\n\
          \n\
-         commands:\n  validate <spec-dir> [--strict] [--spec-only] [--assertions-dir <dir>]\n  run <spec.yaml> [--coverage] [--coverage-threshold <pct>]\n  extract <package-root> -o|--out <spec.yaml> [--component <name>] [--cases]"
+         commands:\n  validate <spec-dir> [--strict] [--spec-only] [--assertions-dir <dir>]\n  run <spec.yaml> [--coverage] [--coverage-threshold <pct>] [--verbose] [--json]\n  extract <package-root> -o|--out <spec.yaml> [--component <name>] [--cases]"
     );
 }
 
@@ -87,6 +87,8 @@ fn cmd_run(args: &[String]) -> ExitCode {
     let mut spec: Option<String> = None;
     let mut coverage = false;
     let mut threshold: Option<f64> = None;
+    let mut verbose = false;
+    let mut json = false;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -106,6 +108,14 @@ fn cmd_run(args: &[String]) -> ExitCode {
                 threshold = Some(pct);
                 coverage = true; // a threshold implies coverage
                 i += 2;
+            }
+            "--verbose" => {
+                verbose = true;
+                i += 1;
+            }
+            "--json" => {
+                json = true;
+                i += 1;
             }
             a if !a.starts_with("--") && spec.is_none() => {
                 spec = Some(a.to_string());
@@ -128,8 +138,12 @@ fn cmd_run(args: &[String]) -> ExitCode {
         return ExitCode::from(run::coverage_exit_code(&outcome, threshold));
     }
 
-    let outcome = run(&spec);
-    print!("{}", run::format_outcome(&outcome));
+    let outcome = run(&spec, verbose, json);
+    if json {
+        print!("{}", run::format_json(&outcome));
+    } else {
+        print!("{}", run::format_outcome(&outcome, verbose));
+    }
     match &outcome {
         run::RunOutcome::Error { .. } => ExitCode::from(1),
         run::RunOutcome::Complete { report } => {
