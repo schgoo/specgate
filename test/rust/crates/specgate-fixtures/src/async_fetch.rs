@@ -1,7 +1,9 @@
-// Async operation — tests that harness generates async runner.
+// Async operation — tests that harness generates async runner. The body awaits
+// an immediately-ready future so the `await` machinery is genuinely exercised
+// without needing a reactor; the C# conformance mirror awaits `Task.FromResult`.
 use specgate::*;
 
 #[spec_operation("fetch")]
 pub async fn fetch(url: &str) -> String {
-    format!("response from {url}")
+    std::future::ready(format!("response from {url}")).await
 }

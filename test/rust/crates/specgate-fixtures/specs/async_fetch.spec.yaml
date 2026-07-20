@@ -1,6 +1,8 @@
 spec_version: 0.4.0
 name: fixture.async_fetch
-binding: binding.yaml
+binding:
+  - binding.yaml
+  - csharp.yaml
 operations:
   fetch:
     async: true

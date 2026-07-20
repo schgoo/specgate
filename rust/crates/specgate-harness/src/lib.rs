@@ -1472,11 +1472,21 @@ fn generate_csharp_program(
             let args = render_csharp_op_args(&mut out, cs_op, inputs, &bindings, op_defaults, step_idx);
             let call = render_csharp_op_call(cs_op, &bindings, &args);
             out.push_str("    try {\n");
-            if cs_op.return_type.trim() == "void" {
-                writeln!(out, "        {call};").expect("fmt");
-            } else {
-                writeln!(out, "        {} __sg_result_{step_idx} = {call};", cs_op.return_type).expect("fmt");
-                writeln!(out, "        SpecGateRuntime.EmitResult(__sg_result_{step_idx});").expect("fmt");
+            match csharp_return_kind(&cs_op.return_type)? {
+                CsReturnKind::Void => {
+                    writeln!(out, "        {call};").expect("fmt");
+                }
+                CsReturnKind::Value(result_type) => {
+                    writeln!(out, "        {result_type} __sg_result_{step_idx} = {call};").expect("fmt");
+                    writeln!(out, "        SpecGateRuntime.EmitResult(__sg_result_{step_idx});").expect("fmt");
+                }
+                CsReturnKind::AsyncVoid => {
+                    writeln!(out, "        await {call};").expect("fmt");
+                }
+                CsReturnKind::AsyncValue(result_type) => {
+                    writeln!(out, "        {result_type} __sg_result_{step_idx} = await {call};").expect("fmt");
+                    writeln!(out, "        SpecGateRuntime.EmitResult(__sg_result_{step_idx});").expect("fmt");
+                }
             }
             out.push_str("    } catch (System.Exception __ex) {\n");
             out.push_str("        SpecGateRuntime.EmitEvent(\"$fault\", __ex.Message);\n");
@@ -1520,6 +1530,84 @@ fn csharp_case_ops(case: &spec::Case) -> Vec<&str> {
     } else {
         case.steps.iter().map(String::as_str).collect()
     }
+}
+
+enum CsReturnKind {
+    Void,
+    Value(String),
+    AsyncVoid,
+    AsyncValue(String),
+}
+
+fn csharp_return_kind(return_type: &str) -> Result<CsReturnKind, String> {
+    let ty = return_type.trim();
+    if ty == "void" {
+        return Ok(CsReturnKind::Void);
+    }
+
+    if let Some(kind) = csharp_async_return_kind(ty)? {
+        return Ok(kind);
+    }
+
+    Ok(CsReturnKind::Value(ty.to_string()))
+}
+
+fn csharp_async_return_kind(return_type: &str) -> Result<Option<CsReturnKind>, String> {
+    let ty = return_type.trim();
+    if bare_cs_type(ty) == "Task" || bare_cs_type(ty) == "ValueTask" {
+        return Ok(Some(CsReturnKind::AsyncVoid));
+    }
+
+    let Some(open) = ty.find('<') else {
+        return if csharp_type_mentions_task(ty) {
+            Err(format!("unsupported C# async return type '{ty}'"))
+        } else {
+            Ok(None)
+        };
+    };
+    let Some(close) = find_matching_angle(ty, open) else {
+        return Err(format!("unsupported C# async return type '{ty}'"));
+    };
+    if !ty[close + 1..].trim().is_empty() {
+        return if csharp_type_mentions_task(ty) {
+            Err(format!("unsupported C# async return type '{ty}'"))
+        } else {
+            Ok(None)
+        };
+    }
+
+    let outer = bare_cs_type(&ty[..open]);
+    if outer != "Task" && outer != "ValueTask" {
+        return Ok(None);
+    }
+
+    let inner = ty[open + 1..close].trim();
+    if inner.is_empty() || split_cs_params(inner).len() != 1 {
+        return Err(format!("unsupported C# async return type '{ty}'"));
+    }
+    Ok(Some(CsReturnKind::AsyncValue(inner.to_string())))
+}
+
+fn csharp_type_mentions_task(ty: &str) -> bool {
+    ty.split(|ch: char| !(ch.is_alphanumeric() || ch == '_' || ch == '.'))
+        .any(|part| matches!(bare_cs_type(part).as_str(), "Task" | "ValueTask"))
+}
+
+fn find_matching_angle(s: &str, open: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for (idx, ch) in s.char_indices().skip_while(|(idx, _)| *idx < open) {
+        match ch {
+            '<' => depth += 1,
+            '>' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(idx);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn csharp_materialization_helpers() -> &'static str {
@@ -2990,6 +3078,79 @@ mod tests {
 
         assert!(program.contains("catch (System.Exception __ex)"));
         assert!(program.contains("SpecGateRuntime.EmitEvent(\"$fault\", __ex.Message);"));
+    }
+
+    #[test]
+    fn csharp_program_awaits_task_result_and_emits_unwrapped_value() {
+        let mut inputs = BTreeMap::new();
+        inputs.insert("url".to_string(), serde_yaml::Value::String("https://example.com".to_string()));
+        let case = super::spec::Case {
+            name: "fetch_returns_response".to_string(),
+            target: None,
+            operation: Some("fetch".to_string()),
+            steps: Vec::new(),
+            step_inputs: Vec::new(),
+            inputs,
+            expected: Vec::new(),
+            level: super::CaseLevel::Must,
+            source: None,
+        };
+        let op = CsOp {
+            op_name: "fetch".to_string(),
+            source_path: PathBuf::new(),
+            class_name: "AsyncOps".to_string(),
+            method_of: "AsyncOps".to_string(),
+            method_name: "Fetch".to_string(),
+            params: vec![("url".to_string(), "string".to_string())],
+            return_type: "Task<string>".to_string(),
+            is_static: true,
+        };
+
+        let program = generate_csharp_program(&[&case], &[op], &[], &BTreeMap::new()).expect("program");
+
+        assert!(program.contains("string __sg_result_0 = await AsyncOps.Fetch(__sg_arg_0_url);"));
+        assert!(program.contains("SpecGateRuntime.EmitResult(__sg_result_0);"));
+        assert!(!program.contains("Task<string> __sg_result_0 = AsyncOps.Fetch"));
+    }
+
+    #[test]
+    fn csharp_program_awaits_void_like_task_without_result_event() {
+        let case = super::spec::Case {
+            name: "send".to_string(),
+            target: None,
+            operation: Some("send".to_string()),
+            steps: Vec::new(),
+            step_inputs: Vec::new(),
+            inputs: BTreeMap::new(),
+            expected: Vec::new(),
+            level: super::CaseLevel::Must,
+            source: None,
+        };
+        let op = CsOp {
+            op_name: "send".to_string(),
+            source_path: PathBuf::new(),
+            class_name: "AsyncOps".to_string(),
+            method_of: "AsyncOps".to_string(),
+            method_name: "Send".to_string(),
+            params: Vec::new(),
+            return_type: "System.Threading.Tasks.ValueTask".to_string(),
+            is_static: true,
+        };
+
+        let program = generate_csharp_program(&[&case], &[op], &[], &BTreeMap::new()).expect("program");
+
+        assert!(program.contains("await AsyncOps.Send();"));
+        assert!(!program.contains("SpecGateRuntime.EmitResult(__sg_result_0);"));
+    }
+
+    #[test]
+    fn csharp_async_return_parser_keeps_nested_generic_result_type() {
+        let kind = super::csharp_return_kind("System.Threading.Tasks.ValueTask<Dictionary<string, List<int>>>").expect("return kind");
+
+        match kind {
+            super::CsReturnKind::AsyncValue(inner) => assert_eq!(inner, "Dictionary<string, List<int>>"),
+            _ => panic!("expected async value"),
+        }
     }
 
     #[test]
