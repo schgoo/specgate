@@ -19,3 +19,8 @@ dotnet_diagnostic.IDE0060.severity = none
 # CA1707: xunit test methods use the conventional Method_Scenario_Expected
 # naming; underscores are idiomatic for test names.
 dotnet_diagnostic.CA1707.severity = none
+
+# CA1822: mocked dependency methods are intentionally instance methods (their
+# calls are intercepted through a [SpecMock] field); their stub bodies need not
+# touch instance state, so "mark as static" does not apply.
+dotnet_diagnostic.CA1822.severity = none

@@ -1431,6 +1431,7 @@ fn generate_csharp_program(
         writeln!(out, "// case: {}", case.name).expect("fmt");
         out.push_str("{\n");
         out.push_str("    SpecGateRuntime.Reset();\n");
+        emit_csharp_mock_tables(&mut out, &case.inputs);
 
         for binding in &bindings {
             let args = render_csharp_construct_args(&binding.setup.params, &binding.target, &case.inputs);
@@ -1819,8 +1820,9 @@ fn copy_selected_csharp_sources(root: &Path, out_root: &Path, source_files: &BTr
             if let Some(parent) = out_path.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| format!("failed to create C# source output dir: {e}"))?;
             }
-            std::fs::write(out_path, instrument_csharp_source(&text))
-                .map_err(|e| format!("failed to write instrumented C# source: {e}"))?;
+            let instrumented =
+                instrument_csharp_source(&text).map_err(|e| format!("failed to instrument C# source '{}': {e}", path.display()))?;
+            std::fs::write(out_path, instrumented).map_err(|e| format!("failed to write instrumented C# source: {e}"))?;
         }
     }
     Ok(())
@@ -1833,13 +1835,109 @@ fn is_skipped_csharp_rel_path(path: &Path) -> bool {
     })
 }
 
-fn instrument_csharp_source(text: &str) -> String {
+fn emit_csharp_mock_tables(out: &mut String, inputs: &BTreeMap<String, serde_yaml::Value>) {
+    use std::fmt::Write as _;
+
+    for (name, value) in inputs {
+        let serde_yaml::Value::Mapping(entries) = value else {
+            continue;
+        };
+        writeln!(
+            out,
+            "    SpecGateRuntime.SetMock({}, new Dictionary<string, string>",
+            csharp_string_literal(name)
+        )
+        .expect("fmt");
+        out.push_str("    {\n");
+        for (key, response) in entries {
+            if let (Some(key), Some(response)) = (key.as_str(), response.as_str()) {
+                writeln!(
+                    out,
+                    "        [{}] = {},",
+                    csharp_string_literal(key),
+                    csharp_string_literal(response)
+                )
+                .expect("fmt");
+            }
+        }
+        out.push_str("    });\n");
+    }
+}
+
+fn instrument_csharp_source(text: &str) -> Result<String, String> {
     use std::fmt::Write as _;
 
     let mut out = String::new();
     let mut pending_spec_event_attrs: Vec<String> = Vec::new();
+    let mut pending_spec_mock: Option<String> = None;
+    let mut mock_fields: BTreeMap<String, String> = BTreeMap::new();
+    let mut pending_operation = false;
+    let mut pending_operation_sig = String::new();
+    let mut operation_return_type: Option<String> = None;
+    let mut operation_brace_depth = 0usize;
+    let mut mock_counter = 0usize;
+
     for line in text.lines() {
         let trimmed = line.trim();
+        let in_operation = operation_return_type.is_some() && operation_brace_depth > 0;
+        if in_operation {
+            if let Some(rewritten) = rewrite_csharp_mock_line(
+                line,
+                operation_return_type.as_deref().unwrap_or("void"),
+                &mock_fields,
+                &mut mock_counter,
+            )? {
+                out.push_str(&rewritten);
+                out.push('\n');
+            } else if line_contains_mock_receiver_call(line, &mock_fields) {
+                return Err(format!("unsupported [SpecMock] call shape in operation body: {trimmed}"));
+            } else {
+                out.push_str(line);
+                out.push('\n');
+            }
+            update_csharp_brace_depth(line, &mut operation_brace_depth);
+            if operation_brace_depth == 0 {
+                operation_return_type = None;
+            }
+            continue;
+        }
+
+        if let Some(class_name) = extract_cs_class(trimmed) {
+            mock_fields.clear();
+            pending_spec_mock = None;
+            let _ = class_name;
+        }
+
+        if let Some(mock_name) = extract_spec_mock_attr(trimmed) {
+            pending_spec_mock = Some(mock_name);
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+
+        if let Some(mock_name) = pending_spec_mock.take()
+            && let Some(field_name) = parse_csharp_field_name(line)
+        {
+            mock_fields.insert(field_name, mock_name);
+        }
+
+        if extract_spec_operation_attr(trimmed).is_some() {
+            pending_operation = true;
+            pending_operation_sig.clear();
+        }
+
+        if pending_operation && !trimmed.is_empty() && !trimmed.starts_with('[') {
+            if !pending_operation_sig.is_empty() {
+                pending_operation_sig.push(' ');
+            }
+            pending_operation_sig.push_str(trimmed);
+            if let Some((_method_name, _params, return_type, _is_static)) = extract_cs_method_sig(&pending_operation_sig) {
+                operation_return_type = Some(return_type);
+                pending_operation = false;
+                pending_operation_sig.clear();
+            }
+        }
+
         if trimmed.starts_with("[SpecEvent") {
             pending_spec_event_attrs.push(line.to_string());
             continue;
@@ -1880,12 +1978,152 @@ fn instrument_csharp_source(text: &str) -> String {
         }
         out.push_str(line);
         out.push('\n');
+        if operation_return_type.is_some() && operation_brace_depth == 0 && line.contains('{') {
+            update_csharp_brace_depth(line, &mut operation_brace_depth);
+        }
     }
     for attr in pending_spec_event_attrs {
         out.push_str(&attr);
         out.push('\n');
     }
-    out
+    Ok(out)
+}
+
+fn parse_csharp_field_name(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    let before_init = trimmed
+        .split_once('=')
+        .map_or(trimmed.trim_end_matches(';'), |(before, _)| before.trim());
+    let member = parse_csharp_member_prefix(before_init)?;
+    if member.modifiers.iter().any(|m| m == "static") {
+        return None;
+    }
+    Some(member.name)
+}
+
+fn extract_spec_mock_attr(line: &str) -> Option<String> {
+    let s = line.trim();
+    let rest = s.strip_prefix("[SpecMock(\"")?;
+    let name = rest.split('"').next()?;
+    Some(name.to_string())
+}
+
+fn rewrite_csharp_mock_line(
+    line: &str,
+    operation_return_type: &str,
+    mock_fields: &BTreeMap<String, String>,
+    counter: &mut usize,
+) -> Result<Option<String>, String> {
+    let indent = &line[..line.len() - line.trim_start().len()];
+    let trimmed = line.trim();
+    if !trimmed.ends_with(';') {
+        return Ok(None);
+    }
+
+    if let Some(rest) = trimmed.strip_prefix("return ") {
+        let expr = rest.trim_end_matches(';').trim();
+        if let Some(call) = parse_csharp_mock_call(expr, mock_fields)? {
+            let hit = next_csharp_mock_hit(counter);
+            return Ok(Some(format!(
+                "{indent}var {hit}_value = SpecGate.Runtime.SpecGateRuntime.MockCall<{}>({}, {}, out var {hit}); if (!{hit}) return SpecGate.Runtime.SpecGateRuntime.SpecDefault<{}>(); return {hit}_value;",
+                operation_return_type.trim(),
+                csharp_string_literal(&call.mock_name),
+                call.key_expr,
+                operation_return_type.trim()
+            )));
+        }
+        return Ok(None);
+    }
+
+    let Some((lhs, rhs_with_semicolon)) = trimmed.split_once('=') else {
+        return Ok(None);
+    };
+    let rhs = rhs_with_semicolon.trim_end_matches(';').trim();
+    let Some(call) = parse_csharp_mock_call(rhs, mock_fields)? else {
+        return Ok(None);
+    };
+    let hit = next_csharp_mock_hit(counter);
+    if let Some(member) = parse_csharp_member_prefix(lhs.trim()) {
+        let call_type = if member.ty == "var" { "string" } else { member.ty.as_str() };
+        return Ok(Some(format!(
+            "{indent}{} = SpecGate.Runtime.SpecGateRuntime.MockCall<{}>({}, {}, out var {hit}); if (!{hit}) return SpecGate.Runtime.SpecGateRuntime.SpecDefault<{}>();",
+            lhs.trim(),
+            call_type.trim(),
+            csharp_string_literal(&call.mock_name),
+            call.key_expr,
+            operation_return_type.trim()
+        )));
+    }
+
+    Ok(Some(format!(
+        "{indent}{} = SpecGate.Runtime.SpecGateRuntime.MockCall<string>({}, {}, out var {hit}); if (!{hit}) return SpecGate.Runtime.SpecGateRuntime.SpecDefault<{}>();",
+        lhs.trim(),
+        csharp_string_literal(&call.mock_name),
+        call.key_expr,
+        operation_return_type.trim()
+    )))
+}
+
+fn next_csharp_mock_hit(counter: &mut usize) -> String {
+    let value = format!("__sg_mock_hit_{counter}");
+    *counter += 1;
+    value
+}
+
+struct CsMockCall {
+    mock_name: String,
+    key_expr: String,
+}
+
+fn parse_csharp_mock_call(expr: &str, mock_fields: &BTreeMap<String, String>) -> Result<Option<CsMockCall>, String> {
+    let expr = expr.trim();
+    for (field, mock_name) in mock_fields {
+        for prefix in [format!("{field}."), format!("this.{field}.")] {
+            if let Some(rest) = expr.strip_prefix(&prefix) {
+                let Some(paren_open) = rest.find('(') else {
+                    continue;
+                };
+                let method = rest[..paren_open].trim();
+                if method.is_empty() || !method.chars().all(is_csharp_ident_continue) {
+                    continue;
+                }
+                let paren_close =
+                    find_matching_paren(rest, paren_open).ok_or_else(|| format!("invalid [SpecMock] call expression: {expr}"))?;
+                if rest[paren_close + 1..].trim().is_empty() {
+                    let args = rest[paren_open + 1..paren_close].trim();
+                    let split = split_cs_params(args);
+                    let Some(last_arg) = split.last() else {
+                        return Err(format!("[SpecMock] call must have at least one argument: {expr}"));
+                    };
+                    let last_arg = last_arg.trim();
+                    if last_arg.starts_with("ref ") || last_arg.starts_with("out ") {
+                        return Err(format!("[SpecMock] call cannot use ref/out arguments: {expr}"));
+                    }
+                    return Ok(Some(CsMockCall {
+                        mock_name: mock_name.clone(),
+                        key_expr: last_arg.to_string(),
+                    }));
+                }
+            }
+        }
+    }
+    Ok(None)
+}
+
+fn line_contains_mock_receiver_call(line: &str, mock_fields: &BTreeMap<String, String>) -> bool {
+    mock_fields
+        .keys()
+        .any(|field| line.contains(&format!("{field}.")) || line.contains(&format!("this.{field}.")))
+}
+
+fn update_csharp_brace_depth(line: &str, depth: &mut usize) {
+    for ch in line.chars() {
+        match ch {
+            '{' => *depth += 1,
+            '}' => *depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
 }
 
 struct CsAutoProperty {

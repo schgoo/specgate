@@ -26,9 +26,14 @@ public static class SpecGateRuntime
     [ThreadStatic]
     private static Dictionary<object, string?>? _objectPrefixes;
 
+    [ThreadStatic]
+    private static Dictionary<string, Dictionary<string, string>>? _mocks;
+
     private static List<string> Events => _events ??= [];
 
     private static Dictionary<object, string?> ObjectPrefixes => _objectPrefixes ??= new Dictionary<object, string?>(ReferenceComparer.Instance);
+
+    private static Dictionary<string, Dictionary<string, string>> Mocks => _mocks ??= [];
 
     /// <summary>
     /// Clears the current thread's accumulated trace records and registered
@@ -38,6 +43,7 @@ public static class SpecGateRuntime
     {
         Events.Clear();
         ObjectPrefixes.Clear();
+        Mocks.Clear();
     }
 
     /// <summary>
@@ -243,6 +249,52 @@ public static class SpecGateRuntime
         }
         sb.Append(']');
         return sb.ToString();
+    }
+
+    internal static void SetMock(string name, IDictionary<string, string> entries)
+    {
+        Mocks[name] = new Dictionary<string, string>(entries, StringComparer.Ordinal);
+    }
+
+    internal static T MockCall<T>(string name, object? input, out bool hit)
+    {
+        string key = CanonicalMockKey(input);
+        EmitEvent(name + ".request", key);
+        if (Mocks.TryGetValue(name, out var table) && table.TryGetValue(key, out string? response))
+        {
+            hit = true;
+            EmitEvent(name + ".response", response);
+            return FromMockResponse<T>(response);
+        }
+
+        hit = false;
+        EmitEvent(name + ".error", "no mock response for input '" + key + "'");
+        return SpecDefault<T>();
+    }
+
+    internal static T SpecDefault<T>()
+    {
+        if (typeof(T) == typeof(string))
+        {
+            return (T)(object)string.Empty;
+        }
+
+        return default!;
+    }
+
+    private static string CanonicalMockKey(object? input)
+    {
+        return input is string s ? s : ToSpecValue(input).ToJson();
+    }
+
+    private static T FromMockResponse<T>(string response)
+    {
+        if (typeof(T) == typeof(string))
+        {
+            return (T)(object)response;
+        }
+
+        return (T)Convert.ChangeType(response, typeof(T), CultureInfo.InvariantCulture);
     }
 
     private static string QuoteJson(string s)

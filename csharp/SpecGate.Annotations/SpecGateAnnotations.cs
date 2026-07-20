@@ -105,3 +105,35 @@ public sealed class SpecEventAttribute : Attribute
     /// <param name="name">The name to use in SpecGate traces.</param>
     public SpecEventAttribute(string name) => Name = name;
 }
+
+/// <summary>
+/// Marks a dependency field as a table-driven mock. Calls made through the
+/// annotated field inside a SpecGate operation are intercepted by the harness:
+/// the real dependency is never invoked. Each intercepted call emits a
+/// <c>&lt;name&gt;.request</c> event with its (last) argument, then either a
+/// <c>&lt;name&gt;.response</c> event carrying the table value on a hit, or a
+/// <c>&lt;name&gt;.error</c> event on a miss (in which case the operation
+/// returns its default value).
+/// </summary>
+/// <remarks>
+/// The mock table is seeded per case from a spec input map keyed by the mock
+/// <see cref="Name"/>. The annotated field's type may be any concrete type,
+/// including third-party or sealed types, because interception happens at the
+/// call site rather than by substituting the type.
+/// </remarks>
+[AttributeUsage(AttributeTargets.Field)]
+public sealed class SpecMockAttribute : Attribute
+{
+    /// <summary>
+    /// Gets the mock name, used both as the spec-input key for the response
+    /// table and as the prefix for the emitted <c>request</c>/<c>response</c>/
+    /// <c>error</c> events.
+    /// </summary>
+    public string Name { get; }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SpecMockAttribute"/> class.
+    /// </summary>
+    /// <param name="name">The mock name (spec-input key and event prefix).</param>
+    public SpecMockAttribute(string name) => Name = name;
+}
