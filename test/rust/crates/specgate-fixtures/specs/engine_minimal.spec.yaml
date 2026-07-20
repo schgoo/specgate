@@ -1,0 +1,15 @@
+spec_version: "0.4.0"
+name: fixture.engine_minimal
+binding: binding.yaml
+
+operations:
+  probe:
+    outputs:
+      - $result: i32
+
+cases:
+  - name: probe_returns_one
+    desc: Trivial engine self-test vehicle — a known-good spec that must pass.
+    operation: probe
+    expected:
+      - $result: 1

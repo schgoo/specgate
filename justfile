@@ -18,6 +18,13 @@ test:
 self-host:
     cd rust && cargo test -p specgate --test harness_self_host -- --ignored
 
+# Run the conformance self-hosting test: the harness validates the conformance
+# ledger by running run_spec on specs/specgate.conformance.spec.yaml, exercising
+# the multi-target byte-identity path. Doubly-nested and #[ignore]d like the
+# harness one.
+conformance-self-host:
+    cd rust && cargo test -p specgate --test conformance_self_host -- --ignored
+
 # Run the CLI self-hosting test: the harness validates the CLI's own spec by
 # running run_spec on specs/specgate.cli.spec.yaml, exercising the CLI's
 # validate/run operations. Doubly-nested and #[ignore]d like the harness one.
@@ -103,4 +110,4 @@ format-check-cs:
     dotnet format SpecGate.slnx --verify-no-changes
 
 # Run all pre-PR checks
-check: build test clippy format-check deny validate extract-check readme-check self-host cli-self-host coverage dotnet-build dotnet-test format-check-cs
+check: build test clippy format-check deny validate extract-check readme-check self-host conformance-self-host cli-self-host coverage dotnet-build dotnet-test format-check-cs
