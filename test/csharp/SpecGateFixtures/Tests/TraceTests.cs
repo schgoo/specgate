@@ -1,4 +1,7 @@
 using SpecGate.Runtime;
+using SpecGateFixtures.Conformance.Basic;
+using SpecGateFixtures.Conformance.Structured;
+using SpecGateFixtures.Conformance.SumTypes;
 using Xunit;
 
 namespace SpecGateFixtures.Tests;
