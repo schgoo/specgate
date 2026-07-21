@@ -7,7 +7,7 @@ use crate::spec::{Case, Spec};
 use serde_yaml::Value;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 pub struct GeneratedProject {
     pub crate_dir: PathBuf,
@@ -36,10 +36,10 @@ pub(crate) struct FixtureCrateInfo {
     cargo_name: String,
     /// Rust identifier form (hyphens → underscores, e.g., `specgate_fixtures`).
     rust_ident: String,
-    /// Module name declared in lib.rs (e.g., `cross_dep`), or `None` when the
-    /// contributing source is the crate root (`src/lib.rs`) — i.e. the op is a
-    /// `pub` item at the crate root and is linked as `use <crate> as fut;`.
-    module_name: Option<String>,
+    /// Full public module path from the crate root (e.g.,
+    /// `conformance::basic::stateless_add`). Empty when the contributing
+    /// source is the crate root (`src/lib.rs`) and linked as `use <crate> as fut;`.
+    module_path: Vec<String>,
     /// Path to the fixture crate root.
     path: PathBuf,
 }
@@ -48,48 +48,50 @@ pub(crate) struct FixtureCrateInfo {
 /// when the target has no `[package] name` (so it cannot be linked at all).
 ///
 /// This does NOT require the module to be `pub mod`-declared: a module that is
-/// not publicly declared still yields a `use <crate>::<module> as fut;` link
+/// not publicly declared still yields a `use <crate>::<full::path> as fut;` link
 /// that fails to compile, surfacing the target's own compiler diagnostics
 /// (e.g. a syntax error in the source) as a `"source failed to compile"` error.
 /// Whether the module is a legitimate public path is decided separately by
 /// [`module_publicly_linkable`], which gates the clean reachability diagnostic.
-fn crate_info_for(fixture_pkg_root: &Path, module_name: &str) -> Option<FixtureCrateInfo> {
+fn crate_info_for(fixture_pkg_root: &Path, fixture_src: &Path) -> Option<FixtureCrateInfo> {
     let cargo_toml = fixture_pkg_root.join("Cargo.toml");
     let text = std::fs::read_to_string(&cargo_toml).ok()?;
     let cargo_name = parse_cargo_name(&text)?;
     let rust_ident = cargo_name.replace('-', "_");
-
-    // Crate-root op (`src/lib.rs`): the op is a public item at the crate root,
-    // so link the crate itself with no submodule (`use <crate> as fut;`).
-    let module = (module_name != "lib").then(|| module_name.to_string());
+    let module_path = module_path_for_source(fixture_pkg_root, fixture_src);
 
     Some(FixtureCrateInfo {
         cargo_name,
         rust_ident,
-        module_name: module,
+        module_path,
         path: fixture_pkg_root.to_path_buf(),
     })
 }
 
-/// Whether `module_name` is reachable through the crate's public path: it is the
-/// crate root (`lib`), or `src/lib.rs` has an *active* `pub mod <module_name>;`
-/// declaration (a commented-out declaration does not count).
-pub(crate) fn module_publicly_linkable(fixture_pkg_root: &Path, module_name: &str) -> bool {
-    if module_name == "lib" {
+/// Whether the source's module is reachable through the crate's public path.
+/// Crate-root sources are reachable; nested sources require an *active*
+/// `pub mod <segment>;` declaration at each parent module boundary.
+pub(crate) fn module_publicly_linkable(fixture_pkg_root: &Path, fixture_src: &Path) -> bool {
+    let module_path = module_path_for_source(fixture_pkg_root, fixture_src);
+    if module_path.is_empty() {
         return true;
     }
-    let Ok(lib_text) = std::fs::read_to_string(fixture_pkg_root.join("src").join("lib.rs")) else {
-        return false;
-    };
-    let decl = format!("pub mod {module_name};");
-    lib_text.lines().any(|line| {
-        let l = line.trim_start();
-        if l.starts_with("//") {
+
+    let mut parent_path = Vec::new();
+    for segment in &module_path {
+        let Some(module_file) = module_file_for_path(fixture_pkg_root, &parent_path) else {
+            return false;
+        };
+        let Ok(text) = std::fs::read_to_string(module_file) else {
+            return false;
+        };
+        if !has_active_pub_mod(&text, segment) {
             return false;
         }
-        // Ignore any trailing line comment before matching the declaration.
-        l.split("//").next().unwrap_or(l).contains(&decl)
-    })
+        parent_path.push(segment.clone());
+    }
+
+    true
 }
 
 /// A human-friendly label for the target crate (its `[package] name`, falling
@@ -110,14 +112,9 @@ pub(crate) fn crate_label(package_root: &Path) -> String {
 /// cannot be linked at all. (Public-reachability of individual operations is
 /// enforced earlier, in the harness pre-flight.)
 pub(crate) fn resolve_fixture_crates(package_root: &Path, fixture_srcs: &[PathBuf]) -> Result<Vec<FixtureCrateInfo>, String> {
-    let module_names: Vec<String> = fixture_srcs
-        .iter()
-        .map(|p| p.file_stem().and_then(|s| s.to_str()).unwrap_or("fixture").to_string())
-        .collect();
-
     let mut resolved: Vec<FixtureCrateInfo> = Vec::new();
-    for m in &module_names {
-        match crate_info_for(package_root, m) {
+    for src in fixture_srcs {
+        match crate_info_for(package_root, src) {
             Some(info) => resolved.push(info),
             None => {
                 return Err(format!(
@@ -129,6 +126,146 @@ pub(crate) fn resolve_fixture_crates(package_root: &Path, fixture_srcs: &[PathBu
     }
 
     Ok(resolved)
+}
+
+fn module_path_for_source(fixture_pkg_root: &Path, fixture_src: &Path) -> Vec<String> {
+    let src_dir = fixture_pkg_root.join("src");
+    let rel = fixture_src.strip_prefix(&src_dir).unwrap_or(fixture_src);
+    if rel == Path::new("lib.rs") {
+        return Vec::new();
+    }
+
+    let mut segments: Vec<String> = Vec::new();
+    if fixture_src.is_dir() {
+        for component in rel.components() {
+            if let Component::Normal(seg) = component {
+                segments.push(seg.to_string_lossy().into_owned());
+            }
+        }
+        return segments;
+    }
+
+    let parent = rel.parent().unwrap_or_else(|| Path::new(""));
+    for component in parent.components() {
+        if let Component::Normal(seg) = component {
+            segments.push(seg.to_string_lossy().into_owned());
+        }
+    }
+    if rel.file_name().and_then(|s| s.to_str()) != Some("mod.rs")
+        && let Some(stem) = rel.file_stem().and_then(|s| s.to_str())
+    {
+        segments.push(stem.to_string());
+    }
+    segments
+}
+
+fn module_file_for_path(fixture_pkg_root: &Path, module_path: &[String]) -> Option<PathBuf> {
+    let src_dir = fixture_pkg_root.join("src");
+    if module_path.is_empty() {
+        return Some(src_dir.join("lib.rs"));
+    }
+
+    let mut file_path = src_dir.clone();
+    for segment in module_path {
+        file_path.push(segment);
+    }
+    file_path.set_extension("rs");
+    if file_path.exists() {
+        return Some(file_path);
+    }
+
+    let mut mod_path = src_dir;
+    for segment in module_path {
+        mod_path.push(segment);
+    }
+    mod_path.push("mod.rs");
+    mod_path.exists().then_some(mod_path)
+}
+
+fn has_active_pub_mod(text: &str, segment: &str) -> bool {
+    let decl = format!("pub mod {segment};");
+    let raw_decl = format!("pub mod r#{segment};");
+    text.lines().any(|line| {
+        let l = line.trim_start();
+        if l.starts_with("//") {
+            return false;
+        }
+        let active = l.split("//").next().unwrap_or(l);
+        active.contains(&decl) || active.contains(&raw_decl)
+    })
+}
+
+fn module_path_suffix(module_path: &[String]) -> String {
+    module_path
+        .iter()
+        .map(|segment| rust_module_segment(segment))
+        .collect::<Vec<_>>()
+        .join("::")
+}
+
+fn rust_module_segment(segment: &str) -> String {
+    if is_rust_keyword(segment) {
+        format!("r#{segment}")
+    } else {
+        segment.to_string()
+    }
+}
+
+fn is_rust_keyword(segment: &str) -> bool {
+    matches!(
+        segment,
+        "as" | "break"
+            | "const"
+            | "continue"
+            | "crate"
+            | "else"
+            | "enum"
+            | "extern"
+            | "false"
+            | "fn"
+            | "for"
+            | "if"
+            | "impl"
+            | "in"
+            | "let"
+            | "loop"
+            | "match"
+            | "mod"
+            | "move"
+            | "mut"
+            | "pub"
+            | "ref"
+            | "return"
+            | "self"
+            | "Self"
+            | "static"
+            | "struct"
+            | "super"
+            | "trait"
+            | "true"
+            | "type"
+            | "unsafe"
+            | "use"
+            | "where"
+            | "while"
+            | "async"
+            | "await"
+            | "dyn"
+            | "abstract"
+            | "become"
+            | "box"
+            | "do"
+            | "final"
+            | "macro"
+            | "override"
+            | "priv"
+            | "try"
+            | "typeof"
+            | "unsized"
+            | "virtual"
+            | "yield"
+            | "gen"
+    )
 }
 
 fn parse_cargo_name(toml: &str) -> Option<String> {
@@ -268,20 +405,19 @@ fn render_main(
 
     match fixture_crates {
         // Single module: alias the linked public path directly as `fut`.
-        // A submodule op -> `use <crate>::<module> as fut;`; a crate-root op
-        // (defined in the crate's `lib.rs`) -> `use <crate> as fut;`.
-        [fc] => match &fc.module_name {
-            Some(module) => writeln!(out, "use {}::{} as fut;", fc.rust_ident, module).expect("fmt"),
-            None => writeln!(out, "use {} as fut;", fc.rust_ident).expect("fmt"),
-        },
+        // A submodule op -> `use <crate>::<full::path> as fut;`; a crate-root
+        // op (defined in `src/lib.rs`) -> `use <crate> as fut;`.
+        [fc] if fc.module_path.is_empty() => writeln!(out, "use {} as fut;", fc.rust_ident).expect("fmt"),
+        [fc] => writeln!(out, "use {}::{} as fut;", fc.rust_ident, module_path_suffix(&fc.module_path)).expect("fmt"),
         // Multiple modules (operations split across files): re-export each
         // module's public items into a synthetic `fut` module.
         crates => {
             out.push_str("mod fut {\n");
             for fc in crates {
-                match &fc.module_name {
-                    Some(module) => writeln!(out, "    pub use ::{}::{}::*;", fc.rust_ident, module).expect("fmt"),
-                    None => writeln!(out, "    pub use ::{}::*;", fc.rust_ident).expect("fmt"),
+                if fc.module_path.is_empty() {
+                    writeln!(out, "    pub use ::{}::*;", fc.rust_ident).expect("fmt");
+                } else {
+                    writeln!(out, "    pub use ::{}::{}::*;", fc.rust_ident, module_path_suffix(&fc.module_path)).expect("fmt");
                 }
             }
             out.push_str("}\n");
@@ -732,6 +868,21 @@ mod tests {
     use super::*;
     use std::collections::BTreeSet;
 
+    fn write_file(path: &Path, text: &str) {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(path, text).unwrap();
+    }
+
+    fn write_crate(root: &Path, lib_rs: &str) {
+        write_file(
+            root.join("Cargo.toml").as_path(),
+            "[package]\nname = \"fixture-crate\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+        );
+        write_file(root.join("src").join("lib.rs").as_path(), lib_rs);
+    }
+
     fn empty_spec() -> Spec {
         Spec {
             binding_paths: vec![],
@@ -887,5 +1038,157 @@ mod tests {
             args.contains("yaml_deser") || args.contains("Offset"),
             "complex default not materialized: {args}"
         );
+    }
+
+    #[test]
+    fn crate_info_uses_nested_module_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_crate(tmp.path(), "pub mod conformance;\n");
+        let src = tmp.path().join("src").join("conformance").join("basic").join("stateless_add.rs");
+        write_file(src.as_path(), "");
+
+        let info = crate_info_for(tmp.path(), &src).unwrap();
+
+        assert_eq!(info.rust_ident, "fixture_crate");
+        assert_eq!(
+            info.module_path,
+            vec!["conformance".to_string(), "basic".to_string(), "stateless_add".to_string()]
+        );
+    }
+
+    #[test]
+    fn module_publicly_linkable_verifies_nested_pub_mod_chain() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_crate(tmp.path(), "pub mod conformance;\n");
+        write_file(
+            tmp.path().join("src").join("conformance").join("mod.rs").as_path(),
+            "pub mod basic;\n",
+        );
+        write_file(
+            tmp.path().join("src").join("conformance").join("basic").join("mod.rs").as_path(),
+            "pub mod stateless_add;\n",
+        );
+        let src = tmp.path().join("src").join("conformance").join("basic").join("stateless_add.rs");
+        write_file(src.as_path(), "");
+
+        assert!(module_publicly_linkable(tmp.path(), &src));
+    }
+
+    #[test]
+    fn module_publicly_linkable_rejects_nonpublic_nested_chain() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_crate(tmp.path(), "pub mod conformance;\n");
+        write_file(tmp.path().join("src").join("conformance").join("mod.rs").as_path(), "mod basic;\n");
+        write_file(
+            tmp.path().join("src").join("conformance").join("basic").join("mod.rs").as_path(),
+            "pub mod hidden;\n",
+        );
+        let src = tmp.path().join("src").join("conformance").join("basic").join("hidden.rs");
+        write_file(src.as_path(), "");
+
+        assert!(!module_publicly_linkable(tmp.path(), &src));
+    }
+
+    #[test]
+    fn module_publicly_linkable_accepts_directory_module_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_crate(tmp.path(), "pub mod conformance;\n");
+        write_file(
+            tmp.path().join("src").join("conformance").join("mod.rs").as_path(),
+            "pub mod multi_file;\n",
+        );
+        let dir = tmp.path().join("src").join("conformance").join("multi_file");
+        write_file(dir.join("mod.rs").as_path(), "pub mod greet;\n");
+
+        assert!(module_publicly_linkable(tmp.path(), &dir));
+    }
+
+    #[test]
+    fn module_publicly_linkable_accepts_raw_identifier_segments() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_crate(tmp.path(), "pub mod conformance;\n");
+        write_file(
+            tmp.path().join("src").join("conformance").join("mod.rs").as_path(),
+            "pub mod r#async;\n",
+        );
+        write_file(
+            tmp.path().join("src").join("conformance").join("async").join("mod.rs").as_path(),
+            "pub mod async_fetch;\n",
+        );
+        let src = tmp.path().join("src").join("conformance").join("async").join("async_fetch.rs");
+        write_file(src.as_path(), "");
+
+        assert!(module_publicly_linkable(tmp.path(), &src));
+    }
+
+    #[test]
+    fn render_main_emits_full_nested_link_paths() {
+        let spec = empty_spec();
+        let annotated = empty_annotated();
+        let fc = FixtureCrateInfo {
+            cargo_name: "fixture-crate".to_string(),
+            rust_ident: "fixture_crate".to_string(),
+            module_path: vec!["conformance".to_string(), "basic".to_string(), "stateless_add".to_string()],
+            path: PathBuf::from("fixture"),
+        };
+
+        let main = render_main(&spec, &[], &annotated, Path::new("traces.json"), None, &[fc]);
+
+        assert!(main.contains("use fixture_crate::conformance::basic::stateless_add as fut;"));
+    }
+
+    #[test]
+    fn render_main_emits_crate_root_link_path() {
+        let spec = empty_spec();
+        let annotated = empty_annotated();
+        let fc = FixtureCrateInfo {
+            cargo_name: "fixture-crate".to_string(),
+            rust_ident: "fixture_crate".to_string(),
+            module_path: Vec::new(),
+            path: PathBuf::from("fixture"),
+        };
+
+        let main = render_main(&spec, &[], &annotated, Path::new("traces.json"), None, &[fc]);
+
+        assert!(main.contains("use fixture_crate as fut;"));
+    }
+
+    #[test]
+    fn render_main_reexports_full_nested_paths_for_multi_module() {
+        let spec = empty_spec();
+        let annotated = empty_annotated();
+        let first = FixtureCrateInfo {
+            cargo_name: "fixture-crate".to_string(),
+            rust_ident: "fixture_crate".to_string(),
+            module_path: vec!["conformance".to_string(), "basic".to_string(), "multi_toplevel_a".to_string()],
+            path: PathBuf::from("fixture"),
+        };
+        let second = FixtureCrateInfo {
+            cargo_name: "fixture-crate".to_string(),
+            rust_ident: "fixture_crate".to_string(),
+            module_path: vec!["conformance".to_string(), "basic".to_string(), "multi_toplevel_b".to_string()],
+            path: PathBuf::from("fixture"),
+        };
+
+        let main = render_main(&spec, &[], &annotated, Path::new("traces.json"), None, &[first, second]);
+
+        assert!(main.contains("pub use ::fixture_crate::conformance::basic::multi_toplevel_a::*;"));
+        assert!(main.contains("pub use ::fixture_crate::conformance::basic::multi_toplevel_b::*;"));
+    }
+
+    #[test]
+    fn render_main_escapes_keyword_module_segments() {
+        let spec = empty_spec();
+        let annotated = empty_annotated();
+        let fc = FixtureCrateInfo {
+            cargo_name: "fixture-crate".to_string(),
+            rust_ident: "fixture_crate".to_string(),
+            module_path: vec!["conformance".to_string(), "async".to_string(), "async_fetch".to_string()],
+            path: PathBuf::from("fixture"),
+        };
+
+        let main = render_main(&spec, &[], &annotated, Path::new("traces.json"), None, &[fc]);
+
+        assert!(main.contains("use fixture_crate::conformance::r#async::async_fetch as fut;"));
     }
 }

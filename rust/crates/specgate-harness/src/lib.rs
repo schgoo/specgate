@@ -415,8 +415,7 @@ fn run_group(
         }
     }
     for src in &fixture_srcs {
-        let module = src.file_stem().and_then(|s| s.to_str()).unwrap_or("fixture");
-        if !codegen::module_publicly_linkable(&target.package_root, module) {
+        if !codegen::module_publicly_linkable(&target.package_root, src) {
             continue;
         }
         let src_annotated = scan(&load_fixture_text(src)?);
@@ -2591,23 +2590,18 @@ fn cargo_bin() -> String {
 
 /// Resolve the set of fixture source files needed to cover the operations the
 /// cases require. Usually a single file (or one directory module), but
-/// operations may be split across several separate top-level files — in that
+/// operations may be split across several separate files — in that
 /// case the minimal covering set is returned so the harness can merge them.
 ///
-/// Prefers `src/<basename>.rs` when it exists. Otherwise scores each candidate
-/// (top-level `.rs` file or directory module) by the required operations it
-/// provides; if one candidate covers everything it wins, else a greedy set
-/// cover over the remaining operations is returned.
+/// Prefers a file whose stem matches the spec basename when it exists, at any
+/// depth. Otherwise scores each candidate (`.rs` file or directory module) by
+/// the required operations it provides; if one candidate covers everything it
+/// wins, else a greedy set cover over the remaining operations is returned.
 fn resolve_fixture_sources(package_root: &Path, fixture_basename: &str, cases: &[&spec::Case]) -> Vec<PathBuf> {
     struct Candidate {
         repr: PathBuf,
         ops: BTreeSet<String>,
         score: usize,
-    }
-
-    let direct = package_root.join("src").join(format!("{fixture_basename}.rs"));
-    if direct.exists() {
-        return vec![direct];
     }
 
     let mut req_ops: BTreeSet<String> = BTreeSet::new();
@@ -2622,22 +2616,28 @@ fn resolve_fixture_sources(package_root: &Path, fixture_basename: &str, cases: &
     }
 
     let src_dir = package_root.join("src");
-    let Ok(entries) = std::fs::read_dir(&src_dir) else {
-        return Vec::new();
-    };
     let mut cands: Vec<Candidate> = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
+    let mut paths = Vec::new();
+    collect_rust_source_candidates(&src_dir, &mut paths);
+    if let Some(exact_file) = paths
+        .iter()
+        .filter(|p| p.is_file() && p.file_stem().and_then(|s| s.to_str()) == Some(fixture_basename))
+        .min_by_key(|p| p.components().count())
+    {
+        return vec![exact_file.clone()];
+    }
+    for path in paths {
         let stem = path.file_stem().and_then(|s| s.to_str()).map(ToString::to_string);
+        if path.is_dir() && stem.as_deref() != Some(fixture_basename) {
+            continue;
+        }
         // Directory module: merge all .rs files it contains and score together.
-        // The representative path is the synthetic `src/<dirname>.rs`.
-        let (text, repr) = if path.is_dir() {
+        let text = if path.is_dir() {
             let Some(text) = merge_module_dir(&path) else { continue };
-            let Some(dir_name) = stem.clone() else { continue };
-            (text, src_dir.join(format!("{dir_name}.rs")))
+            text
         } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
             let Ok(text) = std::fs::read_to_string(&path) else { continue };
-            (text, path.clone())
+            text
         } else {
             continue;
         };
@@ -2650,15 +2650,16 @@ fn resolve_fixture_sources(package_root: &Path, fixture_basename: &str, cases: &
         // receivers resolve), and where the file stem matches the spec name.
         let provided_refs: Vec<&str> = provided.iter().map(String::as_str).collect();
         let wires = annotated.resolve_case(&provided_refs).is_ok();
-        let mut score = provided.len() * 2 + usize::from(wires) * 100;
-        if let Some(stem) = stem.as_deref()
-            && fixture_basename.starts_with(stem)
-            && stem.len() > 4
-        {
-            score += stem.len();
+        let mut score = provided.len() * 2 + usize::from(wires) * 100 + usize::from(path.is_file());
+        if let Some(stem) = stem.as_deref() {
+            if stem == fixture_basename {
+                score += if path.is_dir() { 500 } else { 1000 } + stem.len();
+            } else if fixture_basename.starts_with(stem) && stem.len() > 4 {
+                score += stem.len();
+            }
         }
         cands.push(Candidate {
-            repr,
+            repr: path,
             ops: provided,
             score,
         });
@@ -2686,6 +2687,21 @@ fn resolve_fixture_sources(package_root: &Path, fixture_basename: &str, cases: &
     chosen
 }
 
+fn collect_rust_source_candidates(dir: &Path, paths: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if path.join("mod.rs").exists() {
+                paths.push(path.clone());
+            }
+            collect_rust_source_candidates(&path, paths);
+        } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+            paths.push(path);
+        }
+    }
+}
+
 /// Concatenate the source text of every `.rs` file under a module directory
 /// (recursively), so that operations split across files are scanned together.
 fn merge_module_dir(dir: &Path) -> Option<String> {
@@ -2711,11 +2727,13 @@ fn merge_module_dir(dir: &Path) -> Option<String> {
 }
 
 /// Load the merged source text for a resolved fixture path. If the path is a
-/// physical file, read it directly. Otherwise treat it as a synthetic module
-/// file (`src/<name>.rs`) backed by a directory module (`src/<name>/`) and
-/// merge all `.rs` files in that directory.
+/// physical file, read it directly. Otherwise, for a directory module, merge
+/// all `.rs` files in that directory.
 fn load_fixture_text(fixture_src: &Path) -> Result<String, String> {
     if fixture_src.exists() {
+        if fixture_src.is_dir() {
+            return merge_module_dir(fixture_src).ok_or_else(|| format!("module directory empty: {}", fixture_src.display()));
+        }
         return std::fs::read_to_string(fixture_src).map_err(|e| format!("source file unreadable: {} ({})", fixture_src.display(), e));
     }
     let dir = fixture_src.with_extension("");
@@ -2919,12 +2937,33 @@ fn ops_metadata(raw: &serde_yaml::Value) -> BTreeMap<String, OpMeta> {
 #[cfg(test)]
 mod tests {
     use super::{
-        CsOp, extract_cs_method_sig, generate_csharp_program, ops_metadata, parse_csharp_auto_property, split_cs_params,
-        yaml_to_csharp_literal,
+        CsOp, extract_cs_method_sig, generate_csharp_program, ops_metadata, parse_csharp_auto_property, resolve_fixture_sources,
+        split_cs_params, yaml_to_csharp_literal,
     };
     use crate::binding;
     use std::collections::BTreeMap;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
+
+    fn write_file(path: &Path, text: &str) {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(path, text).unwrap();
+    }
+
+    fn case_with_op(op: &str) -> super::spec::Case {
+        super::spec::Case {
+            name: op.to_string(),
+            target: None,
+            operation: Some(op.to_string()),
+            steps: Vec::new(),
+            step_inputs: Vec::new(),
+            inputs: BTreeMap::new(),
+            expected: Vec::new(),
+            level: super::CaseLevel::Must,
+            source: None,
+        }
+    }
 
     fn meta(yaml: &str) -> BTreeMap<String, super::OpMeta> {
         let raw: serde_yaml::Value = serde_yaml::from_str(yaml).expect("valid yaml");
@@ -3078,6 +3117,119 @@ mod tests {
 
         assert!(program.contains("catch (System.Exception __ex)"));
         assert!(program.contains("SpecGateRuntime.EmitEvent(\"$fault\", __ex.Message);"));
+    }
+
+    #[test]
+    fn resolve_fixture_sources_finds_nested_single_file_by_basename() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src").join("conformance").join("basic").join("stateless_add.rs");
+        write_file(
+            src.as_path(),
+            "#[spec_operation(\"add\")]\npub fn add(a: i32, b: i32) -> i32 { a + b }\n",
+        );
+        let case = case_with_op("add");
+        let cases = [&case];
+
+        let resolved = resolve_fixture_sources(tmp.path(), "stateless_add", &cases);
+
+        assert_eq!(resolved, vec![src]);
+    }
+
+    #[test]
+    fn resolve_fixture_sources_finds_nested_directory_module() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("src").join("conformance").join("multi_file");
+        write_file(dir.join("mod.rs").as_path(), "pub mod greet;\npub mod farewell;\n");
+        write_file(
+            dir.join("greet.rs").as_path(),
+            "#[spec_operation(\"greet\")]\npub fn greet() -> &'static str { \"hi\" }\n",
+        );
+        write_file(
+            dir.join("farewell.rs").as_path(),
+            "#[spec_operation(\"farewell\")]\npub fn farewell() -> &'static str { \"bye\" }\n",
+        );
+        let greet = case_with_op("greet");
+        let farewell = case_with_op("farewell");
+        let cases = [&greet, &farewell];
+
+        let resolved = resolve_fixture_sources(tmp.path(), "multi_file", &cases);
+
+        assert_eq!(resolved, vec![dir]);
+    }
+
+    #[test]
+    fn resolve_fixture_sources_prefers_nested_file_for_basename_prefix() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("src").join("conformance").join("stateful");
+        write_file(dir.join("mod.rs").as_path(), "pub mod statemachine_counter;\n");
+        let src = dir.join("statemachine_counter.rs");
+        write_file(src.as_path(), "#[spec_operation(\"increment\")]\npub fn increment() {}\n");
+        let case = case_with_op("increment");
+        let cases = [&case];
+
+        let resolved = resolve_fixture_sources(tmp.path(), "statemachine_counter_wrong", &cases);
+
+        assert_eq!(resolved, vec![src]);
+    }
+
+    #[test]
+    fn resolve_fixture_sources_prefers_exact_file_even_without_annotations() {
+        let tmp = tempfile::tempdir().unwrap();
+        let exact = tmp.path().join("src").join("engine").join("missing_operation.rs");
+        write_file(exact.as_path(), "pub fn increment() {}\n");
+        let other = tmp.path().join("src").join("conformance").join("stateful").join("counter.rs");
+        write_file(other.as_path(), "#[spec_operation(\"increment\")]\npub fn increment() {}\n");
+        let case = case_with_op("increment");
+        let cases = [&case];
+
+        let resolved = resolve_fixture_sources(tmp.path(), "missing_operation", &cases);
+
+        assert_eq!(resolved, vec![exact]);
+    }
+
+    #[test]
+    fn resolve_fixture_sources_prefers_file_over_same_stem_parent_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("src").join("conformance").join("complex_inputs");
+        write_file(dir.join("mod.rs").as_path(), "pub mod complex_inputs;\n");
+        let src = dir.join("complex_inputs.rs");
+        write_file(
+            src.as_path(),
+            "#[spec_operation(\"sum_points\")]\npub fn sum_points() -> i32 { 0 }\n",
+        );
+        let case = case_with_op("sum_points");
+        let cases = [&case];
+
+        let resolved = resolve_fixture_sources(tmp.path(), "complex_inputs", &cases);
+
+        assert_eq!(resolved, vec![src]);
+    }
+
+    #[test]
+    fn resolve_fixture_sources_keeps_greedy_cover_for_nested_split_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_file(
+            tmp.path().join("src").join("conformance").join("basic").join("mod.rs").as_path(),
+            "pub mod multi_toplevel_a;\npub mod multi_toplevel_b;\n",
+        );
+        let alpha = tmp.path().join("src").join("conformance").join("basic").join("multi_toplevel_a.rs");
+        let beta = tmp.path().join("src").join("conformance").join("basic").join("multi_toplevel_b.rs");
+        write_file(
+            alpha.as_path(),
+            "#[spec_operation(\"alpha\")]\npub fn alpha() -> &'static str { \"a\" }\n",
+        );
+        write_file(
+            beta.as_path(),
+            "#[spec_operation(\"beta\")]\npub fn beta() -> &'static str { \"b\" }\n",
+        );
+        let alpha_case = case_with_op("alpha");
+        let beta_case = case_with_op("beta");
+        let cases = [&alpha_case, &beta_case];
+
+        let mut resolved = resolve_fixture_sources(tmp.path(), "multi_toplevel", &cases);
+        resolved.sort();
+
+        assert_eq!(resolved, vec![alpha, beta]);
     }
 
     #[test]
@@ -3270,7 +3422,7 @@ mod tests {
         assert_eq!(merged.status, super::CaseStatus::Pass);
     }
 
-    fn make_target(framework: Option<&str>, pkg: &std::path::Path) -> binding::Target {
+    fn make_target(framework: Option<&str>, pkg: &Path) -> binding::Target {
         binding::Target {
             package_root: pkg.to_path_buf(),
             command: None,
@@ -3303,13 +3455,13 @@ mod tests {
 
     #[test]
     fn resolve_framework_uses_binding_framework_field() {
-        let target = make_target(Some("net8.0"), std::path::Path::new("."));
+        let target = make_target(Some("net8.0"), Path::new("."));
         assert_eq!(super::resolve_framework_for_runner(&target), "net8.0");
     }
 
     #[test]
     fn resolve_framework_falls_back_from_netstandard_in_binding() {
-        let target = make_target(Some("netstandard2.0"), std::path::Path::new("."));
+        let target = make_target(Some("netstandard2.0"), Path::new("."));
         assert_eq!(super::resolve_framework_for_runner(&target), "net10.0");
     }
 

@@ -182,6 +182,24 @@ cases:
       - No syn-based expression evaluation exists in harness source
       - The harness invokes cargo build/test, never evaluates Rust in-process
 
+  - name: operation_resolution_is_layout_agnostic
+    kind: narrative
+    desc: >
+      The harness locates and links an operation by its identity, not by the
+      internal source layout of the bound package. A binding points at a
+      package root; the harness must resolve an operation defined at any module
+      depth — e.g. src/conformance/basic/stateless_add.rs whose operation is
+      reachable as conformance::basic::stateless_add — by deriving the full
+      module path from the file's location relative to src/ (exactly as rustc
+      maps files to modules) and emitting a matching multi-segment
+      `use <crate>::<path> as fut;` link. It must never assume a flat top-level
+      module whose name matches the spec basename.
+    verify:
+      - An operation nested at src/<a>/<b>/<file>.rs resolves and links via its full module path
+      - A directory module nested inside a category (e.g. conformance/multi_file/) still merges and links its operations
+      - A non-public module anywhere in the chain surfaces the clean "operation is not publicly reachable" diagnostic, not a raw runner compile failure
+      - Resolution never depends on the fixture file stem matching the spec name
+
   - name: operation_inputs_emitted
     kind: narrative
     desc: >

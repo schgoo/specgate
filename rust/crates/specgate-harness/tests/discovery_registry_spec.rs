@@ -16,10 +16,10 @@ use specgate::__rt::discovery_json;
 
 // Force the relevant fixture modules into this test binary so their
 // distributed_slice registration statics are linked in.
-use specgate_fixtures::multi_field_capture;
-use specgate_fixtures::setup_with_params;
-use specgate_fixtures::stateless_add;
-use specgate_fixtures::statemachine_counter;
+use specgate_fixtures::conformance::basic::stateless_add;
+use specgate_fixtures::conformance::stateful::multi_field_capture;
+use specgate_fixtures::conformance::stateful::setup_with_params;
+use specgate_fixtures::conformance::stateful::statemachine_counter;
 
 /// `discovery_json()` must return valid JSON (parseable JSON object with
 /// an "operations" array).

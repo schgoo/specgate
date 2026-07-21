@@ -1,0 +1,16 @@
+//! Engine fixtures — Rust-only test vehicles for the harness itself: matching
+//! semantics, validation, error handling, property tests, and async-runtime
+//! selection. These are not cross-language conformance examples; they exercise
+//! harness mechanism and are exercised only by the `specgate.harness` spec.
+pub mod anywhere_event;
+pub mod async_smol_timer;
+pub mod async_tokio_timer;
+pub mod engine_minimal;
+pub mod keyword_collision;
+pub mod missing_operation;
+pub mod missing_setup;
+pub mod nonpublic_op;
+pub mod property_add;
+pub mod type_exact;
+pub mod unordered_fields;
+// pub mod compile_error;  // intentionally broken — syntax error

@@ -10,7 +10,7 @@
 //! broken — fix the macro/runtime, not this file.
 
 use specgate::{TraceEvent, Value, reset, take_traces};
-use specgate_fixtures::stateless_add;
+use specgate_fixtures::conformance::basic::stateless_add;
 
 #[test]
 fn free_function_self_emits_full_trace_including_result() {
