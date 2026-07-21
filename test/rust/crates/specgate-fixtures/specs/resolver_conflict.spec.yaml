@@ -1,0 +1,20 @@
+spec_version: "0.4.0"
+name: fixture.resolver_conflict
+binding: binding.yaml
+
+# Negative fixture: the backing source defines TWO operations both named
+# `render` in this one component. Because resolution is keyed on
+# (component, operation), that pair is unresolvable and run_spec must fail loud
+# rather than silently pick one. See the engine-spec case
+# `duplicate_operation_in_component_is_error`.
+operations:
+  render:
+    outputs:
+      - $result: string
+
+cases:
+  - name: renders
+    desc: Duplicate `render` in one component — run_spec must error, not run.
+    operation: render
+    expected:
+      - $result: "unreachable"

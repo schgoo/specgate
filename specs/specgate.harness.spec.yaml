@@ -182,23 +182,65 @@ cases:
       - No syn-based expression evaluation exists in harness source
       - The harness invokes cargo build/test, never evaluates Rust in-process
 
-  - name: operation_resolution_is_layout_agnostic
-    kind: narrative
+  - name: operation_name_reused_across_components_resolves_a
     desc: >
-      The harness locates and links an operation by its identity, not by the
-      internal source layout of the bound package. A binding points at a
-      package root; the harness must resolve an operation defined at any module
-      depth — e.g. src/conformance/basic/stateless_add.rs whose operation is
-      reachable as conformance::basic::stateless_add — by deriving the full
-      module path from the file's location relative to src/ (exactly as rustc
-      maps files to modules) and emitting a matching multi-segment
-      `use <crate>::<path> as fut;` link. It must never assume a flat top-level
-      module whose name matches the spec basename.
-    verify:
-      - An operation nested at src/<a>/<b>/<file>.rs resolves and links via its full module path
-      - A directory module nested inside a category (e.g. conformance/multi_file/) still merges and links its operations
-      - A non-public module anywhere in the chain surfaces the clean "operation is not publicly reachable" diagnostic, not a raw runner compile failure
-      - Resolution never depends on the fixture file stem matching the spec name
+      The harness resolves each operation via the extracted registry metadata
+      keyed on (component, operation), where the component is the spec's own
+      name — not by scanning file names or a shallowest-path tiebreak. This
+      fixture and resolver_b both define an operation named `render` in
+      DIFFERENT components; run_spec on this spec must resolve THIS component's
+      `render` (returns "from A"). Under the old scan-based resolution the
+      duplicate name is ambiguous; under (component, operation) it is exact.
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/resolver_a.spec.yaml
+    expected:
+      - $result:
+          Complete:
+            results:
+              - name: renders
+                status: pass
+                expected:
+                  - $result: "from A"
+                traces:
+                  - Run: { operation: render }
+                  - Event: { name: $result, value: "from A" }
+
+  - name: operation_name_reused_across_components_resolves_b
+    desc: >
+      Companion to resolver_a: the same `render` operation name in a second
+      component resolves to ITS own source (returns "from B"), proving the two
+      never cross-contaminate.
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/resolver_b.spec.yaml
+    expected:
+      - $result:
+          Complete:
+            results:
+              - name: renders
+                status: pass
+                expected:
+                  - $result: "from B"
+                traces:
+                  - Run: { operation: render }
+                  - Event: { name: $result, value: "from B" }
+
+  - name: duplicate_operation_in_component_is_error
+    desc: >
+      Operation names must be unique within a component. The resolver_conflict
+      fixture defines two operations both named `render` in ONE component;
+      because resolution is keyed on (component, operation) that pair is
+      unresolvable, so run_spec must return a hard error naming the duplicate
+      rather than silently picking one. (Message text is best-effort; reconcile
+      the exact bytes during implementation.)
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/resolver_conflict.spec.yaml
+    expected:
+      - $result:
+          Error:
+            reason: "operation 'render' is defined more than once in component 'fixture.resolver_conflict'"
 
   - name: operation_inputs_emitted
     kind: narrative

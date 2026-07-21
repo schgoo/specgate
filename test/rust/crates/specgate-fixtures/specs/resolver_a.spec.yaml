@@ -1,0 +1,15 @@
+spec_version: "0.4.0"
+name: fixture.resolver_a
+binding: binding.yaml
+
+operations:
+  render:
+    outputs:
+      - $result: string
+
+cases:
+  - name: renders
+    desc: Resolves this component's `render` (a name also used by resolver_b).
+    operation: render
+    expected:
+      - $result: "from A"

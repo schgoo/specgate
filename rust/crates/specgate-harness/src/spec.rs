@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
 pub struct Spec {
+    /// Component name declared by the spec.
+    pub name: String,
     /// All binding paths declared on this spec (resolved from string or list).
     pub binding_paths: Vec<String>,
     pub target: Option<String>,
@@ -68,6 +70,12 @@ fn parse_spec_value(v: &YValue) -> Result<Spec, ParseError> {
         .as_mapping()
         .ok_or_else(|| ParseError::Shape("top-level is not a mapping".into()))?;
 
+    let name = map
+        .get(YValue::String("name".into()))
+        .and_then(|n| n.as_str())
+        .unwrap_or("")
+        .to_string();
+
     let binding_paths = match map.get(YValue::String("binding".into())) {
         Some(YValue::String(s)) => vec![s.clone()],
         Some(YValue::Sequence(seq)) => seq.iter().filter_map(|v| v.as_str()).map(String::from).collect(),
@@ -118,6 +126,7 @@ fn parse_spec_value(v: &YValue) -> Result<Spec, ParseError> {
         cases.push(parse_case(c)?);
     }
     Ok(Spec {
+        name,
         binding_paths,
         target,
         cases,

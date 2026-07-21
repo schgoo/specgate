@@ -128,6 +128,16 @@ pub(crate) fn resolve_fixture_crates(package_root: &Path, fixture_srcs: &[PathBu
     Ok(resolved)
 }
 
+pub(crate) fn source_for_module_path(fixture_pkg_root: &Path, module_path: &[String]) -> Option<PathBuf> {
+    module_file_for_path(fixture_pkg_root, module_path).or_else(|| {
+        let mut dir_path = fixture_pkg_root.join("src");
+        for segment in module_path {
+            dir_path.push(segment);
+        }
+        dir_path.is_dir().then_some(dir_path)
+    })
+}
+
 fn module_path_for_source(fixture_pkg_root: &Path, fixture_src: &Path) -> Vec<String> {
     let src_dir = fixture_pkg_root.join("src");
     let rel = fixture_src.strip_prefix(&src_dir).unwrap_or(fixture_src);
@@ -885,6 +895,7 @@ mod tests {
 
     fn empty_spec() -> Spec {
         Spec {
+            name: String::new(),
             binding_paths: vec![],
             target: None,
             cases: vec![],

@@ -48,6 +48,7 @@ pub use spec::binding_path_resolved;
 /// `specgate` umbrella's public API.
 pub use scan::{AnnotatedSource, RunnabilityIssue, RunnabilityProblem, RunnableCase, scan};
 
+use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -309,7 +310,13 @@ fn run_group(
         return run_command_group(command, &target.package_root, group_cases).map(|r| (r, None));
     }
 
-    let fixture_srcs = resolve_fixture_sources(&target.package_root, fixture_basename, group_cases);
+    let fixture_srcs = match run_discovery(&target.package_root)
+        .and_then(|registry| metadata_fixture_sources(&target.package_root, &spec.name, group_cases, &registry))
+    {
+        Ok(Some(srcs)) => srcs,
+        Ok(None) => resolve_fixture_sources(&target.package_root, fixture_basename, group_cases),
+        Err(reason) => return Err(reason),
+    };
     if fixture_srcs.is_empty() {
         if let Some(results) = short_circuit_non_must(group_cases, None) {
             return Ok((results, None));
@@ -2588,6 +2595,150 @@ fn cargo_bin() -> String {
     std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string())
 }
 
+#[derive(Debug, Deserialize)]
+struct DiscoveryRegistry {
+    operations: Vec<DiscoveryOp>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DiscoveryOp {
+    name: String,
+    module_path: String,
+    component: String,
+    #[serde(default)]
+    is_setup: bool,
+}
+
+fn run_discovery(package_root: &Path) -> Result<DiscoveryRegistry, String> {
+    let ws = workspace_root();
+    let specgate_path = ws.join("crates").join("specgate");
+    let pkg_abs = std::fs::canonicalize(package_root).map_err(|e| format!("cannot resolve package_root: {e}"))?;
+    let crate_name = cargo_package_name(package_root).ok_or_else(|| "could not read crate name from Cargo.toml".to_string())?;
+    let rust_ident = crate_name.replace('-', "_");
+
+    let scratch = ws.join("target").join("specgate-harness-discovery").join(&crate_name);
+    std::fs::create_dir_all(scratch.join("src")).map_err(|e| format!("failed to scaffold discovery crate: {e}"))?;
+
+    let manifest = format!(
+        "[package]\nname = \"sg-harness-discovery\"\nversion = \"0.0.1\"\nedition = \"2024\"\n\n[[bin]]\nname = \"sg-harness-discovery\"\npath = \"src/main.rs\"\n\n[dependencies]\nspecgate = {{ path = \"{}\" }}\n{} = {{ path = \"{}\" }}\n\n[workspace]\n",
+        cargo_path(&specgate_path),
+        crate_name,
+        cargo_path(&pkg_abs),
+    );
+    std::fs::write(scratch.join("Cargo.toml"), manifest).map_err(|e| format!("failed to write discovery manifest: {e}"))?;
+
+    let parent_lock = ws.join("Cargo.lock");
+    if parent_lock.exists() {
+        let _ = std::fs::copy(&parent_lock, scratch.join("Cargo.lock"));
+    }
+
+    let main_rs = format!("extern crate {rust_ident};\nfn main() {{\n    print!(\"{{}}\", specgate::__rt::discovery_json());\n}}\n");
+    std::fs::write(scratch.join("src").join("main.rs"), main_rs).map_err(|e| format!("failed to write discovery main.rs: {e}"))?;
+
+    let mut cmd = Command::new(cargo_bin());
+    cmd.arg("run").arg("--quiet").arg("--manifest-path").arg(scratch.join("Cargo.toml"));
+    cmd.env_remove("RUSTC_WORKSPACE_WRAPPER");
+    cmd.env_remove("CARGO");
+    cmd.env_remove("CARGO_MANIFEST_DIR");
+    cmd.env("CARGO_TARGET_DIR", scratch.join("target").as_os_str());
+
+    let output = cmd.output().map_err(|e| format!("failed to run discovery build: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "discovery build failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let json = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if json.is_empty() {
+        return Err("discovery build produced no output".to_string());
+    }
+    serde_json::from_str(&json).map_err(|e| format!("discovery build produced invalid JSON: {e}"))
+}
+
+fn cargo_package_name(package_root: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(package_root.join("Cargo.toml")).ok()?;
+    let mut in_package = false;
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed == "[package]" {
+            in_package = true;
+            continue;
+        }
+        if trimmed.starts_with('[') {
+            in_package = false;
+        }
+        if in_package && let Some(rest) = trimmed.strip_prefix("name") {
+            let rest = rest.trim_start_matches([' ', '\t', '=']).trim();
+            let name = rest.trim_matches('"').trim_matches('\'');
+            if !name.is_empty() {
+                return Some(name.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn cargo_path(p: &Path) -> String {
+    let s = p.display().to_string();
+    let s = s.strip_prefix(r"\\?\").unwrap_or(&s);
+    s.replace('\\', "/")
+}
+
+fn required_operations(cases: &[&spec::Case]) -> BTreeSet<String> {
+    let mut req_ops = BTreeSet::new();
+    for case in cases {
+        if !case.steps.is_empty() {
+            req_ops.extend(case.steps.iter().cloned());
+        } else if let Some(op) = case.operation.as_deref() {
+            req_ops.insert(op.to_string());
+        }
+    }
+    req_ops
+}
+
+fn metadata_fixture_sources(
+    package_root: &Path,
+    component: &str,
+    cases: &[&spec::Case],
+    registry: &DiscoveryRegistry,
+) -> Result<Option<Vec<PathBuf>>, String> {
+    let req_ops = required_operations(cases);
+    if req_ops.is_empty() {
+        return Ok(None);
+    }
+    let crate_ident = cargo_package_name(package_root).map(|n| n.replace('-', "_"));
+    let mut sources = Vec::new();
+    for op in req_ops {
+        let matches: Vec<&DiscoveryOp> = registry
+            .operations
+            .iter()
+            .filter(|m| !m.is_setup && m.component == component && m.name == op)
+            .collect();
+        match matches.as_slice() {
+            [] => return Ok(None),
+            [meta] => {
+                let module_path = relative_module_path(&meta.module_path, crate_ident.as_deref());
+                let source = codegen::source_for_module_path(package_root, &module_path)
+                    .ok_or_else(|| format!("source file not found for operation '{op}' in module '{}'", meta.module_path))?;
+                if !sources.contains(&source) {
+                    sources.push(source);
+                }
+            }
+            _ => return Err(format!("operation '{op}' is defined more than once in component '{component}'")),
+        }
+    }
+    Ok(Some(sources))
+}
+
+fn relative_module_path(module_path: &str, crate_ident: Option<&str>) -> Vec<String> {
+    let mut parts: Vec<String> = module_path.split("::").filter(|s| !s.is_empty()).map(ToString::to_string).collect();
+    if crate_ident.is_some_and(|ident| parts.first().is_some_and(|first| first == ident)) {
+        parts.remove(0);
+    }
+    parts
+}
+
 /// Resolve the set of fixture source files needed to cover the operations the
 /// cases require. Usually a single file (or one directory module), but
 /// operations may be split across several separate files — in that
@@ -2937,8 +3088,8 @@ fn ops_metadata(raw: &serde_yaml::Value) -> BTreeMap<String, OpMeta> {
 #[cfg(test)]
 mod tests {
     use super::{
-        CsOp, extract_cs_method_sig, generate_csharp_program, ops_metadata, parse_csharp_auto_property, resolve_fixture_sources,
-        split_cs_params, yaml_to_csharp_literal,
+        CsOp, DiscoveryOp, DiscoveryRegistry, extract_cs_method_sig, generate_csharp_program, metadata_fixture_sources, ops_metadata,
+        parse_csharp_auto_property, resolve_fixture_sources, split_cs_params, yaml_to_csharp_literal,
     };
     use crate::binding;
     use std::collections::BTreeMap;
@@ -3230,6 +3381,101 @@ mod tests {
         resolved.sort();
 
         assert_eq!(resolved, vec![alpha, beta]);
+    }
+
+    #[test]
+    fn metadata_resolution_picks_component_module_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_file(
+            tmp.path().join("Cargo.toml").as_path(),
+            "[package]\nname = \"specgate-fixtures\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+        );
+        let src = tmp.path().join("src").join("engine").join("resolver_a.rs");
+        write_file(
+            src.as_path(),
+            "#[spec_operation(\"render\")]\npub fn render() -> String { String::new() }\n",
+        );
+        let case = case_with_op("render");
+        let cases = [&case];
+        let registry = DiscoveryRegistry {
+            operations: vec![
+                DiscoveryOp {
+                    name: "render".to_string(),
+                    module_path: "specgate_fixtures::engine::resolver_b".to_string(),
+                    component: "fixture.resolver_b".to_string(),
+                    is_setup: false,
+                },
+                DiscoveryOp {
+                    name: "render".to_string(),
+                    module_path: "specgate_fixtures::engine::resolver_a".to_string(),
+                    component: "fixture.resolver_a".to_string(),
+                    is_setup: false,
+                },
+            ],
+        };
+
+        let resolved = metadata_fixture_sources(tmp.path(), "fixture.resolver_a", &cases, &registry)
+            .expect("metadata resolution")
+            .expect("metadata hit");
+
+        assert_eq!(resolved, vec![src]);
+    }
+
+    #[test]
+    fn metadata_resolution_errors_on_duplicate_component_operation() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_file(
+            tmp.path().join("Cargo.toml").as_path(),
+            "[package]\nname = \"specgate-fixtures\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+        );
+        let case = case_with_op("render");
+        let cases = [&case];
+        let registry = DiscoveryRegistry {
+            operations: vec![
+                DiscoveryOp {
+                    name: "render".to_string(),
+                    module_path: "specgate_fixtures::engine::resolver_conflict".to_string(),
+                    component: "fixture.resolver_conflict".to_string(),
+                    is_setup: false,
+                },
+                DiscoveryOp {
+                    name: "render".to_string(),
+                    module_path: "specgate_fixtures::engine::resolver_conflict".to_string(),
+                    component: "fixture.resolver_conflict".to_string(),
+                    is_setup: false,
+                },
+            ],
+        };
+
+        let err = metadata_fixture_sources(tmp.path(), "fixture.resolver_conflict", &cases, &registry).expect_err("duplicate");
+
+        assert_eq!(
+            err,
+            "operation 'render' is defined more than once in component 'fixture.resolver_conflict'"
+        );
+    }
+
+    #[test]
+    fn metadata_resolution_falls_back_when_component_has_no_operation() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_file(
+            tmp.path().join("Cargo.toml").as_path(),
+            "[package]\nname = \"specgate-fixtures\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+        );
+        let case = case_with_op("render");
+        let cases = [&case];
+        let registry = DiscoveryRegistry {
+            operations: vec![DiscoveryOp {
+                name: "render".to_string(),
+                module_path: "specgate_fixtures::engine::resolver_a".to_string(),
+                component: "fixture.resolver_a".to_string(),
+                is_setup: false,
+            }],
+        };
+
+        let resolved = metadata_fixture_sources(tmp.path(), "fixture.legacy", &cases, &registry).expect("metadata resolution");
+
+        assert!(resolved.is_none());
     }
 
     #[test]
