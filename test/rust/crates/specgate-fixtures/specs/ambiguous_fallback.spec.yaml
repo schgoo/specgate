@@ -1,0 +1,23 @@
+spec_version: "0.4.0"
+name: fixture.ambiguous_fallback
+binding: binding.yaml
+
+# Negative fixture for the name-based resolution fallback. This component owns
+# no operation named `render_ambiguous`, so (component, operation) metadata
+# resolution finds nothing and the harness falls back to locating the operation
+# by name in source. Two source files each define a `render_ambiguous`
+# operation (neither file basename-matches this spec), so the by-name fallback
+# is genuinely ambiguous: the harness must fail loud rather than silently pick
+# one by path depth or score. See the engine-spec case
+# `ambiguous_fallback_operation_is_error`.
+operations:
+  render_ambiguous:
+    outputs:
+      - $result: string
+
+cases:
+  - name: renders
+    desc: Ambiguous by-name fallback — run_spec must error, not silently pick.
+    operation: render_ambiguous
+    expected:
+      - $result: "unreachable"

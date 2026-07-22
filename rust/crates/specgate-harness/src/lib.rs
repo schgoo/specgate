@@ -314,7 +314,7 @@ fn run_group(
         .and_then(|registry| metadata_fixture_sources(&target.package_root, &spec.name, group_cases, &registry))
     {
         Ok(Some(srcs)) => srcs,
-        Ok(None) => resolve_fixture_sources(&target.package_root, fixture_basename, group_cases),
+        Ok(None) => resolve_fixture_sources(&target.package_root, fixture_basename, group_cases)?,
         Err(reason) => return Err(reason),
     };
     if fixture_srcs.is_empty() {
@@ -2748,7 +2748,7 @@ fn relative_module_path(module_path: &str, crate_ident: Option<&str>) -> Vec<Str
 /// depth. Otherwise scores each candidate (`.rs` file or directory module) by
 /// the required operations it provides; if one candidate covers everything it
 /// wins, else a greedy set cover over the remaining operations is returned.
-fn resolve_fixture_sources(package_root: &Path, fixture_basename: &str, cases: &[&spec::Case]) -> Vec<PathBuf> {
+fn resolve_fixture_sources(package_root: &Path, fixture_basename: &str, cases: &[&spec::Case]) -> Result<Vec<PathBuf>, String> {
     struct Candidate {
         repr: PathBuf,
         ops: BTreeSet<String>,
@@ -2775,7 +2775,7 @@ fn resolve_fixture_sources(package_root: &Path, fixture_basename: &str, cases: &
         .filter(|p| p.is_file() && p.file_stem().and_then(|s| s.to_str()) == Some(fixture_basename))
         .min_by_key(|p| p.components().count())
     {
-        return vec![exact_file.clone()];
+        return Ok(vec![exact_file.clone()]);
     }
     for path in paths {
         let stem = path.file_stem().and_then(|s| s.to_str()).map(ToString::to_string);
@@ -2816,9 +2816,45 @@ fn resolve_fixture_sources(package_root: &Path, fixture_basename: &str, cases: &
         });
     }
 
+    // Check for ambiguity: if any operation is provided by more than one
+    // candidate source (and no exact-basename early-return disambiguated),
+    // fail loudly rather than silently picking by score.
+    //
+    // A file nested inside a directory-module candidate that also covers the
+    // same operation is not an independent source — it is part of that module.
+    // Filter such sub-candidates out before the ambiguity check.
+    let dir_reprs: Vec<&PathBuf> = cands.iter().filter(|c| c.repr.is_dir()).map(|c| &c.repr).collect();
+    for op in &req_ops {
+        let mut providers: Vec<String> = cands
+            .iter()
+            .filter(|c| c.ops.contains(op))
+            .filter(|c| {
+                c.repr.is_dir()
+                    || !dir_reprs
+                        .iter()
+                        .any(|dir| c.repr.starts_with(dir) && cands.iter().any(|dc| &dc.repr == *dir && dc.ops.contains(op)))
+            })
+            .map(|c| {
+                c.repr
+                    .strip_prefix(package_root)
+                    .unwrap_or(&c.repr)
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            })
+            .collect();
+        if providers.len() > 1 {
+            providers.sort();
+            return Err(format!(
+                "operation '{}' is provided by multiple sources: {}",
+                op,
+                providers.join(", ")
+            ));
+        }
+    }
+
     // If a single candidate covers every required operation, take the best one.
     if let Some(full) = cands.iter().filter(|c| c.ops.len() == req_ops.len()).max_by_key(|c| c.score) {
-        return vec![full.repr.clone()];
+        return Ok(vec![full.repr.clone()]);
     }
 
     // Greedy set cover: take highest-scoring candidates until all required
@@ -2835,7 +2871,7 @@ fn resolve_fixture_sources(package_root: &Path, fixture_basename: &str, cases: &
             }
         }
     }
-    chosen
+    Ok(chosen)
 }
 
 fn collect_rust_source_candidates(dir: &Path, paths: &mut Vec<PathBuf>) {
@@ -3281,7 +3317,7 @@ mod tests {
         let case = case_with_op("add");
         let cases = [&case];
 
-        let resolved = resolve_fixture_sources(tmp.path(), "stateless_add", &cases);
+        let resolved = resolve_fixture_sources(tmp.path(), "stateless_add", &cases).expect("unambiguous");
 
         assert_eq!(resolved, vec![src]);
     }
@@ -3303,7 +3339,7 @@ mod tests {
         let farewell = case_with_op("farewell");
         let cases = [&greet, &farewell];
 
-        let resolved = resolve_fixture_sources(tmp.path(), "multi_file", &cases);
+        let resolved = resolve_fixture_sources(tmp.path(), "multi_file", &cases).expect("unambiguous");
 
         assert_eq!(resolved, vec![dir]);
     }
@@ -3318,7 +3354,7 @@ mod tests {
         let case = case_with_op("increment");
         let cases = [&case];
 
-        let resolved = resolve_fixture_sources(tmp.path(), "statemachine_counter_wrong", &cases);
+        let resolved = resolve_fixture_sources(tmp.path(), "statemachine_counter_wrong", &cases).expect("unambiguous");
 
         assert_eq!(resolved, vec![src]);
     }
@@ -3333,7 +3369,7 @@ mod tests {
         let case = case_with_op("increment");
         let cases = [&case];
 
-        let resolved = resolve_fixture_sources(tmp.path(), "missing_operation", &cases);
+        let resolved = resolve_fixture_sources(tmp.path(), "missing_operation", &cases).expect("unambiguous");
 
         assert_eq!(resolved, vec![exact]);
     }
@@ -3351,7 +3387,7 @@ mod tests {
         let case = case_with_op("sum_points");
         let cases = [&case];
 
-        let resolved = resolve_fixture_sources(tmp.path(), "complex_inputs", &cases);
+        let resolved = resolve_fixture_sources(tmp.path(), "complex_inputs", &cases).expect("unambiguous");
 
         assert_eq!(resolved, vec![src]);
     }
@@ -3377,10 +3413,34 @@ mod tests {
         let beta_case = case_with_op("beta");
         let cases = [&alpha_case, &beta_case];
 
-        let mut resolved = resolve_fixture_sources(tmp.path(), "multi_toplevel", &cases);
+        let mut resolved = resolve_fixture_sources(tmp.path(), "multi_toplevel", &cases).expect("unambiguous");
         resolved.sort();
 
         assert_eq!(resolved, vec![alpha, beta]);
+    }
+
+    #[test]
+    fn resolve_fixture_sources_errors_on_ambiguous_operation() {
+        let tmp = tempfile::tempdir().unwrap();
+        let one = tmp.path().join("src").join("engine").join("ambiguous_one.rs");
+        let two = tmp.path().join("src").join("engine").join("ambiguous_two.rs");
+        write_file(
+            one.as_path(),
+            "#[spec_operation(\"render_ambiguous\")]\npub fn render_ambiguous() -> String { \"one\".to_string() }\n",
+        );
+        write_file(
+            two.as_path(),
+            "#[spec_operation(\"render_ambiguous\")]\npub fn render_ambiguous_alt() -> String { \"two\".to_string() }\n",
+        );
+        let case = case_with_op("render_ambiguous");
+        let cases = [&case];
+
+        let err = resolve_fixture_sources(tmp.path(), "ambiguous_fallback", &cases).expect_err("ambiguous operation should error");
+
+        assert!(
+            err.starts_with("operation 'render_ambiguous' is provided by multiple sources"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

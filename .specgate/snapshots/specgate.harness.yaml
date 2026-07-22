@@ -242,6 +242,25 @@ cases:
           Error:
             reason: "operation 'render' is defined more than once in component 'fixture.resolver_conflict'"
 
+  - name: ambiguous_fallback_operation_is_error
+    desc: >
+      When an operation cannot be resolved via (component, operation) metadata —
+      its spec's component owns no such operation — the harness falls back to
+      locating it by name in source. If more than one source provides an
+      operation of that name, resolution is ambiguous and the harness must fail
+      loud, naming the operation and its candidate sources, rather than silently
+      picking one by path depth or score. The resolver_ambiguous fixture's
+      component owns no `render_ambiguous`, and two source files define one, so
+      the by-name fallback is ambiguous. (Message text is best-effort; reconcile
+      the exact bytes during implementation.)
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/ambiguous_fallback.spec.yaml
+    expected:
+      - $result:
+          Error:
+            reason: { $matches: "operation 'render_ambiguous' is provided by multiple sources" }
+
   - name: operation_inputs_emitted
     kind: narrative
     desc: >

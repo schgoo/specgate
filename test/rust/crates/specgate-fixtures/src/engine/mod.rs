@@ -2,6 +2,8 @@
 //! semantics, validation, error handling, property tests, and async-runtime
 //! selection. These are not cross-language conformance examples; they exercise
 //! harness mechanism and are exercised only by the `specgate.harness` spec.
+pub mod ambiguous_one;
+pub mod ambiguous_two;
 pub mod anywhere_event;
 pub mod async_smol_timer;
 pub mod async_tokio_timer;
