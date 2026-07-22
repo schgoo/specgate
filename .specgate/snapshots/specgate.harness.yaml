@@ -405,21 +405,32 @@ cases:
           Error:
             reason: "target 'nonexistent' not found in binding"
 
-  - name: no_vacuous_match
+  - name: matching_behaviors
     desc: >
-      Non-empty expected with zero matching traces must fail, not pass.
-      Prevents the harness from silently passing unparseable or impossible assertions.
+      Consolidated matcher / mismatch / subsequence / unordered behavior tests,
+      run against the fixture.matching component's own vehicle operations. Each
+      case's pass/fail status is asserted; failing cases prove the harness does
+      not vacuously pass wrong/missing/mis-ordered assertions, passing cases
+      prove correct subsequence / unordered matching.
     operation: run_spec
     inputs:
-      spec: test/rust/crates/specgate-fixtures/specs/vacuous_match.spec.yaml
+      spec: test/rust/crates/specgate-fixtures/specs/matching.spec.yaml
     expected:
       - $result:
           Complete:
             results:
-              - name: wrong_value_fails
-                status: fail
-              - name: wrong_run_fails
-                status: fail
+              - { name: wrong_value_fails, status: fail }
+              - { name: wrong_run_fails, status: fail }
+              - { name: add_2_3, status: fail }
+              - { name: wrong_order_increment_once, status: fail }
+              - { name: counter_wrong_increment_once, status: fail }
+              - { name: increment_then_decrement, status: fail }
+              - { name: double_increment, status: pass }
+              - { name: unordered_both_present, status: pass }
+              - { name: unordered_reversed_still_passes, status: pass }
+              - { name: unordered_wrong_value_fails, status: fail }
+              - { name: unordered_multiple_blocks, status: pass }
+              - { name: withdraw_50, status: pass }
 
   - name: self_test_rejects_all_errors
     desc: >
@@ -546,65 +557,8 @@ cases:
                 status: pass
 
   # ================================================================
-  # Subsequence matching — field order doesn't matter
-  # ================================================================
-
-  - name: event_order_between_runs
-    desc: Asserting on final values works regardless of field iteration order
-    operation: run_spec
-    inputs:
-      spec: test/rust/crates/specgate-fixtures/specs/multi_field_capture_reordered.spec.yaml
-    expected:
-      - $result:
-          Complete:
-            results:
-              - name: withdraw_50
-                status: pass
-                expected:
-                  - balance: 50
-                  - transaction_count: 1
-
-  # ================================================================
   # Mismatch — failures detected
   # ================================================================
-
-  - name: mismatch_wrong_value
-    desc: Wrong expected value produces fail
-    operation: run_spec
-    inputs:
-      spec: test/rust/crates/specgate-fixtures/specs/statemachine_counter_wrong.spec.yaml
-    expected:
-      - $result:
-          Complete:
-            results:
-              - name: increment_once
-                status: fail
-                expected:
-                  - count: 999
-                traces:
-                  - Event: { name: count, value: 0 }
-                  - Run: { operation: increment }
-                  - Event: { name: count, value: 1 }
-
-  - name: mismatch_missing_field
-    desc: Expected field not in traces produces fail
-    operation: run_spec
-    inputs:
-      spec: test/rust/crates/specgate-fixtures/specs/mismatch_missing_event.spec.yaml
-    expected:
-      - $result:
-          Complete:
-            results:
-              - name: add_2_3
-                status: fail
-                expected:
-                  - $result: 5
-                  - add.extra: "bonus"
-                traces:
-                  - Run: { operation: add }
-                  - Event: { name: add.a, value: 2 }
-                  - Event: { name: add.b, value: 3 }
-                  - Event: { name: $result, value: 5 }
 
   - name: mismatch_wrong_field_name
     desc: Asserting on an output name the operation does not declare is a schema error
@@ -616,142 +570,9 @@ cases:
           Error:
             reason: "expected event 'total' is not a declared output of operation 'increment'"
 
-  - name: mismatch_second_step
-    desc: First step OK but second step has wrong value
-    operation: run_spec
-    inputs:
-      spec: test/rust/crates/specgate-fixtures/specs/mismatch_second_step.spec.yaml
-    expected:
-      - $result:
-          Complete:
-            results:
-              - name: increment_then_decrement
-                status: fail
-                expected:
-                  - $run: decrement
-                  - count: 999
-                traces:
-                  - Event: { name: count, value: 0 }
-                  - Run: { operation: increment }
-                  - Event: { name: count, value: 1 }
-                  - Run: { operation: decrement }
-                  - Event: { name: count, value: 0 }
-
-  # ================================================================
-  # Subsequence matching — order matters
-  # ================================================================
-
-  - name: subsequence_wrong_order
-    desc: Expected events in wrong order produces fail
-    operation: run_spec
-    inputs:
-      spec: test/rust/crates/specgate-fixtures/specs/subsequence_wrong_order.spec.yaml
-    expected:
-      - $result:
-          Complete:
-            results:
-              - name: increment_once
-                status: fail
-                expected:
-                  - count: 1
-                  - count: 0
-                traces:
-                  - Event: { name: count, value: 0 }
-                  - Run: { operation: increment }
-                  - Event: { name: count, value: 1 }
-
-  - name: subsequence_with_gaps
-    desc: Matching with gaps between expected events
-    operation: run_spec
-    inputs:
-      spec: test/rust/crates/specgate-fixtures/specs/subsequence_with_gaps.spec.yaml
-    expected:
-      - $result:
-          Complete:
-            results:
-              - name: double_increment
-                status: pass
-                expected:
-                  - count: 0
-                  - count: 2
-                traces:
-                  - Event: { name: count, value: 0 }
-                  - Run: { operation: increment_twice }
-                  - Event: { name: count, value: 1 }
-                  - Event: { name: count, value: 2 }
-
   # ================================================================
   # Matching directives — $unordered, $anywhere, $run collision
   # ================================================================
-
-  - name: unordered_field_matching
-    desc: $unordered block matches fields in any order between ordered items
-    operation: run_spec
-    inputs:
-      spec: test/rust/crates/specgate-fixtures/specs/unordered_fields.spec.yaml
-    expected:
-      - $result:
-          Complete:
-            results:
-              - name: unordered_both_present
-                status: pass
-                expected:
-                  - $run: withdraw
-                  - $unordered:
-                    - balance: 50
-                    - transaction_count: 1
-                traces:
-                  - Event: { name: balance, value: 100 }
-                  - Event: { name: transaction_count, value: 0 }
-                  - Run: { operation: withdraw }
-                  - Event: { name: withdraw.amount, value: 50 }
-                  - Event: { name: balance, value: 50 }
-                  - Event: { name: transaction_count, value: 1 }
-              - name: unordered_reversed_still_passes
-                status: pass
-                expected:
-                  - $run: withdraw
-                  - $unordered:
-                    - transaction_count: 1
-                    - balance: 50
-                traces:
-                  - Event: { name: balance, value: 100 }
-                  - Event: { name: transaction_count, value: 0 }
-                  - Run: { operation: withdraw }
-                  - Event: { name: withdraw.amount, value: 50 }
-                  - Event: { name: balance, value: 50 }
-                  - Event: { name: transaction_count, value: 1 }
-              - name: unordered_wrong_value_fails
-                status: fail
-                expected:
-                  - $run: withdraw
-                  - $unordered:
-                    - balance: 999
-                    - transaction_count: 1
-                traces:
-                  - Event: { name: balance, value: 100 }
-                  - Event: { name: transaction_count, value: 0 }
-                  - Run: { operation: withdraw }
-                  - Event: { name: withdraw.amount, value: 50 }
-                  - Event: { name: balance, value: 50 }
-                  - Event: { name: transaction_count, value: 1 }
-              - name: unordered_multiple_blocks
-                status: pass
-                expected:
-                  - $unordered:
-                    - balance: 100
-                    - transaction_count: 0
-                  - $run: withdraw
-                  - $unordered:
-                    - balance: 50
-                    - transaction_count: 1
-                traces:
-                  - Event: { name: balance, value: 100 }
-                  - Event: { name: transaction_count, value: 0 }
-                  - Run: { operation: withdraw }
-                  - Event: { name: withdraw.amount, value: 50 }
-                  - Event: { name: balance, value: 50 }
-                  - Event: { name: transaction_count, value: 1 }
 
   - name: anywhere_event_matching
     desc: $anywhere matches events regardless of position in trace

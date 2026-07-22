@@ -1,0 +1,17 @@
+spec_version: "0.4.0"
+name: fixture.run_failure
+binding: binding.yaml
+
+# Minimal failing spec for the CLI `run_with_failure` test: one case whose
+# expected value is deliberately wrong, so the run reports exactly one failure.
+operations:
+  emit:
+    outputs:
+      - $result: i32
+
+cases:
+  - name: fails
+    desc: Expected value is wrong on purpose, so this case fails.
+    operation: emit
+    expected:
+      - $result: 999

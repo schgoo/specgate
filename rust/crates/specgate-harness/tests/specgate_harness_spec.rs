@@ -77,6 +77,19 @@ fn check_case(c: &CaseResult, name: &str, status: CaseStatus) {
     );
 }
 
+/// Look up a case by name (the consolidated matching spec has many cases, so
+/// positional indexing is not stable).
+fn find_case<'a>(r: &'a [CaseResult], name: &str) -> &'a CaseResult {
+    r.iter().find(|c| c.name == name).unwrap_or_else(|| {
+        panic!(
+            "case '{name}' not found in {:?}",
+            r.iter().map(|c| c.name.as_str()).collect::<Vec<_>>()
+        )
+    })
+}
+
+const MATCHING: &str = "test/rust/crates/specgate-fixtures/specs/matching.spec.yaml";
+
 // ---------------------------------------------------------------------------
 // Happy path — basic operations
 // ---------------------------------------------------------------------------
@@ -354,22 +367,24 @@ fn readonly_operation() {
 
 #[test]
 fn event_order_between_runs() {
-    let r = complete(run(
-        "test/rust/crates/specgate-fixtures/specs/multi_field_capture_reordered.spec.yaml",
-    ));
-    check_case(&r[0], "withdraw_50", CaseStatus::Pass);
+    let r = complete(run(MATCHING));
+    check_case(find_case(&r, "withdraw_50"), "withdraw_50", CaseStatus::Pass);
 }
 
 #[test]
 fn subsequence_with_gaps() {
-    let r = complete(run("test/rust/crates/specgate-fixtures/specs/subsequence_with_gaps.spec.yaml"));
-    check_case(&r[0], "double_increment", CaseStatus::Pass);
+    let r = complete(run(MATCHING));
+    check_case(find_case(&r, "double_increment"), "double_increment", CaseStatus::Pass);
 }
 
 #[test]
 fn subsequence_wrong_order() {
-    let r = complete(run("test/rust/crates/specgate-fixtures/specs/subsequence_wrong_order.spec.yaml"));
-    check_case(&r[0], "increment_once", CaseStatus::Fail);
+    let r = complete(run(MATCHING));
+    check_case(
+        find_case(&r, "wrong_order_increment_once"),
+        "wrong_order_increment_once",
+        CaseStatus::Fail,
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -378,14 +393,18 @@ fn subsequence_wrong_order() {
 
 #[test]
 fn mismatch_wrong_value() {
-    let r = complete(run("test/rust/crates/specgate-fixtures/specs/statemachine_counter_wrong.spec.yaml"));
-    check_case(&r[0], "increment_once", CaseStatus::Fail);
+    let r = complete(run(MATCHING));
+    check_case(
+        find_case(&r, "counter_wrong_increment_once"),
+        "counter_wrong_increment_once",
+        CaseStatus::Fail,
+    );
 }
 
 #[test]
 fn mismatch_missing_field() {
-    let r = complete(run("test/rust/crates/specgate-fixtures/specs/mismatch_missing_event.spec.yaml"));
-    check_case(&r[0], "add_2_3", CaseStatus::Fail);
+    let r = complete(run(MATCHING));
+    check_case(find_case(&r, "add_2_3"), "add_2_3", CaseStatus::Fail);
 }
 
 #[test]
@@ -398,8 +417,12 @@ fn mismatch_wrong_field_name() {
 
 #[test]
 fn mismatch_second_step() {
-    let r = complete(run("test/rust/crates/specgate-fixtures/specs/mismatch_second_step.spec.yaml"));
-    check_case(&r[0], "increment_then_decrement", CaseStatus::Fail);
+    let r = complete(run(MATCHING));
+    check_case(
+        find_case(&r, "increment_then_decrement"),
+        "increment_then_decrement",
+        CaseStatus::Fail,
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -476,12 +499,23 @@ fn keyword_collision_operation_named_run() {
 
 #[test]
 fn unordered_field_matching() {
-    let r = complete(run("test/rust/crates/specgate-fixtures/specs/unordered_fields.spec.yaml"));
-    assert_eq!(r.len(), 4);
-    check_case(&r[0], "unordered_both_present", CaseStatus::Pass);
-    check_case(&r[1], "unordered_reversed_still_passes", CaseStatus::Pass);
-    check_case(&r[2], "unordered_wrong_value_fails", CaseStatus::Fail);
-    check_case(&r[3], "unordered_multiple_blocks", CaseStatus::Pass);
+    let r = complete(run(MATCHING));
+    check_case(find_case(&r, "unordered_both_present"), "unordered_both_present", CaseStatus::Pass);
+    check_case(
+        find_case(&r, "unordered_reversed_still_passes"),
+        "unordered_reversed_still_passes",
+        CaseStatus::Pass,
+    );
+    check_case(
+        find_case(&r, "unordered_wrong_value_fails"),
+        "unordered_wrong_value_fails",
+        CaseStatus::Fail,
+    );
+    check_case(
+        find_case(&r, "unordered_multiple_blocks"),
+        "unordered_multiple_blocks",
+        CaseStatus::Pass,
+    );
 }
 
 #[test]
@@ -536,14 +570,15 @@ fn level_should_missing_warns() {
 
 #[test]
 fn no_vacuous_match() {
-    let r = complete(run("test/rust/crates/specgate-fixtures/specs/vacuous_match.spec.yaml"));
-    assert_eq!(r.len(), 2);
+    let r = complete(run(MATCHING));
     // Wrong value — must fail, not pass
-    check_case(&r[0], "wrong_value_fails", CaseStatus::Fail);
-    assert!(!r[0].traces.is_empty(), "operation ran, traces should exist");
+    let wv = find_case(&r, "wrong_value_fails");
+    check_case(wv, "wrong_value_fails", CaseStatus::Fail);
+    assert!(!wv.traces.is_empty(), "operation ran, traces should exist");
     // $run for non-matching operation — must fail, not vacuously pass
-    check_case(&r[1], "wrong_run_fails", CaseStatus::Fail);
-    assert!(!r[1].traces.is_empty(), "operation ran, traces should exist");
+    let wr = find_case(&r, "wrong_run_fails");
+    check_case(wr, "wrong_run_fails", CaseStatus::Fail);
+    assert!(!wr.traces.is_empty(), "operation ran, traces should exist");
 }
 
 // ---------------------------------------------------------------------------

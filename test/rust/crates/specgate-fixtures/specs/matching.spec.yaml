@@ -1,0 +1,138 @@
+spec_version: "0.4.0"
+name: fixture.matching
+binding: binding.yaml
+
+# Engine matcher/mismatch/subsequence/unordered behavior tests, consolidated
+# onto this component's own vehicle operations (add / Counter / Account in
+# src/engine/matching.rs). These were previously separate source-less specs
+# that borrowed conformance ops; each operation now belongs to exactly one
+# component so run_spec resolves them unambiguously.
+operations:
+  add:
+    inputs: { a: i32, b: i32 }
+    outputs: [{ $result: i32 }]
+  increment:
+    outputs: [count]
+  decrement:
+    outputs: [count]
+  increment_twice:
+    outputs: [count]
+  withdraw:
+    inputs: { amount: i32 }
+    outputs: [balance, transaction_count]
+
+cases:
+  # --- vacuous match (non-empty expected with zero matching traces must fail) ---
+  - name: wrong_value_fails
+    desc: Declared output with wrong value must fail
+    operation: add
+    inputs: { a: 2, b: 3 }
+    expected:
+      - $result: 999
+
+  - name: wrong_run_fails
+    desc: $run for non-matching operation must fail
+    operation: add
+    inputs: { a: 2, b: 3 }
+    expected:
+      - $run: nonexistent_operation
+
+  # --- mismatch: missing event ---
+  - name: add_2_3
+    desc: Expects a field that doesn't exist
+    operation: add
+    inputs: { a: 2, b: 3 }
+    expected:
+      - $result: 5
+      - add.extra: "bonus"
+
+  # --- shape mismatch: undeclared output name --- (kept as its own error-early
+  # spec fixture.shape_mismatch; not merged here because a bare undeclared
+  # output makes the whole run_spec return an Error, which would poison the
+  # other cases in this spec.)
+
+  # --- subsequence: wrong order (was fixture.subsequence_wrong_order::increment_once) ---
+  - name: wrong_order_increment_once
+    desc: Expected events in reverse order
+    operation: increment
+    expected:
+      - count: 1
+      - count: 0
+
+  # --- state machine wrong value (was fixture.statemachine_counter_wrong::increment_once) ---
+  - name: counter_wrong_increment_once
+    desc: Wrong expected — 999 instead of 1
+    operation: increment
+    expected:
+      - count: 999
+
+  # --- mismatch: wrong value after second step ---
+  - name: increment_then_decrement
+    desc: Wrong value after second step
+    steps:
+      - operation: increment
+      - operation: decrement
+    expected:
+      - $run: decrement
+      - count: 999
+
+  # --- subsequence with gaps (passes) ---
+  - name: double_increment
+    desc: Assert count=0 then count=2, skipping the intermediate count=1
+    operation: increment_twice
+    expected:
+      - count: 0
+      - count: 2
+
+  # --- unordered field matching ---
+  - name: unordered_both_present
+    desc: Both fields matched in any order
+    operation: withdraw
+    inputs: { amount: 50 }
+    expected:
+      - $run: withdraw
+      - $unordered:
+        - balance: 50
+        - transaction_count: 1
+
+  - name: unordered_reversed_still_passes
+    desc: Fields listed in reverse of emission order still pass
+    operation: withdraw
+    inputs: { amount: 50 }
+    expected:
+      - $run: withdraw
+      - $unordered:
+        - transaction_count: 1
+        - balance: 50
+
+  - name: unordered_wrong_value_fails
+    desc: One field has wrong value — should fail
+    operation: withdraw
+    inputs: { amount: 50 }
+    expected:
+      - $run: withdraw
+      - $unordered:
+        - balance: 999
+        - transaction_count: 1
+
+  - name: unordered_multiple_blocks
+    desc: Two separate unordered blocks in one case
+    operation: withdraw
+    inputs: { amount: 50 }
+    expected:
+      - $unordered:
+        - balance: 100
+        - transaction_count: 0
+      - $run: withdraw
+      - $unordered:
+        - balance: 50
+        - transaction_count: 1
+
+  # --- multi-field capture, reordered assertion (passes) ---
+  - name: withdraw_50
+    desc: Just assert final values
+    operation: withdraw
+    inputs: { amount: 50 }
+    expected:
+      - balance: 50
+      - transaction_count: 1

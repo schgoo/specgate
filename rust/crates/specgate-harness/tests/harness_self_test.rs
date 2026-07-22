@@ -59,7 +59,7 @@ fn self_test_stateless_add_produces_real_traces() {
 
 #[test]
 fn self_test_failing_spec_actually_fails() {
-    let spec = repo_root().join("test/rust/crates/specgate-fixtures/specs/statemachine_counter_wrong.spec.yaml");
+    let spec = repo_root().join("test/rust/crates/specgate-fixtures/specs/run_failure.spec.yaml");
     let result = run_spec(spec.to_str().unwrap());
     match result {
         RunOutcome::Complete { results } => {

@@ -988,12 +988,12 @@ cases:
     desc: Running a failing spec reports failure count
     operation: run
     inputs:
-      spec: test/rust/crates/specgate-fixtures/specs/statemachine_counter_wrong.spec.yaml
+      spec: test/rust/crates/specgate-fixtures/specs/run_failure.spec.yaml
     expected:
       - $result:
           Complete:
             report:
-              spec_name: fixture.statemachine_counter_wrong
+              spec_name: fixture.run_failure
               total_cases: 1
               passed: 0
               failed: 1
