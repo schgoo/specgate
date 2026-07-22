@@ -12,6 +12,7 @@ pub mod missing_operation;
 pub mod missing_setup;
 pub mod nonpublic_op;
 pub mod property_add;
+pub mod provenance_example;
 pub mod resolver_a;
 pub mod resolver_b;
 pub mod resolver_conflict;
