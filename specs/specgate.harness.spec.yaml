@@ -242,24 +242,25 @@ cases:
           Error:
             reason: "operation 'render' is defined more than once in component 'fixture.resolver_conflict'"
 
-  - name: ambiguous_fallback_operation_is_error
+  - name: unresolved_operation_is_error
     desc: >
-      When an operation cannot be resolved via (component, operation) metadata —
-      its spec's component owns no such operation — the harness falls back to
-      locating it by name in source. If more than one source provides an
-      operation of that name, resolution is ambiguous and the harness must fail
-      loud, naming the operation and its candidate sources, rather than silently
-      picking one by path depth or score. The resolver_ambiguous fixture's
-      component owns no `render_ambiguous`, and two source files define one, so
-      the by-name fallback is ambiguous. (Message text is best-effort; reconcile
-      the exact bytes during implementation.)
+      Operation resolution is keyed strictly on (component, operation) from the
+      compiled registry; the harness never falls back to scanning source files
+      by name. The fixture.ambiguous_fallback component owns no operation named
+      `render_ambiguous`, even though two OTHER components in the same crate
+      (fixture.ambiguous_one and fixture.ambiguous_two) each define one. Because
+      resolution is component-scoped, the name existing elsewhere is irrelevant:
+      run_spec must fail loud naming the unresolved operation and its component,
+      proving it does not scan by name (which — with two definitions present —
+      would otherwise have been ambiguous). (Message text is best-effort;
+      reconcile the exact bytes during implementation.)
     operation: run_spec
     inputs:
       spec: test/rust/crates/specgate-fixtures/specs/ambiguous_fallback.spec.yaml
     expected:
       - $result:
           Error:
-            reason: { $matches: "operation 'render_ambiguous' is provided by multiple sources" }
+            reason: { $matches: "operation 'render_ambiguous'.*component 'fixture.ambiguous_fallback'" }
 
   - name: operation_inputs_emitted
     kind: narrative
@@ -1005,7 +1006,7 @@ cases:
     expected:
       - $result:
           Error:
-            reason: "operation 'increment' not found in source annotations"
+            reason: "operation 'increment' not found for component 'fixture.missing_operation'"
 
   - name: error_compile_failure
     desc: Source has a syntax error; the reason includes the compiler diagnostics

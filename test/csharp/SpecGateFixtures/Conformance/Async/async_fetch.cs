@@ -12,7 +12,7 @@ public static class Fetcher
     /// <summary>Returns a canned response for <paramref name="url"/>.</summary>
     /// <param name="url">The URL to fetch (spec input <c>url</c>).</param>
     /// <returns>A response string for the given URL.</returns>
-    [SpecOperation("fetch")]
+    [SpecOperation("fetch", Spec = "fixture.async_fetch")]
     public static async Task<string> Fetch([SpecInput("url")] string url) =>
         await Task.FromResult($"response from {url}");
 }

@@ -121,7 +121,7 @@ public static class ComplexInputOps
     /// <param name="name">The enum type name (spec input <c>name</c>).</param>
     /// <param name="members">The member definitions (spec input <c>members</c>).</param>
     /// <returns>The enum <paramref name="name"/> unchanged.</returns>
-    [SpecOperation("create_enum_type")]
+    [SpecOperation("create_enum_type", Spec = "fixture.complex_inputs")]
     public static string CreateEnumType([SpecInput("name")] string name, [SpecInput("members")] List<EnumMemberInput> members)
     {
         SpecGateRuntime.EmitEvent("member_count", members.Count);
@@ -133,7 +133,7 @@ public static class ComplexInputOps
     /// <summary>Sums a list of points component-wise.</summary>
     /// <param name="points">The points to sum (spec input <c>points</c>).</param>
     /// <returns>A <see cref="Point"/> whose coordinates are the component sums.</returns>
-    [SpecOperation("sum_points")]
+    [SpecOperation("sum_points", Spec = "fixture.complex_inputs")]
     public static Point SumPoints([SpecInput("points")] List<Point> points)
     {
         int x = 0, y = 0;
@@ -149,13 +149,13 @@ public static class ComplexInputOps
     /// <summary>Returns the name of a configuration struct input.</summary>
     /// <param name="config">The configuration to describe (spec input <c>config</c>).</param>
     /// <returns>The config's <see cref="AppConfig.Name"/>.</returns>
-    [SpecOperation("describe_config")]
+    [SpecOperation("describe_config", Spec = "fixture.complex_inputs")]
     public static string DescribeConfig([SpecInput("config")] AppConfig config) => config.Name;
 
     /// <summary>Computes the area of a shape variant input.</summary>
     /// <param name="shape">The shape (spec input <c>shape</c>).</param>
     /// <returns>The integer area: circle area for <see cref="Circle"/>, width*height for <see cref="Rectangle"/>, 0 for a point.</returns>
-    [SpecOperation("area_of_shape")]
+    [SpecOperation("area_of_shape", Spec = "fixture.complex_inputs")]
     public static int AreaOfShape([SpecInput("shape")] Shape shape) => shape switch
     {
         Circle c => (int)(Math.PI * c.Radius * c.Radius),
@@ -166,7 +166,7 @@ public static class ComplexInputOps
     /// <summary>Classifies a side count into a <see cref="Shape"/> variant.</summary>
     /// <param name="sides">The side count (spec input <c>sides</c>).</param>
     /// <returns>A <see cref="Rectangle"/> for 4, a point for 1, otherwise a <see cref="Circle"/>.</returns>
-    [SpecOperation("classify")]
+    [SpecOperation("classify", Spec = "fixture.complex_inputs")]
     public static Shape Classify([SpecInput("sides")] int sides) => sides switch
     {
         4 => new Rectangle { Width = 3, Height = 4 },
@@ -177,7 +177,7 @@ public static class ComplexInputOps
     /// <summary>Returns a diagonal line of points.</summary>
     /// <param name="count">The number of points to generate (spec input <c>count</c>).</param>
     /// <returns>A list of <paramref name="count"/> points where each has equal x and y.</returns>
-    [SpecOperation("get_points_on_line")]
+    [SpecOperation("get_points_on_line", Spec = "fixture.complex_inputs")]
     public static List<Point> GetPointsOnLine([SpecInput("count")] int count)
     {
         var points = new List<Point>();
@@ -193,14 +193,14 @@ public static class ComplexInputOps
     /// <param name="table">The map to search (spec input <c>table</c>).</param>
     /// <param name="key">The key to look up (spec input <c>key</c>).</param>
     /// <returns>The mapped value, or 0 when the key is absent.</returns>
-    [SpecOperation("lookup")]
+    [SpecOperation("lookup", Spec = "fixture.complex_inputs")]
     public static int Lookup([SpecInput("table")] Dictionary<string, int> table, [SpecInput("key")] string key) =>
         table.TryGetValue(key, out int value) ? value : 0;
 
     /// <summary>Inverts a string-to-int map into an int-to-string map (values become keys).</summary>
     /// <param name="table">The map to invert (spec input <c>table</c>).</param>
     /// <returns>A map keyed by the stringified original values.</returns>
-    [SpecOperation("invert_map")]
+    [SpecOperation("invert_map", Spec = "fixture.complex_inputs")]
     public static Dictionary<string, string> InvertMap([SpecInput("table")] Dictionary<string, int> table)
     {
         var inverted = new Dictionary<string, string>();
@@ -215,7 +215,7 @@ public static class ComplexInputOps
     /// <summary>Greets an optional name, falling back to a generic greeting when absent.</summary>
     /// <param name="name">The optional name (spec input <c>name</c>).</param>
     /// <returns><c>"Hello, {name}!"</c> when present, otherwise <c>"Hello, stranger!"</c>.</returns>
-    [SpecOperation("greet_optional")]
+    [SpecOperation("greet_optional", Spec = "fixture.complex_inputs")]
     public static string GreetOptional([SpecInput("name")] Option<string> name) =>
         name.HasValue ? $"Hello, {name.Value}!" : "Hello, stranger!";
 
@@ -223,7 +223,7 @@ public static class ComplexInputOps
     /// <param name="points">The points to search (spec input <c>points</c>).</param>
     /// <param name="targetX">The x coordinate to match (spec input <c>target_x</c>).</param>
     /// <returns><c>Some</c> point when found, otherwise <c>None</c>.</returns>
-    [SpecOperation("find_point")]
+    [SpecOperation("find_point", Spec = "fixture.complex_inputs")]
     public static Option<Point> FindPoint([SpecInput("points")] List<Point> points, [SpecInput("target_x")] int targetX)
     {
         foreach (var p in points)
@@ -240,7 +240,7 @@ public static class ComplexInputOps
     /// <summary>Optionally produces a shape for a given side count.</summary>
     /// <param name="sides">The side count (spec input <c>sides</c>).</param>
     /// <returns><c>Some(Circle)</c> for 1, <c>Some(Point)</c> for 0, otherwise <c>None</c>.</returns>
-    [SpecOperation("find_shape")]
+    [SpecOperation("find_shape", Spec = "fixture.complex_inputs")]
     public static Option<Shape> FindShape([SpecInput("sides")] int sides) => sides switch
     {
         1 => Option<Shape>.Some(new Circle { Radius = 5 }),
@@ -251,7 +251,7 @@ public static class ComplexInputOps
     /// <summary>Describes a person built from a nested struct input.</summary>
     /// <param name="person">The person to describe (spec input <c>person</c>).</param>
     /// <returns>The string <c>"{name}, age {age}"</c>.</returns>
-    [SpecOperation("describe_person")]
+    [SpecOperation("describe_person", Spec = "fixture.complex_inputs")]
     public static string DescribePerson([SpecInput("person")] Person person) => $"{person.Name}, age {person.Age}";
 
     /// <summary>Builds a person (with a nested address) from flat inputs.</summary>
@@ -260,7 +260,7 @@ public static class ComplexInputOps
     /// <param name="street">The address street (spec input <c>street</c>).</param>
     /// <param name="city">The address city (spec input <c>city</c>).</param>
     /// <returns>A <see cref="Person"/> with the given fields and a nested <see cref="Address"/>.</returns>
-    [SpecOperation("create_person")]
+    [SpecOperation("create_person", Spec = "fixture.complex_inputs")]
     public static Person CreatePerson(
         [SpecInput("name")] string name,
         [SpecInput("age")] int age,

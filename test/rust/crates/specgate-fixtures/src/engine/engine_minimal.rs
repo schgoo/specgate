@@ -5,7 +5,7 @@
 //! not pass vacuously when every case is expected to complete.
 use specgate::*;
 
-#[spec_operation("probe")]
+#[spec_operation("probe", spec = "fixture.engine_minimal")]
 pub fn probe() -> i32 {
     1
 }

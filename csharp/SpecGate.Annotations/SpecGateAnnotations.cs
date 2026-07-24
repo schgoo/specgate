@@ -7,13 +7,19 @@ namespace SpecGate.Annotations;
 /// The harness discovers methods with this attribute and invokes the matching
 /// operation name from a spec case when it builds a language-binding runner.
 /// </summary>
-[AttributeUsage(AttributeTargets.Method)]
+[AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]
 public sealed class SpecOperationAttribute : Attribute
 {
     /// <summary>
     /// Gets the spec operation name implemented by the annotated method.
     /// </summary>
     public string Name { get; }
+
+    /// <summary>
+    /// Gets or sets the spec component name (e.g., spec.name).
+    /// The harness resolves operations as (component, operation).
+    /// </summary>
+    public string? Spec { get; set; }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SpecOperationAttribute"/> class.
@@ -38,6 +44,12 @@ public sealed class SpecSetupAttribute : Attribute
     /// Gets the operation name whose case setup should use the annotated method.
     /// </summary>
     public string Name { get; }
+
+    /// <summary>
+    /// Gets or sets the spec component name (e.g., spec.name).
+    /// When set, the setup is scoped to operations in that component.
+    /// </summary>
+    public string? Spec { get; set; }
 
     /// <summary>
     /// Gets or sets the operation parameter name filled by the setup result.

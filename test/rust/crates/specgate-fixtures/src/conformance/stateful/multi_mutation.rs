@@ -14,7 +14,7 @@ pub struct Counter {
 }
 
 impl Counter {
-    #[spec_operation("increment_twice")]
+    #[spec_operation("increment_twice", spec = "fixture.multi_mutation")]
     pub fn increment_twice(&mut self) {
         self.count += 1;
         self.count += 1;

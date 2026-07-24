@@ -2,7 +2,7 @@
 use specgate::*;
 use std::collections::BTreeSet;
 
-#[spec_operation("get_navigation_properties")]
+#[spec_operation("get_navigation_properties", spec = "fixture.structured_set")]
 pub fn get_navigation_properties() -> BTreeSet<String> {
     let mut s = BTreeSet::new();
     s.insert("Orders".to_string());

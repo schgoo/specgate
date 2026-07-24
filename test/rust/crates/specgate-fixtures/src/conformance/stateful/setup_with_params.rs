@@ -13,7 +13,7 @@ pub struct Counter {
 }
 
 impl Counter {
-    #[spec_operation("increment")]
+    #[spec_operation("increment", spec = "fixture.setup_with_params")]
     pub fn increment(&mut self) {
         self.count += 1;
     }

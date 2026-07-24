@@ -184,8 +184,17 @@ fn convert_target_failure(tf: specgate_harness::TargetFailure) -> SelfHostTarget
 
 // --- run_spec wrapper ------------------------------------------------------
 
-#[spec_operation("run_spec")]
+#[spec_operation("run_spec", spec = "specgate.harness")]
 pub fn run_spec(#[spec_input("spec")] spec_path: &str) -> SelfHostOutcome {
+    run_spec_inner(spec_path)
+}
+
+#[spec_operation("run_spec", spec = "specgate.conformance")]
+pub fn run_conformance_spec(#[spec_input("spec")] spec_path: &str) -> SelfHostOutcome {
+    run_spec_inner(spec_path)
+}
+
+fn run_spec_inner(spec_path: &str) -> SelfHostOutcome {
     // The harness spec uses repo-root-relative paths, but the generated runner
     // executes with the harness scratch dir
     // (`<repo>/rust/target/specgate-harness/<stem>`) as its `CARGO_MANIFEST_DIR`.

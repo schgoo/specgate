@@ -2,7 +2,7 @@
 use specgate::*;
 use std::collections::BTreeMap;
 
-#[spec_operation("get_entity_values")]
+#[spec_operation("get_entity_values", spec = "fixture.structured_map")]
 pub fn get_entity_values(id: i32) -> BTreeMap<String, String> {
     let mut m = BTreeMap::new();
     m.insert("ID".to_string(), id.to_string());

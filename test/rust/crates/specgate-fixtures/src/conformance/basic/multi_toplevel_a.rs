@@ -4,7 +4,7 @@
 // top-level source files.
 use specgate::*;
 
-#[spec_operation("alpha")]
+#[spec_operation("alpha", spec = "fixture.multi_toplevel")]
 pub fn alpha(x: i32) -> i32 {
     x + 1
 }

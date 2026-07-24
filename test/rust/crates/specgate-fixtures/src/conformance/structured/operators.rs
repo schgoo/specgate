@@ -14,7 +14,7 @@ pub struct Product {
     pub attributes: BTreeMap<String, String>,
 }
 
-#[spec_operation("get_product")]
+#[spec_operation("get_product", spec = "fixture.operators")]
 pub fn get_product() -> Product {
     let mut attrs = BTreeMap::new();
     attrs.insert("category".to_string(), "food".to_string());

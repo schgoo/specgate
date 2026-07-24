@@ -6,7 +6,7 @@
 use specgate::*;
 use std::time::Duration;
 
-#[spec_operation("smol_delay")]
+#[spec_operation("smol_delay", spec = "fixture.async_smol_timer")]
 pub async fn smol_delay() -> String {
     smol::Timer::after(Duration::from_millis(1)).await;
     "smol done".to_string()

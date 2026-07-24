@@ -13,11 +13,11 @@ public class Counter
 
     /// <summary>Builds a counter starting at zero.</summary>
     /// <returns>A new <see cref="Counter"/> with <see cref="Count"/> 0.</returns>
-    [SpecSetup("increment_twice")]
+    [SpecSetup("increment_twice", Spec = "fixture.multi_mutation")]
     public static Counter Make() => new() { Count = 0 };
 
     /// <summary>Increments the counter twice, emitting both intermediate values.</summary>
-    [SpecOperation("increment_twice")]
+    [SpecOperation("increment_twice", Spec = "fixture.multi_mutation")]
     public void IncrementTwice()
     {
         Count += 1;

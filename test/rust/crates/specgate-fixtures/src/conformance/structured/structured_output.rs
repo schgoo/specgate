@@ -11,7 +11,7 @@ pub struct EntityType {
     pub structural_properties: Vec<String>,
 }
 
-#[spec_operation("resolve_entity")]
+#[spec_operation("resolve_entity", spec = "fixture.structured_output")]
 pub fn resolve_entity() -> EntityType {
     EntityType {
         name: "Customer".to_string(),

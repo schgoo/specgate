@@ -8,7 +8,7 @@
 // `nonpublic_operation_is_rejected` (input: test/fixtures/nonpublic/).
 use specgate::*;
 
-#[spec_operation("secret")]
+#[spec_operation("secret", spec = "fixture.nonpublic")]
 fn secret() -> i32 {
     42
 }

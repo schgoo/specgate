@@ -10,7 +10,7 @@ pub fn enable_flag() {
     FLAG.store(1, Ordering::SeqCst);
 }
 
-#[spec_operation("read_flag")]
+#[spec_operation("read_flag", spec = "fixture.side_effect_setup")]
 pub fn read_flag() -> i32 {
     FLAG.load(Ordering::SeqCst)
 }

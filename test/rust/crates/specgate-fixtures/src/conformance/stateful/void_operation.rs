@@ -13,7 +13,7 @@ pub struct Logger {
 }
 
 impl Logger {
-    #[spec_operation("log")]
+    #[spec_operation("log", spec = "fixture.void_operation")]
     pub fn log(&mut self, #[spec_input("msg")] _msg: &str) {
         self.count += 1;
     }

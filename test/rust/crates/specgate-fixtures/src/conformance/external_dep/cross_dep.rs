@@ -3,7 +3,7 @@
 // depend on specgate-fixtures as a Cargo dependency.
 use specgate::*;
 
-#[spec_operation("parse_yaml_key")]
+#[spec_operation("parse_yaml_key", spec = "fixture.cross_dep")]
 pub fn parse_yaml_key(input: &str, key: &str) -> String {
     let value: serde_yaml::Value = serde_yaml::from_str(input).unwrap();
     value[key].as_str().unwrap_or("null").to_string()

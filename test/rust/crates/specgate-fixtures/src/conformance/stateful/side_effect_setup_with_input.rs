@@ -12,7 +12,7 @@ pub fn set_limit(limit: i32) {
     LIMIT.store(limit, Ordering::SeqCst);
 }
 
-#[spec_operation("check_limit")]
+#[spec_operation("check_limit", spec = "fixture.side_effect_setup_with_input")]
 pub fn check_limit() -> i32 {
     LIMIT.load(Ordering::SeqCst)
 }

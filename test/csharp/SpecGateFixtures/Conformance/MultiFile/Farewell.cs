@@ -11,6 +11,6 @@ public static class FarewellOps
     /// <summary>Builds a farewell for <paramref name="name"/>.</summary>
     /// <param name="name">The name to bid farewell (spec input <c>name</c>).</param>
     /// <returns>The string <c>"Goodbye, {name}!"</c>.</returns>
-    [SpecOperation("farewell")]
+    [SpecOperation("farewell", Spec = "fixture.multi_file")]
     public static string Farewell([SpecInput("name")] string name) => $"Goodbye, {name}!";
 }

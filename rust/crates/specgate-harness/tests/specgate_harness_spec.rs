@@ -453,7 +453,7 @@ fn error_missing_setup() {
 #[test]
 fn error_missing_operation() {
     let reason = err_reason(run("test/rust/crates/specgate-fixtures/specs/missing_operation.spec.yaml"));
-    assert_eq!(reason, "operation 'increment' not found in source annotations");
+    assert_eq!(reason, "operation 'increment' not found for component 'fixture.missing_operation'");
 }
 
 #[test]

@@ -11,7 +11,7 @@ public static class ParseYamlKeyOps
     /// <param name="input">The document text, one <c>key: value</c> pair per line (spec input <c>input</c>).</param>
     /// <param name="key">The key whose value to return (spec input <c>key</c>).</param>
     /// <returns>The trimmed value for <paramref name="key"/>, or the string <c>"null"</c> if absent.</returns>
-    [SpecOperation("parse_yaml_key")]
+    [SpecOperation("parse_yaml_key", Spec = "fixture.cross_dep")]
     public static string ParseYamlKey([SpecInput("input")] string input, [SpecInput("key")] string key)
     {
         foreach (var line in input.Split('\n'))

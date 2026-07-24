@@ -18,7 +18,7 @@ pub struct UserService {
 }
 
 impl UserService {
-    #[spec_operation("get_users")]
+    #[spec_operation("get_users", spec = "fixture.mock_multi_response")]
     pub fn get_two_users(&self, id_a: &str, id_b: &str) -> String {
         #[spec_mock("db")]
         let a = self.db.find(id_a);

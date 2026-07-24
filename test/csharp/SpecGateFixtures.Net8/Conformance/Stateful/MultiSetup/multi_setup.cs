@@ -21,19 +21,19 @@ public static class TransferOps
 {
     /// <summary>Builds the source account with a starting balance of 100.</summary>
     /// <returns>A new <see cref="Account"/> for the <c>source</c> parameter.</returns>
-    [SpecSetup("transfer", Fills = "source")]
+    [SpecSetup("transfer", Fills = "source", Spec = "fixture.multi_setup")]
     public static Account MakeSource() => new() { Balance = 100 };
 
     /// <summary>Builds the target account with a starting balance of 0.</summary>
     /// <returns>A new <see cref="Account"/> for the <c>target</c> parameter.</returns>
-    [SpecSetup("transfer", Fills = "target")]
+    [SpecSetup("transfer", Fills = "target", Spec = "fixture.multi_setup")]
     public static Account MakeTarget() => new() { Balance = 0 };
 
     /// <summary>Moves <paramref name="amount"/> from <paramref name="source"/> to <paramref name="target"/>.</summary>
     /// <param name="source">The debited account (built by <see cref="MakeSource"/>).</param>
     /// <param name="target">The credited account (built by <see cref="MakeTarget"/>).</param>
     /// <param name="amount">The amount to transfer (spec input <c>amount</c>).</param>
-    [SpecOperation("transfer")]
+    [SpecOperation("transfer", Spec = "fixture.multi_setup")]
     public static void Transfer(Account source, Account target, [SpecInput("amount")] int amount)
     {
         source.Balance -= amount;

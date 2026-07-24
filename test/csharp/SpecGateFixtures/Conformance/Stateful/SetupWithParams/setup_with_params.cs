@@ -14,10 +14,10 @@ public class Counter
     /// <summary>Builds a counter starting at <paramref name="initial"/>.</summary>
     /// <param name="initial">The starting count (spec input <c>initial</c>).</param>
     /// <returns>A new <see cref="Counter"/> with <see cref="Count"/> = <paramref name="initial"/>.</returns>
-    [SpecSetup("increment")]
+    [SpecSetup("increment", Spec = "fixture.setup_with_params")]
     public static Counter Make([SpecInput("initial")] int initial) => new() { Count = initial };
 
     /// <summary>Increments the counter by one.</summary>
-    [SpecOperation("increment")]
+    [SpecOperation("increment", Spec = "fixture.setup_with_params")]
     public void Increment() => Count += 1;
 }

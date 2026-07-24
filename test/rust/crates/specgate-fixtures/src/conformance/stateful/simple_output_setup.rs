@@ -7,7 +7,7 @@ pub fn make_n() -> i32 {
     21
 }
 
-#[spec_operation("double")]
+#[spec_operation("double", spec = "fixture.simple_output_setup")]
 pub fn double(n: i32) -> i32 {
     n * 2
 }

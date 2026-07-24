@@ -16,7 +16,7 @@ pub fn make_box(start: i32) -> BoxVal {
     BoxVal { value: start }
 }
 
-#[spec_operation("combine")]
+#[spec_operation("combine", spec = "fixture.shared_setup")]
 pub fn combine(left: &BoxVal, right: &BoxVal) -> i32 {
     left.value + right.value
 }
@@ -29,7 +29,7 @@ pub fn make_unit() -> BoxVal {
     BoxVal { value: 1 }
 }
 
-#[spec_operation("combine_three")]
+#[spec_operation("combine_three", spec = "fixture.shared_setup")]
 pub fn combine_three(a: &BoxVal, b: &BoxVal, c: &BoxVal) -> i32 {
     a.value + b.value + c.value
 }

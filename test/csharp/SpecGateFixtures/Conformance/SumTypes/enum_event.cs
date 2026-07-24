@@ -47,7 +47,7 @@ public static class SumTypeFixtures
     /// <summary>Classifies a side count into a <see cref="Shape"/> variant.</summary>
     /// <param name="sides">The number of sides (spec input <c>sides</c>).</param>
     /// <returns>A <see cref="Circle"/> for 1, a <see cref="Rectangle"/> for 4, otherwise a <see cref="Point"/>.</returns>
-    [SpecOperation("classify")]
+    [SpecOperation("classify", Spec = "fixture.enum_event")]
     public static Shape Classify([SpecInput("sides")] int sides) =>
         sides switch
         {
@@ -60,7 +60,8 @@ public static class SumTypeFixtures
     /// <param name="items">The list to search (spec input <c>items</c>).</param>
     /// <param name="target">The value to locate (spec input <c>target</c>).</param>
     /// <returns><see cref="Option{T}"/> carrying the index, or <c>None</c> when absent.</returns>
-    [SpecOperation("find")]
+    [SpecOperation("find", Spec = "fixture.option_some")]
+    [SpecOperation("find", Spec = "fixture.option_none")]
     public static Option<int> Find([SpecInput("items")] List<int> items, [SpecInput("target")] int target)
     {
         int index = items.IndexOf(target);
@@ -71,7 +72,8 @@ public static class SumTypeFixtures
     /// <param name="a">The dividend (spec input <c>a</c>).</param>
     /// <param name="b">The divisor (spec input <c>b</c>).</param>
     /// <returns><c>Ok</c> with the quotient, or <c>Err</c> with a message when <paramref name="b"/> is zero.</returns>
-    [SpecOperation("try_divide")]
+    [SpecOperation("try_divide", Spec = "fixture.result_ok")]
+    [SpecOperation("try_divide", Spec = "fixture.result_err")]
     public static Result<int, string> DivideResult([SpecInput("a")] int a, [SpecInput("b")] int b) =>
         b == 0 ? Result<int, string>.Err("division by zero") : Result<int, string>.Ok(a / b);
 }

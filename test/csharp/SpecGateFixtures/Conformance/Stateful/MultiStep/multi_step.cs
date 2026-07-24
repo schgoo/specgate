@@ -10,14 +10,14 @@ public class Counter
 
     /// <summary>Builds a counter starting at zero.</summary>
     /// <returns>A new <see cref="Counter"/> with <see cref="Count"/> 0.</returns>
-    [SpecSetup("increment")]
+    [SpecSetup("increment", Spec = "fixture.multi_step")]
     public static Counter Make() => new() { Count = 0 };
 
     /// <summary>Increments the counter by one.</summary>
-    [SpecOperation("increment")]
+    [SpecOperation("increment", Spec = "fixture.multi_step")]
     public void Increment() => Count += 1;
 
     /// <summary>Decrements the counter by one.</summary>
-    [SpecOperation("decrement")]
+    [SpecOperation("decrement", Spec = "fixture.multi_step")]
     public void Decrement() => Count -= 1;
 }

@@ -24,7 +24,7 @@ public static class DivergenceWitness
 {
     /// <summary>Returns engine info with the C#-specific engine name.</summary>
     /// <returns>An <see cref="EngineInfo"/> with value 10 and engine <c>"csharp"</c>.</returns>
-    [SpecOperation("engine_info")]
+    [SpecOperation("engine_info", Spec = "fixture.divergence_witness")]
     public static EngineInfo GetEngineInfo() =>
         new() { Value = 10, Engine = "csharp" };
 }

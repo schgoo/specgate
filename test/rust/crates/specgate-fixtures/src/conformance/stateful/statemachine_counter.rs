@@ -13,7 +13,7 @@ pub struct Counter {
 }
 
 impl Counter {
-    #[spec_operation("increment")]
+    #[spec_operation("increment", spec = "fixture.statemachine_counter")]
     pub fn increment(&mut self) {
         self.count += 1;
     }

@@ -6,7 +6,7 @@ use specgate::*;
 
 spec_component!("fixture.coverage");
 
-#[spec_operation("classify")]
+#[spec_operation("classify", spec = "fixture.coverage_partial")]
 pub fn classify(n: i32) -> String {
     if n > 0 {
         positive_label()

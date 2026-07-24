@@ -10,10 +10,10 @@ public class Counter
 
     /// <summary>Builds a counter starting at zero.</summary>
     /// <returns>A new <see cref="Counter"/> with <see cref="Count"/> 0.</returns>
-    [SpecSetup("increment")]
+    [SpecSetup("increment", Spec = "fixture.statemachine_counter")]
     public static Counter Make() => new() { Count = 0 };
 
     /// <summary>Increments the counter by one.</summary>
-    [SpecOperation("increment")]
+    [SpecOperation("increment", Spec = "fixture.statemachine_counter")]
     public void Increment() => Count += 1;
 }

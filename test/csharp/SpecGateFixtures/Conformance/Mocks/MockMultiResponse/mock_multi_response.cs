@@ -24,14 +24,14 @@ public class UserService
 
     /// <summary>Builds the service (with a real, never-invoked dependency).</summary>
     /// <returns>A new <see cref="UserService"/>.</returns>
-    [SpecSetup("get_users")]
+    [SpecSetup("get_users", Spec = "fixture.mock_multi_response")]
     public static UserService Make() => new();
 
     /// <summary>Returns a combined description of two users via two mocked calls.</summary>
     /// <param name="idA">The first user id (spec input <c>id_a</c>).</param>
     /// <param name="idB">The second user id (spec input <c>id_b</c>).</param>
     /// <returns>The two db responses joined with <c>" and "</c>.</returns>
-    [SpecOperation("get_users")]
+    [SpecOperation("get_users", Spec = "fixture.mock_multi_response")]
     public string GetTwoUsers([SpecInput("id_a")] string idA, [SpecInput("id_b")] string idB)
     {
         string a = _db.Find(idA);

@@ -12,7 +12,7 @@ public static class DivideOps
     /// <param name="b">The divisor (spec input <c>b</c>).</param>
     /// <returns>The integer quotient <paramref name="a"/> / <paramref name="b"/>.</returns>
     /// <exception cref="Exception">Thrown when <paramref name="b"/> is zero; captured as a <c>$fault</c>.</exception>
-    [SpecOperation("divide")]
+    [SpecOperation("divide", Spec = "fixture.unrecoverable")]
     public static int Divide([SpecInput("a")] int a, [SpecInput("b")] int b)
     {
         if (b == 0) throw new Exception("attempt to divide by zero");

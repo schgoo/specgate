@@ -18,7 +18,7 @@ pub struct UserService {
 }
 
 impl UserService {
-    #[spec_operation("get_user")]
+    #[spec_operation("get_user", spec = "fixture.mock_field")]
     pub fn get_user(&self, id: &str) -> String {
         #[spec_mock("db")]
         let response = self.db.find(id);

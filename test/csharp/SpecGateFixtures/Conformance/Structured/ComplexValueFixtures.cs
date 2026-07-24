@@ -81,7 +81,7 @@ public static class ComplexValueFixtures
 {
     /// <summary>Returns a fixed sample <see cref="Measurement"/>.</summary>
     /// <returns>A measurement with preset temperature, label, and readings.</returns>
-    [SpecOperation("get_measurement")]
+    [SpecOperation("get_measurement", Spec = "fixture.scalar_operators")]
     public static Measurement GetMeasurement() =>
         new()
         {
@@ -92,12 +92,12 @@ public static class ComplexValueFixtures
 
     /// <summary>Returns an empty string list, exercising empty-collection serialization.</summary>
     /// <returns>An empty <see cref="List{T}"/> of strings.</returns>
-    [SpecOperation("get_empty")]
+    [SpecOperation("get_empty", Spec = "fixture.scalar_operators")]
     public static List<string> GetEmpty() => [];
 
     /// <summary>Returns a fixed sample <see cref="Product"/>.</summary>
     /// <returns>A product with preset name, price, tags, and attributes.</returns>
-    [SpecOperation("get_product")]
+    [SpecOperation("get_product", Spec = "fixture.operators")]
     public static Product GetProduct() =>
         new()
         {
@@ -113,7 +113,7 @@ public static class ComplexValueFixtures
 
     /// <summary>Returns a fixed sample <see cref="EntityType"/>.</summary>
     /// <returns>An entity type describing a <c>Customer</c>.</returns>
-    [SpecOperation("resolve_entity")]
+    [SpecOperation("resolve_entity", Spec = "fixture.structured_output")]
     public static EntityType ResolveEntity() =>
         new()
         {
@@ -125,7 +125,7 @@ public static class ComplexValueFixtures
     /// <summary>Returns a map of entity field values keyed by field name.</summary>
     /// <param name="id">The entity id, formatted into the returned map (spec input <c>id</c>).</param>
     /// <returns>A dictionary of the entity's field values.</returns>
-    [SpecOperation("get_entity_values")]
+    [SpecOperation("get_entity_values", Spec = "fixture.structured_map")]
     public static Dictionary<string, string> GetEntityValues([SpecInput("id")] int id) =>
         new()
         {
@@ -136,13 +136,13 @@ public static class ComplexValueFixtures
 
     /// <summary>Returns navigation property names, exercising set serialization (sorted, deduplicated).</summary>
     /// <returns>A <see cref="SortedSet{T}"/> of navigation property names.</returns>
-    [SpecOperation("get_navigation_properties")]
+    [SpecOperation("get_navigation_properties", Spec = "fixture.structured_set")]
     public static SortedSet<string> GetNavigationProperties() =>
         ["Orders", "Address", "Contacts"];
 
     /// <summary>Returns a list of property descriptor maps, exercising nested list-of-map serialization.</summary>
     /// <returns>A list where each entry is a name/type/nullable descriptor map.</returns>
-    [SpecOperation("get_properties")]
+    [SpecOperation("get_properties", Spec = "fixture.nested_structured")]
     public static List<Dictionary<string, string>> GetProperties() =>
         [
             new Dictionary<string,string>
@@ -163,13 +163,13 @@ public static class ComplexValueFixtures
     /// <param name="value">The base value (spec input <c>value</c>).</param>
     /// <param name="factor">The multiplier (spec input <c>factor</c>).</param>
     /// <returns>The product <paramref name="value"/> * <paramref name="factor"/>.</returns>
-    [SpecOperation("scale")]
+    [SpecOperation("scale", Spec = "fixture.default_input")]
     public static int Scale([SpecInput("value")] int value, [SpecInput("factor")] int factor) => value * factor;
 
     /// <summary>Shifts <paramref name="base"/> by a structured <see cref="Offset"/> input.</summary>
     /// <param name="base">The base value (spec input <c>base</c>).</param>
     /// <param name="by">The offset to apply (spec input <c>by</c>).</param>
     /// <returns><paramref name="base"/> plus the offset's <see cref="Offset.Dx"/> and <see cref="Offset.Dy"/>.</returns>
-    [SpecOperation("shift")]
+    [SpecOperation("shift", Spec = "fixture.default_input")]
     public static int Shift([SpecInput("base")] int @base, [SpecInput("by")] Offset by) => @base + by.Dx + by.Dy;
 }

@@ -11,7 +11,7 @@ pub struct Measurement {
     pub readings: Vec<i32>,
 }
 
-#[spec_operation("get_measurement")]
+#[spec_operation("get_measurement", spec = "fixture.scalar_operators")]
 pub fn get_measurement() -> Measurement {
     Measurement {
         temperature: 72,
@@ -20,7 +20,7 @@ pub fn get_measurement() -> Measurement {
     }
 }
 
-#[spec_operation("get_empty")]
+#[spec_operation("get_empty", spec = "fixture.scalar_operators")]
 pub fn get_empty() -> Vec<String> {
     vec![]
 }

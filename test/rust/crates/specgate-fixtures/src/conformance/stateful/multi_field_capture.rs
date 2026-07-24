@@ -18,7 +18,7 @@ pub struct Account {
 }
 
 impl Account {
-    #[spec_operation("withdraw")]
+    #[spec_operation("withdraw", spec = "fixture.multi_field_capture")]
     pub fn withdraw(&mut self, amount: i32) {
         self.balance -= amount;
         self.transaction_count += 1;

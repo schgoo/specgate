@@ -13,18 +13,18 @@ pub struct Account {
 }
 
 impl Account {
-    #[spec_operation("transfer")]
+    #[spec_operation("transfer", spec = "fixture.nested_operations")]
     pub fn transfer(&mut self, amount: i32) {
         self.withdraw(amount);
         self.deposit(amount);
     }
 
-    #[spec_operation("withdraw")]
+    #[spec_operation("withdraw", spec = "fixture.nested_operations")]
     pub fn withdraw(&mut self, amount: i32) {
         self.balance -= amount;
     }
 
-    #[spec_operation("deposit")]
+    #[spec_operation("deposit", spec = "fixture.nested_operations")]
     pub fn deposit(&mut self, amount: i32) {
         self.balance += amount;
     }

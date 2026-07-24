@@ -25,13 +25,13 @@ public class UserService
 
     /// <summary>Builds the service (with a real, never-invoked dependency).</summary>
     /// <returns>A new <see cref="UserService"/>.</returns>
-    [SpecSetup("get_user")]
+    [SpecSetup("get_user", Spec = "fixture.mock_not_found")]
     public static UserService Make() => new();
 
     /// <summary>Returns the user record for <paramref name="id"/> via the mocked db.</summary>
     /// <param name="id">The user id (spec input <c>id</c>).</param>
     /// <returns>The db's response, or the default when the input is not in the table.</returns>
-    [SpecOperation("get_user")]
+    [SpecOperation("get_user", Spec = "fixture.mock_not_found")]
     public string GetUser([SpecInput("id")] string id)
     {
         string response = _db.Find(id);

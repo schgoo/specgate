@@ -8,7 +8,7 @@ pub enum Shape {
     Point,
 }
 
-#[spec_operation("classify")]
+#[spec_operation("classify", spec = "fixture.enum_event")]
 pub fn classify(sides: i32) -> Shape {
     match sides {
         0 => Shape::Point,

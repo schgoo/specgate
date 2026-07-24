@@ -11,6 +11,6 @@ public static class GreetOps
     /// <summary>Builds a greeting for <paramref name="name"/>.</summary>
     /// <param name="name">The name to greet (spec input <c>name</c>).</param>
     /// <returns>The string <c>"Hello, {name}!"</c>.</returns>
-    [SpecOperation("greet")]
+    [SpecOperation("greet", Spec = "fixture.multi_file")]
     public static string Greet([SpecInput("name")] string name) => $"Hello, {name}!";
 }

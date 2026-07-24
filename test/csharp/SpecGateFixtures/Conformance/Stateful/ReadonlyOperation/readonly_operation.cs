@@ -13,11 +13,11 @@ public class Counter
 
     /// <summary>Builds a counter preset to 42.</summary>
     /// <returns>A new <see cref="Counter"/> with <see cref="Count"/> 42.</returns>
-    [SpecSetup("get_count")]
+    [SpecSetup("get_count", Spec = "fixture.readonly_operation")]
     public static Counter Make() => new() { Count = 42 };
 
     /// <summary>Returns the current count without changing it.</summary>
     /// <returns>The value of <see cref="Count"/>.</returns>
-    [SpecOperation("get_count")]
+    [SpecOperation("get_count", Spec = "fixture.readonly_operation")]
     public int GetCount() => Count;
 }

@@ -18,7 +18,7 @@ pub struct Account {
     pub balance: i32,
 }
 
-#[spec_operation("transfer")]
+#[spec_operation("transfer", spec = "fixture.multi_setup")]
 pub fn transfer(source: &mut Account, target: &mut Account, amount: i32) {
     source.balance -= amount;
     target.balance += amount;

@@ -13,12 +13,12 @@ pub struct Counter {
 }
 
 impl Counter {
-    #[spec_operation("increment")]
+    #[spec_operation("increment", spec = "fixture.multi_step")]
     pub fn increment(&mut self) {
         self.count += 1;
     }
 
-    #[spec_operation("decrement")]
+    #[spec_operation("decrement", spec = "fixture.multi_step")]
     pub fn decrement(&mut self) {
         self.count -= 1;
     }

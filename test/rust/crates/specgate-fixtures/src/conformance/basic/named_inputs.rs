@@ -3,7 +3,7 @@
 // its own parameter names.
 use specgate::*;
 
-#[spec_operation("divide")]
+#[spec_operation("divide", spec = "fixture.named_inputs")]
 pub fn divide(#[spec_input("numerator")] a: i32, #[spec_input("denominator")] b: i32) -> i32 {
     a / b
 }
@@ -20,7 +20,7 @@ pub struct Scaler {
 }
 
 impl Scaler {
-    #[spec_operation("scale")]
+    #[spec_operation("scale", spec = "fixture.named_inputs")]
     pub fn scale(&self, #[spec_input("value")] v: i32) -> i32 {
         self.factor * v
     }

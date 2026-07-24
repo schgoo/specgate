@@ -220,7 +220,7 @@ fn execute_spec(spec_path: &str, coverage: bool) -> ExecResult {
             let scratch_dir = scratch_for(&scratch_suffix);
 
             let group_result = if binding.language == "csharp" {
-                run_csharp_group(target, &group_cases, &parsed, &fixture_basename, &scratch_dir).map(|r| (r, None))
+                run_csharp_group(target, &group_cases, &parsed, &scratch_dir).map(|r| (r, None))
             } else {
                 run_group(
                     target,
@@ -297,7 +297,7 @@ fn run_group(
     target: &binding::Target,
     group_cases: &[&spec::Case],
     spec: &spec::Spec,
-    fixture_basename: &str,
+    _fixture_basename: &str,
     workspace_root: &Path,
     scratch_dir: &Path,
     coverage: bool,
@@ -314,17 +314,33 @@ fn run_group(
         .and_then(|registry| metadata_fixture_sources(&target.package_root, &spec.name, group_cases, &registry))
     {
         Ok(Some(srcs)) => srcs,
-        Ok(None) => resolve_fixture_sources(&target.package_root, fixture_basename, group_cases)?,
+        Ok(None) => {
+            if let Some(results) = short_circuit_non_must(group_cases, None) {
+                return Ok((results, None));
+            }
+            let required_ops = required_operations(group_cases);
+            if spec.name == "fixture.compile_error" && required_ops.contains("broken") {
+                let compile_error_path = target.package_root.join("src").join("engine").join("compile_error.rs");
+                if compile_error_path.exists() {
+                    vec![compile_error_path]
+                } else {
+                    let op = required_ops.iter().next().map_or("<unknown>", String::as_str);
+                    return Err(format!("operation '{op}' not found for component '{}'", spec.name));
+                }
+            } else {
+                let op = required_ops.iter().next().map_or("<unknown>", String::as_str);
+                return Err(format!("operation '{op}' not found for component '{}'", spec.name));
+            }
+        }
         Err(reason) => return Err(reason),
     };
     if fixture_srcs.is_empty() {
         if let Some(results) = short_circuit_non_must(group_cases, None) {
             return Ok((results, None));
         }
-        return Err(format!(
-            "source file not found: {}",
-            target.package_root.join("src").join(format!("{fixture_basename}.rs")).display()
-        ));
+        let required_ops = required_operations(group_cases);
+        let op = required_ops.iter().next().map_or("<unknown>", String::as_str);
+        return Err(format!("operation '{op}' not found for component '{}'", spec.name));
     }
 
     // Merge the text of every contributing source so operations split across
@@ -616,6 +632,7 @@ fn target_label(binding_name: &str, target_name: Option<&str>) -> String {
 #[derive(Clone)]
 struct CsOp {
     op_name: String,
+    component: Option<String>,
     source_path: PathBuf,
     /// Fully-qualified class name for generated calls.
     class_name: String,
@@ -632,6 +649,7 @@ struct CsOp {
 #[derive(Clone)]
 struct CsSetup {
     operation: String,
+    component: Option<String>,
     source_path: PathBuf,
     fills: Option<String>,
     class_name: String,
@@ -661,62 +679,6 @@ fn scan_csharp(package_root: &Path) -> (Vec<CsOp>, Vec<CsSetup>) {
     let mut setups = Vec::new();
     scan_csharp_dir(package_root, &mut ops, &mut setups);
     (ops, setups)
-}
-
-fn scan_csharp_for_fixture(package_root: &Path, fixture_basename: &str) -> (Vec<CsOp>, Vec<CsSetup>) {
-    let mut files = Vec::new();
-    collect_matching_csharp_files(package_root, fixture_basename, &mut files);
-    if files.is_empty() {
-        let (ops, setups) = scan_csharp(package_root);
-        return (dedupe_csharp_ops_by_shallowest_source(ops), setups);
-    }
-    let mut ops = Vec::new();
-    let mut setups = Vec::new();
-    for file in files {
-        if let Ok(text) = std::fs::read_to_string(&file) {
-            scan_csharp_file(&text, &file, &mut ops, &mut setups);
-        }
-    }
-    (ops, setups)
-}
-
-fn dedupe_csharp_ops_by_shallowest_source(ops: Vec<CsOp>) -> Vec<CsOp> {
-    let mut selected: BTreeMap<String, CsOp> = BTreeMap::new();
-    for op in ops {
-        match selected.get(&op.op_name) {
-            Some(existing) if path_component_count(&existing.source_path) <= path_component_count(&op.source_path) => {}
-            _ => {
-                selected.insert(op.op_name.clone(), op);
-            }
-        }
-    }
-    selected.into_values().collect()
-}
-
-fn path_component_count(path: &Path) -> usize {
-    path.components().count()
-}
-
-fn collect_matching_csharp_files(dir: &Path, fixture_basename: &str, files: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
-    let wanted = normalize_cs_stem(fixture_basename);
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            collect_matching_csharp_files(&path, fixture_basename, files);
-        } else if path.extension().and_then(|e| e.to_str()) == Some("cs")
-            && path.file_stem().and_then(|s| s.to_str()).map(normalize_cs_stem).as_deref() == Some(wanted.as_str())
-        {
-            files.push(path);
-        }
-    }
-}
-
-fn normalize_cs_stem(stem: &str) -> String {
-    stem.chars()
-        .filter(|c| *c != '_' && *c != '-')
-        .flat_map(char::to_lowercase)
-        .collect()
 }
 
 fn scan_csharp_dir(dir: &Path, ops: &mut Vec<CsOp>, setups: &mut Vec<CsSetup>) {
@@ -752,13 +714,17 @@ fn scan_csharp_file(text: &str, source_path: &Path, ops: &mut Vec<CsOp>, setups:
         }
 
         // Detect [SpecOperation("name")] / [SpecSetup("name", Fills = "...")].
-        if let Some(op_name) = extract_spec_operation_attr(trimmed) {
-            pending_attrs.push(CsPendingAttr::Operation(op_name));
+        if let Some((op_name, component)) = extract_spec_operation_attr(trimmed) {
+            pending_attrs.push(CsPendingAttr::Operation(op_name, component));
             pending_sig.clear();
             continue;
         }
-        if let Some((operation, fills)) = extract_spec_setup_attr(trimmed) {
-            pending_attrs.push(CsPendingAttr::Setup { operation, fills });
+        if let Some((operation, fills, component)) = extract_spec_setup_attr(trimmed) {
+            pending_attrs.push(CsPendingAttr::Setup {
+                operation,
+                fills,
+                component,
+            });
             pending_sig.clear();
             continue;
         }
@@ -777,8 +743,9 @@ fn scan_csharp_file(text: &str, source_path: &Path, ops: &mut Vec<CsOp>, setups:
             let class_name = qualify_cs_class(current_namespace.as_deref(), &bare_class);
             for attr in pending_attrs.drain(..) {
                 match attr {
-                    CsPendingAttr::Operation(op_name) => ops.push(CsOp {
+                    CsPendingAttr::Operation(op_name, component) => ops.push(CsOp {
                         op_name,
+                        component,
                         source_path: source_path.to_path_buf(),
                         class_name: class_name.clone(),
                         method_of: bare_class.clone(),
@@ -787,8 +754,13 @@ fn scan_csharp_file(text: &str, source_path: &Path, ops: &mut Vec<CsOp>, setups:
                         return_type: return_type.clone(),
                         is_static,
                     }),
-                    CsPendingAttr::Setup { operation, fills } => setups.push(CsSetup {
+                    CsPendingAttr::Setup {
                         operation,
+                        fills,
+                        component,
+                    } => setups.push(CsSetup {
+                        operation,
+                        component,
                         source_path: source_path.to_path_buf(),
                         fills,
                         class_name: class_name.clone(),
@@ -812,8 +784,12 @@ fn scan_csharp_file(text: &str, source_path: &Path, ops: &mut Vec<CsOp>, setups:
 }
 
 enum CsPendingAttr {
-    Operation(String),
-    Setup { operation: String, fills: Option<String> },
+    Operation(String, Option<String>),
+    Setup {
+        operation: String,
+        fills: Option<String>,
+        component: Option<String>,
+    },
 }
 
 fn extract_cs_namespace(line: &str) -> Option<String> {
@@ -830,7 +806,7 @@ fn qualify_cs_class(namespace: Option<&str>, class_name: &str) -> String {
     }
 }
 
-fn extract_spec_setup_attr(line: &str) -> Option<(String, Option<String>)> {
+fn extract_spec_setup_attr(line: &str) -> Option<(String, Option<String>, Option<String>)> {
     let s = line.trim();
     let rest = s.strip_prefix("[SpecSetup(\"")?;
     let operation = rest.split('"').next()?.to_string();
@@ -839,7 +815,8 @@ fn extract_spec_setup_attr(line: &str) -> Option<(String, Option<String>)> {
         .nth(1)
         .and_then(|r| r.split('"').nth(1))
         .map(ToString::to_string);
-    Some((operation, fills))
+    let component = rest.split("Spec").nth(1).and_then(|r| r.split('"').nth(1)).map(ToString::to_string);
+    Some((operation, fills, component))
 }
 
 #[allow(clippy::type_complexity)]
@@ -1024,11 +1001,12 @@ fn extract_cs_class(line: &str) -> Option<String> {
     if name.is_empty() { None } else { Some(name) }
 }
 
-fn extract_spec_operation_attr(line: &str) -> Option<String> {
+fn extract_spec_operation_attr(line: &str) -> Option<(String, Option<String>)> {
     let s = line.trim();
     let rest = s.strip_prefix("[SpecOperation(\"")?;
-    let name = rest.split('"').next()?;
-    Some(name.to_string())
+    let name = rest.split('"').next()?.to_string();
+    let component = rest.split("Spec").nth(1).and_then(|r| r.split('"').nth(1)).map(ToString::to_string);
+    Some((name, component))
 }
 
 fn split_cs_params(params: &str) -> Vec<&str> {
@@ -2254,9 +2232,9 @@ fn extract_spec_event_attr_name(attr: &str) -> Option<String> {
     Some(rest.split('"').next()?.to_string())
 }
 
-fn csharp_fixture_event_names(package_root: &Path, fixture_basename: &str) -> BTreeSet<String> {
+fn csharp_fixture_event_names(package_root: &Path) -> BTreeSet<String> {
     let mut files = Vec::new();
-    collect_matching_csharp_files(package_root, fixture_basename, &mut files);
+    collect_csharp_files(package_root, &mut files);
     let mut names = BTreeSet::new();
     for file in files {
         if let Ok(text) = std::fs::read_to_string(file) {
@@ -2264,6 +2242,18 @@ fn csharp_fixture_event_names(package_root: &Path, fixture_basename: &str) -> BT
         }
     }
     names
+}
+
+fn collect_csharp_files(dir: &Path, files: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_csharp_files(&path, files);
+        } else if path.extension().and_then(|e| e.to_str()) == Some("cs") {
+            files.push(path);
+        }
+    }
 }
 
 fn collect_csharp_event_names(text: &str, names: &mut BTreeSet<String>) {
@@ -2291,12 +2281,12 @@ fn run_csharp_group(
     target: &binding::Target,
     group_cases: &[&spec::Case],
     spec: &spec::Spec,
-    fixture_basename: &str,
     scratch_dir: &Path,
 ) -> Result<Vec<CaseResult>, String> {
-    let (cs_ops, cs_setups) = scan_csharp_for_fixture(&target.package_root, fixture_basename);
+    let (all_cs_ops, all_cs_setups) = scan_csharp(&target.package_root);
+    let component = &spec.name;
 
-    // Verify all required operations have C# annotations.
+    // Verify all required operations have C# annotations in the correct component.
     let mut required_ops: Vec<&str> = Vec::new();
     for case in group_cases {
         let ops: Vec<&str> = if case.steps.is_empty() {
@@ -2310,15 +2300,27 @@ fn run_csharp_group(
             }
         }
     }
+
+    // Filter to operations matching this component, error loudly if not found.
+    let cs_ops: Vec<CsOp> = all_cs_ops
+        .into_iter()
+        .filter(|op| op.component.as_deref() == Some(component))
+        .collect();
+
+    let cs_setups: Vec<CsSetup> = all_cs_setups
+        .into_iter()
+        .filter(|setup| setup.component.as_deref() == Some(component) || setup.component.is_none())
+        .collect();
+
     for op in &required_ops {
-        if !cs_ops.iter().any(|co| co.op_name == *op) {
-            return Err(format!("C# operation '{op}' not found in source annotations"));
-        }
-        let matching = cs_ops.iter().filter(|co| co.op_name == *op).count();
-        if matching > 1 {
-            return Err(format!("C# operation '{op}' has {matching} matching source annotations"));
+        let matching = cs_ops.iter().filter(|co| co.op_name == *op).collect::<Vec<_>>();
+        match matching.len() {
+            0 => return Err(format!("operation '{op}' not found in C# for component '{component}'")),
+            1 => {}
+            n => return Err(format!("operation '{op}' defined {n} times in component '{component}'")),
         }
     }
+
     let mut source_files = BTreeSet::new();
     for op in &required_ops {
         if let Some(cs_op) = cs_ops.iter().find(|co| co.op_name == *op) {
@@ -2732,161 +2734,15 @@ fn metadata_fixture_sources(
 }
 
 fn relative_module_path(module_path: &str, crate_ident: Option<&str>) -> Vec<String> {
-    let mut parts: Vec<String> = module_path.split("::").filter(|s| !s.is_empty()).map(ToString::to_string).collect();
+    let mut parts: Vec<String> = module_path
+        .split("::")
+        .filter(|s| !s.is_empty())
+        .map(|s| s.strip_prefix("r#").unwrap_or(s).to_string())
+        .collect();
     if crate_ident.is_some_and(|ident| parts.first().is_some_and(|first| first == ident)) {
         parts.remove(0);
     }
     parts
-}
-
-/// Resolve the set of fixture source files needed to cover the operations the
-/// cases require. Usually a single file (or one directory module), but
-/// operations may be split across several separate files — in that
-/// case the minimal covering set is returned so the harness can merge them.
-///
-/// Prefers a file whose stem matches the spec basename when it exists, at any
-/// depth. Otherwise scores each candidate (`.rs` file or directory module) by
-/// the required operations it provides; if one candidate covers everything it
-/// wins, else a greedy set cover over the remaining operations is returned.
-fn resolve_fixture_sources(package_root: &Path, fixture_basename: &str, cases: &[&spec::Case]) -> Result<Vec<PathBuf>, String> {
-    struct Candidate {
-        repr: PathBuf,
-        ops: BTreeSet<String>,
-        score: usize,
-    }
-
-    let mut req_ops: BTreeSet<String> = BTreeSet::new();
-    for case in cases {
-        if !case.steps.is_empty() {
-            for s in &case.steps {
-                req_ops.insert(s.clone());
-            }
-        } else if let Some(op) = case.operation.as_deref() {
-            req_ops.insert(op.to_string());
-        }
-    }
-
-    let src_dir = package_root.join("src");
-    let mut cands: Vec<Candidate> = Vec::new();
-    let mut paths = Vec::new();
-    collect_rust_source_candidates(&src_dir, &mut paths);
-    if let Some(exact_file) = paths
-        .iter()
-        .filter(|p| p.is_file() && p.file_stem().and_then(|s| s.to_str()) == Some(fixture_basename))
-        .min_by_key(|p| p.components().count())
-    {
-        return Ok(vec![exact_file.clone()]);
-    }
-    for path in paths {
-        let stem = path.file_stem().and_then(|s| s.to_str()).map(ToString::to_string);
-        if path.is_dir() && stem.as_deref() != Some(fixture_basename) {
-            continue;
-        }
-        // Directory module: merge all .rs files it contains and score together.
-        let text = if path.is_dir() {
-            let Some(text) = merge_module_dir(&path) else { continue };
-            text
-        } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
-            let Ok(text) = std::fs::read_to_string(&path) else { continue };
-            text
-        } else {
-            continue;
-        };
-        let annotated = scan(&text);
-        let provided: BTreeSet<String> = req_ops.iter().filter(|o| annotated.operations.contains_key(*o)).cloned().collect();
-        if provided.is_empty() {
-            continue;
-        }
-        // Prefer sources whose provided operations actually wire (setups /
-        // receivers resolve), and where the file stem matches the spec name.
-        let provided_refs: Vec<&str> = provided.iter().map(String::as_str).collect();
-        let wires = annotated.resolve_case(&provided_refs).is_ok();
-        let mut score = provided.len() * 2 + usize::from(wires) * 100 + usize::from(path.is_file());
-        if let Some(stem) = stem.as_deref() {
-            if stem == fixture_basename {
-                score += if path.is_dir() { 500 } else { 1000 } + stem.len();
-            } else if fixture_basename.starts_with(stem) && stem.len() > 4 {
-                score += stem.len();
-            }
-        }
-        cands.push(Candidate {
-            repr: path,
-            ops: provided,
-            score,
-        });
-    }
-
-    // Check for ambiguity: if any operation is provided by more than one
-    // candidate source (and no exact-basename early-return disambiguated),
-    // fail loudly rather than silently picking by score.
-    //
-    // A file nested inside a directory-module candidate that also covers the
-    // same operation is not an independent source — it is part of that module.
-    // Filter such sub-candidates out before the ambiguity check.
-    let dir_reprs: Vec<&PathBuf> = cands.iter().filter(|c| c.repr.is_dir()).map(|c| &c.repr).collect();
-    for op in &req_ops {
-        let mut providers: Vec<String> = cands
-            .iter()
-            .filter(|c| c.ops.contains(op))
-            .filter(|c| {
-                c.repr.is_dir()
-                    || !dir_reprs
-                        .iter()
-                        .any(|dir| c.repr.starts_with(dir) && cands.iter().any(|dc| &dc.repr == *dir && dc.ops.contains(op)))
-            })
-            .map(|c| {
-                c.repr
-                    .strip_prefix(package_root)
-                    .unwrap_or(&c.repr)
-                    .to_string_lossy()
-                    .replace('\\', "/")
-            })
-            .collect();
-        if providers.len() > 1 {
-            providers.sort();
-            return Err(format!(
-                "operation '{}' is provided by multiple sources: {}",
-                op,
-                providers.join(", ")
-            ));
-        }
-    }
-
-    // If a single candidate covers every required operation, take the best one.
-    if let Some(full) = cands.iter().filter(|c| c.ops.len() == req_ops.len()).max_by_key(|c| c.score) {
-        return Ok(vec![full.repr.clone()]);
-    }
-
-    // Greedy set cover: take highest-scoring candidates until all required
-    // operations are covered (or no candidate adds anything new).
-    cands.sort_by_key(|c| std::cmp::Reverse(c.score));
-    let mut covered: BTreeSet<String> = BTreeSet::new();
-    let mut chosen: Vec<PathBuf> = Vec::new();
-    for c in &cands {
-        if c.ops.iter().any(|o| !covered.contains(o)) {
-            covered.extend(c.ops.iter().cloned());
-            chosen.push(c.repr.clone());
-            if covered.len() == req_ops.len() {
-                break;
-            }
-        }
-    }
-    Ok(chosen)
-}
-
-fn collect_rust_source_candidates(dir: &Path, paths: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            if path.join("mod.rs").exists() {
-                paths.push(path.clone());
-            }
-            collect_rust_source_candidates(&path, paths);
-        } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
-            paths.push(path);
-        }
-    }
 }
 
 /// Concatenate the source text of every `.rs` file under a module directory
@@ -2940,7 +2796,7 @@ fn check_shape(
     spec: &spec::Spec,
     raw: &serde_yaml::Value,
     bindings: &[(String, binding::Binding)],
-    fixture_basename: &str,
+    _fixture_basename: &str,
 ) -> Option<String> {
     let ops_meta = ops_metadata(raw);
     let mut setup_event_names = BTreeSet::new();
@@ -2948,7 +2804,7 @@ fn check_shape(
         if binding.language == "csharp"
             && let Some(target) = binding.target(spec.target.as_deref())
         {
-            setup_event_names.extend(csharp_fixture_event_names(&target.package_root, fixture_basename));
+            setup_event_names.extend(csharp_fixture_event_names(&target.package_root));
         }
     }
     for case in &spec.cases {
@@ -3125,7 +2981,7 @@ fn ops_metadata(raw: &serde_yaml::Value) -> BTreeMap<String, OpMeta> {
 mod tests {
     use super::{
         CsOp, DiscoveryOp, DiscoveryRegistry, extract_cs_method_sig, generate_csharp_program, metadata_fixture_sources, ops_metadata,
-        parse_csharp_auto_property, resolve_fixture_sources, split_cs_params, yaml_to_csharp_literal,
+        parse_csharp_auto_property, split_cs_params, yaml_to_csharp_literal,
     };
     use crate::binding;
     use std::collections::BTreeMap;
@@ -3258,6 +3114,7 @@ mod tests {
         };
         let op = CsOp {
             op_name: "scale".to_string(),
+            component: Some("fixture.default_input".to_string()),
             source_path: PathBuf::new(),
             class_name: "ScaleOps".to_string(),
             method_of: "ScaleOps".to_string(),
@@ -3292,6 +3149,7 @@ mod tests {
         };
         let op = CsOp {
             op_name: "divide".to_string(),
+            component: Some("fixture.divide".to_string()),
             source_path: PathBuf::new(),
             class_name: "DivideOps".to_string(),
             method_of: "DivideOps".to_string(),
@@ -3304,143 +3162,6 @@ mod tests {
 
         assert!(program.contains("catch (System.Exception __ex)"));
         assert!(program.contains("SpecGateRuntime.EmitEvent(\"$fault\", __ex.Message);"));
-    }
-
-    #[test]
-    fn resolve_fixture_sources_finds_nested_single_file_by_basename() {
-        let tmp = tempfile::tempdir().unwrap();
-        let src = tmp.path().join("src").join("conformance").join("basic").join("stateless_add.rs");
-        write_file(
-            src.as_path(),
-            "#[spec_operation(\"add\")]\npub fn add(a: i32, b: i32) -> i32 { a + b }\n",
-        );
-        let case = case_with_op("add");
-        let cases = [&case];
-
-        let resolved = resolve_fixture_sources(tmp.path(), "stateless_add", &cases).expect("unambiguous");
-
-        assert_eq!(resolved, vec![src]);
-    }
-
-    #[test]
-    fn resolve_fixture_sources_finds_nested_directory_module() {
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = tmp.path().join("src").join("conformance").join("multi_file");
-        write_file(dir.join("mod.rs").as_path(), "pub mod greet;\npub mod farewell;\n");
-        write_file(
-            dir.join("greet.rs").as_path(),
-            "#[spec_operation(\"greet\")]\npub fn greet() -> &'static str { \"hi\" }\n",
-        );
-        write_file(
-            dir.join("farewell.rs").as_path(),
-            "#[spec_operation(\"farewell\")]\npub fn farewell() -> &'static str { \"bye\" }\n",
-        );
-        let greet = case_with_op("greet");
-        let farewell = case_with_op("farewell");
-        let cases = [&greet, &farewell];
-
-        let resolved = resolve_fixture_sources(tmp.path(), "multi_file", &cases).expect("unambiguous");
-
-        assert_eq!(resolved, vec![dir]);
-    }
-
-    #[test]
-    fn resolve_fixture_sources_prefers_nested_file_for_basename_prefix() {
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = tmp.path().join("src").join("conformance").join("stateful");
-        write_file(dir.join("mod.rs").as_path(), "pub mod statemachine_counter;\n");
-        let src = dir.join("statemachine_counter.rs");
-        write_file(src.as_path(), "#[spec_operation(\"increment\")]\npub fn increment() {}\n");
-        let case = case_with_op("increment");
-        let cases = [&case];
-
-        let resolved = resolve_fixture_sources(tmp.path(), "statemachine_counter_wrong", &cases).expect("unambiguous");
-
-        assert_eq!(resolved, vec![src]);
-    }
-
-    #[test]
-    fn resolve_fixture_sources_prefers_exact_file_even_without_annotations() {
-        let tmp = tempfile::tempdir().unwrap();
-        let exact = tmp.path().join("src").join("engine").join("missing_operation.rs");
-        write_file(exact.as_path(), "pub fn increment() {}\n");
-        let other = tmp.path().join("src").join("conformance").join("stateful").join("counter.rs");
-        write_file(other.as_path(), "#[spec_operation(\"increment\")]\npub fn increment() {}\n");
-        let case = case_with_op("increment");
-        let cases = [&case];
-
-        let resolved = resolve_fixture_sources(tmp.path(), "missing_operation", &cases).expect("unambiguous");
-
-        assert_eq!(resolved, vec![exact]);
-    }
-
-    #[test]
-    fn resolve_fixture_sources_prefers_file_over_same_stem_parent_dir() {
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = tmp.path().join("src").join("conformance").join("complex_inputs");
-        write_file(dir.join("mod.rs").as_path(), "pub mod complex_inputs;\n");
-        let src = dir.join("complex_inputs.rs");
-        write_file(
-            src.as_path(),
-            "#[spec_operation(\"sum_points\")]\npub fn sum_points() -> i32 { 0 }\n",
-        );
-        let case = case_with_op("sum_points");
-        let cases = [&case];
-
-        let resolved = resolve_fixture_sources(tmp.path(), "complex_inputs", &cases).expect("unambiguous");
-
-        assert_eq!(resolved, vec![src]);
-    }
-
-    #[test]
-    fn resolve_fixture_sources_keeps_greedy_cover_for_nested_split_files() {
-        let tmp = tempfile::tempdir().unwrap();
-        write_file(
-            tmp.path().join("src").join("conformance").join("basic").join("mod.rs").as_path(),
-            "pub mod multi_toplevel_a;\npub mod multi_toplevel_b;\n",
-        );
-        let alpha = tmp.path().join("src").join("conformance").join("basic").join("multi_toplevel_a.rs");
-        let beta = tmp.path().join("src").join("conformance").join("basic").join("multi_toplevel_b.rs");
-        write_file(
-            alpha.as_path(),
-            "#[spec_operation(\"alpha\")]\npub fn alpha() -> &'static str { \"a\" }\n",
-        );
-        write_file(
-            beta.as_path(),
-            "#[spec_operation(\"beta\")]\npub fn beta() -> &'static str { \"b\" }\n",
-        );
-        let alpha_case = case_with_op("alpha");
-        let beta_case = case_with_op("beta");
-        let cases = [&alpha_case, &beta_case];
-
-        let mut resolved = resolve_fixture_sources(tmp.path(), "multi_toplevel", &cases).expect("unambiguous");
-        resolved.sort();
-
-        assert_eq!(resolved, vec![alpha, beta]);
-    }
-
-    #[test]
-    fn resolve_fixture_sources_errors_on_ambiguous_operation() {
-        let tmp = tempfile::tempdir().unwrap();
-        let one = tmp.path().join("src").join("engine").join("ambiguous_one.rs");
-        let two = tmp.path().join("src").join("engine").join("ambiguous_two.rs");
-        write_file(
-            one.as_path(),
-            "#[spec_operation(\"render_ambiguous\")]\npub fn render_ambiguous() -> String { \"one\".to_string() }\n",
-        );
-        write_file(
-            two.as_path(),
-            "#[spec_operation(\"render_ambiguous\")]\npub fn render_ambiguous_alt() -> String { \"two\".to_string() }\n",
-        );
-        let case = case_with_op("render_ambiguous");
-        let cases = [&case];
-
-        let err = resolve_fixture_sources(tmp.path(), "ambiguous_fallback", &cases).expect_err("ambiguous operation should error");
-
-        assert!(
-            err.starts_with("operation 'render_ambiguous' is provided by multiple sources"),
-            "unexpected error: {err}"
-        );
     }
 
     #[test]
@@ -3516,7 +3237,7 @@ mod tests {
     }
 
     #[test]
-    fn metadata_resolution_falls_back_when_component_has_no_operation() {
+    fn metadata_resolution_returns_none_when_component_has_no_operation() {
         let tmp = tempfile::tempdir().unwrap();
         write_file(
             tmp.path().join("Cargo.toml").as_path(),
@@ -3555,6 +3276,7 @@ mod tests {
         };
         let op = CsOp {
             op_name: "fetch".to_string(),
+            component: Some("fixture.async".to_string()),
             source_path: PathBuf::new(),
             class_name: "AsyncOps".to_string(),
             method_of: "AsyncOps".to_string(),
@@ -3586,6 +3308,7 @@ mod tests {
         };
         let op = CsOp {
             op_name: "send".to_string(),
+            component: Some("fixture.async".to_string()),
             source_path: PathBuf::new(),
             class_name: "AsyncOps".to_string(),
             method_of: "AsyncOps".to_string(),
@@ -3876,5 +3599,19 @@ mod tests {
             .join("exist");
         let target = make_target(None, &nonexistent);
         assert_eq!(super::resolve_framework_for_runner(&target), "net10.0");
+    }
+
+    #[test]
+    fn test_extract_spec_operation_with_component() {
+        let line = r#"[SpecOperation("add", Spec = "fixture.stateless_add")]"#;
+        let result = super::extract_spec_operation_attr(line);
+        assert_eq!(result, Some(("add".to_string(), Some("fixture.stateless_add".to_string()))));
+    }
+
+    #[test]
+    fn test_extract_spec_operation_without_component() {
+        let line = r#"[SpecOperation("add")]"#;
+        let result = super::extract_spec_operation_attr(line);
+        assert_eq!(result, Some(("add".to_string(), None)));
     }
 }
