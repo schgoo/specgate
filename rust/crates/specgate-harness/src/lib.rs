@@ -2357,14 +2357,27 @@ fn run_csharp_group(
     let csharp_libs_dir = find_csharp_libs_dir(&target.package_root);
     let runtime_sources = match &csharp_libs_dir {
         Some(libs) => {
-            let annotations = path_to_forward_slash(&libs.join("SpecGate.Annotations").join("SpecGateAnnotations.cs"));
-            let runtime = path_to_forward_slash(&libs.join("SpecGate.Runtime").join("SpecGateRuntime.cs"));
-            format!(
-                "  <ItemGroup>\n    \
-                 <Compile Include=\"{annotations}\" Link=\"SpecGateAnnotations.cs\" />\n    \
-                 <Compile Include=\"{runtime}\" Link=\"SpecGateRuntime.cs\" />\n  \
-                 </ItemGroup>\n"
-            )
+            let mut lines: Vec<(String, String)> = Vec::new();
+            for sub in ["SpecGate.Annotations", "SpecGate.Runtime"] {
+                let dir = libs.join(sub);
+                if let Ok(entries) = std::fs::read_dir(&dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("cs") {
+                            let fwd = path_to_forward_slash(&path);
+                            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
+                            lines.push((fwd, name));
+                        }
+                    }
+                }
+            }
+            lines.sort_by(|a, b| a.1.cmp(&b.1));
+            let items = lines
+                .iter()
+                .map(|(fwd, name)| format!("    <Compile Include=\"{fwd}\" Link=\"{name}\" />"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            format!("  <ItemGroup>\n{items}\n  </ItemGroup>\n")
         }
         None => String::new(),
     };

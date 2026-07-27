@@ -9,15 +9,17 @@ using System.Text;
 namespace SpecGate.Runtime;
 
 /// <summary>
-/// Provides the trace-emission primitives used by generated SpecGate C# runners
-/// and by fixtures that explicitly emit observable events.
+/// Provides the trace-emission primitives used by generated SpecGate C# runners.
 /// </summary>
 /// <remarks>
-/// The runtime stores trace records in thread-local state so each spec case can
-/// be reset and collected independently. Values are serialized into SpecGate's
-/// deterministic JSON trace representation, including annotated structured
-/// event objects, option/result shims, lists, sets, and maps.
+/// This type is runner-internal plumbing and is not part of the fixture-authoring
+/// surface: fixtures emit checkpoints via <see cref="SpecTrace"/> and never call
+/// these methods directly. The runtime stores trace records in thread-local state
+/// so each spec case can be reset and collected independently. Values are
+/// serialized into SpecGate's deterministic JSON trace representation, including
+/// annotated structured event objects, option/result shims, lists, sets, and maps.
 /// </remarks>
+[System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
 public static class SpecGateRuntime
 {
     [ThreadStatic]
@@ -39,6 +41,7 @@ public static class SpecGateRuntime
     /// Clears the current thread's accumulated trace records and registered
     /// object prefixes before starting a new spec case.
     /// </summary>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
     public static void Reset()
     {
         Events.Clear();
@@ -51,6 +54,7 @@ public static class SpecGateRuntime
     /// invoked.
     /// </summary>
     /// <param name="operation">The spec operation name being executed.</param>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
     public static void EmitRun(string operation)
     {
         Events.Add("{\"kind\":\"Run\",\"operation\":" + QuoteJson(operation) + "}");
@@ -61,6 +65,7 @@ public static class SpecGateRuntime
     /// </summary>
     /// <param name="name">The event name expected by the spec.</param>
     /// <param name="value">The string value to serialize.</param>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
     public static void EmitEvent(string name, string value)
     {
         Events.Add("{\"kind\":\"Event\",\"name\":" + QuoteJson(name) + ",\"value\":" + QuoteJson(value) + "}");
@@ -71,6 +76,7 @@ public static class SpecGateRuntime
     /// </summary>
     /// <param name="name">The event name expected by the spec.</param>
     /// <param name="value">The integer value to serialize.</param>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
     public static void EmitEvent(string name, int value)
     {
         Events.Add("{\"kind\":\"Event\",\"name\":" + QuoteJson(name) + ",\"value\":" + value.ToString(CultureInfo.InvariantCulture) + "}");
@@ -81,6 +87,7 @@ public static class SpecGateRuntime
     /// </summary>
     /// <param name="name">The event name expected by the spec.</param>
     /// <param name="value">The Boolean value to serialize.</param>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
     public static void EmitEvent(string name, bool value)
     {
         Events.Add("{\"kind\":\"Event\",\"name\":" + QuoteJson(name) + ",\"value\":" + (value ? "true" : "false") + "}");
@@ -94,6 +101,7 @@ public static class SpecGateRuntime
     /// The value to serialize using SpecGate's deterministic value conversion.
     /// Annotated event types are serialized as structured maps.
     /// </param>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
     public static void EmitEvent(string name, object? value)
     {
         Events.Add("{\"kind\":\"Event\",\"name\":" + QuoteJson(name) + ",\"value\":" + ToSpecValue(value).ToJson() + "}");
@@ -109,6 +117,7 @@ public static class SpecGateRuntime
     /// values are delegated to the object overload so option/result shims and
     /// annotated structured values keep their canonical trace shape.
     /// </remarks>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
     public static void EmitResult<T>(T value)
     {
         var nullableInner = Nullable.GetUnderlyingType(typeof(T));
@@ -130,6 +139,7 @@ public static class SpecGateRuntime
     /// top-level events, matching the Rust <c>SpecEvent</c> behavior. Variant,
     /// option, and result values are emitted as structured <c>$result</c> maps.
     /// </remarks>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
     public static void EmitResult(object? value)
     {
         if (value is null)
@@ -161,6 +171,7 @@ public static class SpecGateRuntime
     /// of the same type, for example <c>source.balance</c> and
     /// <c>target.balance</c>.
     /// </remarks>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
     public static void RegisterObject(object? value, string? prefix)
     {
         if (value is not null)
@@ -181,6 +192,7 @@ public static class SpecGateRuntime
     /// This allows instrumented fixture copies to remain quiet outside harnessed
     /// setup objects.
     /// </remarks>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
     public static void EmitMember(object? owner, string name, object? value)
     {
         if (owner is null || !ObjectPrefixes.TryGetValue(owner, out var prefix))
@@ -199,6 +211,7 @@ public static class SpecGateRuntime
     /// An optional prefix to prepend to each member event name, such as an
     /// operation parameter name.
     /// </param>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
     public static void EmitFields(object? value, string? prefix = null)
     {
         if (value is null)
@@ -239,6 +252,7 @@ public static class SpecGateRuntime
     /// A JSON array string containing the trace records emitted since the last
     /// call to <see cref="Reset"/>.
     /// </returns>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
     public static string GetTracesJson()
     {
         var sb = new StringBuilder("[");

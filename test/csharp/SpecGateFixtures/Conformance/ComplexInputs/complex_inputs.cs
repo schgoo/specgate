@@ -124,9 +124,9 @@ public static class ComplexInputOps
     [SpecOperation("create_enum_type", Spec = "fixture.complex_inputs")]
     public static string CreateEnumType([SpecInput("name")] string name, [SpecInput("members")] List<EnumMemberInput> members)
     {
-        SpecGateRuntime.EmitEvent("member_count", members.Count);
+        SpecTrace.Emit("member_count", members.Count);
         string first = members.Count > 0 ? members[0].Name : string.Empty;
-        SpecGateRuntime.EmitEvent("first_member", first);
+        SpecTrace.Emit("first_member", first);
         return name;
     }
 
