@@ -13,7 +13,7 @@ namespace SpecGate.Runtime;
 /// </summary>
 /// <remarks>
 /// This type is runner-internal plumbing and is not part of the fixture-authoring
-/// surface: fixtures emit checkpoints via <see cref="SpecTrace"/> and never call
+/// surface: fixtures emit checkpoints via <see cref="SpecEvent"/> and never call
 /// these methods directly. The runtime stores trace records in thread-local state
 /// so each spec case can be reset and collected independently. Values are
 /// serialized into SpecGate's deterministic JSON trace representation, including
