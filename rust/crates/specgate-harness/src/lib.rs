@@ -1506,10 +1506,12 @@ fn generate_csharp_program(
             writeln!(out, "    SpecGateRuntime.EmitRun(\"{op_name}\");").expect("fmt");
             let args = render_csharp_op_args(&mut out, cs_op, inputs, &bindings, op_defaults, step_idx);
             let call = render_csharp_op_call(cs_op, &bindings, &args);
+            out.push_str("    SpecGateRuntime.SuppressNextOperationInstrumentation();\n");
             out.push_str("    try {\n");
             let return_kind = csharp_return_kind(&cs_op.return_type)?;
             emit_csharp_call_and_result(&mut out, cs_op, &call, &return_kind, step_idx);
             emit_csharp_catches(&mut out, cs_op);
+            out.push_str("    SpecGateRuntime.ClearOperationInstrumentationSuppression();\n");
         }
         writeln!(out, "    all[\"{}\"] = SpecGateRuntime.GetTracesJson();", case.name).expect("fmt");
         out.push_str("}\n");
@@ -2040,9 +2042,10 @@ fn instrument_csharp_source(text: &str) -> Result<String, String> {
     let mut pending_spec_event_attrs: Vec<String> = Vec::new();
     let mut pending_spec_mock: Option<String> = None;
     let mut mock_fields: BTreeMap<String, String> = BTreeMap::new();
-    let mut pending_operation = false;
+    let mut pending_operation_attrs: Vec<String> = Vec::new();
     let mut pending_operation_sig = String::new();
     let mut operation_return_type: Option<String> = None;
+    let mut pending_operation_instrumentation: Option<CsOperationInstrumentation> = None;
     let mut operation_brace_depth = 0usize;
     let mut mock_counter = 0usize;
 
@@ -2090,20 +2093,48 @@ fn instrument_csharp_source(text: &str) -> Result<String, String> {
             mock_fields.insert(field_name, mock_name);
         }
 
-        if extract_spec_operation_attr(trimmed).is_some() {
-            pending_operation = true;
+        if let Some((op_name, _component)) = extract_spec_operation_attr(trimmed) {
+            if !pending_operation_attrs.iter().any(|existing| existing == &op_name) {
+                pending_operation_attrs.push(op_name);
+            }
             pending_operation_sig.clear();
         }
 
-        if pending_operation && !trimmed.is_empty() && !trimmed.starts_with('[') {
+        if !pending_operation_attrs.is_empty() && !trimmed.is_empty() && !trimmed.starts_with('[') {
             if !pending_operation_sig.is_empty() {
                 pending_operation_sig.push(' ');
             }
             pending_operation_sig.push_str(trimmed);
-            if let Some((_method_name, _params, return_type, _is_static)) = extract_cs_method_sig(&pending_operation_sig) {
-                operation_return_type = Some(return_type);
-                pending_operation = false;
+            if let Some((_method_name, params, return_type, _is_static)) = extract_cs_method_sig(&pending_operation_sig) {
+                let instrumentation = CsOperationInstrumentation {
+                    operation: pending_operation_attrs[0].clone(),
+                    params: parse_cs_param_infos_from_sig(&pending_operation_sig).unwrap_or_else(|| {
+                        params
+                            .iter()
+                            .map(|(name, _ty)| CsParamInfo {
+                                spec_name: name.clone(),
+                                code_name: csharp_ident(name),
+                            })
+                            .collect()
+                    }),
+                    return_type: return_type.clone(),
+                };
+                pending_operation_attrs.clear();
                 pending_operation_sig.clear();
+
+                if trimmed.contains("=>") {
+                    if let Some(rewritten) = rewrite_csharp_expression_bodied_operation(line, &instrumentation) {
+                        out.push_str(&rewritten);
+                        operation_return_type = None;
+                        pending_operation_instrumentation = None;
+                        continue;
+                    }
+                    operation_return_type = None;
+                    pending_operation_instrumentation = None;
+                } else {
+                    operation_return_type = Some(return_type);
+                    pending_operation_instrumentation = Some(instrumentation);
+                }
             }
         }
 
@@ -2149,6 +2180,12 @@ fn instrument_csharp_source(text: &str) -> Result<String, String> {
         out.push('\n');
         if operation_return_type.is_some() && operation_brace_depth == 0 && line.contains('{') {
             update_csharp_brace_depth(line, &mut operation_brace_depth);
+            if operation_brace_depth > 0
+                && let Some(instrumentation) = pending_operation_instrumentation.take()
+            {
+                let indent = format!("{}    ", &line[..line.len() - line.trim_start().len()]);
+                out.push_str(&render_csharp_operation_entry(&instrumentation, &indent));
+            }
         }
     }
     for attr in pending_spec_event_attrs {
@@ -2156,6 +2193,96 @@ fn instrument_csharp_source(text: &str) -> Result<String, String> {
         out.push('\n');
     }
     Ok(out)
+}
+
+struct CsOperationInstrumentation {
+    operation: String,
+    params: Vec<CsParamInfo>,
+    return_type: String,
+}
+
+struct CsParamInfo {
+    spec_name: String,
+    code_name: String,
+}
+
+fn parse_cs_param_infos_from_sig(sig: &str) -> Option<Vec<CsParamInfo>> {
+    let paren_open = sig.find('(')?;
+    let paren_close = find_matching_paren(sig, paren_open)?;
+    let params_str = sig[paren_open + 1..paren_close].trim();
+    if params_str.is_empty() {
+        return Some(Vec::new());
+    }
+    Some(split_cs_params(params_str).into_iter().filter_map(parse_cs_param_info).collect())
+}
+
+fn parse_cs_param_info(param: &str) -> Option<CsParamInfo> {
+    let (spec_name, without_attrs) = peel_spec_input_attrs(param.trim());
+    let member = parse_csharp_member_prefix(without_attrs)?;
+    let code_name = member.name;
+    let event_name = spec_name.unwrap_or_else(|| code_name.trim_start_matches('@').to_string());
+    Some(CsParamInfo {
+        spec_name: event_name,
+        code_name,
+    })
+}
+
+fn render_csharp_operation_entry(inst: &CsOperationInstrumentation, indent: &str) -> String {
+    let names = if inst.params.is_empty() {
+        "System.Array.Empty<string>()".to_string()
+    } else {
+        format!(
+            "new string[] {{ {} }}",
+            inst.params
+                .iter()
+                .map(|p| csharp_string_literal(&p.spec_name))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    let values = if inst.params.is_empty() {
+        "System.Array.Empty<object?>()".to_string()
+    } else {
+        format!(
+            "new object?[] {{ {} }}",
+            inst.params.iter().map(|p| p.code_name.clone()).collect::<Vec<_>>().join(", ")
+        )
+    };
+    format!(
+        "{indent}SpecGate.Runtime.SpecGateRuntime.EnterOperation({}, {names}, {values});\n",
+        csharp_string_literal(&inst.operation)
+    )
+}
+
+fn rewrite_csharp_expression_bodied_operation(line: &str, inst: &CsOperationInstrumentation) -> Option<String> {
+    let arrow = line.find("=>")?;
+    let semi = line.rfind(';')?;
+    if semi < arrow {
+        return None;
+    }
+    let prefix = line[..arrow].trim_end();
+    let expr = line[arrow + 2..semi].trim();
+    let indent = &line[..line.len() - line.trim_start().len()];
+    let body_indent = format!("{indent}    ");
+    let mut out = String::new();
+    out.push_str(prefix);
+    out.push('\n');
+    out.push_str(indent);
+    out.push_str("{\n");
+    out.push_str(&render_csharp_operation_entry(inst, &body_indent));
+    if inst.return_type.trim() == "void" {
+        out.push_str(&body_indent);
+        out.push_str(expr);
+        out.push_str(";\n");
+    } else {
+        out.push_str(&body_indent);
+        out.push_str("return ");
+        out.push_str(expr);
+        out.push_str(";\n");
+    }
+    out.push_str(indent);
+    out.push_str("}\n");
+    Some(out)
 }
 
 fn parse_csharp_field_name(line: &str) -> Option<String> {

@@ -31,6 +31,9 @@ public static class SpecGateRuntime
     [ThreadStatic]
     private static Dictionary<string, Dictionary<string, string>>? _mocks;
 
+    [ThreadStatic]
+    private static int _suppressNextOperationInstrumentation;
+
     private static List<string> Events => _events ??= [];
 
     private static Dictionary<object, string?> ObjectPrefixes => _objectPrefixes ??= new Dictionary<object, string?>(ReferenceComparer.Instance);
@@ -47,6 +50,7 @@ public static class SpecGateRuntime
         Events.Clear();
         ObjectPrefixes.Clear();
         Mocks.Clear();
+        _suppressNextOperationInstrumentation = 0;
     }
 
     /// <summary>
@@ -58,6 +62,45 @@ public static class SpecGateRuntime
     public static void EmitRun(string operation)
     {
         Events.Add("{\"kind\":\"Run\",\"operation\":" + QuoteJson(operation) + "}");
+    }
+
+    /// <summary>
+    /// Emits operation entry traces from instrumented fixture operation bodies.
+    /// </summary>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+    public static void EnterOperation(string operation, string[] inputNames, object?[] inputValues)
+    {
+        if (_suppressNextOperationInstrumentation > 0)
+        {
+            _suppressNextOperationInstrumentation--;
+            return;
+        }
+
+        EmitRun(operation);
+        int count = Math.Min(inputNames.Length, inputValues.Length);
+        for (int i = 0; i < count; i++)
+        {
+            EmitEvent(operation + "." + inputNames[i], inputValues[i]);
+        }
+    }
+
+    /// <summary>
+    /// Suppresses the next instrumented operation entry, used when the generated
+    /// runner has already emitted the top-level operation entry traces.
+    /// </summary>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+    public static void SuppressNextOperationInstrumentation()
+    {
+        _suppressNextOperationInstrumentation++;
+    }
+
+    /// <summary>
+    /// Clears any unconsumed operation-entry suppression.
+    /// </summary>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+    public static void ClearOperationInstrumentationSuppression()
+    {
+        _suppressNextOperationInstrumentation = 0;
     }
 
     /// <summary>
