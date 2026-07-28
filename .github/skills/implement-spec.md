@@ -10,8 +10,30 @@ description: >
 
 # SpecGate Spec Implementation Skill
 
-You are implementing SpecGate components from their spec files. Your job is to
-produce working source code with tests that verify each spec's cases.
+## Outcome
+
+Working, annotated source code with tests that verify each spec's cases, a green
+harness run, and updated snapshots. The implementation is derived **only** from
+the spec — the durable, reviewable artifact — never from validation output.
+
+## Prerequisites
+
+- The `specgate` CLI (`cargo install specgate-cli`, or the in-tree
+  `cargo run -p specgate-cli --quiet -- <command>`).
+- A `validate`-clean spec to implement (author it with the `author-spec` skill
+  first if it does not exist).
+- `docs/knowledge/index.md` open, to pull only the knowledge files you need.
+
+## Principles
+
+- **The spec is the source of truth and the scope fence.** Implement what it
+  asserts; absence from the spec is an intentional decision, not an omission.
+- **Preview before you mutate.** Emit a reconciliation plan (a dry-run artifact)
+  and review it before editing source — see "Preview the plan before mutating".
+- **Validation travels with the change.** Every case gets a discriminating test;
+  build, harness, and coverage must be green before you finish.
+- **The trust boundary is absolute.** Implement from the spec, never from
+  harness-generated artifacts (see the trust-boundary rule).
 
 ## Snapshot-based workflow
 
@@ -59,12 +81,34 @@ a snapshot from the last implementation run.
 
 5. **Build and test** the full workspace to verify nothing is broken
 
-6. **Update snapshots** — copy each successfully implemented spec to its
-   snapshot location:
+6. **Update snapshots and close the loop** — copy each successfully implemented
+   spec to its snapshot location:
 
    ```powershell
    Copy-Item specs/core.validate.spec.yaml .specgate/snapshots/core.validate.yaml
    ```
+
+   Then confirm the change is actually closed: the harness run is green, and the
+   requirement that motivated this change is now satisfied by a passing case (not
+   merely "code compiles"). Note in your summary what changed, what you removed
+   (if anything), and any case you flagged or ignored.
+
+### Preview the plan before mutating (dry-run gate)
+
+Before editing any source, emit the reconciliation from step 4 as a **plan
+artifact** and treat it as a review checkpoint — the implementation analog of a
+`--dry-run`. The plan states, per affected spec (in dependency order):
+
+- new / changed / removed cases (by name) and the tests they map to;
+- new / changed / removed types and operations;
+- source that becomes dead as a result (to be deleted — see "Dead code");
+- which workflow applies (greenfield vs incremental).
+
+Do not begin mutating source until the plan is coherent. If a human is in the
+loop, this plan is the artifact they review; if you are running autonomously,
+writing it out still catches "changes" the hash gate flagged that are already
+implemented, and prevents scope creep beyond the spec delta. A plan that would
+touch code unrelated to the spec change is a signal to stop and re-scope.
 
 ### Change categories
 
@@ -117,6 +161,12 @@ See `spec-format.md` for the full format and `kinds.md` for test generation patt
 ## Generating tests from spec cases (TDD)
 
 Follow a test-driven workflow: write tests from spec cases **before** implementing.
+
+Each test must be **discriminating** — it must fail if the behavior is absent or
+wrong. A generated test that passes against an empty stub validates nothing; if a
+spec case is not discriminating (e.g. a symmetric expected value like
+`add(2, 2) → 4`), still implement it, but rely on the harness run and coverage —
+not that single test — for confidence, and note the weak case in your summary.
 
 1. **Annotate implementation code** — every operation declared in the spec must have
    a corresponding `#[spec_operation("name")]` on the implementing function. This
@@ -207,11 +257,17 @@ execute, and validate them automatically.
 ### Trust boundary — validation artifacts are off-limits
 
 The spec-driven workflow depends on a strict separation: you implement from
-the **spec**, not from the validation output. You MUST NOT:
+the **spec**, not from the validation output. Identify these artifacts by their
+**role** — anything the harness generates to run and check your code — since the
+exact location varies by project and language. You MUST NOT:
 
-- Read, inspect, or reference any files under `target/specgate-harness/`
-- Read harness-generated test files (e.g., `specgate_generated.rs`)
-- Use trace output files (`traces/*.json`) to reverse-engineer expected values
+- Read, inspect, or reference the harness's scratch/output directory (the
+  generated runner project and its build output — e.g. under
+  `target/specgate-harness/` in this repo; the path differs per project and per
+  language binding)
+- Read harness-generated test/runner files (e.g., `specgate_generated.rs`, a
+  generated C# `Runner`)
+- Use harness trace output (e.g., `traces/*.json`) to reverse-engineer expected values
 - Copy generated test code into hand-written test files
 
 These artifacts are produced by the harness to validate your implementation.
@@ -306,12 +362,46 @@ Then read only what you need:
 - Read if creating binding: `bindings.md`
 - Read if you need validation rules: `validation.md`
 
+## Troubleshooting
+
+When the harness run (`specgate run`) fails, diagnose from the spec and your
+source — never from the off-limits generated artifacts (the harness scratch /
+output directory, generated runner and test files, and trace JSON; see the
+trust-boundary rule, which describes them by role since their location varies by
+project and language):
+
+- **`operation '<op>' not found` / not annotated** — the implementing function is
+  missing `#[spec_operation("<op>")]` (Rust) or `[SpecOperation("<op>")]` (C#),
+  or its component tag does not match the spec `name`.
+- **`... not publicly reachable`** — the annotated function or an operation
+  input-type field is not `pub`/`public`.
+- **Setup wiring failed / receiver cannot be constructed** — the operation is a
+  method but no `#[spec_setup]`/`[SpecSetup]` returns its receiver type; add the
+  setup or make the operation a free function.
+- **Trace divergence (expected vs actual)** — read the diff the harness prints,
+  then fix the *implementation* to emit the asserted events, in order. Do not
+  edit the spec to match the code (the spec is the source of truth), and do not
+  read generated trace files to reverse-engineer values.
+- **Cross-language divergence (one target passes, another fails)** — the two
+  language bindings emitted different bytes for the same case. Reconcile the
+  failing target's implementation to the canonical output; confirm with
+  `specgate run <spec> --verbose`. Do not weaken the spec to paper over it.
+- **`binding` / `package_root` errors** — the binding path or a target's
+  `package_root` does not resolve; fix the binding file (allowed) — but never the
+  spec's declared contract.
+- **A case looks genuinely impossible** — follow "When a spec expectation seems
+  wrong": flag it, mark the one test `#[ignore]` with a reason, and keep going.
+
 ## Checklist before finishing
 
+- [ ] **Plan reviewed** — the reconciliation plan (dry-run) was produced and is
+      scoped to the spec delta (no unrelated code touched)
 - [ ] **Spec validation** — run `specgate validate <spec-dir>` (see below)
 - [ ] Project scaffolded with correct structure
 - [ ] All spec types implemented as idiomatic language types
 - [ ] Every spec case has a corresponding test function
+- [ ] Each case test is discriminating (fails against an empty implementation)
+      or the weak case is noted
 - [ ] Core logic implemented — all spec-case tests pass
 - [ ] All implementation functions annotated (`#[spec_operation]`, etc.)
 - [ ] Unit tests added for code paths not reachable through spec cases
@@ -320,6 +410,8 @@ Then read only what you need:
 - [ ] Uncovered branches identified and tested, or justified if untestable
 - [ ] Binding file created/updated for this spec
 - [ ] **Spec harness validation** — run the spec through the harness (see below)
+- [ ] **Loop closed** — snapshot updated, harness green, and the motivating
+      requirement is satisfied by a passing case
 
 ## Using the CLI
 
