@@ -1180,6 +1180,58 @@ cases:
                 expected:
                   - $fault: "attempt to divide by zero"
 
+  - name: declared_exception_is_err_undeclared_is_fault
+    desc: >
+      A fallible operation maps a declared error to the Err arm and an
+      undeclared failure to $fault, while a normal return is Ok. C# realizes
+      this with [SpecException(typeof(X))] (declared throw -> Err, other throw
+      -> $fault); Rust realizes it with Result plus panic!.
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/checked_divide.spec.yaml
+    expected:
+      - $result:
+          Complete:
+            results:
+              - name: divide_ok
+                status: pass
+                expected:
+                  - $result: { Ok: 5 }
+              - name: divide_declared_err
+                status: pass
+                expected:
+                  - $result: { Err: "division by zero" }
+              - name: divide_undeclared_fault
+                status: pass
+                expected:
+                  - $fault: "negative divisor"
+
+  - name: catch_all_exception_is_err
+    desc: >
+      A catch-all fallible operation maps every thrown exception to the Err arm
+      regardless of exception type (the two error cases throw different types).
+      C# realizes this with a no-argument [SpecException]; Rust returns Err
+      directly.
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/catch_all.spec.yaml
+    expected:
+      - $result:
+          Complete:
+            results:
+              - name: in_range_ok
+                status: pass
+                expected:
+                  - $result: { Ok: 50 }
+              - name: below_range_err
+                status: pass
+                expected:
+                  - $result: { Err: "too small" }
+              - name: above_range_err
+                status: pass
+                expected:
+                  - $result: { Err: "too big" }
+
   - name: option_some_path
     desc: Operation returning Some produces $result with the value
     operation: run_spec

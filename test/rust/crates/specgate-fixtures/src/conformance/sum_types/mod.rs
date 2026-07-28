@@ -1,4 +1,6 @@
 //! Sum-type shapes — enums, Option, and Result returns.
+pub mod catch_all;
+pub mod checked_divide;
 pub mod enum_event;
 pub mod option_none;
 pub mod option_some;

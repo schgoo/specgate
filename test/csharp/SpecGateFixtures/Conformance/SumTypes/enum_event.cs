@@ -59,21 +59,29 @@ public static class SumTypeFixtures
     /// <summary>Finds the index of <paramref name="target"/> within <paramref name="items"/>.</summary>
     /// <param name="items">The list to search (spec input <c>items</c>).</param>
     /// <param name="target">The value to locate (spec input <c>target</c>).</param>
-    /// <returns><see cref="Option{T}"/> carrying the index, or <c>None</c> when absent.</returns>
+    /// <returns>The index as a nullable <c>int?</c>, or <c>null</c> when absent (spec <c>Option&lt;i32&gt;</c>).</returns>
     [SpecOperation("find", Spec = "fixture.option_some")]
     [SpecOperation("find", Spec = "fixture.option_none")]
-    public static Option<int> Find([SpecInput("items")] List<int> items, [SpecInput("target")] int target)
+    public static int? Find([SpecInput("items")] List<int> items, [SpecInput("target")] int target)
     {
         int index = items.IndexOf(target);
-        return index < 0 ? Option<int>.None() : Option<int>.Some(index);
+        return index < 0 ? null : index;
     }
 
-    /// <summary>Divides <paramref name="a"/> by <paramref name="b"/>, returning a <see cref="Result{T, E}"/>.</summary>
+    /// <summary>Divides <paramref name="a"/> by <paramref name="b"/>, realizing a spec <c>Result&lt;i32, string&gt;</c>.</summary>
     /// <param name="a">The dividend (spec input <c>a</c>).</param>
     /// <param name="b">The divisor (spec input <c>b</c>).</param>
-    /// <returns><c>Ok</c> with the quotient, or <c>Err</c> with a message when <paramref name="b"/> is zero.</returns>
+    /// <returns>The quotient (Ok arm); throws <see cref="DivideByZeroException"/> for the Err arm when <paramref name="b"/> is zero.</returns>
     [SpecOperation("try_divide", Spec = "fixture.result_ok")]
     [SpecOperation("try_divide", Spec = "fixture.result_err")]
-    public static Result<int, string> DivideResult([SpecInput("a")] int a, [SpecInput("b")] int b) =>
-        b == 0 ? Result<int, string>.Err("division by zero") : Result<int, string>.Ok(a / b);
+    [SpecException(typeof(DivideByZeroException))]
+    public static int DivideResult([SpecInput("a")] int a, [SpecInput("b")] int b)
+    {
+        if (b == 0)
+        {
+            throw new DivideByZeroException("division by zero");
+        }
+
+        return a / b;
+    }
 }

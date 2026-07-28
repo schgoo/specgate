@@ -149,3 +149,41 @@ public sealed class SpecMockAttribute : Attribute
     /// <param name="name">The mock name (spec-input key and event prefix).</param>
     public SpecMockAttribute(string name) => Name = name;
 }
+
+/// <summary>
+/// Declares that an annotated operation is fallible — the C# realization of a
+/// spec <c>Result&lt;T, E&gt;</c> return. The method returns the bare <c>Ok</c>
+/// type and <c>throw</c>s for the <c>Err</c> arm; the harness wraps a normal
+/// return as <c>{ Ok: value }</c> and a declared exception as
+/// <c>{ Err: message }</c>.
+/// </summary>
+/// <remarks>
+/// With one or more <see cref="ExceptionTypes"/>, only those exception types
+/// (or subclasses) form the <c>Err</c> arm; any other exception is an
+/// undeclared fault (<c>$fault</c>). With no types (<c>[SpecException]</c>),
+/// every thrown exception is the <c>Err</c> arm and there is no fault path. An
+/// operation WITHOUT this attribute is not fallible: it emits a plain result,
+/// and any throw surfaces as <c>$fault</c> (the panic analog). The <c>Err</c>
+/// value is the exception's <see cref="Exception.Message"/>, so it must
+/// match the spec's expected <c>Err</c> string.
+/// </remarks>
+[AttributeUsage(AttributeTargets.Method, AllowMultiple = false)]
+public sealed class SpecExceptionAttribute : Attribute
+{
+    /// <summary>
+    /// Gets the exception types (and their subclasses) that constitute the
+    /// <c>Err</c> arm. Empty means catch-all: every thrown exception is
+    /// treated as <c>Err</c>.
+    /// </summary>
+    public Type[] ExceptionTypes { get; }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SpecExceptionAttribute"/>
+    /// class.
+    /// </summary>
+    /// <param name="exceptionTypes">
+    /// The exception types that map to the <c>Err</c> arm. Omit for a catch-all
+    /// where every exception is <c>Err</c>.
+    /// </param>
+    public SpecExceptionAttribute(params Type[] exceptionTypes) => ExceptionTypes = exceptionTypes;
+}

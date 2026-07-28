@@ -157,6 +157,25 @@ public static class SpecGateRuntime
         EmitResultObject(value);
     }
 
+
+    /// <summary>
+    /// Emits a nullable operation return as a SpecGate Option tagged-map result.
+    /// </summary>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+    public static void EmitOptionResult<T>(T value)
+    {
+        EmitEvent("$result", value is null ? TaggedMap("None", EmptyMap()) : TaggedMap("Some", ToSpecValue(value)));
+    }
+
+    /// <summary>
+    /// Emits an operation return as a tagged-map result such as Ok or Err.
+    /// </summary>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+    public static void EmitTaggedResult(string tag, object? value)
+    {
+        EmitEvent("$result", TaggedMap(tag, ToSpecValue(value)));
+    }
+
     /// <summary>
     /// Registers an object with an optional event-name prefix for subsequent
     /// state capture.

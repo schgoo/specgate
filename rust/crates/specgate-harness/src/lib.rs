@@ -642,6 +642,8 @@ struct CsOp {
     /// `(parameter_name, cs_type)`
     params: Vec<(String, String)>,
     return_type: String,
+    return_nullable: bool,
+    exception_types: Option<Vec<String>>,
     is_static: bool,
 }
 
@@ -699,6 +701,7 @@ fn scan_csharp_file(text: &str, source_path: &Path, ops: &mut Vec<CsOp>, setups:
     let mut current_class: Option<String> = None;
     let mut current_namespace: Option<String> = None;
     let mut pending_attrs: Vec<CsPendingAttr> = Vec::new();
+    let mut pending_exception_types: Option<Vec<String>> = None;
     let mut pending_sig = String::new();
 
     for line in text.lines() {
@@ -728,6 +731,11 @@ fn scan_csharp_file(text: &str, source_path: &Path, ops: &mut Vec<CsOp>, setups:
             pending_sig.clear();
             continue;
         }
+        if let Some(exception_types) = extract_spec_exception_attr(trimmed) {
+            pending_exception_types = Some(exception_types);
+            pending_sig.clear();
+            continue;
+        }
 
         // If we have pending spec attributes, try to parse the next method signature.
         if !pending_attrs.is_empty() && !trimmed.is_empty() {
@@ -752,6 +760,8 @@ fn scan_csharp_file(text: &str, source_path: &Path, ops: &mut Vec<CsOp>, setups:
                         method_name: method_name.clone(),
                         params: params.clone(),
                         return_type: return_type.clone(),
+                        return_nullable: is_nullable_cs_type(&return_type),
+                        exception_types: pending_exception_types.clone(),
                         is_static,
                     }),
                     CsPendingAttr::Setup {
@@ -770,6 +780,7 @@ fn scan_csharp_file(text: &str, source_path: &Path, ops: &mut Vec<CsOp>, setups:
                     }),
                 }
             }
+            pending_exception_types = None;
             pending_sig.clear();
         } else if !pending_attrs.is_empty()
             && !trimmed.starts_with('[')
@@ -778,6 +789,7 @@ fn scan_csharp_file(text: &str, source_path: &Path, ops: &mut Vec<CsOp>, setups:
             && !pending_sig.contains('(')
         {
             pending_attrs.clear();
+            pending_exception_types = None;
             pending_sig.clear();
         }
     }
@@ -1009,6 +1021,45 @@ fn extract_spec_operation_attr(line: &str) -> Option<(String, Option<String>)> {
     Some((name, component))
 }
 
+fn extract_spec_exception_attr(line: &str) -> Option<Vec<String>> {
+    let s = line.trim();
+    if !(s.starts_with("[SpecException") || s.starts_with("[SpecGate.Annotations.SpecException")) {
+        return None;
+    }
+    let Some(open) = s.find('(') else {
+        return Some(Vec::new());
+    };
+    let close = find_matching_paren(s, open).unwrap_or_else(|| s.rfind(')').unwrap_or(open));
+    let args = s[open + 1..close].trim();
+    if args.is_empty() {
+        return Some(Vec::new());
+    }
+
+    let mut types = Vec::new();
+    for arg in split_cs_params(args) {
+        let arg = arg.trim();
+        let ty = arg
+            .strip_prefix("typeof")
+            .and_then(|rest| {
+                let rest = rest.trim_start();
+                let open = rest.find('(')?;
+                let close = find_matching_paren(rest, open)?;
+                Some(rest[open + 1..close].trim())
+            })
+            .unwrap_or(arg)
+            .trim_start_matches("global::");
+        let simple = ty.rsplit('.').next().unwrap_or(ty).trim();
+        if !simple.is_empty() && !types.iter().any(|existing| existing == simple) {
+            types.push(simple.to_string());
+        }
+    }
+    Some(types)
+}
+
+fn is_nullable_cs_type(cs_type: &str) -> bool {
+    cs_type.trim().ends_with('?')
+}
+
 fn split_cs_params(params: &str) -> Vec<&str> {
     let mut out = Vec::new();
     let mut start = 0usize;
@@ -1229,7 +1280,7 @@ fn extract_spec_input_attr(attr: &str) -> Option<String> {
 /// Convert a YAML value to a C# literal string for the given C# parameter type.
 fn yaml_to_csharp_literal(val: Option<&serde_yaml::Value>, param_type: &str) -> String {
     let Some(v) = val else { return "default!".to_string() };
-    if is_cs_option_type(param_type) {
+    if is_cs_option_type(param_type) || is_nullable_cs_type(param_type) {
         let json = serde_json::to_string(v).unwrap_or_else(|_| "null".to_string());
         return format!("FromSpecInput<{}>({})", param_type.trim(), csharp_string_literal(&json));
     }
@@ -1456,25 +1507,9 @@ fn generate_csharp_program(
             let args = render_csharp_op_args(&mut out, cs_op, inputs, &bindings, op_defaults, step_idx);
             let call = render_csharp_op_call(cs_op, &bindings, &args);
             out.push_str("    try {\n");
-            match csharp_return_kind(&cs_op.return_type)? {
-                CsReturnKind::Void => {
-                    writeln!(out, "        {call};").expect("fmt");
-                }
-                CsReturnKind::Value(result_type) => {
-                    writeln!(out, "        {result_type} __sg_result_{step_idx} = {call};").expect("fmt");
-                    writeln!(out, "        SpecGateRuntime.EmitResult(__sg_result_{step_idx});").expect("fmt");
-                }
-                CsReturnKind::AsyncVoid => {
-                    writeln!(out, "        await {call};").expect("fmt");
-                }
-                CsReturnKind::AsyncValue(result_type) => {
-                    writeln!(out, "        {result_type} __sg_result_{step_idx} = await {call};").expect("fmt");
-                    writeln!(out, "        SpecGateRuntime.EmitResult(__sg_result_{step_idx});").expect("fmt");
-                }
-            }
-            out.push_str("    } catch (System.Exception __ex) {\n");
-            out.push_str("        SpecGateRuntime.EmitEvent(\"$fault\", __ex.Message);\n");
-            out.push_str("    }\n");
+            let return_kind = csharp_return_kind(&cs_op.return_type)?;
+            emit_csharp_call_and_result(&mut out, cs_op, &call, &return_kind, step_idx);
+            emit_csharp_catches(&mut out, cs_op);
         }
         writeln!(out, "    all[\"{}\"] = SpecGateRuntime.GetTracesJson();", case.name).expect("fmt");
         out.push_str("}\n");
@@ -1506,6 +1541,63 @@ fn generate_csharp_program(
     out.push_str("    }\n");
     out.push_str("}\n");
     Ok(out)
+}
+
+fn emit_csharp_call_and_result(out: &mut String, cs_op: &CsOp, call: &str, return_kind: &CsReturnKind, step_idx: usize) {
+    use std::fmt::Write as _;
+    match return_kind {
+        CsReturnKind::Void => {
+            writeln!(out, "        {call};").expect("fmt");
+        }
+        CsReturnKind::Value(result_type) => {
+            writeln!(out, "        {result_type} __sg_result_{step_idx} = {call};").expect("fmt");
+            emit_csharp_result(out, cs_op, step_idx);
+        }
+        CsReturnKind::AsyncVoid => {
+            writeln!(out, "        await {call};").expect("fmt");
+        }
+        CsReturnKind::AsyncValue(result_type) => {
+            writeln!(out, "        {result_type} __sg_result_{step_idx} = await {call};").expect("fmt");
+            emit_csharp_result(out, cs_op, step_idx);
+        }
+    }
+}
+
+fn emit_csharp_result(out: &mut String, cs_op: &CsOp, step_idx: usize) {
+    use std::fmt::Write as _;
+    let var = format!("__sg_result_{step_idx}");
+    if cs_op.exception_types.is_some() {
+        writeln!(out, "        SpecGateRuntime.EmitTaggedResult(\"Ok\", {var});").expect("fmt");
+    } else if cs_op.return_nullable {
+        writeln!(out, "        SpecGateRuntime.EmitOptionResult({var});").expect("fmt");
+    } else {
+        writeln!(out, "        SpecGateRuntime.EmitResult({var});").expect("fmt");
+    }
+}
+
+fn emit_csharp_catches(out: &mut String, cs_op: &CsOp) {
+    use std::fmt::Write as _;
+    match &cs_op.exception_types {
+        Some(types) if types.is_empty() => {
+            out.push_str("    } catch (System.Exception __ex) {\n");
+            out.push_str("        SpecGateRuntime.EmitTaggedResult(\"Err\", __ex.Message);\n");
+            out.push_str("    }\n");
+        }
+        Some(types) => {
+            for ty in types {
+                writeln!(out, "    }} catch ({ty} __ex) {{").expect("fmt");
+                out.push_str("        SpecGateRuntime.EmitTaggedResult(\"Err\", __ex.Message);\n");
+            }
+            out.push_str("    } catch (System.Exception __ex) {\n");
+            out.push_str("        SpecGateRuntime.EmitEvent(\"$fault\", __ex.Message);\n");
+            out.push_str("    }\n");
+        }
+        None => {
+            out.push_str("    } catch (System.Exception __ex) {\n");
+            out.push_str("        SpecGateRuntime.EmitEvent(\"$fault\", __ex.Message);\n");
+            out.push_str("    }\n");
+        }
+    }
 }
 
 fn csharp_case_ops(case: &spec::Case) -> Vec<&str> {
@@ -1604,6 +1696,11 @@ static object? FromSpecInputValue(Type targetType, JsonElement value) {
     if (targetType == typeof(bool)) return value.GetBoolean();
     if (targetType == typeof(double)) return value.GetDouble();
     if (targetType == typeof(float)) return value.GetSingle();
+
+    Type? nullableInner = Nullable.GetUnderlyingType(targetType);
+    if (nullableInner is not null) {
+        return value.ValueKind == JsonValueKind.Null ? null : FromSpecInputValue(nullableInner, value);
+    }
 
     if (targetType.IsGenericType && targetType.GetGenericTypeDefinition() == typeof(Option<>)) {
         if (value.ValueKind == JsonValueKind.Null) {
@@ -1752,7 +1849,7 @@ fn render_csharp_op_args(
         let lit = yaml_to_csharp_literal(value, param_type);
         let var = format!("__sg_arg_{step_idx}_{}", csharp_ident(param_name));
         writeln!(out, "    {param_type} {var} = {lit};").expect("fmt");
-        if is_cs_option_type(param_type) {
+        if is_cs_option_type(param_type) || is_nullable_cs_type(param_type) {
             let echo = yaml_to_csharp_echo_literal(value);
             writeln!(out, "    SpecGateRuntime.EmitEvent(\"{}.{param_name}\", {echo});", cs_op.op_name).expect("fmt");
         } else {
@@ -2994,7 +3091,7 @@ fn ops_metadata(raw: &serde_yaml::Value) -> BTreeMap<String, OpMeta> {
 mod tests {
     use super::{
         CsOp, DiscoveryOp, DiscoveryRegistry, extract_cs_method_sig, generate_csharp_program, metadata_fixture_sources, ops_metadata,
-        parse_csharp_auto_property, split_cs_params, yaml_to_csharp_literal,
+        parse_csharp_auto_property, scan_csharp_file, split_cs_params, yaml_to_csharp_literal,
     };
     use crate::binding;
     use std::collections::BTreeMap;
@@ -3111,6 +3208,101 @@ mod tests {
     }
 
     #[test]
+    fn csharp_scanner_records_spec_exception_and_nullable_returns() {
+        let src = r#"
+            namespace Demo;
+            public static class Ops {
+                [SpecOperation("find")]
+                public static Point? Find() => null;
+
+                [SpecOperation("checked_divide")]
+                [SpecException(typeof(DivideByZeroException))]
+                public static int CheckedDivide(int a, int b) => a / b;
+
+                [SpecOperation("parse")]
+                [SpecException]
+                public static int Parse(string input) => int.Parse(input);
+            }
+            public class Point {}
+        "#;
+        let mut ops = Vec::new();
+        let mut setups = Vec::new();
+        scan_csharp_file(src, Path::new("fixture.cs"), &mut ops, &mut setups);
+
+        let find = ops.iter().find(|op| op.op_name == "find").expect("find op");
+        assert!(find.return_nullable);
+        assert!(find.exception_types.is_none());
+        assert!(find.is_static);
+
+        let checked = ops.iter().find(|op| op.op_name == "checked_divide").expect("checked op");
+        assert_eq!(
+            checked.exception_types.as_ref().expect("exception types"),
+            &vec!["DivideByZeroException".to_string()]
+        );
+        assert!(checked.is_static, "SpecException must not disrupt static detection");
+
+        let catch_all = ops.iter().find(|op| op.op_name == "parse").expect("parse op");
+        assert_eq!(catch_all.exception_types.as_ref().expect("catch-all types"), &Vec::<String>::new());
+    }
+
+    #[test]
+    fn csharp_program_wraps_nullable_and_exception_results() {
+        let option_case = case_with_op("find");
+        let result_case = case_with_op("checked_divide");
+        let catch_all_case = case_with_op("parse");
+        let ops = vec![
+            CsOp {
+                op_name: "find".to_string(),
+                component: None,
+                source_path: PathBuf::new(),
+                class_name: "Ops".to_string(),
+                method_of: "Ops".to_string(),
+                method_name: "Find".to_string(),
+                params: Vec::new(),
+                return_type: "Point?".to_string(),
+                return_nullable: true,
+                exception_types: None,
+                is_static: true,
+            },
+            CsOp {
+                op_name: "checked_divide".to_string(),
+                component: None,
+                source_path: PathBuf::new(),
+                class_name: "Ops".to_string(),
+                method_of: "Ops".to_string(),
+                method_name: "CheckedDivide".to_string(),
+                params: Vec::new(),
+                return_type: "int".to_string(),
+                return_nullable: false,
+                exception_types: Some(vec!["DivideByZeroException".to_string()]),
+                is_static: true,
+            },
+            CsOp {
+                op_name: "parse".to_string(),
+                component: None,
+                source_path: PathBuf::new(),
+                class_name: "Ops".to_string(),
+                method_of: "Ops".to_string(),
+                method_name: "Parse".to_string(),
+                params: Vec::new(),
+                return_type: "int".to_string(),
+                return_nullable: false,
+                exception_types: Some(Vec::new()),
+                is_static: true,
+            },
+        ];
+
+        let program =
+            generate_csharp_program(&[&option_case, &result_case, &catch_all_case], &ops, &[], &BTreeMap::new()).expect("program");
+
+        assert!(program.contains("SpecGateRuntime.EmitOptionResult(__sg_result_0);"));
+        assert!(program.contains("SpecGateRuntime.EmitTaggedResult(\"Ok\", __sg_result_0);"));
+        assert!(program.contains("catch (DivideByZeroException __ex)"));
+        assert!(program.contains("SpecGateRuntime.EmitTaggedResult(\"Err\", __ex.Message);"));
+        assert!(program.contains("catch (System.Exception __ex)"));
+    }
+
+    #[test]
     fn csharp_program_uses_declared_default_when_case_omits_input() {
         let mut inputs = BTreeMap::new();
         inputs.insert("value".to_string(), serde_yaml::Value::Number(5.into()));
@@ -3134,6 +3326,8 @@ mod tests {
             method_name: "Scale".to_string(),
             params: vec![("value".to_string(), "int".to_string()), ("factor".to_string(), "int".to_string())],
             return_type: "int".to_string(),
+            return_nullable: false,
+            exception_types: None,
             is_static: true,
         };
         let mut scale_defaults = BTreeMap::new();
@@ -3169,6 +3363,8 @@ mod tests {
             method_name: "Divide".to_string(),
             params: Vec::new(),
             return_type: "int".to_string(),
+            return_nullable: false,
+            exception_types: None,
             is_static: true,
         };
         let program = generate_csharp_program(&[&case], &[op], &[], &BTreeMap::new()).expect("program");
@@ -3296,6 +3492,8 @@ mod tests {
             method_name: "Fetch".to_string(),
             params: vec![("url".to_string(), "string".to_string())],
             return_type: "Task<string>".to_string(),
+            return_nullable: false,
+            exception_types: None,
             is_static: true,
         };
 
@@ -3328,6 +3526,8 @@ mod tests {
             method_name: "Send".to_string(),
             params: Vec::new(),
             return_type: "System.Threading.Tasks.ValueTask".to_string(),
+            return_nullable: false,
+            exception_types: None,
             is_static: true,
         };
 

@@ -1,0 +1,39 @@
+spec_version: 0.4.0
+name: fixture.checked_divide
+binding:
+  - binding.yaml
+  - csharp.yaml
+operations:
+  checked_divide:
+    inputs:
+      a: i32
+      b: i32
+    outputs:
+    - $result: "Result<i32, string>"
+cases:
+- name: divide_ok
+  desc: Positive divisor returns the Ok arm
+  operation: checked_divide
+  inputs:
+    a: 10
+    b: 2
+  expected:
+  - $result:
+      Ok: 5
+- name: divide_declared_err
+  desc: Zero divisor throws the declared exception, mapping to the Err arm
+  operation: checked_divide
+  inputs:
+    a: 10
+    b: 0
+  expected:
+  - $result:
+      Err: division by zero
+- name: divide_undeclared_fault
+  desc: Negative divisor throws an undeclared exception, falling through to a fault
+  operation: checked_divide
+  inputs:
+    a: 10
+    b: -2
+  expected:
+  - $fault: negative divisor

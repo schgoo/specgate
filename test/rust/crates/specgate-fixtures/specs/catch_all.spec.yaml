@@ -1,0 +1,36 @@
+spec_version: 0.4.0
+name: fixture.catch_all
+binding:
+  - binding.yaml
+  - csharp.yaml
+operations:
+  require_in_range:
+    inputs:
+      x: i32
+    outputs:
+    - $result: "Result<i32, string>"
+cases:
+- name: in_range_ok
+  desc: A value within range returns the Ok arm
+  operation: require_in_range
+  inputs:
+    x: 50
+  expected:
+  - $result:
+      Ok: 50
+- name: below_range_err
+  desc: A too-small value throws one exception type; the catch-all maps it to the Err arm
+  operation: require_in_range
+  inputs:
+    x: -1
+  expected:
+  - $result:
+      Err: too small
+- name: above_range_err
+  desc: A too-large value throws a DIFFERENT exception type; the catch-all still maps it to the Err arm
+  operation: require_in_range
+  inputs:
+    x: 101
+  expected:
+  - $result:
+      Err: too big

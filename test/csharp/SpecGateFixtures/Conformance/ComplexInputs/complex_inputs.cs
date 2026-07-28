@@ -216,36 +216,36 @@ public static class ComplexInputOps
     /// <param name="name">The optional name (spec input <c>name</c>).</param>
     /// <returns><c>"Hello, {name}!"</c> when present, otherwise <c>"Hello, stranger!"</c>.</returns>
     [SpecOperation("greet_optional", Spec = "fixture.complex_inputs")]
-    public static string GreetOptional([SpecInput("name")] Option<string> name) =>
-        name.HasValue ? $"Hello, {name.Value}!" : "Hello, stranger!";
+    public static string GreetOptional([SpecInput("name")] string? name) =>
+        name is not null ? $"Hello, {name}!" : "Hello, stranger!";
 
     /// <summary>Finds the first point with a matching x coordinate.</summary>
     /// <param name="points">The points to search (spec input <c>points</c>).</param>
     /// <param name="targetX">The x coordinate to match (spec input <c>target_x</c>).</param>
     /// <returns><c>Some</c> point when found, otherwise <c>None</c>.</returns>
     [SpecOperation("find_point", Spec = "fixture.complex_inputs")]
-    public static Option<Point> FindPoint([SpecInput("points")] List<Point> points, [SpecInput("target_x")] int targetX)
+    public static Point? FindPoint([SpecInput("points")] List<Point> points, [SpecInput("target_x")] int targetX)
     {
         foreach (var p in points)
         {
             if (p.X == targetX)
             {
-                return Option<Point>.Some(p);
+                return p;
             }
         }
 
-        return Option<Point>.None();
+        return null;
     }
 
     /// <summary>Optionally produces a shape for a given side count.</summary>
     /// <param name="sides">The side count (spec input <c>sides</c>).</param>
     /// <returns><c>Some(Circle)</c> for 1, <c>Some(Point)</c> for 0, otherwise <c>None</c>.</returns>
     [SpecOperation("find_shape", Spec = "fixture.complex_inputs")]
-    public static Option<Shape> FindShape([SpecInput("sides")] int sides) => sides switch
+    public static Shape? FindShape([SpecInput("sides")] int sides) => sides switch
     {
-        1 => Option<Shape>.Some(new Circle { Radius = 5 }),
-        0 => Option<Shape>.Some(new ShapePoint()),
-        _ => Option<Shape>.None(),
+        1 => new Circle { Radius = 5 },
+        0 => new ShapePoint(),
+        _ => null,
     };
 
     /// <summary>Describes a person built from a nested struct input.</summary>
