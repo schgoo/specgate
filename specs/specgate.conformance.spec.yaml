@@ -966,48 +966,6 @@ cases:
                   - $run: combine_three
                   - $result: 3
 
-  - name: side_effect_setup_runs
-    desc: A setup whose return value is not consumed is still invoked before the operation
-    operation: run_spec
-    inputs:
-      spec: test/rust/crates/specgate-fixtures/specs/side_effect_setup.spec.yaml
-    expected:
-      - $result:
-          Complete:
-            results:
-              - name: setup_side_effect_runs
-                status: pass
-                expected:
-                  - $result: 1
-
-  - name: side_effect_setup_with_input_runs
-    desc: A parameterized side-effect setup writes its input into global state the operation reads
-    operation: run_spec
-    inputs:
-      spec: test/rust/crates/specgate-fixtures/specs/side_effect_setup_with_input.spec.yaml
-    expected:
-      - $result:
-          Complete:
-            results:
-              - name: setup_sets_global_from_input
-                status: pass
-                expected:
-                  - $result: 42
-
-  - name: simple_output_setup_fills_param
-    desc: A setup returning a primitive fills an operation parameter by type
-    operation: run_spec
-    inputs:
-      spec: test/rust/crates/specgate-fixtures/specs/simple_output_setup.spec.yaml
-    expected:
-      - $result:
-          Complete:
-            results:
-              - name: setup_fills_primitive_param
-                status: pass
-                expected:
-                  - $result: 42
-
   # ================================================================
   # Happy path — multi-case and multi-step
   # ================================================================

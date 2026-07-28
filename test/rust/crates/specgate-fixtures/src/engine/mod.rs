@@ -20,5 +20,8 @@ pub mod resolver_a;
 pub mod resolver_b;
 pub mod resolver_conflict;
 pub mod run_failure;
+pub mod side_effect_setup;
+pub mod side_effect_setup_with_input;
+pub mod simple_output_setup;
 pub mod type_exact;
 // pub mod compile_error;  // intentionally broken — syntax error
