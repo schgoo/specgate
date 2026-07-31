@@ -73,6 +73,66 @@ types:
     traces: List<TraceEvent>  # what this target actually produced
     mismatch: string  # human-readable description of the first divergence
 
+  # --- Structural conformance: self-described schema (discovery) ------------
+  # A component's schema, normalized to spec types and folded to the black-box
+  # spec view. Every bound target must self-describe to the SAME normalized
+  # schema — structural conformance, complementing the trace (behavioral)
+  # conformance above. Per-language discovery metadata (Rust discovery_json, C#
+  # reflection) carries implementation detail — is_setup, fills, module paths,
+  # per-language type spelling — which discover consumes to FOLD setups into
+  # their operation's inputs (the invisible-setup model) and normalize types,
+  # exposing only the language-neutral operations and types below. Setups,
+  # is_setup, and fills never surface here: whether a target uses a setup or a
+  # plain parameter is an implementation choice, and both must fold to the same
+  # operation inputs.
+
+  DiscoveredInput:
+    name: string
+    type: string  # normalized spec type, e.g. "i32", "List<i32>", "Option<i32>"
+
+  DiscoveredOperation:
+    name: string
+    async: bool  # true only for async operations (mirrors the spec's `async:` flag)
+    inputs: List<DiscoveredInput>  # black-box inputs, with any setup construction params folded in
+    output: string  # normalized spec return type; empty when the operation returns nothing
+
+  DiscoveredField:
+    name: string
+    type: string  # normalized spec type
+
+  DiscoveredVariant:
+    name: string
+    fields: List<DiscoveredField>  # empty for unit/tuple variants
+
+  DiscoveredType:
+    name: string
+    kind:
+      oneof: [struct, enum]
+    fields: List<DiscoveredField>  # struct fields (empty for enums)
+    variants: List<DiscoveredVariant>  # enum variants (empty for structs)
+
+  DiscoveredSchema:
+    component: string
+    operations: List<DiscoveredOperation>
+    types: List<DiscoveredType>
+
+  # One entry per BOUND target (every binding file × target). Makes per-target
+  # participation first-class: a target that is skipped or never consulted is
+  # visibly ABSENT from the list, so "all targets agree" is provable rather than
+  # assumed. A self-describing target echoes its own full normalized schema
+  # (identical to the canonical `schema` when it conforms; different when it
+  # diverges — the difference is visible by comparison, so no separate
+  # divergence type is needed). A target that emits no discovery metadata is
+  # NotSelfDescribing — the structural analog of a behavioral TargetFailure.
+  TargetDiscovery:
+    target: string  # binding target label, e.g. "binding.yaml::default", "csharp.yaml::default"
+    outcome:
+      oneof:
+        SelfDescribed:
+          schema: DiscoveredSchema  # this target's full normalized schema (echoed, not summarized)
+        NotSelfDescribing:
+          reason: string  # why no schema was produced, e.g. "no discovery metadata emitted"
+
 operations:
   run_spec:
     desc: Run all test cases in a spec file and return results with traces.
@@ -88,7 +148,318 @@ operations:
             Error:
               reason: string
 
+  discover:
+    desc: >
+      Report a component's self-described schema, normalized to spec types.
+      Like run_spec, discover reads the spec's component and EVERY bound target,
+      asks each to self-describe, and normalizes each to spec types — structural
+      conformance, complementing run_spec's behavioral (trace) conformance. The
+      canonical `schema` is what the self-describing targets agree on. `targets`
+      enumerates every bound target and its outcome: a self-describing target
+      echoes its own full normalized schema (which must equal the canonical
+      schema to conform); a target that emits no discovery metadata is
+      NotSelfDescribing. Because every bound target appears in `targets`, a
+      skipped or non-participating target is visible rather than silently
+      absent — the structural analog of run_spec listing a target_failure.
+    inputs:
+      spec:
+        type: string
+        desc: Path to the spec YAML whose component and targets to discover
+    outputs:
+      - outcome:
+          oneof:
+            Complete:
+              schema: DiscoveredSchema  # canonical schema the self-describing targets agree on
+              targets: List<TargetDiscovery>  # one entry per bound target (binding x target)
+            Error:
+              reason: string
+
 cases:
+
+  # ================================================================
+  # Structural conformance — self-described schema (discovery)
+  # ================================================================
+  # discover(spec) consults EVERY bound target of a fixture, normalizes each
+  # self-report to spec types, and returns the canonical `schema` plus a
+  # per-target `targets` list — the structural half of conformance (run_spec
+  # below is the behavioral half). Every bound target appears in `targets`, so a
+  # skipped or non-participating target is VISIBLE, not silently assumed to
+  # agree. The Rust target self-describes (SelfDescribed, echoing its full
+  # normalized schema, which must equal the canonical schema); the C# targets do
+  # not self-describe yet (NotSelfDescribing). When C# discovery lands, each
+  # csharp entry flips to SelfDescribed echoing the same schema — forcing the C#
+  # reflection to produce a matching normalized schema, canonical unchanged.
+  #
+  # These cases exercise every value the schema can carry: both `async` values,
+  # empty vs non-empty `output`, every normalized type category (primitive
+  # scalars, List / Option / Result / map / set collections, and named
+  # struct / enum complex types), and both empty (unit) and populated enum
+  # variants.
+  #
+  # NOTE: example schema values are best-effort — reconcile exact type spellings
+  # and list order against real discover output during implementation.
+
+  # --- Primitive scalars, async flag, empty output ---
+
+  - name: discover_scalar_operation
+    desc: A synchronous scalar operation self-describes async:false with typed i32 inputs and output.
+    operation: discover
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/stateless_add.spec.yaml
+    expected:
+      - $result:
+          Complete:
+            schema: &schema_stateless_add
+              component: fixture.stateless_add
+              operations:
+                - name: add
+                  async: false
+                  inputs:
+                    - { name: a, type: i32 }
+                    - { name: b, type: i32 }
+                  output: i32
+              types: []
+            targets:
+              - target: "binding::default"
+                outcome: { SelfDescribed: { schema: *schema_stateless_add } }
+              - target: "csharp::default"
+                outcome: { SelfDescribed: { schema: *schema_stateless_add } }
+              - target: "csharp-net8::default"
+                outcome: { SelfDescribed: { schema: *schema_stateless_add } }
+
+  - name: discover_async_operation
+    desc: An async operation self-describes async:true with its string input and output.
+    operation: discover
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/async_fetch.spec.yaml
+    expected:
+      - $result:
+          Complete:
+            schema: &schema_async_fetch
+              component: fixture.async_fetch
+              operations:
+                - name: fetch
+                  async: true
+                  inputs:
+                    - { name: url, type: string }
+                  output: string
+              types: []
+            targets:
+              - target: "binding::default"
+                outcome: { SelfDescribed: { schema: *schema_async_fetch } }
+              - target: "csharp::default"
+                outcome: { SelfDescribed: { schema: *schema_async_fetch } }
+
+  - name: discover_void_operation
+    desc: >
+      An operation returning nothing self-describes an empty output; its
+      receiver setup folds away, leaving only the black-box input.
+    operation: discover
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/void_operation.spec.yaml
+    expected:
+      - $result:
+          Complete:
+            schema: &schema_void_operation
+              component: fixture.void_operation
+              operations:
+                - name: log
+                  inputs:
+                    - { name: msg, type: string }
+                  output: ""
+              types: []
+            targets:
+              - target: "binding::default"
+                outcome: { SelfDescribed: { schema: *schema_void_operation } }
+              - target: "csharp::default"
+                outcome: { SelfDescribed: { schema: *schema_void_operation } }
+
+  - name: discover_scalar_builtin_types
+    desc: >
+      An operation over an i64 and a bool returning the universal `value` type
+      self-describes the remaining scalar built-ins (i64, bool, value).
+    operation: discover
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/scalar_types.spec.yaml
+    expected:
+      - $result:
+          Complete:
+            schema: &schema_scalar_types
+              component: fixture.scalar_types
+              operations:
+                - name: classify
+                  inputs:
+                    - { name: id, type: i64 }
+                    - { name: active, type: bool }
+                  output: value
+              types: []
+            targets:
+              - target: "binding::default"
+                outcome: { SelfDescribed: { schema: *schema_scalar_types } }
+              - target: "csharp::default"
+                outcome: { SelfDescribed: { schema: *schema_scalar_types } }
+
+  - name: discover_option_and_list_types
+    desc: >
+      An operation over a list input returning an Option self-describes the
+      normalized container types, matching the fixture's declared spec types.
+    operation: discover
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/option_some.spec.yaml
+    expected:
+      - $result:
+          Complete:
+            schema: &schema_option_some
+              component: fixture.option_some
+              operations:
+                - name: find
+                  inputs:
+                    - { name: items, type: "List<i32>" }
+                    - { name: target, type: i32 }
+                  output: "Option<i32>"
+              types: []
+            targets:
+              - target: "binding::default"
+                outcome: { SelfDescribed: { schema: *schema_option_some } }
+              - target: "csharp::default"
+                outcome: { SelfDescribed: { schema: *schema_option_some } }
+
+  # --- Collection types: map, set, Result ---
+
+  - name: discover_map_output
+    desc: An operation returning a map self-describes the normalized map type.
+    operation: discover
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/structured_map.spec.yaml
+    expected:
+      - $result:
+          Complete:
+            schema: &schema_structured_map
+              component: fixture.structured_map
+              operations:
+                - name: get_entity_values
+                  inputs:
+                    - { name: id, type: i32 }
+                  output: "map<string, string>"
+              types: []
+            targets:
+              - target: "binding::default"
+                outcome: { SelfDescribed: { schema: *schema_structured_map } }
+              - target: "csharp::default"
+                outcome: { SelfDescribed: { schema: *schema_structured_map } }
+
+  - name: discover_set_output
+    desc: An operation returning a set self-describes the normalized set type.
+    operation: discover
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/structured_set.spec.yaml
+    expected:
+      - $result:
+          Complete:
+            schema: &schema_structured_set
+              component: fixture.structured_set
+              operations:
+                - name: get_navigation_properties
+                  inputs: []
+                  output: "set<string>"
+              types: []
+            targets:
+              - target: "binding::default"
+                outcome: { SelfDescribed: { schema: *schema_structured_set } }
+              - target: "csharp::default"
+                outcome: { SelfDescribed: { schema: *schema_structured_set } }
+
+  - name: discover_result_output
+    desc: An operation returning a Result self-describes the normalized Result type.
+    operation: discover
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/result_ok.spec.yaml
+    expected:
+      - $result:
+          Complete:
+            schema: &schema_result_ok
+              component: fixture.result_ok
+              operations:
+                - name: try_divide
+                  inputs:
+                    - { name: a, type: i32 }
+                    - { name: b, type: i32 }
+                  output: "Result<i32, string>"
+              types: []
+            targets:
+              - target: "binding::default"
+                outcome: { SelfDescribed: { schema: *schema_result_ok } }
+              - target: "csharp::default"
+                outcome: { SelfDescribed: { schema: *schema_result_ok } }
+
+  # --- Complex types: named struct and named enum (in `types`) ---
+
+  - name: discover_struct_type
+    desc: >
+      A struct return type self-describes as a kind:struct entry in `types`,
+      with its fields normalized (honoring spec_event renames).
+    operation: discover
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/structured_output.spec.yaml
+    expected:
+      - $result:
+          Complete:
+            schema: &schema_structured_output
+              component: fixture.structured_output
+              operations:
+                - name: resolve_entity
+                  inputs: []
+                  output: EntityType
+              types:
+                - name: EntityType
+                  kind: struct
+                  fields:
+                    - { name: entity_name, type: string }
+                    - { name: key_properties, type: "List<string>" }
+                    - { name: structural_properties, type: "List<string>" }
+                  variants: []
+            targets:
+              - target: "binding::default"
+                outcome: { SelfDescribed: { schema: *schema_structured_output } }
+              - target: "csharp::default"
+                outcome: { SelfDescribed: { schema: *schema_structured_output } }
+
+  - name: discover_enum_type
+    desc: >
+      An enum return type self-describes as a kind:enum entry in `types`, with
+      both a unit variant (empty fields) and struct variants (populated fields).
+    operation: discover
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/enum_event.spec.yaml
+    expected:
+      - $result:
+          Complete:
+            schema: &schema_enum_event
+              component: fixture.enum_event
+              operations:
+                - name: classify
+                  inputs:
+                    - { name: sides, type: i32 }
+                  output: Shape
+              types:
+                - name: Shape
+                  kind: enum
+                  fields: []
+                  variants:
+                    - name: Circle
+                      fields:
+                        - { name: radius, type: f64 }
+                    - name: Rectangle
+                      fields:
+                        - { name: width, type: f64 }
+                        - { name: height, type: f64 }
+                    - name: Point
+                      fields: []
+            targets:
+              - target: "binding::default"
+                outcome: { SelfDescribed: { schema: *schema_enum_event } }
+              - target: "csharp::default"
+                outcome: { SelfDescribed: { schema: *schema_enum_event } }
 
   # ================================================================
   # External dependency — operation using a third-party crate
@@ -121,6 +492,12 @@ cases:
   # Structured values — lists, maps, sets, $-operators
   # ================================================================
 
+  # Assertion operators ($size, $contains, $containsAll, $any, $every, $match,
+  # $excludes) apply to structured Value types, not strings: the matcher parses
+  # the operator syntax and applies it against the actual Value in the trace.
+  # String equality is only the default for scalar values without operators —
+  # e.g. a string "3" does NOT satisfy $size: 3 (type mismatch). ($gt/$ne on
+  # integer Values are covered by scalar_operators_matching below.)
   - name: assertion_operators
     desc: All 9 assertion operators work correctly
     operation: run_spec
@@ -263,6 +640,10 @@ cases:
                   - Event: { name: attributes, value: { category: "food", origin: "local" } }
                   - Event: { name: $result, value: { attributes: { category: "food", origin: "local" }, price: 4, product_name: "Milk", tags: [ "dairy", "organic", "local" ] } }
 
+  # Collection fields (Vec/BTreeMap/BTreeSet) tagged #[spec_event] must emit
+  # structured Value events (List/Map/Set), never stringified: codegen uses
+  # structured emission, not format!("{}", x). A stringified list value
+  # "[\"ID\"]" would fail these exact-list / $size / $contains assertions.
   - name: structured_list_matching
     desc: List outputs match with exact, $contains, $size, $any operators
     operation: run_spec
@@ -426,6 +807,34 @@ cases:
                 status: fail
                 target_failures:
                   - target: csharp
+
+  - name: scalar_types_matching
+    desc: i64 and bool inputs with a universal `value` result (Integer or Bool)
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/scalar_types.spec.yaml
+    expected:
+      - $result:
+          Complete:
+            results:
+              - name: classify_active
+                status: pass
+                expected:
+                  - $result: 7
+                traces:
+                  - Run: { operation: classify }
+                  - Event: { name: classify.id, value: 7 }
+                  - Event: { name: classify.active, value: true }
+                  - Event: { name: $result, value: 7 }
+              - name: classify_inactive
+                status: pass
+                expected:
+                  - $result: false
+                traces:
+                  - Run: { operation: classify }
+                  - Event: { name: classify.id, value: 7 }
+                  - Event: { name: classify.active, value: false }
+                  - Event: { name: $result, value: false }
 
   - name: nested_structured_matching
     desc: List of maps — nested operators ($any with $match, $contains with $match)
@@ -900,6 +1309,9 @@ cases:
   # language-neutral input names
   # ================================================================
 
+  # Operations a spec references may be defined in different source files; the
+  # harness discovers and runs every one regardless of file, and skips no case
+  # for a missing-source reason.
   - name: operations_across_files
     desc: Operations defined in separate source files are all discovered and run
     operation: run_spec
@@ -1305,6 +1717,10 @@ cases:
   # Complex inputs — structured YAML deserialized into typed params
   # ================================================================
 
+  # Every operation input parameter is emitted to the trace as an `op.param`
+  # event — including complex inputs (struct/enum/list/map) — so specs can assert
+  # what an operation received, not only what it produced. A complex parameter
+  # must not suppress emission of its primitive siblings (e.g. lookup's map + key).
   - name: complex_input_deserialization
     desc: >
       When a spec case input is a YAML Mapping or Sequence, and the

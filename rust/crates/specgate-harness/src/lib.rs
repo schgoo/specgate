@@ -22,6 +22,9 @@
 mod binding;
 mod codegen;
 mod coverage;
+mod csharp_discovery;
+#[doc(hidden)]
+pub mod discovery;
 mod match_traces;
 pub(crate) mod scan;
 mod spec;
@@ -29,6 +32,12 @@ mod types;
 
 // Public API — what users need for run_spec() results
 pub use types::{CaseLevel, CaseResult, CaseStatus, CoverageOutcome, CoverageReport, FileCoverage, RunOutcome, Source, TargetFailure};
+
+// Public API — structural discovery (the schema counterpart to run_spec).
+pub use discovery::{
+    DiscoverOutcome, DiscoveredField, DiscoveredInput, DiscoveredOperation, DiscoveredSchema, DiscoveredType, DiscoveredVariant,
+    TargetDiscovery, TargetOutcome, discover,
+};
 
 // Internal types — exposed for integration tests within this crate,
 // but hidden from public docs. Not part of the stable API.

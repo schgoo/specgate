@@ -306,8 +306,9 @@ fn parse_assert_value(v: &YValue) -> Result<AssertValue, ParseError> {
         // implicit `$match`: each field is asserted as a subset and any field
         // may itself be a matcher. This lets e.g. `reason: { $matches: "..." }`
         // work inside a structured value (like `{ Error: { reason: ... } }`)
-        // without an explicit `$match` wrapper. Lists are not scanned — use
-        // `$any`/`$every`/`$contains` for list-element matchers.
+        // without an explicit `$match` wrapper. Lists are not scanned — a
+        // matcher inside a list is kept literal at parse time and honored
+        // against a scalar actual value at match time (see `match_traces`).
         if mapping_has_nested_op(m) {
             let mut out = BTreeMap::new();
             for (k, val) in m {
@@ -635,5 +636,75 @@ mod nested_matcher_tests {
         let expected = result_assertion(r#"{ Error: { reason: { $matches: "this will not appear" } } }"#);
         let actual = error_result("source failed to compile:\nerror: expected expression");
         assert!(!crate::match_traces::matches(&expected, &actual));
+    }
+
+    // Build an actual `$result` trace: { Complete: { targets: [ { reason: <r> } ] } }.
+    fn targets_result(reasons: &[&str]) -> Vec<TraceEvent> {
+        let list: Vec<Value> = reasons
+            .iter()
+            .map(|r| {
+                let mut m = BTreeMap::new();
+                m.insert("reason".to_string(), Value::String((*r).to_string()));
+                Value::Map(m)
+            })
+            .collect();
+        let mut inner = BTreeMap::new();
+        inner.insert("targets".to_string(), Value::List(list));
+        let mut outer = BTreeMap::new();
+        outer.insert("Complete".to_string(), Value::Map(inner));
+        vec![TraceEvent::Event {
+            name: "$result".to_string(),
+            value: Value::Map(outer),
+        }]
+    }
+
+    #[test]
+    fn list_with_nested_op_stays_exact_at_parse() {
+        // Lists are not scanned at parse time: a `$matches` inside a list is
+        // kept literal (Exact) and honored at match time against a scalar.
+        let av = parse_assert_value(&yaml(r#"{ Complete: { targets: [ { reason: { $matches: "no discovery" } } ] } }"#)).unwrap();
+        assert!(matches!(av, AssertValue::Exact(_)), "got {av:?}");
+    }
+
+    #[test]
+    fn nested_matcher_honored_inside_list_against_scalar() {
+        // A `$matches` op nested inside a list element is honored at match time
+        // when the actual value at that position is a scalar string.
+        let expected = result_assertion(r#"{ Complete: { targets: [ { reason: { $matches: "no discovery metadata" } } ] } }"#);
+        let actual = targets_result(&["no discovery metadata emitted by csharp target"]);
+        assert!(crate::match_traces::matches(&expected, &actual));
+    }
+
+    #[test]
+    fn nested_matcher_inside_list_rejects_non_matching_scalar() {
+        // Same shape, but the regex does not match — proving the honored
+        // matcher actually runs (not vacuously true).
+        let expected = result_assertion(r#"{ Complete: { targets: [ { reason: { $matches: "will not appear" } } ] } }"#);
+        let actual = targets_result(&["no discovery metadata emitted by csharp target"]);
+        assert!(!crate::match_traces::matches(&expected, &actual));
+    }
+
+    #[test]
+    fn op_map_stays_literal_when_actual_is_a_map() {
+        // When the actual value is itself an operator map (round-tripped
+        // matcher data, as the conformance operator cases assert), the expected
+        // `$op` map is compared literally rather than honored as a matcher.
+        let expected = result_assertion(r#"{ Complete: { targets: [ { reason: { $matches: "no discovery metadata" } } ] } }"#);
+        let list = vec![{
+            let mut m = BTreeMap::new();
+            let mut inner = BTreeMap::new();
+            inner.insert("$matches".to_string(), Value::String("no discovery metadata".to_string()));
+            m.insert("reason".to_string(), Value::Map(inner));
+            Value::Map(m)
+        }];
+        let mut inner = BTreeMap::new();
+        inner.insert("targets".to_string(), Value::List(list));
+        let mut outer = BTreeMap::new();
+        outer.insert("Complete".to_string(), Value::Map(inner));
+        let actual = vec![TraceEvent::Event {
+            name: "$result".to_string(),
+            value: Value::Map(outer),
+        }];
+        assert!(crate::match_traces::matches(&expected, &actual));
     }
 }

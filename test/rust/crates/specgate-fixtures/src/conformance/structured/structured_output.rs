@@ -2,6 +2,7 @@
 use specgate::*;
 
 #[derive(SpecEvent)]
+#[spec_component("fixture.structured_output")]
 pub struct EntityType {
     #[spec_event(name = "entity_name")]
     pub name: String,

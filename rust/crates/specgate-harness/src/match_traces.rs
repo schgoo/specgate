@@ -78,6 +78,22 @@ fn values_equal(expected: &Value, actual: &Value) -> bool {
     if expected == actual {
         return true;
     }
+    // Eval-time matcher rule: an `expected` map that is a *single* value-matcher
+    // operator (e.g. `{ $matches: "..." }`) is honored as a matcher — but ONLY
+    // when the `actual` value is a scalar. Matchers cannot survive into a list
+    // at parse time (lists are kept literal), so a `$matches` nested inside a
+    // list-valued field (like discover's `targets[].outcome...reason`) reaches
+    // here as a literal map against a scalar string and must be evaluated.
+    //
+    // The scalar guard is what keeps the conformance operator cases literal:
+    // those cases assert round-tripped matcher DATA (`{ $eq: ... }`) whose
+    // `actual` side is itself a map, so they fall through to structural
+    // comparison rather than being mis-evaluated as live matchers.
+    if is_scalar(actual)
+        && let Some(m) = single_value_op_matcher(expected)
+    {
+        return matcher_matches(&m, actual);
+    }
     match (expected, actual) {
         (Value::List(a), Value::List(b)) => a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| values_equal(x, y)),
         (Value::List(a), Value::Set(b)) | (Value::Set(b), Value::List(a)) => {
@@ -92,6 +108,39 @@ fn values_equal(expected: &Value, actual: &Value) -> bool {
             a.iter().all(|(k, v)| b.get(k).is_some_and(|bv| values_equal(v, bv)))
         }
         _ => false,
+    }
+}
+
+/// True for scalar (non-collection) values.
+fn is_scalar(v: &Value) -> bool {
+    matches!(v, Value::String(_) | Value::Integer(_) | Value::Float(_) | Value::Bool(_))
+}
+
+/// If `v` is a map with exactly one entry whose key is a value-matcher operator
+/// applicable to a scalar (e.g. `$matches`, `$eq`, `$ne`, `$type`, comparisons),
+/// build the corresponding [`Matcher`]. Otherwise return `None`.
+fn single_value_op_matcher(v: &Value) -> Option<Matcher> {
+    let Value::Map(m) = v else { return None };
+    if m.len() != 1 {
+        return None;
+    }
+    let (k, arg) = m.iter().next()?;
+    match k.as_str() {
+        "$matches" => match arg {
+            Value::String(s) => Some(Matcher::Matches(s.clone())),
+            _ => None,
+        },
+        "$eq" => Some(Matcher::Eq(arg.clone())),
+        "$ne" => Some(Matcher::Ne(arg.clone())),
+        "$type" => match arg {
+            Value::String(s) => Some(Matcher::Type(s.clone())),
+            _ => None,
+        },
+        "$gt" => Some(Matcher::Gt(arg.clone())),
+        "$gte" => Some(Matcher::Gte(arg.clone())),
+        "$lt" => Some(Matcher::Lt(arg.clone())),
+        "$lte" => Some(Matcher::Lte(arg.clone())),
+        _ => None,
     }
 }
 

@@ -133,19 +133,6 @@ cases:
     expected:
       - $outcome: "Complete"
 
-  - name: discovery_registry_handles_methods_and_duplicates
-    kind: narrative
-    desc: >
-      Annotation metadata discovery must register free functions, method
-      operations, and setups without compile failures, even when multiple
-      source files reuse the same operation name. The discovery JSON exposed
-      by the runtime must stay valid and include those registered entries.
-    verify:
-      - Method operations annotated inside impl blocks compile successfully and register metadata
-      - #[spec_setup] functions register metadata with is_setup: true
-      - Reusing the same operation name in different source files does not cause registry symbol collisions
-      - specgate_runtime::discovery_json() returns valid JSON listing the registered operations
-
   - name: command_target_executes_binding_command
     kind: narrative
     desc: >
@@ -160,27 +147,23 @@ cases:
       - A command target passes when its shell command exits 0
       - run_spec is source-oriented and does not execute command targets
 
-  - name: multi_file_operations
-    kind: narrative
-    desc: >
-      A single spec may define operations that live in different source
-      files. The harness must discover and run every operation the spec
-      references, regardless of which file each one is defined in.
-    verify:
-      - The multi_file fixture spec completes with all cases passing
-      - Operations greet and farewell, defined in separate files, are both invoked
-      - No case is skipped for a missing-source reason
-
   - name: no_source_interpretation
     kind: narrative
     desc: >
-      The harness must not interpret Rust source with syn. It must shell out
-      to cargo to compile and run annotated code. An earlier implementation
-      used source interpretation as a shortcut — it passed all spec-driven
-      tests but could not handle real-world code.
+      The harness must not derive a target's schema or resolve its operations by
+      interpreting or scanning source. Every target is self-describing (see the
+      specgate.conformance discover cases): the harness compiles or loads the
+      annotated code, reads the discovery metadata it emits, and runs it to
+      collect traces. An earlier Rust implementation used syn-based source
+      interpretation as a shortcut — it passed spec-driven tests but could not
+      handle real-world code; scanning C# source text for annotations is the same
+      anti-pattern in another language and is likewise disallowed. Obtaining
+      schema and resolution from a target's own emitted self-report is the only
+      sanctioned path.
     verify:
-      - No syn-based expression evaluation exists in harness source
-      - The harness invokes cargo build/test, never evaluates Rust in-process
+      - No target's operations are resolved by parsing or scanning its source text
+      - The harness obtains each target's schema from its emitted discovery metadata
+      - The harness compiles or loads and runs annotated code; it never evaluates it in-process from source
 
   - name: operation_name_reused_across_components_resolves_a
     desc: >
@@ -262,32 +245,6 @@ cases:
           Error:
             reason: { $matches: "operation 'render_ambiguous'.*component 'fixture.ambiguous_fallback'" }
 
-  - name: operation_inputs_emitted
-    kind: narrative
-    desc: >
-      Every input parameter of an operation must be emitted to the trace as an
-      `op.param` event, including complex inputs (structs, enums, lists, maps).
-      A single non-primitive parameter must not suppress emission of the other
-      parameters. This lets specs assert on what an operation received, not just
-      what it produced.
-    verify:
-      - Complex (struct/enum/list/map) input parameters appear as op.param events
-      - Primitive parameters are still emitted even when a sibling parameter is complex
-      - Run complex_inputs.spec.yaml — input-echo expectations on lookup, describe_config, and describe_person pass
-
-  - name: structured_values_not_stringified
-    kind: narrative
-    desc: >
-      Collection fields (Vec, BTreeMap, BTreeSet) annotated with #[spec_event]
-      must emit structured Value events (Value::List, Value::Map, Value::Set),
-      not stringified representations. The codegen must use emit_event_v (or
-      equivalent structured emission) for these types. Using format!("{}", x)
-      to stringify a Vec into "["a", "b"]" is incorrect — the matcher cannot
-      apply $size, $contains, $any operators on a plain string.
-    verify:
-      - 'Run structured_output.spec.yaml — list_exact_match expects value: ["ID"]'
-      - 'If the trace contains value: "[\"ID\"]" (a string), matching will fail'
-
   - name: crate_dependency_not_path_include
     kind: narrative
     desc: >
@@ -301,19 +258,6 @@ cases:
       - Run cross_dep.spec.yaml — it uses serde_yaml
       - Check generated Cargo.toml has specgate-fixtures in [dependencies]
       - Generated main.rs uses "use specgate_fixtures::..." not "#[path]"
-
-  - name: operators_work_on_structured_values
-    kind: narrative
-    desc: >
-      Assertion operators ($size, $contains, $containsAll, $any, $every,
-      $match, $excludes) operate on structured Value types, not strings.
-      The matcher must parse the expected operator syntax and apply it
-      against the actual Value in the trace event. String equality is
-      only the default for scalar values without operators.
-    verify:
-      - Run operators.spec.yaml — $size on a list Value works
-      - Run scalar_operators.spec.yaml — $gt on an integer Value works
-      - A string value "3" does not satisfy $size: 3 (type mismatch)
 
   - name: generated_runner_uses_version_deps_from_crates_io
     kind: narrative

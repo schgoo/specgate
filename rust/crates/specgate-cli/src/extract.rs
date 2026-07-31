@@ -20,6 +20,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use specgate::{SpecEvent, TraceEvent, Value, spec_operation};
+use specgate_harness::discovery::{
+    OpInfo, Registry, SpecType, TypeInfo, build_inputs, cargo_bin, cargo_package_name, collect_named_refs, is_unit, map_type, raw_inputs,
+    run_discovery, to_cargo_path, workspace_root,
+};
 
 /// Summary of an extraction run.
 #[derive(Debug, Clone, PartialEq, Eq, SpecEvent)]
@@ -177,106 +181,9 @@ pub fn extract(package_root: &str, out: &str, component: &str, cases: bool) -> E
     ExtractOutcome::Complete { report }
 }
 
-// ---------------------------------------------------------------------------
-// Discovery build
-// ---------------------------------------------------------------------------
-
-/// The Rust workspace root (`rust/`) of this repository, resolved at compile
-/// time from this crate's manifest directory.
-fn workspace_root() -> PathBuf {
-    let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR")); // rust/crates/specgate-cli
-    p.pop(); // crates
-    p.pop(); // rust
-    p
-}
-
-/// Scaffold a temporary bin crate that links the target crate and prints its
-/// `discovery_json()`, build+run it, and return the captured JSON.
-fn run_discovery(package_root: &Path) -> Result<String, String> {
-    let ws = workspace_root();
-    let specgate_path = ws.join("crates").join("specgate");
-    let pkg_abs = std::fs::canonicalize(package_root).map_err(|e| format!("cannot resolve package_root: {e}"))?;
-    let crate_name = cargo_package_name(package_root).ok_or_else(|| "could not read crate name from Cargo.toml".to_string())?;
-    let rust_ident = crate_name.replace('-', "_");
-
-    let scratch = ws.join("target").join("specgate-extract").join(&crate_name);
-    std::fs::create_dir_all(scratch.join("src")).map_err(|e| format!("failed to scaffold discovery crate: {e}"))?;
-
-    let manifest = format!(
-        "[package]\nname = \"sg-extract-discovery\"\nversion = \"0.0.1\"\nedition = \"2024\"\n\n[[bin]]\nname = \"sg-extract-discovery\"\npath = \"src/main.rs\"\n\n[dependencies]\nspecgate = {{ path = \"{specgate}\" }}\n{crate_name} = {{ path = \"{pkg}\" }}\n\n[workspace]\n",
-        specgate = to_cargo_path(&specgate_path),
-        pkg = to_cargo_path(&pkg_abs),
-    );
-    std::fs::write(scratch.join("Cargo.toml"), manifest).map_err(|e| format!("failed to write discovery manifest: {e}"))?;
-
-    // Seed the discovery crate's lockfile from the workspace so cargo need not
-    // reach crates.io (the environment may have it blocked).
-    let parent_lock = ws.join("Cargo.lock");
-    if parent_lock.exists() {
-        let _ = std::fs::copy(&parent_lock, scratch.join("Cargo.lock"));
-    }
-
-    // `extern crate` forces the target crate's rlib to be linked so its
-    // `linkme` registration statics (which are `#[used]`) are pulled in.
-    let main_rs = format!("extern crate {rust_ident};\nfn main() {{\n    print!(\"{{}}\", specgate::__rt::discovery_json());\n}}\n");
-    std::fs::write(scratch.join("src").join("main.rs"), main_rs).map_err(|e| format!("failed to write discovery main.rs: {e}"))?;
-
-    let mut cmd = Command::new(cargo_bin());
-    cmd.arg("run").arg("--quiet").arg("--manifest-path").arg(scratch.join("Cargo.toml"));
-    cmd.env_remove("RUSTC_WORKSPACE_WRAPPER");
-    cmd.env_remove("CARGO");
-    cmd.env_remove("CARGO_MANIFEST_DIR");
-    cmd.env("CARGO_TARGET_DIR", scratch.join("target").as_os_str());
-
-    let output = cmd.output().map_err(|e| format!("failed to run discovery build: {e}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "discovery build failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    let json = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if json.is_empty() {
-        return Err("discovery build produced no output".to_string());
-    }
-    Ok(json)
-}
-
-fn cargo_bin() -> String {
-    std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string())
-}
-
-/// Convert a path to a forward-slash string suitable for `Cargo.toml`, stripping
-/// the Windows extended-length prefix (`\\?\`) that `canonicalize` adds.
-fn to_cargo_path(p: &Path) -> String {
-    let s = p.display().to_string();
-    let s = s.strip_prefix(r"\\?\").unwrap_or(&s);
-    s.replace('\\', "/")
-}
-
-/// Read the `[package] name` from a crate's `Cargo.toml`.
-fn cargo_package_name(package_root: &Path) -> Option<String> {
-    let text = std::fs::read_to_string(package_root.join("Cargo.toml")).ok()?;
-    let mut in_package = false;
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if trimmed == "[package]" {
-            in_package = true;
-            continue;
-        }
-        if trimmed.starts_with('[') {
-            in_package = false;
-        }
-        if in_package && let Some(rest) = trimmed.strip_prefix("name") {
-            let rest = rest.trim_start_matches([' ', '\t', '=']).trim();
-            let name = rest.trim_matches('"').trim_matches('\'');
-            if !name.is_empty() {
-                return Some(name.to_string());
-            }
-        }
-    }
-    None
-}
+// The discovery build, registry parse, type normalization, and invisible-setup
+// folding live in `specgate_harness::discovery` (shared with the harness's
+// `discover` operation); they are imported at the top of this module.
 
 // ---------------------------------------------------------------------------
 // Case capture — run the crate's existing tests under record mode and
@@ -599,155 +506,6 @@ fn value_as_string(v: &Value) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Registry model (parsed from discovery JSON)
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone)]
-struct OpInfo {
-    name: String,
-    is_setup: bool,
-    is_async: bool,
-    return_type: String,
-    fills: String,
-    params: Vec<(String, String)>,
-    component: String,
-}
-
-#[derive(Debug, Clone)]
-struct VariantInfo {
-    name: String,
-    fields: Vec<(String, String)>,
-}
-
-#[derive(Debug, Clone)]
-struct TypeInfo {
-    name: String,
-    kind: String,
-    fields: Vec<(String, String)>,
-    variants: Vec<VariantInfo>,
-    component: String,
-}
-
-#[derive(Debug, Clone)]
-struct Registry {
-    ops: Vec<OpInfo>,
-    types: Vec<TypeInfo>,
-}
-
-impl Registry {
-    fn parse(json: &str) -> Result<Self, String> {
-        let v: serde_json::Value = serde_json::from_str(json).map_err(|e| format!("failed to parse discovery JSON: {e}"))?;
-        let ops = v
-            .get("operations")
-            .and_then(serde_json::Value::as_array)
-            .ok_or("discovery JSON missing 'operations' array")?
-            .iter()
-            .map(parse_op)
-            .collect();
-        let mut types: Vec<TypeInfo> = v
-            .get("types")
-            .and_then(serde_json::Value::as_array)
-            .ok_or("discovery JSON missing 'types' array")?
-            .iter()
-            .map(parse_type)
-            .collect();
-        types.sort_by(|a, b| a.name.cmp(&b.name));
-        Ok(Registry { ops, types })
-    }
-
-    /// Non-setup operations owned by `comp`, sorted by name.
-    fn operations_for(&self, comp: &str) -> Vec<&OpInfo> {
-        let mut ops: Vec<&OpInfo> = self.ops.iter().filter(|o| !o.is_setup && o.component == comp).collect();
-        ops.sort_by(|a, b| a.name.cmp(&b.name));
-        ops
-    }
-
-    /// Registered types owned by `comp`, sorted by name.
-    fn local_types(&self, comp: &str) -> Vec<&TypeInfo> {
-        let mut ts: Vec<&TypeInfo> = self.types.iter().filter(|t| t.component == comp).collect();
-        ts.sort_by(|a, b| a.name.cmp(&b.name));
-        ts
-    }
-
-    /// Distinct, sorted components present among non-setup operations and types.
-    fn present_components(&self) -> Vec<String> {
-        let mut set: BTreeSet<String> = BTreeSet::new();
-        for o in &self.ops {
-            if !o.is_setup && !o.component.is_empty() {
-                set.insert(o.component.clone());
-            }
-        }
-        for t in &self.types {
-            if !t.component.is_empty() {
-                set.insert(t.component.clone());
-            }
-        }
-        set.into_iter().collect()
-    }
-
-    /// Setups registered for the operation named `op`, in registry order.
-    fn setups_for<'a>(&'a self, op: &str) -> Vec<&'a OpInfo> {
-        self.ops.iter().filter(|o| o.is_setup && o.name == op).collect()
-    }
-
-    /// The names of registered `SpecEvent` types.
-    fn type_names(&self) -> Vec<&str> {
-        self.types.iter().map(|t| t.name.as_str()).collect()
-    }
-}
-
-fn parse_op(v: &serde_json::Value) -> OpInfo {
-    OpInfo {
-        name: str_field(v, "name"),
-        is_setup: v.get("is_setup").and_then(serde_json::Value::as_bool).unwrap_or(false),
-        is_async: v.get("is_async").and_then(serde_json::Value::as_bool).unwrap_or(false),
-        return_type: str_field(v, "return_type"),
-        fills: str_field(v, "fills"),
-        params: parse_pairs(v.get("params")),
-        component: str_field(v, "component"),
-    }
-}
-
-fn parse_type(v: &serde_json::Value) -> TypeInfo {
-    let variants = v
-        .get("variants")
-        .and_then(serde_json::Value::as_array)
-        .map(|arr| {
-            arr.iter()
-                .map(|vv| VariantInfo {
-                    name: str_field(vv, "name"),
-                    fields: parse_pairs(vv.get("fields")),
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    TypeInfo {
-        name: str_field(v, "name"),
-        kind: str_field(v, "kind"),
-        fields: parse_pairs(v.get("fields")),
-        variants,
-        component: str_field(v, "component"),
-    }
-}
-
-fn parse_pairs(v: Option<&serde_json::Value>) -> Vec<(String, String)> {
-    v.and_then(serde_json::Value::as_array)
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|p| {
-                    let pair = p.as_array()?;
-                    Some((pair.first()?.as_str()?.to_string(), pair.get(1)?.as_str()?.to_string()))
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn str_field(v: &serde_json::Value, key: &str) -> String {
-    v.get(key).and_then(serde_json::Value::as_str).unwrap_or_default().to_string()
-}
-
-// ---------------------------------------------------------------------------
 // Spec-name derivation
 // ---------------------------------------------------------------------------
 
@@ -784,146 +542,10 @@ fn relative_path(from_dir: &Path, to: &Path) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Type-ref mapping
+// Type-ref mapping — the SpecType/RustType model, `map_type`, `is_builtin_type`,
+// `collect_named_refs`, and the Rust-type parser now live in
+// `specgate_harness::discovery` (imported at the top of this module).
 // ---------------------------------------------------------------------------
-
-/// A mapped spec type reference: either a scalar shorthand string or an inline
-/// `map`/`set` object.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum SpecType {
-    Scalar(String),
-    Map { keys: Box<SpecType>, values: Box<SpecType> },
-    Set { items: Box<SpecType> },
-}
-
-impl SpecType {
-    /// Render as a single-line reference string (used inside shorthand wrappers
-    /// such as `Option<…>` / `List<…>` / `Result<…>`).
-    fn ref_string(&self) -> String {
-        match self {
-            SpecType::Scalar(s) => s.clone(),
-            SpecType::Map { keys, values } => format!("map<{}, {}>", keys.ref_string(), values.ref_string()),
-            SpecType::Set { items } => format!("set<{}>", items.ref_string()),
-        }
-    }
-}
-
-/// Parsed Rust type AST (only the shapes schema extraction needs).
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum RustType {
-    Named { name: String, args: Vec<RustType> },
-    Ref(Box<RustType>),
-    Slice(Box<RustType>),
-}
-
-/// Map a stringified Rust type (as produced by `quote!(#ty).to_string()`, which
-/// inserts spaces around tokens) to its spec type reference, recursing into
-/// generic arguments. `type_names` are the registered `SpecEvent` types (passed
-/// through by bare name).
-fn map_type(ty: &str, type_names: &[&str]) -> SpecType {
-    let parsed = parse_rust_type(ty).unwrap_or_else(|| RustType::Named {
-        name: ty.trim().to_string(),
-        args: Vec::new(),
-    });
-    map_rust_type(&parsed, type_names)
-}
-
-fn map_rust_type(t: &RustType, type_names: &[&str]) -> SpecType {
-    match t {
-        RustType::Ref(inner) => map_rust_type(inner, type_names),
-        RustType::Slice(inner) => SpecType::Scalar(format!("List<{}>", map_rust_type(inner, type_names).ref_string())),
-        RustType::Named { name, args } => map_named(name, args, type_names),
-    }
-}
-
-fn map_named(name: &str, args: &[RustType], type_names: &[&str]) -> SpecType {
-    let m = |t: &RustType| map_rust_type(t, type_names);
-    match (name, args.len()) {
-        ("String" | "str", _) => SpecType::Scalar("string".to_string()),
-        // The runtime `Value` is the spec's built-in universal structured value.
-        (_, 0) if is_runtime_value(name) => SpecType::Scalar("value".to_string()),
-        ("Option", 1) => SpecType::Scalar(format!("Option<{}>", m(&args[0]).ref_string())),
-        ("Vec", 1) => SpecType::Scalar(format!("List<{}>", m(&args[0]).ref_string())),
-        ("Result", 2) => SpecType::Scalar(format!("Result<{}, {}>", m(&args[0]).ref_string(), m(&args[1]).ref_string())),
-        ("HashMap" | "BTreeMap", 2) => SpecType::Map {
-            keys: Box::new(m(&args[0])),
-            values: Box::new(m(&args[1])),
-        },
-        ("HashSet" | "BTreeSet", 1) => SpecType::Set {
-            items: Box::new(m(&args[0])),
-        },
-        // Named SpecEvent type or any other bare name → pass through by name.
-        _ => SpecType::Scalar(name.to_string()),
-    }
-}
-
-/// True for primitive scalars and the collection/option/result constructors
-/// extraction maps directly — i.e. type names that are NOT named `SpecEvent` refs.
-fn is_builtin_type(name: &str) -> bool {
-    is_runtime_value(name)
-        || matches!(
-            name,
-            "String"
-                | "str"
-                | "char"
-                | "bool"
-                | "i8"
-                | "i16"
-                | "i32"
-                | "i64"
-                | "i128"
-                | "isize"
-                | "u8"
-                | "u16"
-                | "u32"
-                | "u64"
-                | "u128"
-                | "usize"
-                | "f32"
-                | "f64"
-                | "Option"
-                | "Vec"
-                | "Result"
-                | "HashMap"
-                | "BTreeMap"
-                | "HashSet"
-                | "BTreeSet"
-        )
-}
-
-/// True for the runtime `specgate_runtime::Value` type in any of its stringified
-/// forms. Type-path parsing keeps only the last path segment, so any of
-/// `Value`, `specgate_runtime::Value`, `::specgate_runtime::Value`, or
-/// `specgate::Value` arrive here as the bare name `Value`. It maps to the
-/// built-in `value` spec type.
-fn is_runtime_value(name: &str) -> bool {
-    matches!(
-        name,
-        "Value" | "specgate_runtime::Value" | "::specgate_runtime::Value" | "specgate::Value"
-    )
-}
-
-/// Collect every non-builtin named type referenced inside a stringified Rust
-/// type (recursing into generic args), in source order.
-fn collect_named_refs(ty: &str, out: &mut Vec<String>) {
-    if let Some(parsed) = parse_rust_type(ty) {
-        collect_from_rust_type(&parsed, out);
-    }
-}
-
-fn collect_from_rust_type(t: &RustType, out: &mut Vec<String>) {
-    match t {
-        RustType::Ref(inner) | RustType::Slice(inner) => collect_from_rust_type(inner, out),
-        RustType::Named { name, args } => {
-            if !is_builtin_type(name) {
-                out.push(name.clone());
-            }
-            for a in args {
-                collect_from_rust_type(a, out);
-            }
-        }
-    }
-}
 
 /// Every (named-type, location) reference on the selected component's spec
 /// surface: operation inputs/outputs and the component's own type fields/variants.
@@ -990,180 +612,10 @@ fn resolve_dependencies(registry: &Registry, comp: &str) -> Result<Vec<String>, 
     Ok(deps.into_iter().collect())
 }
 
-/// Parse a (possibly space-separated) Rust type string into a [`RustType`].
-fn parse_rust_type(s: &str) -> Option<RustType> {
-    let tokens = tokenize_type(s);
-    let mut pos = 0;
-    let t = parse_type_tokens(&tokens, &mut pos)?;
-    Some(t)
-}
-
-fn tokenize_type(s: &str) -> Vec<String> {
-    let mut tokens = Vec::new();
-    let mut cur = String::new();
-    for c in s.chars() {
-        match c {
-            '<' | '>' | ',' | '&' | '[' | ']' | '(' | ')' => {
-                if !cur.trim().is_empty() {
-                    tokens.push(cur.trim().to_string());
-                }
-                cur.clear();
-                tokens.push(c.to_string());
-            }
-            c if c.is_whitespace() => {
-                if !cur.trim().is_empty() {
-                    tokens.push(cur.trim().to_string());
-                }
-                cur.clear();
-            }
-            c => cur.push(c),
-        }
-    }
-    if !cur.trim().is_empty() {
-        tokens.push(cur.trim().to_string());
-    }
-    tokens
-}
-
-fn parse_type_tokens(tokens: &[String], pos: &mut usize) -> Option<RustType> {
-    let tok = tokens.get(*pos)?.as_str();
-    match tok {
-        "&" => {
-            *pos += 1;
-            // Skip a lifetime token (e.g. `'a`) if present.
-            if tokens.get(*pos).is_some_and(|t| t.starts_with('\'')) {
-                *pos += 1;
-            }
-            if tokens.get(*pos).map(String::as_str) == Some("mut") {
-                *pos += 1;
-            }
-            let inner = parse_type_tokens(tokens, pos)?;
-            Some(RustType::Ref(Box::new(inner)))
-        }
-        "[" => {
-            *pos += 1;
-            let inner = parse_type_tokens(tokens, pos)?;
-            // Expect closing ']'.
-            if tokens.get(*pos).map(String::as_str) == Some("]") {
-                *pos += 1;
-            }
-            Some(RustType::Slice(Box::new(inner)))
-        }
-        _ => {
-            // Skip a leading path separator (`::Foo` / `::specgate_runtime::Value`).
-            if tok == "::" {
-                *pos += 1;
-            }
-            // A path like `std :: collections :: BTreeMap` — keep the last segment.
-            let mut name = tokens.get(*pos)?.clone();
-            *pos += 1;
-            while tokens.get(*pos).map(String::as_str) == Some("::") {
-                *pos += 1;
-                if let Some(seg) = tokens.get(*pos) {
-                    name.clone_from(seg);
-                    *pos += 1;
-                }
-            }
-            // Strip `::` if the tokenizer kept colons inside the segment.
-            if let Some(idx) = name.rfind("::") {
-                name = name[idx + 2..].to_string();
-            }
-            let mut args = Vec::new();
-            if tokens.get(*pos).map(String::as_str) == Some("<") {
-                *pos += 1;
-                loop {
-                    if tokens.get(*pos).map(String::as_str) == Some(">") {
-                        *pos += 1;
-                        break;
-                    }
-                    let arg = parse_type_tokens(tokens, pos)?;
-                    args.push(arg);
-                    match tokens.get(*pos).map(String::as_str) {
-                        Some(",") => {
-                            *pos += 1;
-                        }
-                        Some(">") => {
-                            *pos += 1;
-                            break;
-                        }
-                        _ => break,
-                    }
-                }
-            }
-            Some(RustType::Named { name, args })
-        }
-    }
-}
-
-/// Normalize a type string for equality comparison (collapse whitespace).
-fn normalize_type(s: &str) -> String {
-    s.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-// ---------------------------------------------------------------------------
-// Inputs (setup-aware)
-// ---------------------------------------------------------------------------
-
-/// Build an operation's RAW (unmapped) `inputs` list, applying the
-/// invisible-setup model: receiver-filling setups inject their construction
-/// params at the front (in setup order); a signature param whose type a setup
-/// fills is replaced by that setup's own construction params; remaining params
-/// are kept in order. Values are the stringified Rust types (unmapped).
-fn raw_inputs(op: &OpInfo, registry: &Registry) -> Vec<(String, String)> {
-    let setups = registry.setups_for(&op.name);
-
-    // For each signature param, the construction params injected in its place
-    // when a setup fills it (empty vec ⇒ omit the param with nothing injected).
-    let mut param_injection: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
-    let mut filled: Vec<String> = Vec::new();
-    let mut receiver_setups: Vec<&OpInfo> = Vec::new();
-
-    for s in setups {
-        let target = if s.fills.is_empty() {
-            op.params
-                .iter()
-                .find(|(pn, pty)| normalize_type(pty) == normalize_type(&s.return_type) && !filled.contains(pn))
-                .map(|(pn, _)| pn.clone())
-        } else {
-            op.params.iter().find(|(pn, _)| *pn == s.fills).map(|(pn, _)| pn.clone())
-        };
-        match target {
-            Some(pn) => {
-                filled.push(pn.clone());
-                param_injection.insert(pn, s.params.clone());
-            }
-            None => receiver_setups.push(s),
-        }
-    }
-
-    let mut out: Vec<(String, String)> = Vec::new();
-    for s in &receiver_setups {
-        for (pn, pty) in &s.params {
-            out.push((pn.clone(), pty.clone()));
-        }
-    }
-    for (pn, pty) in &op.params {
-        if filled.contains(pn) {
-            if let Some(inj) = param_injection.get(pn) {
-                for (ipn, ipty) in inj {
-                    out.push((ipn.clone(), ipty.clone()));
-                }
-            }
-        } else {
-            out.push((pn.clone(), pty.clone()));
-        }
-    }
-    out
-}
-
-/// Build an operation's spec `inputs` list (mapped to `SpecType`).
-fn build_inputs(op: &OpInfo, registry: &Registry) -> Vec<(String, SpecType)> {
-    let type_names = registry.type_names();
-    raw_inputs(op, registry)
-        .into_iter()
-        .map(|(name, ty)| (name, map_type(&ty, &type_names)))
-        .collect()
-}
+// The Rust-type parser (`parse_rust_type`, `tokenize_type`, `parse_type_tokens`,
+// `normalize_type`) and the setup-aware input folding (`raw_inputs`,
+// `build_inputs`) now live in `specgate_harness::discovery` (imported at the top
+// of this module).
 
 // ---------------------------------------------------------------------------
 // YAML emission
@@ -1400,11 +852,6 @@ fn render_operation(s: &mut String, op: &OpInfo, registry: &Registry, type_names
     }
 }
 
-fn is_unit(ty: &str) -> bool {
-    let n = normalize_type(ty);
-    n.is_empty() || n == "()"
-}
-
 fn render_binding(rel_pkg: &str) -> String {
     let mut s = String::new();
     s.push_str(BINDING_HEADER);
@@ -1443,6 +890,7 @@ pub fn format_outcome(outcome: &ExtractOutcome) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use specgate_harness::discovery::{VariantInfo, is_builtin_type, is_runtime_value};
 
     fn names() -> Vec<&'static str> {
         vec!["Shape", "Balance", "Money"]

@@ -1,0 +1,25 @@
+spec_version: "0.4.0"
+name: fixture.scalar_types
+binding:
+  - binding.yaml
+  - csharp.yaml
+operations:
+  classify:
+    inputs:
+      id: i64
+      active: bool
+    outputs:
+      - $result: value
+cases:
+  - name: classify_active
+    desc: An active id yields its i64 value as the universal value type
+    operation: classify
+    inputs: { id: 7, active: true }
+    expected:
+      - $result: 7
+  - name: classify_inactive
+    desc: An inactive id yields the boolean false
+    operation: classify
+    inputs: { id: 7, active: false }
+    expected:
+      - $result: false

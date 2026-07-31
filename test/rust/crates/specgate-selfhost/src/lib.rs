@@ -235,3 +235,179 @@ fn run_spec_inner(spec_path: &str) -> SelfHostOutcome {
         specgate_harness::RunOutcome::Error { reason } => SelfHostOutcome::Error { reason },
     }
 }
+
+// --- discover mirror types -------------------------------------------------
+//
+// The harness's `DiscoveredSchema` family does not derive `SpecEvent`, so it is
+// mirrored here with local `SpecEvent` types whose `to_spec_value` yields the
+// structured `$result` the conformance spec's `discover_*` cases assert:
+// `{ Complete: { schema: {...}, targets: [ { target, outcome: { SelfDescribed:
+// { schema } | NotSelfDescribing: { reason } } } ] } }` / `{ Error: { reason } }`.
+
+#[derive(Debug, SpecEvent)]
+pub struct DiscInput {
+    #[spec_event]
+    pub name: String,
+    #[spec_event(name = "type")]
+    pub ty: String,
+}
+
+#[derive(Debug, SpecEvent)]
+pub struct DiscOperation {
+    #[spec_event]
+    pub name: String,
+    #[spec_event(name = "async")]
+    pub is_async: bool,
+    #[spec_event]
+    pub inputs: Vec<DiscInput>,
+    #[spec_event]
+    pub output: String,
+}
+
+#[derive(Debug, SpecEvent)]
+pub struct DiscField {
+    #[spec_event]
+    pub name: String,
+    #[spec_event(name = "type")]
+    pub ty: String,
+}
+
+#[derive(Debug, SpecEvent)]
+pub struct DiscVariant {
+    #[spec_event]
+    pub name: String,
+    #[spec_event]
+    pub fields: Vec<DiscField>,
+}
+
+#[derive(Debug, SpecEvent)]
+pub struct DiscType {
+    #[spec_event]
+    pub name: String,
+    #[spec_event]
+    pub kind: String,
+    #[spec_event]
+    pub fields: Vec<DiscField>,
+    #[spec_event]
+    pub variants: Vec<DiscVariant>,
+}
+
+#[derive(Debug, SpecEvent)]
+pub struct DiscSchema {
+    #[spec_event]
+    pub component: String,
+    #[spec_event]
+    pub operations: Vec<DiscOperation>,
+    #[spec_event]
+    pub types: Vec<DiscType>,
+}
+
+#[derive(Debug, SpecEvent)]
+pub enum DiscTargetOutcome {
+    SelfDescribed { schema: DiscSchema },
+    NotSelfDescribing { reason: String },
+}
+
+#[derive(Debug, SpecEvent)]
+pub struct DiscTargetDiscovery {
+    #[spec_event]
+    pub target: String,
+    #[spec_event]
+    pub outcome: DiscTargetOutcome,
+}
+
+#[derive(Debug, SpecEvent)]
+pub enum DiscOutcome {
+    Complete {
+        schema: DiscSchema,
+        targets: Vec<DiscTargetDiscovery>,
+    },
+    Error {
+        reason: String,
+    },
+}
+
+fn convert_field(f: specgate_harness::DiscoveredField) -> DiscField {
+    DiscField { name: f.name, ty: f.ty }
+}
+
+fn convert_variant(v: specgate_harness::DiscoveredVariant) -> DiscVariant {
+    DiscVariant {
+        name: v.name,
+        fields: v.fields.into_iter().map(convert_field).collect(),
+    }
+}
+
+fn convert_type(t: specgate_harness::DiscoveredType) -> DiscType {
+    DiscType {
+        name: t.name,
+        kind: t.kind,
+        fields: t.fields.into_iter().map(convert_field).collect(),
+        variants: t.variants.into_iter().map(convert_variant).collect(),
+    }
+}
+
+fn convert_schema(s: specgate_harness::DiscoveredSchema) -> DiscSchema {
+    DiscSchema {
+        component: s.component,
+        operations: s
+            .operations
+            .into_iter()
+            .map(|op| DiscOperation {
+                name: op.name,
+                is_async: op.is_async,
+                inputs: op
+                    .inputs
+                    .into_iter()
+                    .map(|i| DiscInput { name: i.name, ty: i.ty })
+                    .collect(),
+                output: op.output,
+            })
+            .collect(),
+        types: s.types.into_iter().map(convert_type).collect(),
+    }
+}
+
+// --- discover wrapper ------------------------------------------------------
+
+#[spec_operation("discover", spec = "specgate.conformance")]
+pub fn discover(#[spec_input("spec")] spec_path: &str) -> DiscOutcome {
+    discover_inner(spec_path)
+}
+
+fn discover_inner(spec_path: &str) -> DiscOutcome {
+    // Same repo-root-relative path resolution as `run_spec_inner`: the runner
+    // executes with the harness scratch dir as its `CARGO_MANIFEST_DIR`, four
+    // levels below the repo root.
+    let resolved = {
+        let p = std::path::Path::new(spec_path);
+        if p.is_absolute() {
+            p.to_path_buf()
+        } else {
+            let mut root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+            root.pop();
+            root.pop();
+            root.pop();
+            root.pop();
+            root.join(p)
+        }
+    };
+    let resolved = resolved.to_string_lossy().into_owned();
+    match specgate_harness::discover(&resolved) {
+        specgate_harness::DiscoverOutcome::Complete { schema, targets } => DiscOutcome::Complete {
+            schema: convert_schema(schema),
+            targets: targets.into_iter().map(convert_target).collect(),
+        },
+        specgate_harness::DiscoverOutcome::Error { reason } => DiscOutcome::Error { reason },
+    }
+}
+
+fn convert_target(t: specgate_harness::TargetDiscovery) -> DiscTargetDiscovery {
+    let outcome = match t.outcome {
+        specgate_harness::TargetOutcome::SelfDescribed { schema } => DiscTargetOutcome::SelfDescribed {
+            schema: convert_schema(schema),
+        },
+        specgate_harness::TargetOutcome::NotSelfDescribing { reason } => DiscTargetOutcome::NotSelfDescribing { reason },
+    };
+    DiscTargetDiscovery { target: t.target, outcome }
+}

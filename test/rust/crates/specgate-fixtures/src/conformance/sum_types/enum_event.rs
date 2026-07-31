@@ -2,6 +2,7 @@
 use specgate::*;
 
 #[derive(SpecEvent)]
+#[spec_component("fixture.enum_event")]
 pub enum Shape {
     Circle { radius: f64 },
     Rectangle { width: f64, height: f64 },
