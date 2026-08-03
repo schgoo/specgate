@@ -20,15 +20,17 @@ use std::process::Command;
 /// and return the raw registry JSON it prints (same shape as the Rust runtime's
 /// `discovery_json()`: `{ "operations": [...], "types": [...] }`).
 ///
+/// Scaffolds into the shared, component/framework-keyed discovery scratch dir.
+/// Callers that may run concurrently against the same component (e.g. the C#
+/// behavioral runner) must instead use [`run_csharp_discovery_in`] with a
+/// caller-private scratch dir to avoid clobbering the same `Runner.dll`.
+///
 /// # Errors
 ///
 /// Returns an error string when the scaffold, `dotnet` build/run, or output
 /// read fails.
 pub(crate) fn run_csharp_discovery(target: &crate::binding::Target, component: &str) -> Result<String, String> {
     let settings = crate::resolve_csharp_runner_settings(target);
-    let pkg_abs = std::fs::canonicalize(&target.package_root).unwrap_or_else(|_| target.package_root.clone());
-    let pkg_fwd = crate::path_to_forward_slash(&pkg_abs);
-
     let sanitized_component: String = component.chars().map(|c| if c.is_alphanumeric() { c } else { '_' }).collect();
     let sanitized_framework: String = settings
         .framework
@@ -39,7 +41,22 @@ pub(crate) fn run_csharp_discovery(target: &crate::binding::Target, component: &
         .join("target")
         .join("specgate-discovery-cs")
         .join(format!("{sanitized_component}_{sanitized_framework}"));
-    std::fs::create_dir_all(&scratch).map_err(|e| format!("failed to scaffold C# discovery dir: {e}"))?;
+    run_csharp_discovery_in(target, component, &scratch)
+}
+
+/// Build and run the C# reflection self-report for `target`/`component`,
+/// scaffolding into `scratch`. Returns the raw registry JSON.
+///
+/// # Errors
+///
+/// Returns an error string when the scaffold, `dotnet` build/run, or output
+/// read fails.
+pub(crate) fn run_csharp_discovery_in(target: &crate::binding::Target, component: &str, scratch: &Path) -> Result<String, String> {
+    let settings = crate::resolve_csharp_runner_settings(target);
+    let pkg_abs = std::fs::canonicalize(&target.package_root).unwrap_or_else(|_| target.package_root.clone());
+    let pkg_fwd = crate::path_to_forward_slash(&pkg_abs);
+
+    std::fs::create_dir_all(scratch).map_err(|e| format!("failed to scaffold C# discovery dir: {e}"))?;
 
     let runtime_sources = runtime_compile_items(&pkg_abs);
     let lang_version = settings
@@ -75,7 +92,7 @@ pub(crate) fn run_csharp_discovery(target: &crate::binding::Target, component: &
         .arg(scratch.join("Runner.csproj"))
         .arg("--")
         .arg(&out_file)
-        .current_dir(&scratch);
+        .current_dir(scratch);
 
     let output = cmd.output().map_err(|e| format!("failed to invoke dotnet for C# discovery: {e}"))?;
     if !output.status.success() {
@@ -236,6 +253,77 @@ string MapWithNull(Type t, NullabilityInfo? info)
     return MapCore(t, info);
 }
 
+// Render the raw C# type spelling (keywords for primitives, generic syntax with
+// nullable annotations) that CODEGEN needs — the same spelling the retired
+// source scanner recorded from the fixture text. This is distinct from MapCore,
+// which normalizes to spec types for structural discovery.
+string MapRawCsCore(Type t, NullabilityInfo? info)
+{
+    if (t == typeof(void)) return "void";
+    if (t == typeof(object)) return "object";
+    if (t == typeof(bool)) return "bool";
+    if (t == typeof(string)) return "string";
+    if (t == typeof(char)) return "char";
+    if (t == typeof(int)) return "int";
+    if (t == typeof(long)) return "long";
+    if (t == typeof(short)) return "short";
+    if (t == typeof(sbyte)) return "sbyte";
+    if (t == typeof(byte)) return "byte";
+    if (t == typeof(uint)) return "uint";
+    if (t == typeof(ulong)) return "ulong";
+    if (t == typeof(ushort)) return "ushort";
+    if (t == typeof(double)) return "double";
+    if (t == typeof(float)) return "float";
+    if (t == typeof(decimal)) return "decimal";
+    if (t.IsArray)
+    {
+        Type elem = t.GetElementType()!;
+        return MapRawCs(elem, info?.ElementType) + "[]";
+    }
+    if (t.IsGenericType)
+    {
+        Type[] args = t.GetGenericArguments();
+        NullabilityInfo[]? gtas = info?.GenericTypeArguments;
+        NullabilityInfo? Ai(int i) => gtas is not null && i < gtas.Length ? gtas[i] : null;
+        string baseName = t.Name;
+        int tick = baseName.IndexOf('`');
+        if (tick >= 0) baseName = baseName.Substring(0, tick);
+        var parts = new List<string>();
+        for (int i = 0; i < args.Length; i++) parts.Add(MapRawCs(args[i], Ai(i)));
+        return baseName + "<" + string.Join(", ", parts) + ">";
+    }
+    return t.Name;
+}
+
+string MapRawCs(Type t, NullabilityInfo? info)
+{
+    Type? underlying = Nullable.GetUnderlyingType(t);
+    if (underlying is not null)
+    {
+        NullabilityInfo? inner = info?.GenericTypeArguments is { Length: > 0 } g ? g[0] : null;
+        return MapRawCsCore(underlying, inner) + "?";
+    }
+    string core = MapRawCsCore(t, info);
+    if (info is not null && !t.IsValueType && info.ReadState == NullabilityState.Nullable)
+    {
+        return core + "?";
+    }
+    return core;
+}
+
+List<string[]> BuildRawParams(MethodInfo m)
+{
+    var list = new List<string[]>();
+    foreach (ParameterInfo p in m.GetParameters())
+    {
+        var inp = p.GetCustomAttribute<SpecInputAttribute>();
+        string pname = inp?.Name ?? p.Name ?? "";
+        string ptype = MapRawCs(p.ParameterType, ctx.Create(p));
+        list.Add(new[] { pname, ptype });
+    }
+    return list;
+}
+
 (bool IsAsync, Type? Inner, NullabilityInfo? InnerInfo) Unwrap(Type ret, NullabilityInfo? retInfo)
 {
     if (ret == typeof(void)) return (false, null, null);
@@ -302,6 +390,8 @@ foreach (Type type in allTypes)
                 string mapped = MapWithNull(inner, innerInfo);
                 output = hasException ? "Result<" + mapped + ", string>" : mapped;
             }
+            var exAttr = method.GetCustomAttribute<SpecExceptionAttribute>();
+            object? csExceptions = exAttr is null ? null : (object)exAttr.ExceptionTypes.Select(et => et.Name).ToArray();
             operations.Add(new
             {
                 name = op.Name,
@@ -311,6 +401,13 @@ foreach (Type type in allTypes)
                 fills = "",
                 @params = BuildParams(method),
                 component = Component,
+                cs_class = (method.DeclaringType?.FullName ?? method.DeclaringType?.Name ?? "").Replace('+', '.'),
+                cs_method_of = method.DeclaringType?.Name ?? "",
+                cs_method = method.Name,
+                cs_is_static = method.IsStatic,
+                cs_return = MapRawCs(method.ReturnType, retInfo),
+                cs_params = BuildRawParams(method),
+                cs_exceptions = csExceptions,
             });
         }
         foreach (SpecSetupAttribute setup in method.GetCustomAttributes<SpecSetupAttribute>())
@@ -320,6 +417,7 @@ foreach (Type type in allTypes)
             var (_, inner, innerInfo) = Unwrap(method.ReturnType, retInfo);
             collectEnabled = false;
             string ret = inner is null ? "" : MapWithNull(inner, innerInfo);
+            string csReturn = MapRawCs(method.ReturnType, retInfo);
             collectEnabled = true;
             operations.Add(new
             {
@@ -330,6 +428,13 @@ foreach (Type type in allTypes)
                 fills = setup.Fills ?? "",
                 @params = BuildParams(method),
                 component = Component,
+                cs_class = (method.DeclaringType?.FullName ?? method.DeclaringType?.Name ?? "").Replace('+', '.'),
+                cs_method_of = method.DeclaringType?.Name ?? "",
+                cs_method = method.Name,
+                cs_is_static = method.IsStatic,
+                cs_return = csReturn,
+                cs_params = BuildRawParams(method),
+                cs_exceptions = (object?)null,
             });
         }
     }

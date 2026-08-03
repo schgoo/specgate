@@ -637,12 +637,11 @@ fn target_label(binding_name: &str, target_name: Option<&str>) -> String {
 // C# targets
 // ---------------------------------------------------------------------------
 
-/// Metadata about a C# operation found by scanning source files.
+/// Metadata about a C# operation resolved from the reflection self-report.
 #[derive(Clone)]
 struct CsOp {
     op_name: String,
     component: Option<String>,
-    source_path: PathBuf,
     /// Fully-qualified class name for generated calls.
     class_name: String,
     /// Bare declaring class name, used for setup/receiver type matching.
@@ -656,12 +655,11 @@ struct CsOp {
     is_static: bool,
 }
 
-/// Metadata about a C# setup found by scanning source files.
+/// Metadata about a C# setup resolved from the reflection self-report.
 #[derive(Clone)]
 struct CsSetup {
     operation: String,
     component: Option<String>,
-    source_path: PathBuf,
     fills: Option<String>,
     class_name: String,
     method_name: String,
@@ -683,161 +681,100 @@ enum CsSetupTarget {
     SideEffect,
 }
 
-/// Scan all `.cs` files under `package_root` recursively for `[SpecOperation("name")]`
-/// annotations and extract the annotated method's class, name, params, and return type.
-fn scan_csharp(package_root: &Path) -> (Vec<CsOp>, Vec<CsSetup>) {
+/// Resolve the C# operations and setups for `component` from the reflection
+/// self-report — the same `[SpecOperation]`/`[SpecSetup]`/`[SpecException]`
+/// metadata the structural discovery path reads. This replaces the retired C#
+/// source-text scanner: the reflection registry now feeds BOTH structural
+/// discovery and behavioral codegen, honoring the harness's
+/// `no_source_interpretation` contract.
+///
+/// The registry is already scoped to `component` by the C# program (operations
+/// for the component; setups whose `Spec` is unset or equal to the component),
+/// so the returned vectors mirror the scanner's post-filter output.
+fn resolve_csharp_ops_via_reflection(
+    target: &binding::Target,
+    component: &str,
+    scratch_dir: &Path,
+) -> Result<(Vec<CsOp>, Vec<CsSetup>), String> {
+    let reflect_dir = scratch_dir.join("reflect");
+    let json = csharp_discovery::run_csharp_discovery_in(target, component, &reflect_dir)?;
+    let value: serde_json::Value = serde_json::from_str(&json).map_err(|e| format!("failed to parse C# reflection registry: {e}"))?;
+    let entries = value
+        .get("operations")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("C# reflection registry missing 'operations' array")?;
+
     let mut ops = Vec::new();
     let mut setups = Vec::new();
-    scan_csharp_dir(package_root, &mut ops, &mut setups);
-    (ops, setups)
-}
+    for entry in entries {
+        let is_setup = entry.get("is_setup").and_then(serde_json::Value::as_bool).unwrap_or(false);
+        let name = json_str(entry, "name");
+        let component = json_opt_str(entry, "component");
+        let class_name = json_str(entry, "cs_class");
+        let method_name = json_str(entry, "cs_method");
+        let return_type = json_str(entry, "cs_return");
+        let params = parse_cs_reflection_params(entry.get("cs_params"));
 
-fn scan_csharp_dir(dir: &Path, ops: &mut Vec<CsOp>, setups: &mut Vec<CsSetup>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
-    for entry in entries.flatten() {
-        let p = entry.path();
-        if p.is_dir() {
-            scan_csharp_dir(&p, ops, setups);
-        } else if p.extension().and_then(|e| e.to_str()) == Some("cs")
-            && let Ok(text) = std::fs::read_to_string(&p)
-        {
-            scan_csharp_file(&text, &p, ops, setups);
-        }
-    }
-}
-
-fn scan_csharp_file(text: &str, source_path: &Path, ops: &mut Vec<CsOp>, setups: &mut Vec<CsSetup>) {
-    let mut current_class: Option<String> = None;
-    let mut current_namespace: Option<String> = None;
-    let mut pending_attrs: Vec<CsPendingAttr> = Vec::new();
-    let mut pending_exception_types: Option<Vec<String>> = None;
-    let mut pending_sig = String::new();
-
-    for line in text.lines() {
-        let trimmed = line.trim();
-
-        if let Some(ns) = extract_cs_namespace(trimmed) {
-            current_namespace = Some(ns);
-        }
-
-        // Detect class declaration: look for keyword "class" followed by the name.
-        if let Some(class_name) = extract_cs_class(trimmed) {
-            current_class = Some(class_name);
-        }
-
-        // Detect [SpecOperation("name")] / [SpecSetup("name", Fills = "...")].
-        if let Some((op_name, component)) = extract_spec_operation_attr(trimmed) {
-            pending_attrs.push(CsPendingAttr::Operation(op_name, component));
-            pending_sig.clear();
-            continue;
-        }
-        if let Some((operation, fills, component)) = extract_spec_setup_attr(trimmed) {
-            pending_attrs.push(CsPendingAttr::Setup {
-                operation,
-                fills,
+        if is_setup {
+            setups.push(CsSetup {
+                operation: name,
                 component,
+                fills: json_opt_str(entry, "fills"),
+                class_name,
+                method_name,
+                params,
+                return_type,
             });
-            pending_sig.clear();
-            continue;
-        }
-        if let Some(exception_types) = extract_spec_exception_attr(trimmed) {
-            pending_exception_types = Some(exception_types);
-            pending_sig.clear();
-            continue;
-        }
-
-        // If we have pending spec attributes, try to parse the next method signature.
-        if !pending_attrs.is_empty() && !trimmed.is_empty() {
-            if !pending_sig.is_empty() {
-                pending_sig.push(' ');
-            }
-            pending_sig.push_str(trimmed);
-        }
-        if !pending_attrs.is_empty()
-            && let Some((method_name, params, return_type, is_static)) = extract_cs_method_sig(&pending_sig)
-        {
-            let bare_class = current_class.clone().unwrap_or_default();
-            let class_name = qualify_cs_class(current_namespace.as_deref(), &bare_class);
-            for attr in pending_attrs.drain(..) {
-                match attr {
-                    CsPendingAttr::Operation(op_name, component) => ops.push(CsOp {
-                        op_name,
-                        component,
-                        source_path: source_path.to_path_buf(),
-                        class_name: class_name.clone(),
-                        method_of: bare_class.clone(),
-                        method_name: method_name.clone(),
-                        params: params.clone(),
-                        return_type: return_type.clone(),
-                        return_nullable: is_nullable_cs_type(&return_type),
-                        exception_types: pending_exception_types.clone(),
-                        is_static,
-                    }),
-                    CsPendingAttr::Setup {
-                        operation,
-                        fills,
-                        component,
-                    } => setups.push(CsSetup {
-                        operation,
-                        component,
-                        source_path: source_path.to_path_buf(),
-                        fills,
-                        class_name: class_name.clone(),
-                        method_name: method_name.clone(),
-                        params: params.clone(),
-                        return_type: return_type.clone(),
-                    }),
-                }
-            }
-            pending_exception_types = None;
-            pending_sig.clear();
-        } else if !pending_attrs.is_empty()
-            && !trimmed.starts_with('[')
-            && !trimmed.is_empty()
-            && (trimmed.ends_with(';') || trimmed.ends_with('{'))
-            && !pending_sig.contains('(')
-        {
-            pending_attrs.clear();
-            pending_exception_types = None;
-            pending_sig.clear();
+        } else {
+            let exception_types = match entry.get("cs_exceptions") {
+                Some(serde_json::Value::Array(arr)) => Some(arr.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()),
+                _ => None,
+            };
+            ops.push(CsOp {
+                op_name: name,
+                component,
+                class_name,
+                method_of: json_str(entry, "cs_method_of"),
+                method_name,
+                params,
+                return_nullable: is_nullable_cs_type(&return_type),
+                return_type,
+                exception_types,
+                is_static: entry.get("cs_is_static").and_then(serde_json::Value::as_bool).unwrap_or(false),
+            });
         }
     }
+    Ok((ops, setups))
 }
 
-enum CsPendingAttr {
-    Operation(String, Option<String>),
-    Setup {
-        operation: String,
-        fills: Option<String>,
-        component: Option<String>,
-    },
+fn json_str(v: &serde_json::Value, key: &str) -> String {
+    v.get(key).and_then(serde_json::Value::as_str).unwrap_or_default().to_string()
 }
 
-fn extract_cs_namespace(line: &str) -> Option<String> {
-    let rest = line.strip_prefix("namespace ")?;
-    let end = rest.find([';', '{']).unwrap_or(rest.len());
-    let name = rest[..end].trim();
-    if name.is_empty() { None } else { Some(name.to_string()) }
+/// Read a string field, mapping absent/empty/null to `None` (mirroring the
+/// scanner's `Option<String>` semantics for `component`/`fills`).
+fn json_opt_str(v: &serde_json::Value, key: &str) -> Option<String> {
+    v.get(key)
+        .and_then(serde_json::Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
 }
 
-fn qualify_cs_class(namespace: Option<&str>, class_name: &str) -> String {
-    match namespace {
-        Some(ns) if !ns.is_empty() => format!("{ns}.{class_name}"),
-        _ => class_name.to_string(),
-    }
-}
-
-fn extract_spec_setup_attr(line: &str) -> Option<(String, Option<String>, Option<String>)> {
-    let s = line.trim();
-    let rest = s.strip_prefix("[SpecSetup(\"")?;
-    let operation = rest.split('"').next()?.to_string();
-    let fills = rest
-        .split("Fills")
-        .nth(1)
-        .and_then(|r| r.split('"').nth(1))
-        .map(ToString::to_string);
-    let component = rest.split("Spec").nth(1).and_then(|r| r.split('"').nth(1)).map(ToString::to_string);
-    Some((operation, fills, component))
+/// Parse the reflection registry's `cs_params` array (`[[name, cs_type], ...]`)
+/// into `(spec_param_name, raw_cs_type)` pairs.
+fn parse_cs_reflection_params(v: Option<&serde_json::Value>) -> Vec<(String, String)> {
+    v.and_then(serde_json::Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|p| {
+                    let pair = p.as_array()?;
+                    let name = pair.first()?.as_str()?.to_string();
+                    let ty = pair.get(1)?.as_str()?.to_string();
+                    Some((name, ty))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 #[allow(clippy::type_complexity)]
@@ -1028,41 +965,6 @@ fn extract_spec_operation_attr(line: &str) -> Option<(String, Option<String>)> {
     let name = rest.split('"').next()?.to_string();
     let component = rest.split("Spec").nth(1).and_then(|r| r.split('"').nth(1)).map(ToString::to_string);
     Some((name, component))
-}
-
-fn extract_spec_exception_attr(line: &str) -> Option<Vec<String>> {
-    let s = line.trim();
-    if !(s.starts_with("[SpecException") || s.starts_with("[SpecGate.Annotations.SpecException")) {
-        return None;
-    }
-    let Some(open) = s.find('(') else {
-        return Some(Vec::new());
-    };
-    let close = find_matching_paren(s, open).unwrap_or_else(|| s.rfind(')').unwrap_or(open));
-    let args = s[open + 1..close].trim();
-    if args.is_empty() {
-        return Some(Vec::new());
-    }
-
-    let mut types = Vec::new();
-    for arg in split_cs_params(args) {
-        let arg = arg.trim();
-        let ty = arg
-            .strip_prefix("typeof")
-            .and_then(|rest| {
-                let rest = rest.trim_start();
-                let open = rest.find('(')?;
-                let close = find_matching_paren(rest, open)?;
-                Some(rest[open + 1..close].trim())
-            })
-            .unwrap_or(arg)
-            .trim_start_matches("global::");
-        let simple = ty.rsplit('.').next().unwrap_or(ty).trim();
-        if !simple.is_empty() && !types.iter().any(|existing| existing == simple) {
-            types.push(simple.to_string());
-        }
-    }
-    Some(types)
 }
 
 fn is_nullable_cs_type(cs_type: &str) -> bool {
@@ -2508,16 +2410,17 @@ fn collect_csharp_event_names(text: &str, names: &mut BTreeSet<String>) {
     }
 }
 
-/// Run one C# target group: scan annotated operations, generate and execute a
-/// temporary C# runner, parse its trace output, and return per-case results.
+/// Run one C# target group: resolve annotated operations from the reflection
+/// self-report, generate and execute a temporary C# runner, parse its trace
+/// output, and return per-case results.
 fn run_csharp_group(
     target: &binding::Target,
     group_cases: &[&spec::Case],
     spec: &spec::Spec,
     scratch_dir: &Path,
 ) -> Result<Vec<CaseResult>, String> {
-    let (all_cs_ops, all_cs_setups) = scan_csharp(&target.package_root);
     let component = &spec.name;
+    let (all_cs_ops, all_cs_setups) = resolve_csharp_ops_via_reflection(target, component, scratch_dir)?;
 
     // Verify all required operations have C# annotations in the correct component.
     let mut required_ops: Vec<&str> = Vec::new();
@@ -2554,19 +2457,20 @@ fn run_csharp_group(
         }
     }
 
+    // The reflection self-report no longer carries per-op source paths, so
+    // compile the whole fixture package (as structural discovery already does):
+    // copy+instrument every fixture `.cs` file into the scratch runner. Files
+    // under Tests/bin/obj are skipped by `copy_selected_csharp_sources`.
     let mut source_files = BTreeSet::new();
-    for op in &required_ops {
-        if let Some(cs_op) = cs_ops.iter().find(|co| co.op_name == *op) {
-            source_files.insert(cs_op.source_path.clone());
-        }
+    {
+        let mut all_files = Vec::new();
+        collect_csharp_files(&target.package_root, &mut all_files);
+        source_files.extend(all_files);
     }
     for case in group_cases {
         let ops = csharp_case_ops(case);
-        let bindings = resolve_csharp_case(&cs_ops, &cs_setups, &ops)
+        resolve_csharp_case(&cs_ops, &cs_setups, &ops)
             .map_err(|detail| format!("C# case '{}' setup wiring failed: {detail}", case.name))?;
-        for binding in bindings {
-            source_files.insert(binding.setup.source_path);
-        }
     }
 
     std::fs::create_dir_all(scratch_dir).map_err(|e| format!("failed to create C# scratch dir: {e}"))?;
@@ -3227,7 +3131,7 @@ fn ops_metadata(raw: &serde_yaml::Value) -> BTreeMap<String, OpMeta> {
 mod tests {
     use super::{
         CsOp, DiscoveryOp, DiscoveryRegistry, extract_cs_method_sig, generate_csharp_program, metadata_fixture_sources, ops_metadata,
-        parse_csharp_auto_property, scan_csharp_file, split_cs_params, yaml_to_csharp_literal,
+        parse_csharp_auto_property, split_cs_params, yaml_to_csharp_literal,
     };
     use crate::binding;
     use std::collections::BTreeMap;
@@ -3344,44 +3248,6 @@ mod tests {
     }
 
     #[test]
-    fn csharp_scanner_records_spec_exception_and_nullable_returns() {
-        let src = r#"
-            namespace Demo;
-            public static class Ops {
-                [SpecOperation("find")]
-                public static Point? Find() => null;
-
-                [SpecOperation("checked_divide")]
-                [SpecException(typeof(DivideByZeroException))]
-                public static int CheckedDivide(int a, int b) => a / b;
-
-                [SpecOperation("parse")]
-                [SpecException]
-                public static int Parse(string input) => int.Parse(input);
-            }
-            public class Point {}
-        "#;
-        let mut ops = Vec::new();
-        let mut setups = Vec::new();
-        scan_csharp_file(src, Path::new("fixture.cs"), &mut ops, &mut setups);
-
-        let find = ops.iter().find(|op| op.op_name == "find").expect("find op");
-        assert!(find.return_nullable);
-        assert!(find.exception_types.is_none());
-        assert!(find.is_static);
-
-        let checked = ops.iter().find(|op| op.op_name == "checked_divide").expect("checked op");
-        assert_eq!(
-            checked.exception_types.as_ref().expect("exception types"),
-            &vec!["DivideByZeroException".to_string()]
-        );
-        assert!(checked.is_static, "SpecException must not disrupt static detection");
-
-        let catch_all = ops.iter().find(|op| op.op_name == "parse").expect("parse op");
-        assert_eq!(catch_all.exception_types.as_ref().expect("catch-all types"), &Vec::<String>::new());
-    }
-
-    #[test]
     fn csharp_program_wraps_nullable_and_exception_results() {
         let option_case = case_with_op("find");
         let result_case = case_with_op("checked_divide");
@@ -3390,7 +3256,6 @@ mod tests {
             CsOp {
                 op_name: "find".to_string(),
                 component: None,
-                source_path: PathBuf::new(),
                 class_name: "Ops".to_string(),
                 method_of: "Ops".to_string(),
                 method_name: "Find".to_string(),
@@ -3403,7 +3268,6 @@ mod tests {
             CsOp {
                 op_name: "checked_divide".to_string(),
                 component: None,
-                source_path: PathBuf::new(),
                 class_name: "Ops".to_string(),
                 method_of: "Ops".to_string(),
                 method_name: "CheckedDivide".to_string(),
@@ -3416,7 +3280,6 @@ mod tests {
             CsOp {
                 op_name: "parse".to_string(),
                 component: None,
-                source_path: PathBuf::new(),
                 class_name: "Ops".to_string(),
                 method_of: "Ops".to_string(),
                 method_name: "Parse".to_string(),
@@ -3456,7 +3319,6 @@ mod tests {
         let op = CsOp {
             op_name: "scale".to_string(),
             component: Some("fixture.default_input".to_string()),
-            source_path: PathBuf::new(),
             class_name: "ScaleOps".to_string(),
             method_of: "ScaleOps".to_string(),
             method_name: "Scale".to_string(),
@@ -3493,7 +3355,6 @@ mod tests {
         let op = CsOp {
             op_name: "divide".to_string(),
             component: Some("fixture.divide".to_string()),
-            source_path: PathBuf::new(),
             class_name: "DivideOps".to_string(),
             method_of: "DivideOps".to_string(),
             method_name: "Divide".to_string(),
@@ -3622,7 +3483,6 @@ mod tests {
         let op = CsOp {
             op_name: "fetch".to_string(),
             component: Some("fixture.async".to_string()),
-            source_path: PathBuf::new(),
             class_name: "AsyncOps".to_string(),
             method_of: "AsyncOps".to_string(),
             method_name: "Fetch".to_string(),
@@ -3656,7 +3516,6 @@ mod tests {
         let op = CsOp {
             op_name: "send".to_string(),
             component: Some("fixture.async".to_string()),
-            source_path: PathBuf::new(),
             class_name: "AsyncOps".to_string(),
             method_of: "AsyncOps".to_string(),
             method_name: "Send".to_string(),
