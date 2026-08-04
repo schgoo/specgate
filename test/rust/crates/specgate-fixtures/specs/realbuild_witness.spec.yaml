@@ -1,0 +1,22 @@
+spec_version: "0.4.0"
+name: fixture.realbuild_witness
+binding:
+  - csharp.yaml
+operations:
+  witness:
+    inputs:
+      seed: i32
+    outputs:
+      - $result: i32
+cases:
+  - name: witness_increments_seed
+    desc: >
+      The witness operation is emitted by a build-time C# source generator, so
+      it exists only in the real compiled assembly — never in globbed source.
+      Running it proves the harness builds and runs the fixture's real assembly
+      rather than a source-reconstructed surrogate.
+    operation: witness
+    inputs:
+      seed: 41
+    expected:
+      - $result: 42

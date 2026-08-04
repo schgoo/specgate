@@ -15,6 +15,15 @@
     <ProjectReference Include="..\..\..\csharp\SpecGate.Runtime\SpecGate.Runtime.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <!-- Build-time source generator emitting the real-build witness operation
+         (fixture.realbuild_witness). Its output lives in obj/generated, so the
+         op is present only in the real compiled assembly, never in globbed
+         source — a conformance witness for the harness building the real
+         fixture assembly rather than a source-globbed surrogate. -->
+    <ProjectReference Include="..\SpecGate.WitnessGenerator\SpecGate.WitnessGenerator.csproj"
+                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+  <ItemGroup>
     <!-- External NuGet dependency used by the cross_dep fixture (ParseYamlKey),
          the C# twin of the Rust cross_dep fixture's serde_yaml. Exercises that
          the harness builds the fixture's real assembly (resolving package

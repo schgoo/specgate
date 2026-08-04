@@ -461,6 +461,35 @@ cases:
               - target: "csharp::default"
                 outcome: { SelfDescribed: { schema: *schema_enum_event } }
 
+  # --- Real-build witness: a source-generated operation ---
+  # `witness` is emitted by a build-time C# source generator, so it exists only
+  # in the real compiled assembly (its source lives in obj/generated) — never in
+  # globbed source. discover finds it only by reflecting over the fixture's real
+  # built assembly, not a source-reconstructed surrogate. C#-only fixture (Rust
+  # always builds its real crate, so this fidelity gap is C#-specific).
+
+  - name: discover_generated_witness
+    desc: >
+      An operation emitted by a build-time source generator is discovered only
+      when reflecting over the real built assembly.
+    operation: discover
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/realbuild_witness.spec.yaml
+    expected:
+      - $result:
+          Complete:
+            schema: &schema_realbuild_witness
+              component: fixture.realbuild_witness
+              operations:
+                - name: witness
+                  inputs:
+                    - { name: seed, type: i32 }
+                  output: i32
+              types: []
+            targets:
+              - target: "csharp::default"
+                outcome: { SelfDescribed: { schema: *schema_realbuild_witness } }
+
   # ================================================================
   # External dependency — operation using a third-party crate
   # ================================================================

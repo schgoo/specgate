@@ -53,6 +53,15 @@ fn csharp_scalar_types_matches_canonical() {
 
 #[test]
 #[ignore = "builds C# via dotnet; slow"]
+fn csharp_generated_witness_matches_canonical() {
+    // `witness` is emitted by a build-time C# source generator, so it exists
+    // only in the compiled assembly — discovery must build+reflect the real
+    // fixture assembly (not a source-globbed surrogate) to see it.
+    assert_csharp_matches_canonical("test/rust/crates/specgate-fixtures/specs/realbuild_witness.spec.yaml");
+}
+
+#[test]
+#[ignore = "builds C# via dotnet; slow"]
 fn csharp_all_discover_specs_match_canonical() {
     for rel in [
         "test/rust/crates/specgate-fixtures/specs/stateless_add.spec.yaml",
