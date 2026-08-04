@@ -14,4 +14,11 @@
     <ProjectReference Include="..\..\..\csharp\SpecGate.Annotations\SpecGate.Annotations.csproj" />
     <ProjectReference Include="..\..\..\csharp\SpecGate.Runtime\SpecGate.Runtime.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- External NuGet dependency used by the cross_dep fixture (ParseYamlKey),
+         the C# twin of the Rust cross_dep fixture's serde_yaml. Exercises that
+         the harness builds the fixture's real assembly (resolving package
+         references) rather than reconstructing a surrogate from globbed source. -->
+    <PackageReference Include="YamlDotNet" Version="16.3.0" />
+  </ItemGroup>
 </Project>

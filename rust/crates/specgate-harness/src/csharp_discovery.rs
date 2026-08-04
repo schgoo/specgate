@@ -59,6 +59,7 @@ pub(crate) fn run_csharp_discovery_in(target: &crate::binding::Target, component
     std::fs::create_dir_all(scratch).map_err(|e| format!("failed to scaffold C# discovery dir: {e}"))?;
 
     let runtime_sources = runtime_compile_items(&pkg_abs);
+    let references = crate::read_csproj_references(&pkg_abs);
     let lang_version = settings
         .lang_version
         .as_ref()
@@ -72,7 +73,7 @@ pub(crate) fn run_csharp_discovery_in(target: &crate::binding::Target, component
          <Nullable>{nullable}</Nullable>\n    <ImplicitUsings>{implicit_usings}</ImplicitUsings>\n{lang_version}  </PropertyGroup>\n  <ItemGroup>\n    \
          <Compile Include=\"Program.cs\" />\n    \
          <Compile Include=\"{pkg}/**/*.cs\" Exclude=\"{pkg}/Tests/**/*.cs;{pkg}/bin/**/*.cs;{pkg}/obj/**/*.cs\" LinkBase=\"Fixture\" />\n  \
-         </ItemGroup>\n{runtime_sources}</Project>\n",
+         </ItemGroup>\n{runtime_sources}{references}</Project>\n",
         framework = crate::escape_xml_text(&settings.framework),
         nullable = crate::escape_xml_text(&settings.nullable),
         implicit_usings = crate::escape_xml_text(&settings.implicit_usings),

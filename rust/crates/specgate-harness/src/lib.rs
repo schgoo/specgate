@@ -1842,6 +1842,107 @@ pub(crate) fn read_csproj_settings(package_root: &Path) -> CsProjectSettings {
     CsProjectSettings::default()
 }
 
+/// Extract the value of a single XML attribute `name="value"` from an element's
+/// attribute text (the run of characters between the tag name and `>`).
+fn extract_csproj_xml_attr(attrs: &str, name: &str) -> Option<String> {
+    let key = format!("{name}=\"");
+    let start = attrs.find(&key)? + key.len();
+    let end = attrs[start..].find('"')?;
+    Some(attrs[start..start + end].to_string())
+}
+
+/// Extract `(Include, Version)` pairs for every `<tag ... />` item in a
+/// `.csproj`-style XML string (e.g. `PackageReference`, `ProjectReference`).
+/// `Version` is `None` when the attribute is absent. Items without an `Include`
+/// attribute are skipped.
+pub(crate) fn extract_csproj_item_refs(text: &str, tag: &str) -> Vec<(String, Option<String>)> {
+    let mut result = Vec::new();
+    let needle = format!("<{tag}");
+    let mut rest = text;
+    while let Some(pos) = rest.find(&needle) {
+        let after = &rest[pos + needle.len()..];
+        // Require a delimiter after the tag name so `<PackageReference` does not
+        // also match a hypothetical `<PackageReferenceExtra>`.
+        let is_boundary = matches!(after.chars().next(), Some(c) if c.is_whitespace() || c == '>' || c == '/');
+        let Some(end) = after.find('>') else { break };
+        if is_boundary {
+            let attrs = &after[..end];
+            if let Some(include) = extract_csproj_xml_attr(attrs, "Include") {
+                result.push((include, extract_csproj_xml_attr(attrs, "Version")));
+            }
+        }
+        rest = &after[end..];
+    }
+    result
+}
+
+/// Read the fixture's `.csproj` and render an `<ItemGroup>` carrying its real
+/// `<PackageReference>` and `<ProjectReference>` items, so the generated
+/// `Runner.csproj` compiles instrumented fixture source against the same
+/// dependencies the real project uses (the C# twin of the Rust generated runner
+/// inheriting the fixture crate's transitive deps).
+///
+/// `<ProjectReference>` `Include` paths are relative to the fixture `.csproj`,
+/// so they are re-resolved to absolute paths that still resolve from the
+/// generated `Runner.csproj` location. The `SpecGate.Annotations` /
+/// `SpecGate.Runtime` project references are EXCLUDED because the runner already
+/// compiles those runtime sources directly (`runtime_sources` /
+/// `runtime_compile_items`); re-adding them as project references would produce
+/// duplicate-type conflicts.
+///
+/// Returns an empty string when there is no `.csproj` or no references to
+/// propagate.
+pub(crate) fn read_csproj_references(package_root: &Path) -> String {
+    let Ok(entries) = std::fs::read_dir(package_root) else {
+        return String::new();
+    };
+    let mut csproj_path = None;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) == Some("csproj") {
+            csproj_path = Some(path);
+            break;
+        }
+    }
+    let Some(csproj_path) = csproj_path else {
+        return String::new();
+    };
+    let Ok(text) = std::fs::read_to_string(&csproj_path) else {
+        return String::new();
+    };
+    let csproj_dir = csproj_path.parent().unwrap_or(package_root);
+
+    let mut items: Vec<String> = Vec::new();
+
+    for (include, version) in extract_csproj_item_refs(&text, "PackageReference") {
+        match version {
+            Some(v) => items.push(format!(
+                "    <PackageReference Include=\"{}\" Version=\"{}\" />",
+                escape_xml_text(&include),
+                escape_xml_text(&v)
+            )),
+            None => items.push(format!("    <PackageReference Include=\"{}\" />", escape_xml_text(&include))),
+        }
+    }
+
+    for (include, _) in extract_csproj_item_refs(&text, "ProjectReference") {
+        let normalized = include.replace('\\', "/");
+        let file_stem = Path::new(&normalized).file_stem().and_then(|s| s.to_str()).unwrap_or("");
+        if file_stem == "SpecGate.Annotations" || file_stem == "SpecGate.Runtime" {
+            continue;
+        }
+        let resolved = csproj_dir.join(&normalized);
+        let abs = std::fs::canonicalize(&resolved).unwrap_or(resolved);
+        let fwd = path_to_forward_slash(&abs);
+        items.push(format!("    <ProjectReference Include=\"{}\" />", escape_xml_text(&fwd)));
+    }
+
+    if items.is_empty() {
+        return String::new();
+    }
+    format!("  <ItemGroup>\n{}\n  </ItemGroup>\n", items.join("\n"))
+}
+
 /// Resolve the `<TargetFramework>` to use in the generated `Runner.csproj`.
 ///
 /// Resolution order:
@@ -2518,6 +2619,7 @@ fn run_csharp_group(
         }
         None => String::new(),
     };
+    let references = read_csproj_references(&target.package_root);
     let csproj = format!(
         "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    \
          <OutputType>Exe</OutputType>\n    <TargetFramework>{}</TargetFramework>\n    \
@@ -2525,7 +2627,7 @@ fn run_csharp_group(
          <Nullable>{}</Nullable>\n    <ImplicitUsings>{}</ImplicitUsings>\n{}  </PropertyGroup>\n  <ItemGroup>\n    \
          <Compile Include=\"Program.cs\" />\n    \
          <Compile Include=\"{pkg_path}/**/*.cs\" Exclude=\"{pkg_path}/Tests/**/*.cs;{pkg_path}/bin/**/*.cs;{pkg_path}/obj/**/*.cs\" LinkBase=\"Fixture\" />\n  \
-         </ItemGroup>\n{runtime_sources}</Project>\n",
+         </ItemGroup>\n{runtime_sources}{references}</Project>\n",
         escape_xml_text(&runner_settings.framework),
         escape_xml_text(&runner_settings.nullable),
         escape_xml_text(&runner_settings.implicit_usings),
@@ -3688,6 +3790,33 @@ mod tests {
     fn extract_csproj_xml_tag_absent_returns_none() {
         let xml = "<Project><PropertyGroup><OutputType>Exe</OutputType></PropertyGroup></Project>";
         assert_eq!(super::extract_csproj_xml_tag(xml, "TargetFramework"), None);
+    }
+
+    #[test]
+    fn extract_csproj_item_refs_parses_package_references() {
+        let xml = "<Project>\n  <ItemGroup>\n    <PackageReference Include=\"YamlDotNet\" Version=\"16.3.0\" />\n    <PackageReference Include=\"NoVersion\" />\n  </ItemGroup>\n</Project>";
+        assert_eq!(
+            super::extract_csproj_item_refs(xml, "PackageReference"),
+            vec![
+                ("YamlDotNet".to_string(), Some("16.3.0".to_string())),
+                ("NoVersion".to_string(), None),
+            ]
+        );
+    }
+
+    #[test]
+    fn extract_csproj_item_refs_parses_project_references() {
+        let xml = "<Project>\n  <ItemGroup>\n    <ProjectReference Include=\"..\\..\\csharp\\SpecGate.Runtime\\SpecGate.Runtime.csproj\" />\n  </ItemGroup>\n</Project>";
+        assert_eq!(
+            super::extract_csproj_item_refs(xml, "ProjectReference"),
+            vec![("..\\..\\csharp\\SpecGate.Runtime\\SpecGate.Runtime.csproj".to_string(), None)]
+        );
+    }
+
+    #[test]
+    fn extract_csproj_item_refs_absent_returns_empty() {
+        let xml = "<Project><ItemGroup></ItemGroup></Project>";
+        assert!(super::extract_csproj_item_refs(xml, "PackageReference").is_empty());
     }
 
     #[test]

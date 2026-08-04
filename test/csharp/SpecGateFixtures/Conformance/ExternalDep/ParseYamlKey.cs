@@ -1,25 +1,26 @@
 using SpecGate.Annotations;
+using YamlDotNet.Serialization;
+
 namespace SpecGateFixtures.Conformance.ExternalDep;
 
 /// <summary>
-/// String-processing fixture: <c>parse_yaml_key</c> extracts the value of a
-/// named key from a newline-delimited <c>key: value</c> document.
+/// External-dependency fixture: <c>parse_yaml_key</c> extracts the value of a
+/// named key from a YAML document, using the YamlDotNet NuGet package (the C#
+/// twin of the Rust cross_dep fixture's serde_yaml). Because it depends on an
+/// external package, it compiles only when the harness builds the fixture's
+/// real assembly — not a source-globbed surrogate.
 /// </summary>
 public static class ParseYamlKeyOps
 {
-    /// <summary>Looks up <paramref name="key"/> in a simple YAML-like document.</summary>
-    /// <param name="input">The document text, one <c>key: value</c> pair per line (spec input <c>input</c>).</param>
+    /// <summary>Looks up <paramref name="key"/> in a YAML document via YamlDotNet.</summary>
+    /// <param name="input">The YAML document text (spec input <c>input</c>).</param>
     /// <param name="key">The key whose value to return (spec input <c>key</c>).</param>
-    /// <returns>The trimmed value for <paramref name="key"/>, or the string <c>"null"</c> if absent.</returns>
+    /// <returns>The value for <paramref name="key"/>, or the string <c>"null"</c> if absent.</returns>
     [SpecOperation("parse_yaml_key", Spec = "fixture.cross_dep")]
     public static string ParseYamlKey([SpecInput("input")] string input, [SpecInput("key")] string key)
     {
-        foreach (var line in input.Split('\n'))
-        {
-            var parts = line.Split(':', 2);
-            if (parts.Length == 2 && parts[0].Trim() == key)
-                return parts[1].Trim();
-        }
-        return "null";
+        var deserializer = new DeserializerBuilder().Build();
+        var doc = deserializer.Deserialize<Dictionary<string, string>>(input);
+        return doc is not null && doc.TryGetValue(key, out var value) ? value : "null";
     }
 }
