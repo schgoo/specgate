@@ -1,0 +1,10 @@
+<Project>
+  <UsingTask TaskName="SpecGate.Weaver.SpecGateWeaverTask"
+             AssemblyFile="$(SpecGateWeaverTaskAssembly)" />
+
+  <Target Name="SpecGateWeaveAssembly"
+          AfterTargets="CopyFilesToOutputDirectory"
+          Condition="'$(SpecGateWeaverTaskAssembly)' != '' and Exists('$(SpecGateWeaverTaskAssembly)') and Exists('$(TargetPath)')">
+    <SpecGateWeaverTask AssemblyPath="$(TargetPath)" />
+  </Target>
+</Project>

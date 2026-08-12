@@ -6,9 +6,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>SpecGateFixtures</RootNamespace>
     <AssemblyName>SpecGateFixtures.Net8</AssemblyName>
+    <SpecGateWeaverTaskAssembly>$(MSBuildThisFileDirectory)..\..\..\csharp\SpecGate.Weaver\bin\$(Configuration)\netstandard2.0\SpecGate.Weaver.dll</SpecGateWeaverTaskAssembly>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\..\csharp\SpecGate.Annotations\SpecGate.Annotations.csproj" />
     <ProjectReference Include="..\..\..\csharp\SpecGate.Runtime\SpecGate.Runtime.csproj" />
+    <ProjectReference Include="..\..\..\csharp\SpecGate.Weaver\SpecGate.Weaver.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" />
   </ItemGroup>
+  <Import Project="..\..\..\csharp\SpecGate.Weaver\SpecGateWeave.targets" />
 </Project>

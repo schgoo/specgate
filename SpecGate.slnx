@@ -2,6 +2,7 @@
   <Folder Name="/csharp/">
     <Project Path="csharp/SpecGate.Annotations/SpecGate.Annotations.csproj" />
     <Project Path="csharp/SpecGate.Runtime/SpecGate.Runtime.csproj" />
+    <Project Path="csharp/SpecGate.Weaver/SpecGate.Weaver.csproj" />
   </Folder>
   <Folder Name="/test/" />
   <Folder Name="/test/csharp/">

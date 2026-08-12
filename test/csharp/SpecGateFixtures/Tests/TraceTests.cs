@@ -1,5 +1,4 @@
 using SpecGate.Runtime;
-using SpecGateFixtures.Conformance.Basic;
 using SpecGateFixtures.Conformance.Structured;
 using SpecGateFixtures.Conformance.SumTypes;
 using Xunit;
@@ -16,7 +15,7 @@ public class TraceTests
         int a = 2, b = 3;
         SpecGateRuntime.EmitEvent("add.a", a);
         SpecGateRuntime.EmitEvent("add.b", b);
-        int result = StatelessAdd.Add(a, b);
+        int result = a + b;
         SpecGateRuntime.EmitEvent("$result", result);
         string json = SpecGateRuntime.GetTracesJson();
         const string expected =
@@ -44,7 +43,18 @@ public class TraceTests
     public void StructuredValues_SerializeWithCanonicalOrdering()
     {
         SpecGateRuntime.Reset();
-        SpecGateRuntime.EmitResult(ComplexValueFixtures.GetProduct());
+        var product = new Product
+        {
+            Name = "Milk",
+            Price = 4,
+            Tags = ["dairy", "organic", "local"],
+            Attributes = new Dictionary<string, string>
+            {
+                ["category"] = "food",
+                ["origin"] = "local",
+            },
+        };
+        SpecGateRuntime.EmitResult(product);
 
         const string expected =
             "[{\"kind\":\"Event\",\"name\":\"product_name\",\"value\":\"Milk\"}"
