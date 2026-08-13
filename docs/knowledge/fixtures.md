@@ -141,6 +141,7 @@ crates are listed under [Cross-crate examples](#cross-crate-examples).
 | Partial coverage measurement (`run --coverage`) | [`coverage_partial.spec.yaml`](../../test/rust/crates/specgate-fixtures/specs/coverage_partial.spec.yaml) |
 | Keyword collision (`run` as op name) | [`keyword_collision.spec.yaml`](../../test/rust/crates/specgate-fixtures/specs/keyword_collision.spec.yaml) |
 | Vacuous match prevention | [`vacuous_match.spec.yaml`](../../test/rust/crates/specgate-fixtures/specs/vacuous_match.spec.yaml) |
+| Real-build execution (op exists only in the compiled artifact) | [`realbuild_witness.spec.yaml`](../../test/rust/crates/specgate-fixtures/specs/realbuild_witness.spec.yaml) |
 | Expected mismatch — wrong value | [`mismatch_wrong_field.spec.yaml`](../../test/rust/crates/specgate-fixtures/specs/mismatch_wrong_field.spec.yaml) |
 | Expected mismatch — missing event | [`mismatch_missing_event.spec.yaml`](../../test/rust/crates/specgate-fixtures/specs/mismatch_missing_event.spec.yaml) |
 | Expected mismatch — second step | [`mismatch_second_step.spec.yaml`](../../test/rust/crates/specgate-fixtures/specs/mismatch_second_step.spec.yaml) |
