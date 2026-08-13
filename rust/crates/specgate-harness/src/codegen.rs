@@ -112,10 +112,30 @@ pub(crate) fn crate_label(package_root: &Path) -> String {
 /// cannot be linked at all. (Public-reachability of individual operations is
 /// enforced earlier, in the harness pre-flight.)
 pub(crate) fn resolve_fixture_crates(package_root: &Path, fixture_srcs: &[PathBuf]) -> Result<Vec<FixtureCrateInfo>, String> {
+    resolve_fixture_crates_with_modules(package_root, fixture_srcs, &[])
+}
+
+pub(crate) fn resolve_fixture_crates_with_modules(
+    package_root: &Path,
+    fixture_srcs: &[PathBuf],
+    module_paths: &[Vec<String>],
+) -> Result<Vec<FixtureCrateInfo>, String> {
     let mut resolved: Vec<FixtureCrateInfo> = Vec::new();
     for src in fixture_srcs {
         match crate_info_for(package_root, src) {
-            Some(info) => resolved.push(info),
+            Some(info) => push_unique_crate_info(&mut resolved, info),
+            None => {
+                return Err(format!(
+                    "target crate at '{}' has no `[package] name`; cannot link the target",
+                    to_cargo_path(package_root)
+                ));
+            }
+        }
+    }
+
+    for module_path in module_paths {
+        match crate_info_for_module_path(package_root, module_path) {
+            Some(info) => push_unique_crate_info(&mut resolved, info),
             None => {
                 return Err(format!(
                     "target crate at '{}' has no `[package] name`; cannot link the target",
@@ -126,6 +146,29 @@ pub(crate) fn resolve_fixture_crates(package_root: &Path, fixture_srcs: &[PathBu
     }
 
     Ok(resolved)
+}
+
+fn crate_info_for_module_path(fixture_pkg_root: &Path, module_path: &[String]) -> Option<FixtureCrateInfo> {
+    let cargo_toml = fixture_pkg_root.join("Cargo.toml");
+    let text = std::fs::read_to_string(&cargo_toml).ok()?;
+    let cargo_name = parse_cargo_name(&text)?;
+    let rust_ident = cargo_name.replace('-', "_");
+
+    Some(FixtureCrateInfo {
+        cargo_name,
+        rust_ident,
+        module_path: module_path.to_vec(),
+        path: fixture_pkg_root.to_path_buf(),
+    })
+}
+
+fn push_unique_crate_info(resolved: &mut Vec<FixtureCrateInfo>, info: FixtureCrateInfo) {
+    if !resolved
+        .iter()
+        .any(|existing| existing.cargo_name == info.cargo_name && existing.module_path == info.module_path && existing.path == info.path)
+    {
+        resolved.push(info);
+    }
 }
 
 pub(crate) fn source_for_module_path(fixture_pkg_root: &Path, module_path: &[String]) -> Option<PathBuf> {

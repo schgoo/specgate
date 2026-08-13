@@ -328,7 +328,10 @@ pub enum DiscOutcome {
 }
 
 fn convert_field(f: specgate_harness::DiscoveredField) -> DiscField {
-    DiscField { name: f.name, ty: f.ty }
+    DiscField {
+        name: f.name,
+        ty: f.ty,
+    }
 }
 
 fn convert_variant(v: specgate_harness::DiscoveredVariant) -> DiscVariant {
@@ -359,7 +362,10 @@ fn convert_schema(s: specgate_harness::DiscoveredSchema) -> DiscSchema {
                 inputs: op
                     .inputs
                     .into_iter()
-                    .map(|i| DiscInput { name: i.name, ty: i.ty })
+                    .map(|i| DiscInput {
+                        name: i.name,
+                        ty: i.ty,
+                    })
                     .collect(),
                 output: op.output,
             })
@@ -404,10 +410,17 @@ fn discover_inner(spec_path: &str) -> DiscOutcome {
 
 fn convert_target(t: specgate_harness::TargetDiscovery) -> DiscTargetDiscovery {
     let outcome = match t.outcome {
-        specgate_harness::TargetOutcome::SelfDescribed { schema } => DiscTargetOutcome::SelfDescribed {
-            schema: convert_schema(schema),
-        },
-        specgate_harness::TargetOutcome::NotSelfDescribing { reason } => DiscTargetOutcome::NotSelfDescribing { reason },
+        specgate_harness::TargetOutcome::SelfDescribed { schema } => {
+            DiscTargetOutcome::SelfDescribed {
+                schema: convert_schema(schema),
+            }
+        }
+        specgate_harness::TargetOutcome::NotSelfDescribing { reason } => {
+            DiscTargetOutcome::NotSelfDescribing { reason }
+        }
     };
-    DiscTargetDiscovery { target: t.target, outcome }
+    DiscTargetDiscovery {
+        target: t.target,
+        outcome,
+    }
 }

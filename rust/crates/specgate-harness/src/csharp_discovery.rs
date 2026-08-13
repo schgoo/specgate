@@ -16,8 +16,69 @@
 //! path in [`crate::discovery`] to a `DiscoveredSchema` identical to the Rust
 //! canonical.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+
+pub(crate) struct CSharpBuildOutput {
+    pub(crate) fixture_dll: PathBuf,
+    pub(crate) fixture_out: PathBuf,
+    pub(crate) assembly_name: String,
+}
+
+/// Build the fixture's real C# project into `scratch/artifacts` and return the
+/// woven fixture assembly plus its copy-local output directory.
+pub(crate) fn build_real_csharp_project(
+    target: &crate::binding::Target,
+    scratch: &Path,
+    context: &str,
+) -> Result<CSharpBuildOutput, String> {
+    let pkg_abs = strip_verbatim_prefix(&std::fs::canonicalize(&target.package_root).unwrap_or_else(|_| target.package_root.clone()));
+    std::fs::create_dir_all(scratch).map_err(|e| format!("failed to scaffold C# {context} dir: {e}"))?;
+
+    let csproj = find_fixture_csproj(&pkg_abs).ok_or_else(|| format!("no .csproj found under {}", pkg_abs.display()))?;
+    let project_name = csproj
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .ok_or("could not read fixture .csproj file name")?
+        .to_string();
+    let csproj_text = std::fs::read_to_string(&csproj).map_err(|e| format!("failed to read fixture .csproj: {e}"))?;
+    let assembly_name = crate::extract_csproj_xml_tag(&csproj_text, "AssemblyName").unwrap_or_else(|| project_name.clone());
+
+    let artifacts_dir = scratch.join("artifacts");
+    let mut build = Command::new("dotnet");
+    build
+        .arg("build")
+        .arg(&csproj)
+        .arg("-c")
+        .arg("Debug")
+        .arg("--artifacts-path")
+        .arg(&artifacts_dir)
+        .current_dir(scratch);
+    let build_out = build
+        .output()
+        .map_err(|e| format!("failed to invoke dotnet build for C# {context}: {e}"))?;
+    if !build_out.status.success() {
+        let stderr = String::from_utf8_lossy(&build_out.stderr);
+        let stdout = String::from_utf8_lossy(&build_out.stdout);
+        let combined = format!("{stderr}\n{stdout}");
+        return Err(format!(
+            "C# {context} fixture build failed:\n{}",
+            combined.lines().take(40).collect::<Vec<_>>().join("\n")
+        ));
+    }
+
+    let fixture_out = artifacts_dir.join("bin").join(&project_name).join("debug");
+    let fixture_dll = fixture_out.join(format!("{assembly_name}.dll"));
+    if !fixture_dll.exists() {
+        return Err(format!("C# {context} build produced no assembly at {}", fixture_dll.display()));
+    }
+
+    Ok(CSharpBuildOutput {
+        fixture_dll,
+        fixture_out,
+        assembly_name,
+    })
+}
 
 /// Build and run the C# discovery program for `target`, scoped to `component`,
 /// and return the raw registry JSON it prints (same shape as the Rust runtime's
@@ -66,9 +127,6 @@ pub(crate) fn run_csharp_discovery(target: &crate::binding::Target, component: &
 /// read fails.
 pub(crate) fn run_csharp_discovery_in(target: &crate::binding::Target, component: &str, scratch: &Path) -> Result<String, String> {
     let settings = crate::resolve_csharp_runner_settings(target);
-    let pkg_abs = strip_verbatim_prefix(&std::fs::canonicalize(&target.package_root).unwrap_or_else(|_| target.package_root.clone()));
-
-    std::fs::create_dir_all(scratch).map_err(|e| format!("failed to scaffold C# discovery dir: {e}"))?;
 
     // 1. Build the fixture's REAL project into a per-run isolated artifacts tree,
     //    then reflect over the resulting assembly. This is what lets discovery
@@ -79,48 +137,9 @@ pub(crate) fn run_csharp_discovery_in(target: &crate::binding::Target, component
     //    `bin/<project>/<config>` and `obj/<project>/<config>` subfolders under
     //    the scratch dir, so concurrent harness runs never contend on — nor even
     //    touch — the source project's `obj`/`bin`.
-    let csproj = find_fixture_csproj(&pkg_abs).ok_or_else(|| format!("no .csproj found under {}", pkg_abs.display()))?;
-    let project_name = csproj
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .ok_or("could not read fixture .csproj file name")?
-        .to_string();
-    let csproj_text = std::fs::read_to_string(&csproj).map_err(|e| format!("failed to read fixture .csproj: {e}"))?;
-    let assembly_name = crate::extract_csproj_xml_tag(&csproj_text, "AssemblyName").unwrap_or_else(|| project_name.clone());
-
-    let artifacts_dir = scratch.join("artifacts");
-    let mut build = Command::new("dotnet");
-    build
-        .arg("build")
-        .arg(&csproj)
-        .arg("-c")
-        .arg("Debug")
-        .arg("--artifacts-path")
-        .arg(&artifacts_dir)
-        .current_dir(scratch);
-    let build_out = build
-        .output()
-        .map_err(|e| format!("failed to invoke dotnet build for C# discovery: {e}"))?;
-    if !build_out.status.success() {
-        let stderr = String::from_utf8_lossy(&build_out.stderr);
-        let stdout = String::from_utf8_lossy(&build_out.stdout);
-        let combined = format!("{stderr}\n{stdout}");
-        return Err(format!(
-            "C# discovery fixture build failed:\n{}",
-            combined.lines().take(40).collect::<Vec<_>>().join("\n")
-        ));
-    }
-
-    // `--artifacts-path` output layout: `<artifacts>/bin/<project>/<config>/`
-    // (config lowercased; no TFM suffix for single-target projects). The fixture
-    // output dir holds the built assembly plus its copy-local dependencies
-    // (SpecGate.Annotations, SpecGate.Runtime, …), which is exactly what the
-    // reflection runner references and resolves against.
-    let fixture_out = artifacts_dir.join("bin").join(&project_name).join("debug");
-    let fixture_dll = fixture_out.join(format!("{assembly_name}.dll"));
-    if !fixture_dll.exists() {
-        return Err(format!("C# discovery build produced no assembly at {}", fixture_dll.display()));
-    }
+    let built = build_real_csharp_project(target, scratch, "discovery")?;
+    let fixture_dll = built.fixture_dll;
+    let fixture_out = built.fixture_out;
     let fixture_out_fwd = crate::path_to_forward_slash(&fixture_out);
 
     // 2. Write a tiny reflection runner that references the SAME built
@@ -184,7 +203,7 @@ pub(crate) fn run_csharp_discovery_in(target: &crate::binding::Target, component
 }
 
 /// Find the first `.csproj` directly under `package_root` (the fixture project).
-fn find_fixture_csproj(package_root: &Path) -> Option<std::path::PathBuf> {
+fn find_fixture_csproj(package_root: &Path) -> Option<PathBuf> {
     let entries = std::fs::read_dir(package_root).ok()?;
     for entry in entries.flatten() {
         let path = entry.path();
@@ -200,9 +219,9 @@ fn find_fixture_csproj(package_root: &Path) -> Option<std::path::PathBuf> {
 /// relative `<ProjectReference>` items and its default compile-item excludes
 /// (leaving stale `obj/` sources globbed), so `dotnet` must be invoked with a
 /// plain path.
-fn strip_verbatim_prefix(p: &Path) -> std::path::PathBuf {
+fn strip_verbatim_prefix(p: &Path) -> PathBuf {
     let s = p.to_string_lossy();
-    s.strip_prefix(r"\\?\").map_or_else(|| p.to_path_buf(), std::path::PathBuf::from)
+    s.strip_prefix(r"\\?\").map_or_else(|| p.to_path_buf(), PathBuf::from)
 }
 
 /// Render the discovery `Program.cs`: top-level statements that reflect over the
@@ -236,10 +255,13 @@ string fixtureOut = args[2];
 // SpecGate.Runtime, YamlDotNet, …) from the build output dir so LoadFrom +
 // GetTypes() + attribute reads + NullabilityInfoContext work against the real
 // assembly and its references.
+var dependencyResolver = new AssemblyDependencyResolver(fixtureDll);
 AssemblyLoadContext.Default.Resolving += (ctx, name) =>
 {
     string candidate = Path.Combine(fixtureOut, name.Name + ".dll");
-    return File.Exists(candidate) ? ctx.LoadFromAssemblyPath(candidate) : null;
+    if (File.Exists(candidate)) return ctx.LoadFromAssemblyPath(candidate);
+    string? resolved = dependencyResolver.ResolveAssemblyToPath(name);
+    return resolved is not null ? ctx.LoadFromAssemblyPath(resolved) : null;
 };
 
 var ctx = new NullabilityInfoContext();

@@ -461,6 +461,62 @@ cases:
               - target: "csharp::default"
                 outcome: { SelfDescribed: { schema: *schema_enum_event } }
 
+  # --- Real-build witness: a build-time-generated operation ---
+  # `witness` is emitted by a build-time code generator in each language (a C#
+  # Roslyn source generator and a Rust build.rs), so it exists only in the real
+  # compiled artifact — never as a source file on disk. discover finds it only
+  # by reflecting over / linking the fixture's real built artifact, and run
+  # executes it only when the harness runs that artifact rather than a
+  # source-reconstructed surrogate. Dual-bound so the real-build guarantee is
+  # enforced for every binding, not just one.
+
+  - name: discover_generated_witness
+    desc: >
+      An operation emitted by a build-time generator is discovered only when
+      reflecting over / linking the real built artifact — for every binding.
+    operation: discover
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/realbuild_witness.spec.yaml
+    expected:
+      - $result:
+          Complete:
+            schema: &schema_realbuild_witness
+              component: fixture.realbuild_witness
+              operations:
+                - name: witness
+                  inputs:
+                    - { name: seed, type: i32 }
+                  output: i32
+              types: []
+            targets:
+              - target: "binding::default"
+                outcome: { SelfDescribed: { schema: *schema_realbuild_witness } }
+              - target: "csharp::default"
+                outcome: { SelfDescribed: { schema: *schema_realbuild_witness } }
+
+  - name: run_generated_witness
+    desc: >
+      Running a build-time-generated operation proves the harness builds and
+      runs the fixture's real built artifact, not a source-reconstructed
+      surrogate: the witness op has no source file on disk (emitted into
+      obj/generated for C#, OUT_DIR for Rust), so a source-scanning runner
+      cannot execute it. Dual-bound — enforced for every binding.
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/realbuild_witness.spec.yaml
+    expected:
+      - $result:
+          Complete:
+            results:
+              - name: witness_increments_seed
+                status: pass
+                expected:
+                  - $result: 42
+                traces:
+                  - Run: { operation: witness }
+                  - Event: { name: witness.seed, value: 41 }
+                  - Event: { name: $result, value: 42 }
+
   # ================================================================
   # External dependency — operation using a third-party crate
   # ================================================================

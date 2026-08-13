@@ -319,10 +319,10 @@ fn run_group(
         return run_command_group(command, &target.package_root, group_cases).map(|r| (r, None));
     }
 
-    let fixture_srcs = match run_discovery(&target.package_root)
+    let fixture_metadata = match run_discovery(&target.package_root)
         .and_then(|registry| metadata_fixture_sources(&target.package_root, &spec.name, group_cases, &registry))
     {
-        Ok(Some(srcs)) => srcs,
+        Ok(Some(metadata)) => metadata,
         Ok(None) => {
             if let Some(results) = short_circuit_non_must(group_cases, None) {
                 return Ok((results, None));
@@ -331,7 +331,10 @@ fn run_group(
             if spec.name == "fixture.compile_error" && required_ops.contains("broken") {
                 let compile_error_path = target.package_root.join("src").join("engine").join("compile_error.rs");
                 if compile_error_path.exists() {
-                    vec![compile_error_path]
+                    FixtureMetadata {
+                        sources: vec![compile_error_path],
+                        generated_ops: Vec::new(),
+                    }
                 } else {
                     let op = required_ops.iter().next().map_or("<unknown>", String::as_str);
                     return Err(format!("operation '{op}' not found for component '{}'", spec.name));
@@ -343,7 +346,7 @@ fn run_group(
         }
         Err(reason) => return Err(reason),
     };
-    if fixture_srcs.is_empty() {
+    if fixture_metadata.sources.is_empty() && fixture_metadata.generated_ops.is_empty() {
         if let Some(results) = short_circuit_non_must(group_cases, None) {
             return Ok((results, None));
         }
@@ -355,12 +358,13 @@ fn run_group(
     // Merge the text of every contributing source so operations split across
     // separate files are scanned together.
     let mut src_text = String::new();
-    for fs in &fixture_srcs {
+    for fs in &fixture_metadata.sources {
         src_text.push_str(&load_fixture_text(fs)?);
         src_text.push('\n');
     }
 
-    let annotated = scan(&src_text);
+    let mut annotated = scan(&src_text);
+    merge_generated_ops(&mut annotated, &fixture_metadata.generated_ops);
 
     // Pre-flight runnability: every operation a MUST case runs must be
     // annotated, and each case's setups must wire. Shared with the CLI's
@@ -446,7 +450,7 @@ fn run_group(
             }
         }
     }
-    for src in &fixture_srcs {
+    for src in &fixture_metadata.sources {
         if !codegen::module_publicly_linkable(&target.package_root, src) {
             continue;
         }
@@ -463,7 +467,12 @@ fn run_group(
             }
         }
     }
-    let fixture_crates = codegen::resolve_fixture_crates(&target.package_root, &fixture_srcs)?;
+    let generated_module_paths: Vec<Vec<String>> = fixture_metadata.generated_ops.iter().map(|op| op.module_path.clone()).collect();
+    let fixture_crates = if generated_module_paths.is_empty() {
+        codegen::resolve_fixture_crates(&target.package_root, &fixture_metadata.sources)?
+    } else {
+        codegen::resolve_fixture_crates_with_modules(&target.package_root, &fixture_metadata.sources, &generated_module_paths)?
+    };
 
     let proj = codegen::generate(
         scratch_dir,
@@ -778,6 +787,7 @@ fn parse_cs_reflection_params(v: Option<&serde_json::Value>) -> Vec<(String, Str
 }
 
 #[allow(clippy::type_complexity)]
+#[cfg(test)]
 fn extract_cs_method_sig(line: &str) -> Option<(String, Vec<(String, String)>, String, bool)> {
     let paren_open = line.find('(')?;
     let paren_close = find_matching_paren(line, paren_open)?;
@@ -950,15 +960,7 @@ fn bare_cs_type(ty: &str) -> String {
     out.trim_end_matches('?').rsplit('.').next().unwrap_or(out).trim().to_string()
 }
 
-fn extract_cs_class(line: &str) -> Option<String> {
-    let words: Vec<&str> = line.split_whitespace().collect();
-    let idx = words.iter().position(|&w| w == "class")?;
-    let raw = words.get(idx + 1)?;
-    // Strip trailing '{', ':', '<T>' etc.
-    let name: String = raw.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
-    if name.is_empty() { None } else { Some(name) }
-}
-
+#[cfg(test)]
 fn extract_spec_operation_attr(line: &str) -> Option<(String, Option<String>)> {
     let s = line.trim();
     let rest = s.strip_prefix("[SpecOperation(\"")?;
@@ -1015,6 +1017,7 @@ fn split_cs_params(params: &str) -> Vec<&str> {
     out
 }
 
+#[cfg(test)]
 fn find_matching_paren(s: &str, open: usize) -> Option<usize> {
     let mut depth = 0usize;
     let mut in_string = false;
@@ -1045,6 +1048,7 @@ fn find_matching_paren(s: &str, open: usize) -> Option<usize> {
     None
 }
 
+#[cfg(test)]
 fn parse_cs_param(param: &str) -> Option<(String, String)> {
     let (spec_name, without_attrs) = peel_spec_input_attrs(param.trim());
     let parts: Vec<&str> = without_attrs.split_whitespace().collect();
@@ -1058,6 +1062,7 @@ fn parse_cs_param(param: &str) -> Option<(String, String)> {
 
 struct CsMemberPrefix {
     modifiers: Vec<String>,
+    #[cfg(test)]
     ty: String,
     name: String,
 }
@@ -1091,7 +1096,12 @@ fn parse_csharp_member_prefix(prefix: &str) -> Option<CsMemberPrefix> {
         return None;
     }
 
-    Some(CsMemberPrefix { modifiers, ty, name })
+    Some(CsMemberPrefix {
+        modifiers,
+        #[cfg(test)]
+        ty,
+        name,
+    })
 }
 
 fn find_last_csharp_ident_start(s: &str) -> Option<usize> {
@@ -1161,6 +1171,7 @@ fn is_csharp_member_modifier(token: &str) -> bool {
     )
 }
 
+#[cfg(test)]
 fn peel_spec_input_attrs(mut param: &str) -> (Option<String>, &str) {
     let mut spec_name = None;
     loop {
@@ -1181,6 +1192,7 @@ fn peel_spec_input_attrs(mut param: &str) -> (Option<String>, &str) {
     }
 }
 
+#[cfg(test)]
 fn extract_spec_input_attr(attr: &str) -> Option<String> {
     let open = attr.find("SpecInput(\"")?;
     let rest = &attr[open + "SpecInput(\"".len()..];
@@ -1311,22 +1323,6 @@ fn path_to_forward_slash(p: &Path) -> String {
     s.replace('\\', "/")
 }
 
-/// Walk up from `package_root` to find the nearest ancestor that contains a `csharp` child
-/// directory holding the `SpecGate` production library projects.
-/// Returns the path to `<ancestor>/csharp` if found, or `None` if no such ancestor exists.
-fn find_csharp_libs_dir(package_root: &Path) -> Option<PathBuf> {
-    let mut dir = package_root.to_path_buf();
-    loop {
-        let candidate = dir.join("csharp");
-        if candidate.join("SpecGate.Annotations").join("SpecGate.Annotations.csproj").exists() {
-            return Some(candidate);
-        }
-        if !dir.pop() {
-            return None;
-        }
-    }
-}
-
 /// Generate the `Program.cs` content for the C# runner.
 fn generate_csharp_program(
     cases: &[&spec::Case],
@@ -1367,8 +1363,18 @@ fn generate_csharp_program(
     out.push_str("using System.IO;\n");
     out.push_str("using System.Linq;\n");
     out.push_str("using System.Reflection;\n");
+    out.push_str("using System.Runtime.Loader;\n");
     out.push_str("using System.Text;\n\n");
     out.push_str("using System.Text.Json;\n\n");
+    out.push_str("var fixtureOut = args.Length > 1 ? args[1] : AppContext.BaseDirectory;\n");
+    out.push_str("var fixtureDll = args.Length > 2 ? args[2] : null;\n");
+    out.push_str("var dependencyResolver = fixtureDll is null ? null : new AssemblyDependencyResolver(fixtureDll);\n");
+    out.push_str("AssemblyLoadContext.Default.Resolving += (ctx, name) => {\n");
+    out.push_str("    var candidate = Path.Combine(fixtureOut, name.Name + \".dll\");\n");
+    out.push_str("    if (File.Exists(candidate)) return ctx.LoadFromAssemblyPath(candidate);\n");
+    out.push_str("    var resolved = dependencyResolver?.ResolveAssemblyToPath(name);\n");
+    out.push_str("    return resolved is not null ? ctx.LoadFromAssemblyPath(resolved) : null;\n");
+    out.push_str("};\n");
     out.push_str("var all = new SortedDictionary<string, string>();\n");
 
     for case in cases {
@@ -1601,6 +1607,11 @@ fn find_matching_angle(s: &str, open: usize) -> Option<usize> {
 
 fn csharp_materialization_helpers() -> &'static str {
     r#"static T FromSpecInput<T>(string json) => (T)FromSpecInputValue(typeof(T), JsonSerializer.Deserialize<JsonElement>(json))!;
+
+static void SetSpecMock(string name, Dictionary<string, string> entries) {
+    typeof(SpecGateRuntime).GetMethod("SetMock", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public)!
+        .Invoke(null, new object?[] { name, entries });
+}
 
 static object? FromSpecInputValue(Type targetType, JsonElement value) {
     if (targetType == typeof(string)) return value.ValueKind == JsonValueKind.Null ? null : value.GetString();
@@ -1876,71 +1887,40 @@ pub(crate) fn extract_csproj_item_refs(text: &str, tag: &str) -> Vec<(String, Op
     result
 }
 
-/// Read the fixture's `.csproj` and render an `<ItemGroup>` carrying its real
-/// `<PackageReference>` and `<ProjectReference>` items, so the generated
-/// `Runner.csproj` compiles instrumented fixture source against the same
-/// dependencies the real project uses (the C# twin of the Rust generated runner
-/// inheriting the fixture crate's transitive deps).
-///
-/// `<ProjectReference>` `Include` paths are relative to the fixture `.csproj`,
-/// so they are re-resolved to absolute paths that still resolve from the
-/// generated `Runner.csproj` location. The `SpecGate.Annotations` /
-/// `SpecGate.Runtime` project references are EXCLUDED because the runner already
-/// compiles those runtime sources directly (`runtime_sources` /
-/// `runtime_compile_items`); re-adding them as project references would produce
-/// duplicate-type conflicts.
-///
-/// Returns an empty string when there is no `.csproj` or no references to
-/// propagate.
-pub(crate) fn read_csproj_references(package_root: &Path) -> String {
+/// Read the fixture `.csproj` and render only its `<PackageReference>` items,
+/// so the generated runner carries the fixture assembly's `NuGet` dependencies
+/// without compiling or project-referencing fixture source.
+fn read_csproj_package_references(package_root: &Path) -> String {
     let Ok(entries) = std::fs::read_dir(package_root) else {
         return String::new();
     };
-    let mut csproj_path = None;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) == Some("csproj") {
-            csproj_path = Some(path);
-            break;
-        }
-    }
-    let Some(csproj_path) = csproj_path else {
+    let Some(csproj_path) = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| path.extension().and_then(|e| e.to_str()) == Some("csproj"))
+    else {
         return String::new();
     };
     let Ok(text) = std::fs::read_to_string(&csproj_path) else {
         return String::new();
     };
-    let csproj_dir = csproj_path.parent().unwrap_or(package_root);
 
-    let mut items: Vec<String> = Vec::new();
-
-    for (include, version) in extract_csproj_item_refs(&text, "PackageReference") {
-        match version {
-            Some(v) => items.push(format!(
+    let items = extract_csproj_item_refs(&text, "PackageReference")
+        .into_iter()
+        .map(|(include, version)| match version {
+            Some(v) => format!(
                 "    <PackageReference Include=\"{}\" Version=\"{}\" />",
                 escape_xml_text(&include),
                 escape_xml_text(&v)
-            )),
-            None => items.push(format!("    <PackageReference Include=\"{}\" />", escape_xml_text(&include))),
-        }
-    }
-
-    for (include, _) in extract_csproj_item_refs(&text, "ProjectReference") {
-        let normalized = include.replace('\\', "/");
-        let file_stem = Path::new(&normalized).file_stem().and_then(|s| s.to_str()).unwrap_or("");
-        if file_stem == "SpecGate.Annotations" || file_stem == "SpecGate.Runtime" {
-            continue;
-        }
-        let resolved = csproj_dir.join(&normalized);
-        let abs = std::fs::canonicalize(&resolved).unwrap_or(resolved);
-        let fwd = path_to_forward_slash(&abs);
-        items.push(format!("    <ProjectReference Include=\"{}\" />", escape_xml_text(&fwd)));
-    }
-
+            ),
+            None => format!("    <PackageReference Include=\"{}\" />", escape_xml_text(&include)),
+        })
+        .collect::<Vec<_>>();
     if items.is_empty() {
-        return String::new();
+        String::new()
+    } else {
+        format!("  <ItemGroup>\n{}\n  </ItemGroup>\n", items.join("\n"))
     }
-    format!("  <ItemGroup>\n{}\n  </ItemGroup>\n", items.join("\n"))
 }
 
 /// Resolve the `<TargetFramework>` to use in the generated `Runner.csproj`.
@@ -1982,42 +1962,6 @@ pub(crate) fn resolve_csharp_runner_settings(target: &binding::Target) -> CSharp
     }
 }
 
-fn prepare_csharp_sources(package_root: &Path, scratch_dir: &Path, source_files: &BTreeSet<PathBuf>) -> Result<PathBuf, String> {
-    let source_dir = scratch_dir.join("source");
-    std::fs::create_dir_all(&source_dir).map_err(|e| format!("failed to create C# source dir: {e}"))?;
-    copy_selected_csharp_sources(package_root, &source_dir, source_files)?;
-    Ok(source_dir)
-}
-
-fn copy_selected_csharp_sources(root: &Path, out_root: &Path, source_files: &BTreeSet<PathBuf>) -> Result<(), String> {
-    for path in source_files {
-        let rel = path
-            .strip_prefix(root)
-            .map_err(|e| format!("failed to relativize C# source path: {e}"))?;
-        if is_skipped_csharp_rel_path(rel) {
-            continue;
-        }
-        if path.extension().and_then(|e| e.to_str()) == Some("cs") {
-            let text = std::fs::read_to_string(path).map_err(|e| format!("failed to read C# source '{}': {e}", path.display()))?;
-            let out_path = out_root.join(rel);
-            if let Some(parent) = out_path.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| format!("failed to create C# source output dir: {e}"))?;
-            }
-            let instrumented =
-                instrument_csharp_source(&text).map_err(|e| format!("failed to instrument C# source '{}': {e}", path.display()))?;
-            std::fs::write(out_path, instrumented).map_err(|e| format!("failed to write instrumented C# source: {e}"))?;
-        }
-    }
-    Ok(())
-}
-
-fn is_skipped_csharp_rel_path(path: &Path) -> bool {
-    path.components().any(|component| {
-        let part = component.as_os_str().to_string_lossy();
-        matches!(part.as_ref(), "Tests" | "bin" | "obj")
-    })
-}
-
 fn emit_csharp_mock_tables(out: &mut String, inputs: &BTreeMap<String, serde_yaml::Value>) {
     use std::fmt::Write as _;
 
@@ -2027,7 +1971,7 @@ fn emit_csharp_mock_tables(out: &mut String, inputs: &BTreeMap<String, serde_yam
         };
         writeln!(
             out,
-            "    SpecGateRuntime.SetMock({}, new Dictionary<string, string>",
+            "    SetSpecMock({}, new Dictionary<string, string>",
             csharp_string_literal(name)
         )
         .expect("fmt");
@@ -2047,403 +1991,15 @@ fn emit_csharp_mock_tables(out: &mut String, inputs: &BTreeMap<String, serde_yam
     }
 }
 
-fn instrument_csharp_source(text: &str) -> Result<String, String> {
-    use std::fmt::Write as _;
-
-    let mut out = String::new();
-    let mut pending_spec_event_attrs: Vec<String> = Vec::new();
-    let mut pending_spec_mock: Option<String> = None;
-    let mut mock_fields: BTreeMap<String, String> = BTreeMap::new();
-    let mut pending_operation_attrs: Vec<String> = Vec::new();
-    let mut pending_operation_sig = String::new();
-    let mut operation_return_type: Option<String> = None;
-    let mut pending_operation_instrumentation: Option<CsOperationInstrumentation> = None;
-    let mut operation_brace_depth = 0usize;
-    let mut mock_counter = 0usize;
-
-    for line in text.lines() {
-        let trimmed = line.trim();
-        let in_operation = operation_return_type.is_some() && operation_brace_depth > 0;
-        if in_operation {
-            if let Some(rewritten) = rewrite_csharp_mock_line(
-                line,
-                operation_return_type.as_deref().unwrap_or("void"),
-                &mock_fields,
-                &mut mock_counter,
-            )? {
-                out.push_str(&rewritten);
-                out.push('\n');
-            } else if line_contains_mock_receiver_call(line, &mock_fields) {
-                return Err(format!("unsupported [SpecMock] call shape in operation body: {trimmed}"));
-            } else {
-                out.push_str(line);
-                out.push('\n');
-            }
-            update_csharp_brace_depth(line, &mut operation_brace_depth);
-            if operation_brace_depth == 0 {
-                operation_return_type = None;
-            }
-            continue;
-        }
-
-        if let Some(class_name) = extract_cs_class(trimmed) {
-            mock_fields.clear();
-            pending_spec_mock = None;
-            let _ = class_name;
-        }
-
-        if let Some(mock_name) = extract_spec_mock_attr(trimmed) {
-            pending_spec_mock = Some(mock_name);
-            out.push_str(line);
-            out.push('\n');
-            continue;
-        }
-
-        if let Some(mock_name) = pending_spec_mock.take()
-            && let Some(field_name) = parse_csharp_field_name(line)
-        {
-            mock_fields.insert(field_name, mock_name);
-        }
-
-        if let Some((op_name, _component)) = extract_spec_operation_attr(trimmed) {
-            if !pending_operation_attrs.iter().any(|existing| existing == &op_name) {
-                pending_operation_attrs.push(op_name);
-            }
-            pending_operation_sig.clear();
-        }
-
-        if !pending_operation_attrs.is_empty() && !trimmed.is_empty() && !trimmed.starts_with('[') {
-            if !pending_operation_sig.is_empty() {
-                pending_operation_sig.push(' ');
-            }
-            pending_operation_sig.push_str(trimmed);
-            if let Some((_method_name, params, return_type, _is_static)) = extract_cs_method_sig(&pending_operation_sig) {
-                let instrumentation = CsOperationInstrumentation {
-                    operation: pending_operation_attrs[0].clone(),
-                    params: parse_cs_param_infos_from_sig(&pending_operation_sig).unwrap_or_else(|| {
-                        params
-                            .iter()
-                            .map(|(name, _ty)| CsParamInfo {
-                                spec_name: name.clone(),
-                                code_name: csharp_ident(name),
-                            })
-                            .collect()
-                    }),
-                    return_type: return_type.clone(),
-                };
-                pending_operation_attrs.clear();
-                pending_operation_sig.clear();
-
-                if trimmed.contains("=>") {
-                    if let Some(rewritten) = rewrite_csharp_expression_bodied_operation(line, &instrumentation) {
-                        out.push_str(&rewritten);
-                        operation_return_type = None;
-                        pending_operation_instrumentation = None;
-                        continue;
-                    }
-                    operation_return_type = None;
-                    pending_operation_instrumentation = None;
-                } else {
-                    operation_return_type = Some(return_type);
-                    pending_operation_instrumentation = Some(instrumentation);
-                }
-            }
-        }
-
-        if trimmed.starts_with("[SpecEvent") {
-            pending_spec_event_attrs.push(line.to_string());
-            continue;
-        }
-        if !pending_spec_event_attrs.is_empty()
-            && let Some(prop) = parse_csharp_auto_property(line)
-        {
-            let event_name = pending_spec_event_attrs
-                .iter()
-                .find_map(|attr| extract_spec_event_attr_name(attr))
-                .unwrap_or_else(|| prop.name.trim_start_matches('@').to_string());
-            let field_name = format!("__sg_{}", csharp_ident(&prop.name));
-            writeln!(out, "{}private {} {};", prop.indent, prop.ty, field_name).expect("fmt");
-            for attr in pending_spec_event_attrs.drain(..) {
-                out.push_str(&attr);
-                out.push('\n');
-            }
-            writeln!(out, "{}{} {} {}", prop.indent, prop.visibility, prop.ty, prop.name).expect("fmt");
-            writeln!(out, "{}{{", prop.indent).expect("fmt");
-            writeln!(out, "{}    get => {};", prop.indent, field_name).expect("fmt");
-            writeln!(out, "{}    set", prop.indent).expect("fmt");
-            writeln!(out, "{}    {{", prop.indent).expect("fmt");
-            writeln!(out, "{}        {} = value;", prop.indent, field_name).expect("fmt");
-            writeln!(
-                out,
-                "{}        SpecGate.Runtime.SpecGateRuntime.EmitMember(this, {}, value);",
-                prop.indent,
-                csharp_string_literal(&event_name)
-            )
-            .expect("fmt");
-            writeln!(out, "{}    }}", prop.indent).expect("fmt");
-            writeln!(out, "{}}}", prop.indent).expect("fmt");
-            continue;
-        }
-        for attr in pending_spec_event_attrs.drain(..) {
-            out.push_str(&attr);
-            out.push('\n');
-        }
-        out.push_str(line);
-        out.push('\n');
-        if operation_return_type.is_some() && operation_brace_depth == 0 && line.contains('{') {
-            update_csharp_brace_depth(line, &mut operation_brace_depth);
-            if operation_brace_depth > 0
-                && let Some(instrumentation) = pending_operation_instrumentation.take()
-            {
-                let indent = format!("{}    ", &line[..line.len() - line.trim_start().len()]);
-                out.push_str(&render_csharp_operation_entry(&instrumentation, &indent));
-            }
-        }
-    }
-    for attr in pending_spec_event_attrs {
-        out.push_str(&attr);
-        out.push('\n');
-    }
-    Ok(out)
-}
-
-struct CsOperationInstrumentation {
-    operation: String,
-    params: Vec<CsParamInfo>,
-    return_type: String,
-}
-
-struct CsParamInfo {
-    spec_name: String,
-    code_name: String,
-}
-
-fn parse_cs_param_infos_from_sig(sig: &str) -> Option<Vec<CsParamInfo>> {
-    let paren_open = sig.find('(')?;
-    let paren_close = find_matching_paren(sig, paren_open)?;
-    let params_str = sig[paren_open + 1..paren_close].trim();
-    if params_str.is_empty() {
-        return Some(Vec::new());
-    }
-    Some(split_cs_params(params_str).into_iter().filter_map(parse_cs_param_info).collect())
-}
-
-fn parse_cs_param_info(param: &str) -> Option<CsParamInfo> {
-    let (spec_name, without_attrs) = peel_spec_input_attrs(param.trim());
-    let member = parse_csharp_member_prefix(without_attrs)?;
-    let code_name = member.name;
-    let event_name = spec_name.unwrap_or_else(|| code_name.trim_start_matches('@').to_string());
-    Some(CsParamInfo {
-        spec_name: event_name,
-        code_name,
-    })
-}
-
-fn render_csharp_operation_entry(inst: &CsOperationInstrumentation, indent: &str) -> String {
-    let names = if inst.params.is_empty() {
-        "System.Array.Empty<string>()".to_string()
-    } else {
-        format!(
-            "new string[] {{ {} }}",
-            inst.params
-                .iter()
-                .map(|p| csharp_string_literal(&p.spec_name))
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-    };
-    let values = if inst.params.is_empty() {
-        "System.Array.Empty<object?>()".to_string()
-    } else {
-        format!(
-            "new object?[] {{ {} }}",
-            inst.params.iter().map(|p| p.code_name.clone()).collect::<Vec<_>>().join(", ")
-        )
-    };
-    format!(
-        "{indent}SpecGate.Runtime.SpecGateRuntime.EnterOperation({}, {names}, {values});\n",
-        csharp_string_literal(&inst.operation)
-    )
-}
-
-fn rewrite_csharp_expression_bodied_operation(line: &str, inst: &CsOperationInstrumentation) -> Option<String> {
-    let arrow = line.find("=>")?;
-    let semi = line.rfind(';')?;
-    if semi < arrow {
-        return None;
-    }
-    let prefix = line[..arrow].trim_end();
-    let expr = line[arrow + 2..semi].trim();
-    let indent = &line[..line.len() - line.trim_start().len()];
-    let body_indent = format!("{indent}    ");
-    let mut out = String::new();
-    out.push_str(prefix);
-    out.push('\n');
-    out.push_str(indent);
-    out.push_str("{\n");
-    out.push_str(&render_csharp_operation_entry(inst, &body_indent));
-    if inst.return_type.trim() == "void" {
-        out.push_str(&body_indent);
-        out.push_str(expr);
-        out.push_str(";\n");
-    } else {
-        out.push_str(&body_indent);
-        out.push_str("return ");
-        out.push_str(expr);
-        out.push_str(";\n");
-    }
-    out.push_str(indent);
-    out.push_str("}\n");
-    Some(out)
-}
-
-fn parse_csharp_field_name(line: &str) -> Option<String> {
-    let trimmed = line.trim();
-    let before_init = trimmed
-        .split_once('=')
-        .map_or(trimmed.trim_end_matches(';'), |(before, _)| before.trim());
-    let member = parse_csharp_member_prefix(before_init)?;
-    if member.modifiers.iter().any(|m| m == "static") {
-        return None;
-    }
-    Some(member.name)
-}
-
-fn extract_spec_mock_attr(line: &str) -> Option<String> {
-    let s = line.trim();
-    let rest = s.strip_prefix("[SpecMock(\"")?;
-    let name = rest.split('"').next()?;
-    Some(name.to_string())
-}
-
-fn rewrite_csharp_mock_line(
-    line: &str,
-    operation_return_type: &str,
-    mock_fields: &BTreeMap<String, String>,
-    counter: &mut usize,
-) -> Result<Option<String>, String> {
-    let indent = &line[..line.len() - line.trim_start().len()];
-    let trimmed = line.trim();
-    if !trimmed.ends_with(';') {
-        return Ok(None);
-    }
-
-    if let Some(rest) = trimmed.strip_prefix("return ") {
-        let expr = rest.trim_end_matches(';').trim();
-        if let Some(call) = parse_csharp_mock_call(expr, mock_fields)? {
-            let hit = next_csharp_mock_hit(counter);
-            return Ok(Some(format!(
-                "{indent}var {hit}_value = SpecGate.Runtime.SpecGateRuntime.MockCall<{}>({}, {}, out var {hit}); if (!{hit}) return SpecGate.Runtime.SpecGateRuntime.SpecDefault<{}>(); return {hit}_value;",
-                operation_return_type.trim(),
-                csharp_string_literal(&call.mock_name),
-                call.key_expr,
-                operation_return_type.trim()
-            )));
-        }
-        return Ok(None);
-    }
-
-    let Some((lhs, rhs_with_semicolon)) = trimmed.split_once('=') else {
-        return Ok(None);
-    };
-    let rhs = rhs_with_semicolon.trim_end_matches(';').trim();
-    let Some(call) = parse_csharp_mock_call(rhs, mock_fields)? else {
-        return Ok(None);
-    };
-    let hit = next_csharp_mock_hit(counter);
-    if let Some(member) = parse_csharp_member_prefix(lhs.trim()) {
-        let call_type = if member.ty == "var" { "string" } else { member.ty.as_str() };
-        return Ok(Some(format!(
-            "{indent}{} = SpecGate.Runtime.SpecGateRuntime.MockCall<{}>({}, {}, out var {hit}); if (!{hit}) return SpecGate.Runtime.SpecGateRuntime.SpecDefault<{}>();",
-            lhs.trim(),
-            call_type.trim(),
-            csharp_string_literal(&call.mock_name),
-            call.key_expr,
-            operation_return_type.trim()
-        )));
-    }
-
-    Ok(Some(format!(
-        "{indent}{} = SpecGate.Runtime.SpecGateRuntime.MockCall<string>({}, {}, out var {hit}); if (!{hit}) return SpecGate.Runtime.SpecGateRuntime.SpecDefault<{}>();",
-        lhs.trim(),
-        csharp_string_literal(&call.mock_name),
-        call.key_expr,
-        operation_return_type.trim()
-    )))
-}
-
-fn next_csharp_mock_hit(counter: &mut usize) -> String {
-    let value = format!("__sg_mock_hit_{counter}");
-    *counter += 1;
-    value
-}
-
-struct CsMockCall {
-    mock_name: String,
-    key_expr: String,
-}
-
-fn parse_csharp_mock_call(expr: &str, mock_fields: &BTreeMap<String, String>) -> Result<Option<CsMockCall>, String> {
-    let expr = expr.trim();
-    for (field, mock_name) in mock_fields {
-        for prefix in [format!("{field}."), format!("this.{field}.")] {
-            if let Some(rest) = expr.strip_prefix(&prefix) {
-                let Some(paren_open) = rest.find('(') else {
-                    continue;
-                };
-                let method = rest[..paren_open].trim();
-                if method.is_empty() || !method.chars().all(is_csharp_ident_continue) {
-                    continue;
-                }
-                let paren_close =
-                    find_matching_paren(rest, paren_open).ok_or_else(|| format!("invalid [SpecMock] call expression: {expr}"))?;
-                if rest[paren_close + 1..].trim().is_empty() {
-                    let args = rest[paren_open + 1..paren_close].trim();
-                    let split = split_cs_params(args);
-                    let Some(last_arg) = split.last() else {
-                        return Err(format!("[SpecMock] call must have at least one argument: {expr}"));
-                    };
-                    let last_arg = last_arg.trim();
-                    if last_arg.starts_with("ref ") || last_arg.starts_with("out ") {
-                        return Err(format!("[SpecMock] call cannot use ref/out arguments: {expr}"));
-                    }
-                    return Ok(Some(CsMockCall {
-                        mock_name: mock_name.clone(),
-                        key_expr: last_arg.to_string(),
-                    }));
-                }
-            }
-        }
-    }
-    Ok(None)
-}
-
-fn line_contains_mock_receiver_call(line: &str, mock_fields: &BTreeMap<String, String>) -> bool {
-    mock_fields
-        .keys()
-        .any(|field| line.contains(&format!("{field}.")) || line.contains(&format!("this.{field}.")))
-}
-
-fn update_csharp_brace_depth(line: &str, depth: &mut usize) {
-    for ch in line.chars() {
-        match ch {
-            '{' => *depth += 1,
-            '}' => *depth = depth.saturating_sub(1),
-            _ => {}
-        }
-    }
-}
-
 struct CsAutoProperty {
-    indent: String,
+    #[cfg(test)]
     visibility: String,
+    #[cfg(test)]
     ty: String,
     name: String,
 }
 
 fn parse_csharp_auto_property(line: &str) -> Option<CsAutoProperty> {
-    let indent_len = line.len() - line.trim_start().len();
-    let indent = line[..indent_len].to_string();
     let trimmed = line.trim();
     let before_brace = trimmed.split('{').next()?.trim();
     let body = trimmed.split('{').nth(1)?.trim_end_matches('}').trim();
@@ -2455,8 +2011,9 @@ fn parse_csharp_auto_property(line: &str) -> Option<CsAutoProperty> {
         return None;
     }
     Some(CsAutoProperty {
-        indent,
+        #[cfg(test)]
         visibility: member.modifiers.join(" "),
+        #[cfg(test)]
         ty: member.ty,
         name: member.name,
     })
@@ -2558,16 +2115,6 @@ fn run_csharp_group(
         }
     }
 
-    // The reflection self-report no longer carries per-op source paths, so
-    // compile the whole fixture package (as structural discovery already does):
-    // copy+instrument every fixture `.cs` file into the scratch runner. Files
-    // under Tests/bin/obj are skipped by `copy_selected_csharp_sources`.
-    let mut source_files = BTreeSet::new();
-    {
-        let mut all_files = Vec::new();
-        collect_csharp_files(&target.package_root, &mut all_files);
-        source_files.extend(all_files);
-    }
     for case in group_cases {
         let ops = csharp_case_ops(case);
         resolve_csharp_case(&cs_ops, &cs_setups, &ops)
@@ -2577,10 +2124,18 @@ fn run_csharp_group(
     std::fs::create_dir_all(scratch_dir).map_err(|e| format!("failed to create C# scratch dir: {e}"))?;
     let trace_file = scratch_dir.join("traces.json");
 
+    // Build the fixture's real project and reference its woven assembly. The
+    // fixture output dir also carries the copy-local SpecGate.Runtime DLL that
+    // both the runner and woven fixture bind to for shared trace state.
+    let built = csharp_discovery::build_real_csharp_project(target, scratch_dir, "runner")?;
+    let fixture_dll = path_to_forward_slash(&built.fixture_dll);
+    let fixture_out = path_to_forward_slash(&built.fixture_out);
+    let assembly_name = escape_xml_text(&built.assembly_name);
+    let package_references = read_csproj_package_references(&target.package_root);
+
     // Resolve project settings for the runner (binding framework > csproj >
     // defaults, with netstandard falling back to net10.0 since it can't produce
-    // an exe). These mirror source-affecting fixture project settings so
-    // dotnet-format-canonical source still compiles in the scratch project.
+    // an exe).
     let runner_settings = resolve_csharp_runner_settings(target);
     let lang_version = runner_settings
         .lang_version
@@ -2588,50 +2143,26 @@ fn run_csharp_group(
         .map(|v| format!("    <LangVersion>{}</LangVersion>\n", escape_xml_text(v)))
         .unwrap_or_default();
 
-    // Write Runner.csproj that compiles the fixture source directly. This keeps
-    // concurrent harness runs from contending on the fixture project's obj/bin.
-    let source_dir = prepare_csharp_sources(&target.package_root, scratch_dir, &source_files)?;
-    let pkg_path = path_to_forward_slash(&source_dir);
-    let csharp_libs_dir = find_csharp_libs_dir(&target.package_root);
-    let runtime_sources = match &csharp_libs_dir {
-        Some(libs) => {
-            let mut lines: Vec<(String, String)> = Vec::new();
-            for sub in ["SpecGate.Annotations", "SpecGate.Runtime"] {
-                let dir = libs.join(sub);
-                if let Ok(entries) = std::fs::read_dir(&dir) {
-                    for entry in entries.flatten() {
-                        let path = entry.path();
-                        if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("cs") {
-                            let fwd = path_to_forward_slash(&path);
-                            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
-                            lines.push((fwd, name));
-                        }
-                    }
-                }
-            }
-            lines.sort_by(|a, b| a.1.cmp(&b.1));
-            let items = lines
-                .iter()
-                .map(|(fwd, name)| format!("    <Compile Include=\"{fwd}\" Link=\"{name}\" />"))
-                .collect::<Vec<_>>()
-                .join("\n");
-            format!("  <ItemGroup>\n{items}\n  </ItemGroup>\n")
-        }
-        None => String::new(),
-    };
-    let references = read_csproj_references(&target.package_root);
+    // Write Runner.csproj that compiles only Program.cs and references the real
+    // woven fixture assembly plus the exact SpecGate assemblies from the
+    // fixture build output.
     let csproj = format!(
         "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    \
-         <OutputType>Exe</OutputType>\n    <TargetFramework>{}</TargetFramework>\n    \
+         <OutputType>Exe</OutputType>\n    <TargetFramework>{framework}</TargetFramework>\n    \
          <EnableDefaultCompileItems>false</EnableDefaultCompileItems>\n    \
-         <Nullable>{}</Nullable>\n    <ImplicitUsings>{}</ImplicitUsings>\n{}  </PropertyGroup>\n  <ItemGroup>\n    \
-         <Compile Include=\"Program.cs\" />\n    \
-         <Compile Include=\"{pkg_path}/**/*.cs\" Exclude=\"{pkg_path}/Tests/**/*.cs;{pkg_path}/bin/**/*.cs;{pkg_path}/obj/**/*.cs\" LinkBase=\"Fixture\" />\n  \
-         </ItemGroup>\n{runtime_sources}{references}</Project>\n",
-        escape_xml_text(&runner_settings.framework),
-        escape_xml_text(&runner_settings.nullable),
-        escape_xml_text(&runner_settings.implicit_usings),
-        lang_version
+         <Nullable>{nullable}</Nullable>\n    <ImplicitUsings>{implicit_usings}</ImplicitUsings>\n{lang_version}  </PropertyGroup>\n  <ItemGroup>\n    \
+         <Compile Include=\"Program.cs\" />\n  </ItemGroup>\n  <ItemGroup>\n    \
+         <Reference Include=\"{assembly_name}\">\n      <HintPath>{fixture_dll}</HintPath>\n      <Private>true</Private>\n    </Reference>\n    \
+         <Reference Include=\"SpecGate.Annotations\">\n      <HintPath>{fixture_out}/SpecGate.Annotations.dll</HintPath>\n      <Private>true</Private>\n    </Reference>\n    \
+         <Reference Include=\"SpecGate.Runtime\">\n      <HintPath>{fixture_out}/SpecGate.Runtime.dll</HintPath>\n      <Private>true</Private>\n    </Reference>\n  </ItemGroup>\n{package_references}</Project>\n",
+        framework = escape_xml_text(&runner_settings.framework),
+        nullable = escape_xml_text(&runner_settings.nullable),
+        implicit_usings = escape_xml_text(&runner_settings.implicit_usings),
+        lang_version = lang_version,
+        assembly_name = assembly_name,
+        fixture_dll = escape_xml_text(&fixture_dll),
+        fixture_out = escape_xml_text(&fixture_out),
+        package_references = package_references,
     );
     std::fs::write(scratch_dir.join("Runner.csproj"), csproj).map_err(|e| format!("failed to write Runner.csproj: {e}"))?;
 
@@ -2646,6 +2177,8 @@ fn run_csharp_group(
         .arg(scratch_dir.join("Runner.csproj"))
         .arg("--")
         .arg(&trace_file)
+        .arg(&built.fixture_out)
+        .arg(&built.fixture_dll)
         // Anchor working dir to scratch so dotnet is independent of process cwd.
         .current_dir(scratch_dir);
 
@@ -2861,6 +2394,27 @@ struct DiscoveryOp {
     component: String,
     #[serde(default)]
     is_setup: bool,
+    #[serde(default)]
+    fn_name: Option<String>,
+    #[serde(default)]
+    params: Vec<(String, String)>,
+    #[serde(default)]
+    return_type: String,
+}
+
+#[derive(Debug, Clone)]
+struct FixtureMetadata {
+    sources: Vec<PathBuf>,
+    generated_ops: Vec<GeneratedOpMetadata>,
+}
+
+#[derive(Debug, Clone)]
+struct GeneratedOpMetadata {
+    name: String,
+    module_path: Vec<String>,
+    fn_name: String,
+    params: Vec<(String, String)>,
+    return_type: String,
 }
 
 fn run_discovery(package_root: &Path) -> Result<DiscoveryRegistry, String> {
@@ -2956,13 +2510,14 @@ fn metadata_fixture_sources(
     component: &str,
     cases: &[&spec::Case],
     registry: &DiscoveryRegistry,
-) -> Result<Option<Vec<PathBuf>>, String> {
+) -> Result<Option<FixtureMetadata>, String> {
     let req_ops = required_operations(cases);
     if req_ops.is_empty() {
         return Ok(None);
     }
     let crate_ident = cargo_package_name(package_root).map(|n| n.replace('-', "_"));
     let mut sources = Vec::new();
+    let mut generated_ops = Vec::new();
     for op in req_ops {
         let matches: Vec<&DiscoveryOp> = registry
             .operations
@@ -2973,16 +2528,43 @@ fn metadata_fixture_sources(
             [] => return Ok(None),
             [meta] => {
                 let module_path = relative_module_path(&meta.module_path, crate_ident.as_deref());
-                let source = codegen::source_for_module_path(package_root, &module_path)
-                    .ok_or_else(|| format!("source file not found for operation '{op}' in module '{}'", meta.module_path))?;
-                if !sources.contains(&source) {
-                    sources.push(source);
+                if let Some(source) = codegen::source_for_module_path(package_root, &module_path) {
+                    if !sources.contains(&source) {
+                        sources.push(source);
+                    }
+                } else {
+                    generated_ops.push(GeneratedOpMetadata {
+                        name: meta.name.clone(),
+                        module_path,
+                        fn_name: meta.fn_name.clone().unwrap_or_else(|| meta.name.clone()),
+                        params: meta.params.clone(),
+                        return_type: if meta.return_type.is_empty() {
+                            "()".to_string()
+                        } else {
+                            meta.return_type.clone()
+                        },
+                    });
                 }
             }
             _ => return Err(format!("operation '{op}' is defined more than once in component '{component}'")),
         }
     }
-    Ok(Some(sources))
+    Ok(Some(FixtureMetadata { sources, generated_ops }))
+}
+
+fn merge_generated_ops(annotated: &mut AnnotatedSource, generated_ops: &[GeneratedOpMetadata]) {
+    for op in generated_ops {
+        annotated.operations.entry(op.name.clone()).or_insert_with(|| scan::OpDecl {
+            sig: scan::FnSig {
+                fn_ident: op.fn_name.clone(),
+                params: op.params.clone(),
+                return_type: op.return_type.clone(),
+            },
+            method_of: None,
+            takes_self: false,
+            is_pub: true,
+        });
+    }
 }
 
 fn relative_module_path(module_path: &str, crate_ident: Option<&str>) -> Vec<String> {
@@ -3493,12 +3075,18 @@ mod tests {
                     module_path: "specgate_fixtures::engine::resolver_b".to_string(),
                     component: "fixture.resolver_b".to_string(),
                     is_setup: false,
+                    fn_name: Some("render".to_string()),
+                    params: Vec::new(),
+                    return_type: "String".to_string(),
                 },
                 DiscoveryOp {
                     name: "render".to_string(),
                     module_path: "specgate_fixtures::engine::resolver_a".to_string(),
                     component: "fixture.resolver_a".to_string(),
                     is_setup: false,
+                    fn_name: Some("render".to_string()),
+                    params: Vec::new(),
+                    return_type: "String".to_string(),
                 },
             ],
         };
@@ -3507,7 +3095,39 @@ mod tests {
             .expect("metadata resolution")
             .expect("metadata hit");
 
-        assert_eq!(resolved, vec![src]);
+        assert_eq!(resolved.sources, vec![src]);
+        assert!(resolved.generated_ops.is_empty());
+    }
+
+    #[test]
+    fn metadata_resolution_preserves_source_less_operation_metadata() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_file(
+            tmp.path().join("Cargo.toml").as_path(),
+            "[package]\nname = \"specgate-fixtures\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+        );
+        let case = case_with_op("witness");
+        let cases = [&case];
+        let registry = DiscoveryRegistry {
+            operations: vec![DiscoveryOp {
+                name: "witness".to_string(),
+                module_path: "specgate_fixtures::conformance::witness::generated".to_string(),
+                component: "specgate.conformance".to_string(),
+                is_setup: false,
+                fn_name: Some("witness".to_string()),
+                params: vec![("seed".to_string(), "i32".to_string())],
+                return_type: "i32".to_string(),
+            }],
+        };
+
+        let resolved = metadata_fixture_sources(tmp.path(), "specgate.conformance", &cases, &registry)
+            .expect("metadata resolution")
+            .expect("metadata hit");
+
+        assert!(resolved.sources.is_empty());
+        assert_eq!(resolved.generated_ops.len(), 1);
+        assert_eq!(resolved.generated_ops[0].module_path, vec!["conformance", "witness", "generated"]);
+        assert_eq!(resolved.generated_ops[0].params, vec![("seed".to_string(), "i32".to_string())]);
     }
 
     #[test]
@@ -3526,12 +3146,18 @@ mod tests {
                     module_path: "specgate_fixtures::engine::resolver_conflict".to_string(),
                     component: "fixture.resolver_conflict".to_string(),
                     is_setup: false,
+                    fn_name: Some("render".to_string()),
+                    params: Vec::new(),
+                    return_type: "String".to_string(),
                 },
                 DiscoveryOp {
                     name: "render".to_string(),
                     module_path: "specgate_fixtures::engine::resolver_conflict".to_string(),
                     component: "fixture.resolver_conflict".to_string(),
                     is_setup: false,
+                    fn_name: Some("render".to_string()),
+                    params: Vec::new(),
+                    return_type: "String".to_string(),
                 },
             ],
         };
@@ -3559,6 +3185,9 @@ mod tests {
                 module_path: "specgate_fixtures::engine::resolver_a".to_string(),
                 component: "fixture.resolver_a".to_string(),
                 is_setup: false,
+                fn_name: Some("render".to_string()),
+                params: Vec::new(),
+                return_type: "String".to_string(),
             }],
         };
 
