@@ -1,0 +1,174 @@
+spec_version: "0.4.0"
+name: fixture.order_pricing_translation
+binding:
+  - binding.yaml
+  - csharp.yaml
+
+types:
+  OrderLine:
+    fields:
+      sku: string
+      quantity: i32
+      unit_price_cents: i64
+  CustomerTier:
+    oneof:
+      Standard: {}
+      Silver: {}
+      Gold: {}
+  ShippingRegion:
+    oneof:
+      Domestic: {}
+      International: {}
+  PriceQuote:
+    fields:
+      subtotal_cents: i64
+      discount_cents: i64
+      shipping_cents: i64
+      tax_cents: i64
+      total_cents: i64
+
+operations:
+  price_order:
+    inputs:
+      lines:
+        type: list
+        items: OrderLine
+      customer_tier: CustomerTier
+      shipping_region: ShippingRegion
+      coupon:
+        type: optional
+        items: string
+    outputs:
+      - subtotal_cents: i64
+      - discount_cents: i64
+      - shipping_cents: i64
+      - tax_cents: i64
+      - total_cents: i64
+      - $result: PriceQuote
+
+cases:
+  - name: standard_domestic_order
+    desc: Standard pricing pays domestic shipping and 8% merchandise tax.
+    operation: price_order
+    inputs:
+      lines:
+        - { sku: widget, quantity: 2, unit_price_cents: 2500 }
+        - { sku: cable, quantity: 3, unit_price_cents: 500 }
+      customer_tier: Standard
+      shipping_region: Domestic
+      coupon: null
+    expected:
+      - subtotal_cents: 6500
+      - discount_cents: 0
+      - shipping_cents: 750
+      - tax_cents: 520
+      - total_cents: 7770
+      - $result:
+          subtotal_cents: 6500
+          discount_cents: 0
+          shipping_cents: 750
+          tax_cents: 520
+          total_cents: 7770
+
+  - name: gold_bulk_order_with_coupon
+    desc: Bulk, Gold-tier, and SAVE500 discounts stack before tax.
+    operation: price_order
+    inputs:
+      lines:
+        - { sku: bulk-pack, quantity: 10, unit_price_cents: 1000 }
+        - { sku: premium-part, quantity: 2, unit_price_cents: 2500 }
+      customer_tier: Gold
+      shipping_region: Domestic
+      coupon: SAVE500
+    expected:
+      - subtotal_cents: 15000
+      - discount_cents: 2900
+      - shipping_cents: 0
+      - tax_cents: 968
+      - total_cents: 13068
+      - $result:
+          subtotal_cents: 15000
+          discount_cents: 2900
+          shipping_cents: 0
+          tax_cents: 968
+          total_cents: 13068
+
+  - name: silver_international_shipfree
+    desc: Silver discount applies, SHIPFREE removes shipping, and international tax is zero.
+    operation: price_order
+    inputs:
+      lines:
+        - { sku: export-item, quantity: 4, unit_price_cents: 1000 }
+      customer_tier: Silver
+      shipping_region: International
+      coupon: SHIPFREE
+    expected:
+      - subtotal_cents: 4000
+      - discount_cents: 200
+      - shipping_cents: 0
+      - tax_cents: 0
+      - total_cents: 3800
+      - $result:
+          subtotal_cents: 4000
+          discount_cents: 200
+          shipping_cents: 0
+          tax_cents: 0
+          total_cents: 3800
+
+  - name: gold_threshold_after_discount
+    desc: >
+      Tier and tax percentages truncate fractional cents, and free shipping is
+      decided from the post-discount merchandise total.
+    operation: price_order
+    inputs:
+      lines:
+        - { sku: threshold-item, quantity: 1, unit_price_cents: 10501 }
+      customer_tier: Gold
+      shipping_region: Domestic
+      coupon: null
+    expected:
+      - subtotal_cents: 10501
+      - discount_cents: 1050
+      - shipping_cents: 750
+      - tax_cents: 756
+      - total_cents: 10957
+      - $result:
+          subtotal_cents: 10501
+          discount_cents: 1050
+          shipping_cents: 750
+          tax_cents: 756
+          total_cents: 10957
+
+  - name: standard_international_paid_shipping
+    desc: International orders pay the 2500-cent rate unless shipping is waived.
+    operation: price_order
+    inputs:
+      lines:
+        - { sku: international-item, quantity: 2, unit_price_cents: 1000 }
+      customer_tier: Standard
+      shipping_region: International
+      coupon: null
+    expected:
+      - subtotal_cents: 2000
+      - discount_cents: 0
+      - shipping_cents: 2500
+      - tax_cents: 0
+      - total_cents: 4500
+      - $result:
+          subtotal_cents: 2000
+          discount_cents: 0
+          shipping_cents: 2500
+          tax_cents: 0
+          total_cents: 4500
+
+  - name: arithmetic_overflow_fault
+    desc: Arithmetic overflow fails deterministically instead of wrapping.
+    operation: price_order
+    inputs:
+      lines:
+        - { sku: overflow-item, quantity: 2, unit_price_cents: 9223372036854775807 }
+      customer_tier: Standard
+      shipping_region: Domestic
+      coupon: null
+    expected:
+      - $fault: order price overflow

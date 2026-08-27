@@ -86,7 +86,7 @@ C# 8 compatibility is sampled separately by `stateless_add`, `multi_setup`, and
 | Mock with multiple responses | [`mock_multi_response.spec.yaml`](../../test/rust/crates/specgate-fixtures/specs/mock_multi_response.spec.yaml) |
 | Mock input not in table | [`mock_not_found.spec.yaml`](../../test/rust/crates/specgate-fixtures/specs/mock_not_found.spec.yaml) |
 
-### Build and runtime integration
+### Build, runtime, and translation
 
 | Feature | Fixture |
 |---------|---------|
@@ -94,6 +94,7 @@ C# 8 compatibility is sampled separately by `stateless_add`, `multi_setup`, and
 | Cross-crate / package dependency | [`cross_dep.spec.yaml`](../../test/rust/crates/specgate-fixtures/specs/cross_dep.spec.yaml) |
 | Real-build execution (op exists only in compiled artifact) | [`realbuild_witness.spec.yaml`](../../test/rust/crates/specgate-fixtures/specs/realbuild_witness.spec.yaml) |
 | Cross-target divergence detection | [`divergence_witness.spec.yaml`](../../test/rust/crates/specgate-fixtures/specs/divergence_witness.spec.yaml) |
+| .NET component translated to Rust | [`order_pricing_translation.spec.yaml`](../../test/rust/crates/specgate-fixtures/specs/order_pricing_translation.spec.yaml) |
 
 ## Harness and toolchain behavior
 

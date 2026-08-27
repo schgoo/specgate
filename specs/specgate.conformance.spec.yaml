@@ -461,6 +461,63 @@ cases:
               - target: "csharp::default"
                 outcome: { SelfDescribed: { schema: *schema_enum_event } }
 
+  - name: discover_order_pricing_translation
+    desc: >
+      The translated Rust and C# pricing implementations self-describe the same
+      operation, structured inputs, enum inputs, optional coupon, and structured
+      quote output.
+    operation: discover
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/order_pricing_translation.spec.yaml
+    expected:
+      - $result:
+          Complete:
+            schema: &schema_order_pricing_translation
+              component: fixture.order_pricing_translation
+              operations:
+                - name: price_order
+                  inputs:
+                    - { name: lines, type: "List<OrderLine>" }
+                    - { name: customer_tier, type: CustomerTier }
+                    - { name: shipping_region, type: ShippingRegion }
+                    - { name: coupon, type: "Option<string>" }
+                  output: PriceQuote
+              types:
+                - name: CustomerTier
+                  kind: enum
+                  fields: []
+                  variants:
+                    - { name: Standard, fields: [] }
+                    - { name: Silver, fields: [] }
+                    - { name: Gold, fields: [] }
+                - name: OrderLine
+                  kind: struct
+                  fields:
+                    - { name: sku, type: string }
+                    - { name: quantity, type: i32 }
+                    - { name: unit_price_cents, type: i64 }
+                  variants: []
+                - name: PriceQuote
+                  kind: struct
+                  fields:
+                    - { name: subtotal_cents, type: i64 }
+                    - { name: discount_cents, type: i64 }
+                    - { name: shipping_cents, type: i64 }
+                    - { name: tax_cents, type: i64 }
+                    - { name: total_cents, type: i64 }
+                  variants: []
+                - name: ShippingRegion
+                  kind: enum
+                  fields: []
+                  variants:
+                    - { name: Domestic, fields: [] }
+                    - { name: International, fields: [] }
+            targets:
+              - target: "binding::default"
+                outcome: { SelfDescribed: { schema: *schema_order_pricing_translation } }
+              - target: "csharp::default"
+                outcome: { SelfDescribed: { schema: *schema_order_pricing_translation } }
+
   # --- Real-build witness: a build-time-generated operation ---
   # `witness` is emitted by a build-time code generator in each language (a C#
   # Roslyn source generator and a Rust build.rs), so it exists only in the real
@@ -1853,4 +1910,29 @@ cases:
               - name: describe_person_with_address
                 status: pass
               - name: create_person_struct
+                status: pass
+
+  - name: order_pricing_translation
+    desc: >
+      An annotated C# order-pricing component and its Rust translation produce
+      byte-identical canonical traces for structured inputs and nontrivial
+      pricing branches.
+    operation: run_spec
+    inputs:
+      spec: test/rust/crates/specgate-fixtures/specs/order_pricing_translation.spec.yaml
+    expected:
+      - $result:
+          Complete:
+            results:
+              - name: standard_domestic_order
+                status: pass
+              - name: gold_bulk_order_with_coupon
+                status: pass
+              - name: silver_international_shipfree
+                status: pass
+              - name: gold_threshold_after_discount
+                status: pass
+              - name: standard_international_paid_shipping
+                status: pass
+              - name: arithmetic_overflow_fault
                 status: pass
