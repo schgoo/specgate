@@ -751,21 +751,30 @@ def validate_trace(path: Path) -> tuple[list[dict[str, Any]], Validator]:
     validator = Validator()
     batches: list[dict[str, Any]] = []
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        text = path.read_text(encoding="utf-8")
     except OSError as error:
         validator.error(str(path), str(error))
         return batches, validator
 
-    for line_number, line in enumerate(lines, 1):
-        if not line:
-            validator.error(f"{path}:{line_number}", "blank JSONL line")
-            continue
+    documents: list[tuple[str, Any]] = []
+    try:
+        documents.append((str(path), json.loads(text)))
+    except json.JSONDecodeError:
+        for line_number, line in enumerate(text.splitlines(), 1):
+            if not line:
+                validator.error(f"{path}:{line_number}", "blank JSONL line")
+                continue
+            try:
+                documents.append((f"{path}:{line_number}", json.loads(line)))
+            except json.JSONDecodeError as error:
+                validator.error(f"{path}:{line_number}", f"invalid JSON: {error}")
+
+    for location, batch in documents:
         try:
-            batch = json.loads(line)
             ParseDict(batch, TracesData())
             batches.append(batch)
-        except (json.JSONDecodeError, ParseError, ValueError) as error:
-            validator.error(f"{path}:{line_number}", f"invalid OTLP TracesData: {error}")
+        except (ParseError, ValueError) as error:
+            validator.error(location, f"invalid OTLP TracesData: {error}")
 
     spans: list[tuple[dict[str, Any], dict[str, dict[str, Any]], str]] = []
     for batch_index, batch in enumerate(batches):

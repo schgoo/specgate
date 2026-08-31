@@ -9,15 +9,19 @@ interchange between tools that record, compare, or analyze executions of
 different implementations of the same behavior.
 
 CTSC does not define a new trace envelope. A CTSC trace is standard OTLP
-`TracesData`, encoded according to the OTLP protobuf or OTLP JSON mapping. A
-CTSC trace file follows the OpenTelemetry Protocol File Exporter format:
+`TracesData`, encoded according to the OTLP protobuf or OTLP JSON mapping.
 
-- UTF-8 JSON Lines;
-- one complete OTLP `TracesData` value per line;
-- line separator `\n`;
-- preferred extension `.jsonl`;
-- no semantic dependence on file, batch, resource, scope, span, or attribute
-  array ordering except where this specification explicitly says otherwise.
+The primary file form is one UTF-8 OTLP JSON document with the extension
+`.otlp.json`. It contains one complete `TracesData` value and may be
+pretty-printed.
+
+Producers MAY instead use the OpenTelemetry Protocol File Exporter streaming
+form with the extension `.otlp.jsonl`. Each UTF-8 JSON Lines entry contains one
+complete `TracesData` batch and lines are separated by `\n`.
+
+Container and batch boundaries have no semantic meaning. CTSC does not depend
+on file, batch, resource, scope, span, or attribute array ordering except where
+this specification explicitly says otherwise.
 
 The words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY** are to
 be interpreted as normative requirements.
@@ -115,8 +119,9 @@ The run span is the root of one conformance execution.
 
 One run represents one target invocation, such as one `cargo test`, `dotnet
 test`, process execution, or equivalent runner call. It contains every scenario
-recorded by that invocation. A trace file MAY contain one run across multiple
-OTLP JSONL batches or several independent runs.
+recorded by that invocation. A streaming trace MAY contain one run across
+multiple OTLP JSONL batches. Either file form MAY contain several independent
+runs.
 
 | Attribute | Requirement | Type |
 |---|---|---|

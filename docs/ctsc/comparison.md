@@ -15,7 +15,7 @@ Comparators MUST document their behavior for those traces.
 
 A comparator MUST:
 
-1. decode every OTLP JSONL batch;
+1. decode the OTLP JSON document or every OTLP JSONL batch;
 2. group spans by trace ID;
 3. reconstruct parent/child relationships by span ID;
 4. identify CTSC spans by their fixed names;

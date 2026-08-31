@@ -1,0 +1,343 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": {
+              "stringValue": "ctsc-parallel-example"
+            }
+          },
+          {
+            "key": "conformance.version",
+            "value": {
+              "stringValue": "0.1.0"
+            }
+          },
+          {
+            "key": "conformance.tool.name",
+            "value": {
+              "stringValue": "example-producer"
+            }
+          },
+          {
+            "key": "conformance.tool.version",
+            "value": {
+              "stringValue": "1.0.0"
+            }
+          },
+          {
+            "key": "conformance.target.name",
+            "value": {
+              "stringValue": "implementation-a"
+            }
+          },
+          {
+            "key": "conformance.target.language",
+            "value": {
+              "stringValue": "example"
+            }
+          }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": {
+            "name": "example.ctsc.instrumentation",
+            "version": "1.0.0"
+          },
+          "spans": [
+            {
+              "traceId": "22222222222222222222222222222222",
+              "spanId": "2222222222222201",
+              "name": "conformance.run",
+              "kind": 1,
+              "startTimeUnixNano": "2000000000",
+              "endTimeUnixNano": "2000009000",
+              "attributes": [
+                {
+                  "key": "conformance.run.id",
+                  "value": {
+                    "stringValue": "run-parallel-001"
+                  }
+                }
+              ],
+              "status": {
+                "code": 1
+              }
+            },
+            {
+              "traceId": "22222222222222222222222222222222",
+              "spanId": "2222222222222202",
+              "parentSpanId": "2222222222222201",
+              "name": "conformance.scenario",
+              "kind": 1,
+              "startTimeUnixNano": "2000001000",
+              "endTimeUnixNano": "2000008900",
+              "attributes": [
+                {
+                  "key": "conformance.scenario.name",
+                  "value": {
+                    "stringValue": "price_and_inventory_in_parallel"
+                  }
+                },
+                {
+                  "key": "conformance.scenario.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                }
+              ],
+              "status": {
+                "code": 1
+              }
+            },
+            {
+              "traceId": "22222222222222222222222222222222",
+              "spanId": "2222222222222203",
+              "parentSpanId": "2222222222222202",
+              "name": "conformance.operation",
+              "kind": 1,
+              "startTimeUnixNano": "2000002000",
+              "endTimeUnixNano": "2000008800",
+              "attributes": [
+                {
+                  "key": "conformance.component.id",
+                  "value": {
+                    "stringValue": "example.orders"
+                  }
+                },
+                {
+                  "key": "conformance.operation.name",
+                  "value": {
+                    "stringValue": "process_order"
+                  }
+                },
+                {
+                  "key": "conformance.operation.inputs",
+                  "value": {
+                    "kvlistValue": {
+                      "values": [
+                        {
+                          "key": "order_id",
+                          "value": {
+                            "stringValue": "order-42"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              ],
+              "events": [
+                {
+                  "timeUnixNano": "2000008000",
+                  "name": "conformance.result",
+                  "attributes": [
+                    {
+                      "key": "conformance.result.value",
+                      "value": {
+                        "stringValue": "complete"
+                      }
+                    }
+                  ]
+                }
+              ],
+              "status": {
+                "code": 1
+              }
+            },
+            {
+              "traceId": "22222222222222222222222222222222",
+              "spanId": "2222222222222204",
+              "parentSpanId": "2222222222222203",
+              "name": "conformance.parallel",
+              "kind": 1,
+              "startTimeUnixNano": "2000003000",
+              "endTimeUnixNano": "2000006000",
+              "attributes": [
+                {
+                  "key": "conformance.parallel.name",
+                  "value": {
+                    "stringValue": "price-and-inventory"
+                  }
+                }
+              ],
+              "status": {
+                "code": 1
+              }
+            },
+            {
+              "traceId": "22222222222222222222222222222222",
+              "spanId": "2222222222222205",
+              "parentSpanId": "2222222222222204",
+              "name": "conformance.operation",
+              "kind": 1,
+              "startTimeUnixNano": "2000003100",
+              "endTimeUnixNano": "2000005000",
+              "attributes": [
+                {
+                  "key": "conformance.component.id",
+                  "value": {
+                    "stringValue": "example.orders"
+                  }
+                },
+                {
+                  "key": "conformance.operation.name",
+                  "value": {
+                    "stringValue": "price_items"
+                  }
+                },
+                {
+                  "key": "conformance.operation.inputs",
+                  "value": {
+                    "kvlistValue": {
+                      "values": [
+                        {
+                          "key": "order_id",
+                          "value": {
+                            "stringValue": "order-42"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              ],
+              "events": [
+                {
+                  "timeUnixNano": "2000004900",
+                  "name": "conformance.result",
+                  "attributes": [
+                    {
+                      "key": "conformance.result.value",
+                      "value": {
+                        "intValue": "3"
+                      }
+                    }
+                  ]
+                }
+              ],
+              "status": {
+                "code": 1
+              }
+            },
+            {
+              "traceId": "22222222222222222222222222222222",
+              "spanId": "2222222222222206",
+              "parentSpanId": "2222222222222204",
+              "name": "conformance.operation",
+              "kind": 1,
+              "startTimeUnixNano": "2000003200",
+              "endTimeUnixNano": "2000005500",
+              "attributes": [
+                {
+                  "key": "conformance.component.id",
+                  "value": {
+                    "stringValue": "example.inventory"
+                  }
+                },
+                {
+                  "key": "conformance.operation.name",
+                  "value": {
+                    "stringValue": "check_inventory"
+                  }
+                },
+                {
+                  "key": "conformance.operation.inputs",
+                  "value": {
+                    "kvlistValue": {
+                      "values": [
+                        {
+                          "key": "order_id",
+                          "value": {
+                            "stringValue": "order-42"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              ],
+              "events": [
+                {
+                  "timeUnixNano": "2000005400",
+                  "name": "conformance.result",
+                  "attributes": [
+                    {
+                      "key": "conformance.result.value",
+                      "value": {
+                        "boolValue": true
+                      }
+                    }
+                  ]
+                }
+              ],
+              "status": {
+                "code": 1
+              }
+            },
+            {
+              "traceId": "22222222222222222222222222222222",
+              "spanId": "2222222222222207",
+              "parentSpanId": "2222222222222203",
+              "name": "conformance.operation",
+              "kind": 1,
+              "startTimeUnixNano": "2000006100",
+              "endTimeUnixNano": "2000007000",
+              "attributes": [
+                {
+                  "key": "conformance.component.id",
+                  "value": {
+                    "stringValue": "example.orders"
+                  }
+                },
+                {
+                  "key": "conformance.operation.name",
+                  "value": {
+                    "stringValue": "finalize_order"
+                  }
+                },
+                {
+                  "key": "conformance.operation.inputs",
+                  "value": {
+                    "kvlistValue": {
+                      "values": [
+                        {
+                          "key": "order_id",
+                          "value": {
+                            "stringValue": "order-42"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              ],
+              "events": [
+                {
+                  "timeUnixNano": "2000006900",
+                  "name": "conformance.result",
+                  "attributes": [
+                    {
+                      "key": "conformance.result.value",
+                      "value": {
+                        "stringValue": "finalized"
+                      }
+                    }
+                  ]
+                }
+              ],
+              "status": {
+                "code": 1
+              }
+            }
+          ],
+          "schemaUrl": "https://example.com/ctsc/schema/0.1.0"
+        }
+      ],
+      "schemaUrl": "https://example.com/ctsc/schema/0.1.0"
+    }
+  ]
+}

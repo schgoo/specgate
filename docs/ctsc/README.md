@@ -17,15 +17,15 @@ This directory contains the **0.1 draft**:
   for modular registry documents.
 - [`corpus/registry/valid/order-pricing.registry.json`](corpus/registry/valid/order-pricing.registry.json)
   — registry example.
-- [`corpus/trace/valid/sequential.otlp.jsonl`](corpus/trace/valid/sequential.otlp.jsonl) — sequential
+- [`corpus/trace/valid/sequential.otlp.json`](corpus/trace/valid/sequential.otlp.json) — sequential
   run/scenario/operation example.
-- [`corpus/trace/valid/parallel.otlp.jsonl`](corpus/trace/valid/parallel.otlp.jsonl) — explicit
+- [`corpus/trace/valid/parallel.otlp.json`](corpus/trace/valid/parallel.otlp.json) — explicit
   parallel-region example.
-- [`corpus/trace/valid/supervisor-fault.otlp.jsonl`](corpus/trace/valid/supervisor-fault.otlp.jsonl)
+- [`corpus/trace/valid/supervisor-fault.otlp.json`](corpus/trace/valid/supervisor-fault.otlp.json)
   — target-process failure recorded by a surviving supervisor.
-- [`corpus/trace/valid/unit.otlp.jsonl`](corpus/trace/valid/unit.otlp.jsonl) — successful operation
+- [`corpus/trace/valid/unit.otlp.json`](corpus/trace/valid/unit.otlp.json) — successful operation
   completion without a value channel.
-- [`corpus/trace/valid/outcomes.otlp.jsonl`](corpus/trace/valid/outcomes.otlp.jsonl) — empty and
+- [`corpus/trace/valid/outcomes.otlp.json`](corpus/trace/valid/outcomes.otlp.json) — empty and
   declared-error operation outcomes.
 
 CTSC defines three conformance levels:
@@ -52,10 +52,10 @@ corpus/
 └── full/
     ├── valid/
     │   ├── registry.json
-    │   └── trace.otlp.jsonl
+    │   └── trace.otlp.json
     └── invalid/
         ├── registry-expects-i64.json
-        └── trace-returns-string.otlp.jsonl
+        └── trace-returns-string.otlp.json
 ```
 
 The Full corpus pairs are self-contained copies of a registry and trace. The
@@ -67,7 +67,7 @@ Validate the Full pairs directly:
 
 ```powershell
 python docs\ctsc\validate.py full `
-  docs\ctsc\corpus\full\valid\trace.otlp.jsonl `
+  docs\ctsc\corpus\full\valid\trace.otlp.json `
   docs\ctsc\corpus\full\valid\registry.json
 ```
 
@@ -83,8 +83,8 @@ Validate individual documents:
 
 ```powershell
 python docs\ctsc\validate.py registry registry.json
-python docs\ctsc\validate.py trace traces.otlp.jsonl
-python docs\ctsc\validate.py full traces.otlp.jsonl registry.json
+python docs\ctsc\validate.py trace traces.otlp.json
+python docs\ctsc\validate.py full traces.otlp.json registry.json
 ```
 
 The convenience validator checks registry schema and local references, official
