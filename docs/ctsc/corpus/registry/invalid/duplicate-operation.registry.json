@@ -1,0 +1,25 @@
+{
+  "format": "ctsc.registry",
+  "formatVersion": "0.1.0",
+  "registryId": "urn:ctsc:registry:invalid.duplicate-operation:1",
+  "components": [
+    {
+      "id": "invalid.duplicate-operation",
+      "operations": [
+        {
+          "name": "read",
+          "inputs": [],
+          "observations": [],
+          "outcomes": {}
+        },
+        {
+          "name": "read",
+          "inputs": [],
+          "observations": [],
+          "outcomes": {}
+        }
+      ],
+      "types": []
+    }
+  ]
+}

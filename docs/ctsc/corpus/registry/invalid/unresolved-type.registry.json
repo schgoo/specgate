@@ -1,0 +1,21 @@
+{
+  "format": "ctsc.registry",
+  "formatVersion": "0.1.0",
+  "registryId": "urn:ctsc:registry:invalid.unresolved:1",
+  "components": [
+    {
+      "id": "invalid.unresolved",
+      "operations": [
+        {
+          "name": "read",
+          "inputs": [],
+          "observations": [],
+          "outcomes": {
+            "result": { "kind": "named", "name": "MissingType" }
+          }
+        }
+      ],
+      "types": []
+    }
+  ]
+}

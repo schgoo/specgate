@@ -1,0 +1,318 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/ctsc/schema/ctsc-registry-0.1.schema.json",
+  "title": "CTSC Registry 0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "formatVersion", "registryId", "components"],
+  "properties": {
+    "format": { "const": "ctsc.registry" },
+    "formatVersion": { "const": "0.1.0" },
+    "registryId": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "imports": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/import" },
+      "default": []
+    },
+    "components": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/component" }
+    },
+    "extensions": { "$ref": "#/$defs/extensions" }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "extensions": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z0-9_-]+)+$"
+      },
+      "additionalProperties": true
+    },
+    "import": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["registryId", "digest"],
+      "properties": {
+        "registryId": { "type": "string", "minLength": 1 },
+        "digest": { "$ref": "#/$defs/digest" },
+        "uri": { "type": "string", "minLength": 1 }
+      }
+    },
+    "componentRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["componentId"],
+      "properties": {
+        "componentId": { "type": "string", "minLength": 1 },
+        "registryId": { "type": "string", "minLength": 1 },
+        "required": { "type": "boolean", "default": true }
+      }
+    },
+    "component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "operations", "types"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "dependencies": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/componentRef" },
+          "default": []
+        },
+        "operations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/operation" }
+        },
+        "types": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/namedType" }
+        },
+        "extensions": { "$ref": "#/$defs/extensions" }
+      }
+    },
+    "namedValue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "type"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "type": { "$ref": "#/$defs/typeRef" },
+        "description": { "type": "string" }
+      }
+    },
+    "operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "inputs", "observations", "outcomes"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "inputs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/namedValue" }
+        },
+        "observations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "type"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "type": { "$ref": "#/$defs/typeRef" },
+              "description": { "type": "string" }
+            }
+          }
+        },
+        "outcomes": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "result": { "$ref": "#/$defs/resultTypeRef" },
+            "empty": { "type": "boolean", "default": false },
+            "errors": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/errorOutcome" },
+              "default": []
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "required": ["empty"],
+                "properties": { "empty": { "const": true } }
+              },
+              "then": {
+                "required": ["result"]
+              }
+            }
+          ]
+        },
+        "extensions": { "$ref": "#/$defs/extensions" }
+      }
+    },
+    "errorOutcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "type": { "$ref": "#/$defs/typeRef" },
+        "description": { "type": "string" }
+      }
+    },
+    "field": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "type"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "type": { "$ref": "#/$defs/typeRef" },
+        "description": { "type": "string" }
+      }
+    },
+    "variant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "payload": { "$ref": "#/$defs/typeRef" },
+        "description": { "type": "string" }
+      }
+    },
+    "namedType": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "kind", "fields"],
+          "properties": {
+            "name": { "type": "string", "minLength": 1 },
+            "kind": { "const": "record" },
+            "fields": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/field" }
+            },
+            "description": { "type": "string" },
+            "extensions": { "$ref": "#/$defs/extensions" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "kind", "variants"],
+          "properties": {
+            "name": { "type": "string", "minLength": 1 },
+            "kind": { "const": "tagged_union" },
+            "variants": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/variant" }
+            },
+            "description": { "type": "string" },
+            "extensions": { "$ref": "#/$defs/extensions" }
+          }
+        }
+      ]
+    },
+    "typeRef": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "name"],
+          "properties": {
+            "kind": { "const": "primitive" },
+            "name": {
+              "enum": [
+                "unit",
+                "string",
+                "bool",
+                "i32",
+                "i64",
+                "u32",
+                "u64",
+                "f32",
+                "f64",
+                "bytes"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "name"],
+          "dependentRequired": {
+            "registryId": ["componentId"]
+          },
+          "properties": {
+            "kind": { "const": "named" },
+            "name": { "type": "string", "minLength": 1 },
+            "componentId": { "type": "string", "minLength": 1 },
+            "registryId": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "items"],
+          "properties": {
+            "kind": { "enum": ["list", "set"] },
+            "items": { "$ref": "#/$defs/typeRef" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "keys", "values"],
+          "properties": {
+            "kind": { "const": "map" },
+            "keys": { "$ref": "#/$defs/typeRef" },
+            "values": { "$ref": "#/$defs/typeRef" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "items"],
+          "properties": {
+            "kind": { "const": "tuple" },
+            "items": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/typeRef" }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "fields"],
+          "properties": {
+            "kind": { "const": "record" },
+            "fields": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/field" }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "variants"],
+          "properties": {
+            "kind": { "const": "tagged_union" },
+            "variants": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/variant" }
+            }
+          }
+        }
+      ]
+    },
+    "resultTypeRef": {
+      "allOf": [
+        { "$ref": "#/$defs/typeRef" },
+        {
+          "not": {
+            "type": "object",
+            "required": ["kind", "name"],
+            "properties": {
+              "kind": { "const": "primitive" },
+              "name": { "const": "unit" }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

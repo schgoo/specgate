@@ -9,6 +9,10 @@ obj/
 target/
 coverage*.json
 
+# Python
+__pycache__/
+*.py[cod]
+
 # Standalone Part B fixture is built in-place by `extract --cases`; its lock is
 # a regenerated build artifact, not source.
 /test/rust/crates/specgate-cases-fixture/Cargo.lock

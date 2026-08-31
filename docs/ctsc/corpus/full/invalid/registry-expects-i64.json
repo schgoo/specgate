@@ -1,0 +1,21 @@
+{
+  "format": "ctsc.registry",
+  "formatVersion": "0.1.0",
+  "registryId": "urn:ctsc:registry:invalid.result-type:1",
+  "components": [
+    {
+      "id": "example.answer",
+      "operations": [
+        {
+          "name": "answer",
+          "inputs": [],
+          "observations": [],
+          "outcomes": {
+            "result": { "kind": "primitive", "name": "i64" }
+          }
+        }
+      ],
+      "types": []
+    }
+  ]
+}

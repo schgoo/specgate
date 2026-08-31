@@ -1,0 +1,2 @@
+jsonschema>=4,<5
+opentelemetry-proto>=1,<2

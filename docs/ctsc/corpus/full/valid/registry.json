@@ -1,0 +1,122 @@
+{
+  "format": "ctsc.registry",
+  "formatVersion": "0.1.0",
+  "registryId": "urn:ctsc:registry:example.order-pricing:1",
+  "description": "Order-pricing component used by the CTSC golden traces.",
+  "components": [
+    {
+      "id": "example.order-pricing",
+      "operations": [
+        {
+          "name": "price_order",
+          "inputs": [
+            {
+              "name": "lines",
+              "type": {
+                "kind": "list",
+                "items": { "kind": "named", "name": "OrderLine" }
+              }
+            },
+            {
+              "name": "customer_tier",
+              "type": { "kind": "named", "name": "CustomerTier" }
+            },
+            {
+              "name": "shipping_region",
+              "type": { "kind": "named", "name": "ShippingRegion" }
+            },
+            {
+              "name": "coupon",
+              "type": {
+                "kind": "tagged_union",
+                "variants": [
+                  {
+                    "name": "Some",
+                    "payload": { "kind": "primitive", "name": "string" }
+                  },
+                  { "name": "None" }
+                ]
+              }
+            }
+          ],
+          "observations": [
+            {
+              "name": "subtotal_cents",
+              "type": { "kind": "primitive", "name": "i64" }
+            },
+            {
+              "name": "discount_cents",
+              "type": { "kind": "primitive", "name": "i64" }
+            }
+          ],
+          "outcomes": {
+            "result": { "kind": "named", "name": "PriceQuote" }
+          }
+        }
+      ],
+      "types": [
+        {
+          "name": "OrderLine",
+          "kind": "record",
+          "fields": [
+            {
+              "name": "sku",
+              "type": { "kind": "primitive", "name": "string" }
+            },
+            {
+              "name": "quantity",
+              "type": { "kind": "primitive", "name": "i32" }
+            },
+            {
+              "name": "unit_price_cents",
+              "type": { "kind": "primitive", "name": "i64" }
+            }
+          ]
+        },
+        {
+          "name": "CustomerTier",
+          "kind": "tagged_union",
+          "variants": [
+            { "name": "Standard" },
+            { "name": "Silver" },
+            { "name": "Gold" }
+          ]
+        },
+        {
+          "name": "ShippingRegion",
+          "kind": "tagged_union",
+          "variants": [
+            { "name": "Domestic" },
+            { "name": "International" }
+          ]
+        },
+        {
+          "name": "PriceQuote",
+          "kind": "record",
+          "fields": [
+            {
+              "name": "subtotal_cents",
+              "type": { "kind": "primitive", "name": "i64" }
+            },
+            {
+              "name": "discount_cents",
+              "type": { "kind": "primitive", "name": "i64" }
+            },
+            {
+              "name": "shipping_cents",
+              "type": { "kind": "primitive", "name": "i64" }
+            },
+            {
+              "name": "tax_cents",
+              "type": { "kind": "primitive", "name": "i64" }
+            },
+            {
+              "name": "total_cents",
+              "type": { "kind": "primitive", "name": "i64" }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
