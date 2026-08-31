@@ -132,12 +132,17 @@ according to Section 8.
 
 ### 5.3 Lists and sets
 
+Lists are ordered collections. Item position is part of the declared value
+semantics.
+
 ```json
 {
   "kind": "list",
   "items": { "kind": "primitive", "name": "string" }
 }
 ```
+
+Sets are unordered, duplicate-free collections.
 
 ```json
 {
@@ -157,6 +162,8 @@ according to Section 8.
 ```
 
 ### 5.5 Tuple
+
+Tuples are ordered, fixed-arity values. Each position has its own declared type.
 
 ```json
 {

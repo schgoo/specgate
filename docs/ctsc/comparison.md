@@ -67,6 +67,7 @@ A policy MUST define:
 | Event ordering | Must event-array order match? |
 | Presence | Are additional/missing scenarios, operations, observations, or results allowed? |
 | Values | Which values require exact equality, projection, coercion, or custom matching? |
+| Collections | Does the policy preserve or explicitly relax declared list, tuple, set, and map semantics? |
 | Floating point | Exact, absolute tolerance, relative tolerance, or another policy? |
 | Faults | Which fault fields participate in equality? |
 | Parallel regions | How are unordered branches paired? |
@@ -165,10 +166,14 @@ Linked values additionally use registry semantics:
 
 - records require the same declared fields;
 - tagged unions require the same variant and equivalent payload;
+- lists compare by position;
 - tuples compare by position;
 - sets compare as unordered duplicate-free collections;
 - maps compare as unordered key/value collections;
 - integer widths and ranges must be valid.
+
+Custom policies MAY relax collection equality, such as treating a list as
+unordered, but MUST declare that deviation from the registry type semantics.
 
 The Strict policy compares valid floating-point values exactly. Other policies
 may define tolerance.

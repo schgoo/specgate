@@ -321,7 +321,20 @@ Every CTSC `AnyValue` MUST select one concrete OTLP value variant. An unset
 | unit | empty `kvlistValue` |
 | tagged union | single-key `kvlistValue` |
 
-### 8.1 Maps
+### 8.1 Lists, sets, and tuples
+
+Lists and tuples use `arrayValue`. Producers MUST preserve their logical item
+order. Reordering list or tuple items changes the value.
+
+Sets also use `arrayValue`, but item order is not semantic and duplicate values
+are invalid under Linked validation. Producers SHOULD emit sets in a stable
+order to improve Trace Core interoperability.
+
+A source collection with no meaningful order SHOULD be projected as a set. If
+it is projected as a list, the producer MUST define and preserve a deterministic
+logical order.
+
+### 8.2 Maps
 
 A string-keyed map uses `kvlistValue`; keys MUST be unique and order is
 insignificant.
@@ -343,7 +356,7 @@ and keys MUST be unique. Trace Core treats this encoding as an ordered array.
 Producers SHOULD emit non-string-keyed map entries in a stable order to improve
 Trace Core interoperability.
 
-### 8.2 Integers
+### 8.3 Integers
 
 | Registry type | Wire representation | Valid range |
 |---|---|---|
@@ -356,7 +369,7 @@ A `u64` string contains only ASCII decimal digits and uses the shortest
 representation. Leading zeroes are prohibited except for `"0"`. Signs,
 whitespace, separators, decimal points, and exponent notation are invalid.
 
-### 8.3 Floating point
+### 8.4 Floating point
 
 Registry `f32` and `f64` values use `doubleValue`.
 
@@ -365,7 +378,7 @@ accepts any finite IEEE 754 binary64 value. Non-finite values are invalid CTSC.
 
 Floating-point equality and tolerance belong to comparison policy.
 
-### 8.4 Unit and tagged unions
+### 8.5 Unit and tagged unions
 
 Unit uses an empty `kvlistValue`.
 
@@ -376,10 +389,7 @@ Variant names do not alter encoding or operation-completion rules. A tagged
 union remains a value unless the producer's operation-outcome mapping selects a
 completion state before encoding the payload.
 
-Producers SHOULD emit sets in a stable order to improve Trace Core
-interoperability.
-
-### 8.5 Linked type validation
+### 8.6 Linked type validation
 
 Every value validated in Linked mode has a concrete CTSC registry type.
 Third-party or unannotated source values are projected onto CTSC primitives,
