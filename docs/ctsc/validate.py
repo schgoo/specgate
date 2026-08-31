@@ -12,6 +12,7 @@ import struct
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 try:
     import jsonschema
@@ -188,7 +189,12 @@ def unique_names(
         seen.add(name)
 
 
-def validate_registry_semantics(document: dict[str, Any], validator: Validator) -> None:
+def validate_registry_semantics(
+    document: dict[str, Any],
+    validator: Validator,
+    resolved_imports: dict[str, dict[str, Any]] | None = None,
+) -> None:
+    resolved_imports = resolved_imports or {}
     imports = document.get("imports", [])
     unique_names(imports, "$.imports", validator, "registryId")
     components = document.get("components", [])
@@ -226,7 +232,11 @@ def validate_registry_semantics(document: dict[str, Any], validator: Validator) 
             component_id = reference.get("componentId")
             name = reference.get("name")
             if registry_id is not None:
-                if not any(item.get("registryId") == registry_id for item in imports):
+                matching_import = next(
+                    (item for item in imports if item.get("registryId") == registry_id),
+                    None,
+                )
+                if matching_import is None:
                     validator.error(reference_location, f"unknown imported registry {registry_id!r}")
                 if not any(
                     dependency.get("registryId") == registry_id
@@ -234,6 +244,34 @@ def validate_registry_semantics(document: dict[str, Any], validator: Validator) 
                     for dependency in dependencies
                 ):
                     validator.error(reference_location, "missing matching component dependency")
+                imported = resolved_imports.get(registry_id)
+                if imported is None:
+                    validator.error(
+                        reference_location,
+                        f"imported registry {registry_id!r} is not locally resolved",
+                    )
+                else:
+                    imported_component = next(
+                        (
+                            item
+                            for item in imported.get("components", [])
+                            if item.get("id") == component_id
+                        ),
+                        None,
+                    )
+                    if imported_component is None:
+                        validator.error(
+                            reference_location,
+                            f"unknown imported component {component_id!r}",
+                        )
+                    elif name not in {
+                        item.get("name")
+                        for item in imported_component.get("types", [])
+                    }:
+                        validator.error(
+                            reference_location,
+                            f"unknown imported named type {name!r}",
+                        )
             elif component_id is not None:
                 target = local_components.get(component_id)
                 if target is None:
@@ -383,13 +421,17 @@ def validate_value_type(
         return
 
     if kind == "named":
-        if type_ref.get("registryId") is not None:
-            validator.error(location, "imported named types are not supported by this validator")
-            return
         component_id = type_ref.get("componentId", current_component)
         component = components.get(component_id)
         if component is None:
             validator.error(location, f"unknown component {component_id!r}")
+            return
+        registry_id = type_ref.get("registryId")
+        if registry_id is not None and component.get("__registryId") != registry_id:
+            validator.error(
+                location,
+                f"component {component_id!r} does not belong to registry {registry_id!r}",
+            )
             return
         definition = next(
             (item for item in component["types"] if item["name"] == type_ref["name"]),
@@ -408,6 +450,7 @@ def validate_value_type(
             validator.error(location, f"{kind} must use arrayValue")
             return
         items = value["arrayValue"].get("values", [])
+        errors_before = len(validator.errors)
         for index, item in enumerate(items):
             validate_value_type(
                 item,
@@ -417,7 +460,7 @@ def validate_value_type(
                 f"{location}[{index}]",
                 validator,
             )
-        if kind == "set":
+        if kind == "set" and len(validator.errors) == errors_before:
             canonical = [
                 canonical_typed_value(
                     item, type_ref["items"], current_component, components
@@ -520,6 +563,7 @@ def validate_value_type(
             if entries is None or set(entries) != {"key", "value"}:
                 validator.error(entry_location, "map entry must contain key and value")
                 continue
+            key_errors_before = len(validator.errors)
             validate_value_type(
                 entries["key"],
                 key_type,
@@ -528,12 +572,13 @@ def validate_value_type(
                 f"{entry_location}.key",
                 validator,
             )
-            canonical_key = canonical_typed_value(
-                entries["key"], key_type, current_component, components
-            )
-            if canonical_key in seen_keys:
-                validator.error(location, "map contains duplicate keys")
-            seen_keys.add(canonical_key)
+            if len(validator.errors) == key_errors_before:
+                canonical_key = canonical_typed_value(
+                    entries["key"], key_type, current_component, components
+                )
+                if canonical_key in seen_keys:
+                    validator.error(location, "map contains duplicate keys")
+                seen_keys.add(canonical_key)
             validate_value_type(
                 entries["value"],
                 value_type,
@@ -552,8 +597,6 @@ def canonical_typed_value(
 ) -> Any:
     kind = type_ref["kind"]
     if kind == "named":
-        if type_ref.get("registryId") is not None:
-            return ("external", json.dumps(value, sort_keys=True, separators=(",", ":")))
         component_id = type_ref.get("componentId", current_component)
         component = components[component_id]
         definition = next(
@@ -655,27 +698,143 @@ def canonical_typed_value(
     raise ValueError(f"unsupported registry type kind {kind!r}")
 
 
-def validate_registry(path: Path) -> tuple[dict[str, Any] | None, Validator]:
-    validator = Validator()
+def file_import_path(base: Path, uri: str) -> Path | None:
+    parsed = urlparse(uri)
+    if parsed.scheme != "file":
+        return None
+    raw = unquote(parsed.path)
+    if parsed.netloc:
+        raw = f"//{parsed.netloc}{raw}"
+    elif re.match(r"^/[A-Za-z]:/", raw):
+        raw = raw[1:]
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        candidate = base.parent / candidate
+    return candidate.resolve()
+
+
+def load_registry_document(
+    path: Path,
+    validator: Validator,
+    documents_by_path: dict[Path, dict[str, Any]],
+    documents_by_id: dict[str, tuple[dict[str, Any], Path]],
+    visiting: set[Path],
+) -> dict[str, Any] | None:
+    path = path.resolve()
+    if path in documents_by_path:
+        return documents_by_path[path]
+    if path in visiting:
+        validator.error(str(path), "registry import cycle")
+        return None
+    visiting.add(path)
     try:
         document = load_json(path)
         schema = load_json(Path(__file__).with_name("ctsc-registry-0.1.schema.json"))
         jsonschema.Draft202012Validator.check_schema(schema)
         schema_errors = list(jsonschema.Draft202012Validator(schema).iter_errors(document))
         for error in schema_errors:
-            location = "$" + "".join(
+            location = f"{path}:$" + "".join(
                 f"[{part}]" if isinstance(part, int) else f".{part}"
                 for part in error.absolute_path
             )
             validator.error(location, error.message)
-        if isinstance(document, dict) and not schema_errors:
-            validate_registry_semantics(document, validator)
-        else:
-            if not isinstance(document, dict):
-                validator.error("$", "registry document must be an object")
+        if not isinstance(document, dict):
+            validator.error(str(path), "registry document must be an object")
+            return None
+        if schema_errors:
+            return document
+
+        registry_id = document["registryId"]
+        existing = documents_by_id.get(registry_id)
+        if existing is not None and existing[1] != path:
+            validator.error(
+                str(path),
+                f"registry ID {registry_id!r} also resolves to {existing[1]}",
+            )
+
+        documents_by_path[path] = document
+        documents_by_id[registry_id] = (document, path)
+
+        resolved_imports: dict[str, dict[str, Any]] = {}
+        for index, imported in enumerate(document.get("imports", [])):
+            uri = imported.get("uri")
+            if not isinstance(uri, str):
+                continue
+            imported_path = file_import_path(path, uri)
+            if imported_path is None:
+                continue
+            child = load_registry_document(
+                imported_path,
+                validator,
+                documents_by_path,
+                documents_by_id,
+                visiting,
+            )
+            if child is None:
+                continue
+            location = f"{path}:$.imports[{index}]"
+            validator.require(
+                child.get("registryId") == imported["registryId"],
+                location,
+                "imported registry ID does not match referenced registry ID",
+            )
+            validator.require(
+                child.get("version") == imported["version"],
+                location,
+                "imported registry version does not match referenced version",
+            )
+            digest = "sha256:" + hashlib.sha256(imported_path.read_bytes()).hexdigest()
+            validator.require(
+                digest == imported["digest"],
+                location,
+                "imported registry digest does not match exact file bytes",
+            )
+            resolved_imports[imported["registryId"]] = child
+
+        validate_registry_semantics(document, validator, resolved_imports)
+        return document
     except (ValueError, jsonschema.SchemaError) as error:
         validator.error(str(path), str(error))
-        document = None
+        return None
+    finally:
+        visiting.discard(path)
+
+
+def validate_registry_set(
+    path: Path,
+) -> tuple[
+    dict[str, Any] | None,
+    dict[str, tuple[dict[str, Any], Path]],
+    Validator,
+]:
+    validator = Validator()
+    documents_by_path: dict[Path, dict[str, Any]] = {}
+    documents_by_id: dict[str, tuple[dict[str, Any], Path]] = {}
+    document = load_registry_document(
+        path,
+        validator,
+        documents_by_path,
+        documents_by_id,
+        set(),
+    )
+
+    component_owners: dict[str, str] = {}
+    for registry_id, (registry, _) in documents_by_id.items():
+        for component in registry.get("components", []):
+            component_id = component["id"]
+            owner = component_owners.get(component_id)
+            if owner is not None and owner != registry_id:
+                validator.error(
+                    str(path),
+                    f"component ID {component_id!r} exists in both {owner!r} and {registry_id!r}",
+                )
+            component_owners[component_id] = registry_id
+
+    return document, documents_by_id, validator
+
+
+def validate_registry(path: Path) -> tuple[dict[str, Any] | None, Validator]:
+    document, _, validator = validate_registry_set(path)
     return document, validator
 
 
@@ -736,8 +895,22 @@ def validate_event(
             location,
             "fault must belong to a run, scenario, or operation span",
         )
-        for key in ("conformance.fault.type", "conformance.fault.observer"):
-            string_attribute(attributes, key, location, validator)
+        string_attribute(attributes, "conformance.fault.type", location, validator)
+        observer = string_attribute(
+            attributes, "conformance.fault.observer", location, validator
+        )
+        if observer == "target":
+            validator.require(
+                span_name == "conformance.operation",
+                location,
+                "target fault must belong to an operation span",
+            )
+        elif observer == "supervisor":
+            validator.require(
+                span_name in {"conformance.run", "conformance.scenario"},
+                location,
+                "supervisor fault must belong to a run or scenario span",
+            )
         for key in ("conformance.fault.message", "conformance.fault.native_type"):
             string_attribute(attributes, key, location, validator, required=False)
 
@@ -770,6 +943,9 @@ def validate_trace(path: Path) -> tuple[list[dict[str, Any]], Validator]:
                 validator.error(f"{path}:{line_number}", f"invalid JSON: {error}")
 
     for location, batch in documents:
+        if not isinstance(batch, dict):
+            validator.error(location, "OTLP TracesData must be a JSON object")
+            continue
         try:
             ParseDict(batch, TracesData())
             batches.append(batch)
@@ -787,9 +963,38 @@ def validate_trace(path: Path) -> tuple[list[dict[str, Any]], Validator]:
                     "resourceSpans item must be an object",
                 )
                 continue
-            resource_location = (
-                f"$[{batch_index}].resourceSpans[{resource_index}].resource"
+            resource_span_location = (
+                f"$[{batch_index}].resourceSpans[{resource_index}]"
             )
+            resource_location = (
+                f"{resource_span_location}.resource"
+            )
+            resource_ctsc_spans: list[tuple[dict[str, Any], str]] = []
+            for scope_index, scope_spans in enumerate(
+                list_field(
+                    resource_spans,
+                    "scopeSpans",
+                    resource_span_location,
+                    validator,
+                )
+            ):
+                scope_location = f"{resource_span_location}.scopeSpans[{scope_index}]"
+                if not isinstance(scope_spans, dict):
+                    validator.error(scope_location, "scopeSpans item must be an object")
+                    continue
+                for span_index, span in enumerate(
+                    list_field(scope_spans, "spans", scope_location, validator)
+                ):
+                    span_location = f"{scope_location}.spans[{span_index}]"
+                    if not isinstance(span, dict):
+                        validator.error(span_location, "span must be an object")
+                        continue
+                    if span.get("name") in CTSC_SPANS:
+                        resource_ctsc_spans.append((span, span_location))
+
+            if not resource_ctsc_spans:
+                continue
+
             resource = resource_spans.get("resource") or {}
             if not isinstance(resource, dict):
                 validator.error(resource_location, "resource must be an object")
@@ -807,38 +1012,10 @@ def validate_trace(path: Path) -> tuple[list[dict[str, Any]], Validator]:
                         resource_location,
                         "conformance.version must be '0.1.0'",
                     )
-            for scope_index, scope_spans in enumerate(
-                list_field(resource_spans, "scopeSpans", resource_location, validator)
-            ):
-                if not isinstance(scope_spans, dict):
-                    validator.error(
-                        f"{resource_location}.scopeSpans[{scope_index}]",
-                        "scopeSpans item must be an object",
-                    )
-                    continue
-                for span_index, span in enumerate(
-                    list_field(
-                        scope_spans,
-                        "spans",
-                        f"{resource_location}.scopeSpans[{scope_index}]",
-                        validator,
-                    )
-                ):
-                    if not isinstance(span, dict):
-                        validator.error(
-                            f"{resource_location}.scopeSpans[{scope_index}].spans[{span_index}]",
-                            "span must be an object",
-                        )
-                        continue
-                    if span.get("name") in CTSC_SPANS:
-                        spans.append(
-                            (
-                                span,
-                                resource_attributes,
-                                f"$[{batch_index}].resourceSpans[{resource_index}]"
-                                f".scopeSpans[{scope_index}].spans[{span_index}]",
-                            )
-                        )
+            spans.extend(
+                (span, resource_attributes, span_location)
+                for span, span_location in resource_ctsc_spans
+            )
 
     validator.require(bool(spans), str(path), "trace contains no CTSC spans")
 
@@ -923,7 +1100,7 @@ def validate_trace(path: Path) -> tuple[list[dict[str, Any]], Validator]:
             )
 
         event_names: list[str] = []
-        result_names: list[str | None] = []
+        result_count = 0
         for event_index, event in enumerate(
             list_field(span, "events", location, validator)
         ):
@@ -939,20 +1116,7 @@ def validate_trace(path: Path) -> tuple[list[dict[str, Any]], Validator]:
             event_name = event.get("name")
             event_names.append(event_name)
             if event_name == "conformance.result":
-                event_attributes = attribute_map(
-                    event.get("attributes", []),
-                    f"{location}.events[{event_index}]",
-                    validator,
-                )
-                result_names.append(
-                    string_attribute(
-                        event_attributes,
-                        "conformance.result.name",
-                        f"{location}.events[{event_index}]",
-                        validator,
-                        required=False,
-                    )
-                )
+                result_count += 1
         if name == "conformance.operation":
             non_result_terminal = sum(
                 event_name
@@ -965,20 +1129,14 @@ def validate_trace(path: Path) -> tuple[list[dict[str, Any]], Validator]:
                 "operation must not contain multiple non-result completion/failure events",
             )
             validator.require(
-                not (result_names and non_result_terminal),
+                not (result_count and non_result_terminal),
                 location,
                 "result events cannot be combined with another completion/failure event",
             )
             validator.require(
-                result_names.count(None) <= 1,
+                result_count <= 1,
                 location,
-                "operation may contain at most one unnamed result",
-            )
-            named_results = [result_name for result_name in result_names if result_name]
-            validator.require(
-                len(named_results) == len(set(named_results)),
-                location,
-                "named results must be unique within an operation",
+                "operation may contain at most one result event",
             )
             if "conformance.error" in event_names or "conformance.fault" in event_names:
                 validator.require(
@@ -998,8 +1156,10 @@ def validate_trace(path: Path) -> tuple[list[dict[str, Any]], Validator]:
     return batches, validator
 
 
-def validate_full(trace_path: Path, registry_path: Path) -> Validator:
-    document, registry_validation = validate_registry(registry_path)
+def validate_linked(trace_path: Path, registry_path: Path) -> Validator:
+    document, registry_documents, registry_validation = validate_registry_set(
+        registry_path
+    )
     batches, trace_validation = validate_trace(trace_path)
     validator = Validator()
     validator.errors.extend(registry_validation.errors)
@@ -1008,11 +1168,24 @@ def validate_full(trace_path: Path, registry_path: Path) -> Validator:
         return validator
 
     expected_digest = "sha256:" + hashlib.sha256(registry_path.read_bytes()).hexdigest()
-    components = {component["id"]: component for component in document["components"]}
+    components: dict[str, dict[str, Any]] = {}
+    for registry_id, (registry, _) in registry_documents.items():
+        for component in registry["components"]:
+            resolved_component = dict(component)
+            resolved_component["__registryId"] = registry_id
+            components[component["id"]] = resolved_component
 
     for batch_index, batch in enumerate(batches):
         for resource_index, resource_spans in enumerate(batch.get("resourceSpans") or []):
             location = f"$[{batch_index}].resourceSpans[{resource_index}]"
+            has_ctsc_spans = any(
+                span.get("name") in CTSC_SPANS
+                for scope in resource_spans.get("scopeSpans") or []
+                for span in scope.get("spans") or []
+                if isinstance(span, dict)
+            )
+            if not has_ctsc_spans:
+                continue
             resource = resource_spans.get("resource") or {}
             resource_attributes = attribute_map(
                 resource.get("attributes", []),
@@ -1022,6 +1195,12 @@ def validate_full(trace_path: Path, registry_path: Path) -> Validator:
             registry_id = string_attribute(
                 resource_attributes, "conformance.registry.id", location, validator
             )
+            registry_version = string_attribute(
+                resource_attributes,
+                "conformance.registry.version",
+                location,
+                validator,
+            )
             digest = string_attribute(
                 resource_attributes, "conformance.registry.digest", location, validator
             )
@@ -1029,6 +1208,11 @@ def validate_full(trace_path: Path, registry_path: Path) -> Validator:
                 registry_id == document["registryId"],
                 location,
                 "trace registry ID does not match registry document",
+            )
+            validator.require(
+                registry_version == document["version"],
+                location,
+                "trace registry version does not match registry document",
             )
             validator.require(
                 digest == expected_digest,
@@ -1228,9 +1412,9 @@ def main() -> int:
     trace_parser = subparsers.add_parser("trace")
     trace_parser.add_argument("path", type=Path)
 
-    full_parser = subparsers.add_parser("full")
-    full_parser.add_argument("trace", type=Path)
-    full_parser.add_argument("registry", type=Path)
+    linked_parser = subparsers.add_parser("linked")
+    linked_parser.add_argument("trace", type=Path)
+    linked_parser.add_argument("registry", type=Path)
 
     args = parser.parse_args()
 
@@ -1240,8 +1424,8 @@ def main() -> int:
     if args.command == "trace":
         _, result = validate_trace(args.path)
         return 0 if print_result(str(args.path), result) else 1
-    if args.command == "full":
-        result = validate_full(args.trace, args.registry)
+    if args.command == "linked":
+        result = validate_linked(args.trace, args.registry)
         return 0 if print_result(str(args.trace), result) else 1
     return 2
 

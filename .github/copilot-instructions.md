@@ -7,6 +7,15 @@
 This runs: build → test → clippy → format-check → deny → validate → readme-check.
 Do not push code that fails `just check`.
 
+## Line Endings
+
+**Use LF line endings for all source, documentation, specs, schemas, and
+generated text artifacts.**
+
+Normalize every new or edited text file before finishing and verify touched
+files contain no CRLF. Follow the explicit `.gitattributes` exceptions for
+Windows-native script formats.
+
 ## Implementation Rule
 
 **All implementation changes must go through the spec implementation skill.**

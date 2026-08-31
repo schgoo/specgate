@@ -2,6 +2,7 @@
   "format": "ctsc.registry",
   "formatVersion": "0.1.0",
   "registryId": "urn:ctsc:registry:invalid.duplicate-operation:1",
+  "version": "1.0.0",
   "components": [
     {
       "id": "invalid.duplicate-operation",

@@ -46,9 +46,15 @@
             }
           },
           {
+            "key": "conformance.registry.version",
+            "value": {
+              "stringValue": "1.0.0"
+            }
+          },
+          {
             "key": "conformance.registry.digest",
             "value": {
-              "stringValue": "sha256:ea4a414e1c1255b5ceddad619552f21c977af73643d7ca20746f4883ec278dac"
+              "stringValue": "sha256:f83aa6049f54fd995a48a1641294372ad190c3aca3a6dff03adbc6df96b31fdb"
             }
           },
           {
@@ -115,7 +121,27 @@
               ],
               "status": {
                 "code": 1
-              }
+              },
+              "events": [
+                {
+                  "timeUnixNano": "1000003000",
+                  "name": "conformance.observation",
+                  "attributes": [
+                    {
+                      "key": "conformance.observation.name",
+                      "value": {
+                        "stringValue": "subtotal_cents"
+                      }
+                    },
+                    {
+                      "key": "conformance.observation.value",
+                      "value": {
+                        "intValue": "15000"
+                      }
+                    }
+                  ]
+                }
+              ]
             },
             {
               "traceId": "11111111111111111111111111111111",
@@ -303,7 +329,7 @@
                             {
                               "key": "subtotal_cents",
                               "value": {
-                                "stringValue": "15000"
+                                "intValue": "15000"
                               }
                             },
                             {

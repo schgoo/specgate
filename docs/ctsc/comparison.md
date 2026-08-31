@@ -4,171 +4,232 @@
 
 ## 1. Scope
 
-This document defines how a CTSC comparator validates, normalizes, pairs, and
-compares two or more CTSC traces. It is separate from the producer conventions:
-a tool may emit conforming CTSC traces without implementing this algorithm.
+CTSC defines trace and registry interchange. It does not require every
+comparator to use one equality algorithm.
 
-CTSC 0.1 does not specify portable pairing for duplicate parallel branches.
-Comparators MUST document their behavior for those traces.
+This document defines:
 
-## 2. Input validation
+- the semantic information available to comparison policies;
+- the policy decisions a comparator must declare;
+- requirements for deterministic and explainable results;
+- an optional CTSC Strict reference policy.
 
-A comparator MUST:
+A producer may emit conforming CTSC artifacts without implementing comparison.
+A comparator may implement one or more policies.
 
-1. decode the OTLP JSON document or every OTLP JSONL batch;
-2. group spans by trace ID;
-3. reconstruct parent/child relationships by span ID;
-4. identify CTSC spans by their fixed names;
-5. reject malformed CTSC hierarchy;
-6. reject missing required CTSC attributes;
-7. reject duplicate keys in values interpreted as maps or records;
-8. reject CTSC spans or events with nonzero dropped-data counters;
-9. reject an `AnyValue` with no selected value;
-10. reject incomplete or partially exported runs.
+## 2. Input handling
 
-Attribute array order and OTLP batch/file order are never significant.
+A comparator MUST accept CTSC Trace Core artifacts and MAY support CTSC Linked
+comparison with registry documents.
 
-## 3. Normalized comparison view
+Before comparison, it MUST either:
 
-A comparator MUST preserve the original OTLP input and derive a normalized
-semantic view for equality and diagnostics. Normalization does not delete or
-rewrite the source trace.
+- validate each input according to its CTSC conformance level; or
+- require independently validated inputs and report that assumption.
 
-The following data may be used to reconstruct semantics but is excluded from
-equality by default:
+Invalid artifacts are validation failures, not behavioral differences.
 
-- trace IDs and span IDs, after reconstructing relationships;
-- absolute timestamp values, after deriving order;
-- duration values;
-- resource, scope, span, event, and link attributes outside CTSC semantics,
-  unless comparison of an extension namespace was explicitly requested;
-- producer-specific batching and serialization choices.
+A comparator MUST preserve the source artifacts. It MAY derive internal indexes,
+trees, typed values, or normalized views.
 
-OTLP span links do not affect CTSC 0.1 comparison and are excluded from the
-normalized comparison view.
+## 3. Semantic input model
 
-Trace Core comparison uses structural `AnyValue` semantics. Full comparison
-resolves registry types and applies their stronger record, tagged-union, tuple,
-set, and numeric-width semantics.
+Comparison policies operate on the following CTSC semantics:
 
-For string-keyed maps, entry order is insignificant and duplicate keys are
-invalid. Trace Core compares non-string-keyed map encoding as an ordered array
-of entry records. Full comparison uses the registry map type, ignores entry
-order, and rejects duplicate keys under Full key equality.
+- runs containing scenarios;
+- scenario, operation, and parallel span hierarchy;
+- operation component IDs, names, and inputs;
+- event-array order;
+- observations and their values;
+- unit, result, empty, and declared-error completion;
+- target and supervisor faults;
+- concrete OTLP `AnyValue` structures;
+- registry record, tagged-union, tuple, set, map, and numeric types;
+- timestamps, durations, resources, scopes, attributes, and extensions.
 
-Full comparison validates `i32`, `i64`, and `u32` ranges on OTLP `intValue`.
-Registry `u64` values are parsed from canonical decimal `stringValue`, checked
-against the unsigned 64-bit range, and compared numerically. A non-canonical or
-out-of-range representation is invalid Full input.
+Trace and span IDs identify and connect spans within one execution. Independent
+executions generate different IDs, so comparators use them to reconstruct each
+trace hierarchy but do not compare the ID values across executions.
 
-Full comparison validates that registry `f32` values round-trip exactly through
-IEEE 754 binary32 and that registry `f64` values are finite binary64 values.
-The equality or tolerance policy for valid floating-point values is unspecified
-in CTSC Comparison 0.1.
+## 4. Policy declaration
 
-## 4. Run and scenario pairing
+Every comparison result MUST identify the comparison policy and its version.
+When policy options are configurable, the result MUST include or reference the
+effective configuration.
 
-The caller selects which runs to compare. When each input contains exactly one
-run, selection is implicit. When an input contains multiple runs, the caller or
-comparison policy must select one.
+A policy MUST define:
 
-`conformance.run.id` identifies one target invocation for provenance and
-diagnostics. Baseline and current runs normally have different IDs, so run IDs
-are not equality or pairing keys.
+| Dimension | Questions the policy answers |
+|---|---|
+| Run selection | Which run from each artifact is compared? |
+| Scenario matching | Are scenarios paired by name, position, selection, or another key? |
+| Operation matching | Are repeated invocations paired by order, inputs, identity, or another rule? |
+| Event ordering | Must event-array order match? |
+| Presence | Are additional/missing scenarios, operations, observations, or results allowed? |
+| Values | Which values require exact equality, projection, coercion, or custom matching? |
+| Floating point | Exact, absolute tolerance, relative tolerance, or another policy? |
+| Faults | Which fault fields participate in equality? |
+| Parallel regions | How are unordered branches paired? |
+| Timing | Are timestamps or durations compared? |
+| Resources and scopes | Which resource/scope attributes participate? |
+| Extensions | Which extension namespaces participate? |
 
-Scenarios pair by `conformance.scenario.name`. Scenario names MUST be unique
-within a run for portable comparison. `conformance.scenario.index` is
-descriptive declaration order, not a cross-target pairing key.
+Policies MAY expose additional dimensions.
 
-Missing or additional runs or scenarios are divergences.
+## 5. Determinism
 
-## 5. Event ordering
+Given the same artifacts and effective policy configuration, a comparator MUST
+produce the same verdict and semantic mismatch locations.
 
-Events within one span are ordered by their position in the OTLP `events`
-array. Timestamp values and timing differences are ignored for equality.
-Paired events must have the same fixed event name and equivalent required CTSC
-attributes and values.
+A policy relying on custom callbacks, external state, or nondeterministic
+matching MUST define how determinism is maintained or report that the result is
+non-portable.
 
-## 6. Sequential child spans
+## 6. Result requirements
 
-Children of ordinary run, scenario, and operation spans are order-sensitive.
+A comparison result MUST identify:
 
-Non-overlapping children are ordered by their time intervals. A child that ends
-before another starts precedes it.
+- the selected input artifacts and runs;
+- the comparison policy and version;
+- whether the artifacts are equivalent under that policy;
+- validation failures, if any;
+- semantic mismatch locations.
 
-The ordering of overlapping children outside a `conformance.parallel` span is
-unspecified. Producers SHOULD wrap intentionally concurrent children in an
-explicit parallel span.
+A semantic mismatch location SHOULD include:
 
-Paired operation spans must have equal `conformance.component.id`,
-`conformance.operation.name`, and equivalent inputs.
-
-Sequential child spans pair by order. Repeated invocations of the same operation
-therefore pair by their position among the parent's ordered child spans.
-
-## 7. Parallel regions
-
-Direct children of `conformance.parallel` are compared as an unordered
-collection. Each branch retains its internal ordering and nested structure.
-
-Ending the parallel span represents joining all direct branches. Work emitted
-after that span is ordered after the join.
-
-Parallel regions with unique branch identities pair branches by fixed span name
-and, for operation spans, by:
-
-```text
-(conformance.component.id, conformance.operation.name)
-```
-
-Pairing duplicate parallel branches with the same identity is unspecified in
-CTSC 0.1.
-
-Unequal branch counts are divergences.
-
-## 8. Observations and outcomes
-
-Observations pair in event order. Paired observations must have equal
-`conformance.observation.name` and equivalent values.
-
-Results pair by event order and optional `conformance.result.name`. An operation
-may have at most one unnamed result.
-
-Unit completion pairs with unit completion. It is represented by an
-operation span that ends successfully with no result, empty, error, or fault
-event. In Full comparison, the registry operation has no `result` and does not
-permit `empty`.
-
-Empty outcomes pair only with empty outcomes.
-
-Declared errors pair by `conformance.error.name` and equivalent optional error
-values. In Full comparison, result, empty, and declared-error outcomes must be
-permitted by the operation's registry `outcomes` declaration.
-
-Repeated observations compare in event-array order.
-
-## 9. Faults
-
-Faults pair only with faults. A comparison policy determines whether
-`conformance.fault.type`, message, native type, observer, and diagnostic fields
-must be equivalent. CTSC defines no stack-trace comparison.
-
-Faults are not validated against registry outcomes.
-
-Unit, result, empty, and declared error are distinct completion outcomes.
-Target and supervisor faults are failure terminations. These states are never
-interchangeable.
-
-## 10. Diagnostics
-
-A comparator SHOULD report the first semantic divergence and its normalized
-location:
-
-- run;
 - scenario;
 - operation path;
 - event or child-span position;
 - expected and actual semantic values.
 
-Additional divergences MAY be reported. Diagnostic formatting is not part of
-CTSC compatibility.
+Diagnostic wording and serialization format are not defined by CTSC 0.1.
+
+## 7. CTSC Strict reference policy
+
+`ctsc.strict/0.1.0` is an optional reference policy. Implementing CTSC does not
+require implementing this policy.
+
+### 7.1 Run selection
+
+The caller selects one run from each artifact. Selection is implicit only when
+each artifact contains exactly one run.
+
+`conformance.run.id` is provenance and does not participate in equality.
+
+### 7.2 Scenario matching
+
+Scenarios pair by `conformance.scenario.name`. Names must be unique within a
+run.
+
+Missing or additional scenarios are mismatches.
+`conformance.scenario.index` does not participate in equality.
+
+### 7.3 Sequential operation matching
+
+Children of ordinary run, scenario, and operation spans are ordered by their
+non-overlapping time intervals and pair by position.
+
+Paired operation spans must have equal:
+
+- `conformance.component.id`;
+- `conformance.operation.name`;
+- operation inputs.
+
+Repeated invocations of the same operation pair by position.
+
+Overlapping child spans outside `conformance.parallel` are unsupported by this
+policy.
+
+### 7.4 Events
+
+Events pair by position in the OTLP event array. Event names and required CTSC
+attributes must match.
+
+Missing, additional, or reordered events are mismatches.
+
+### 7.5 Completion
+
+Unit, result, empty, declared error, and fault are distinct termination states.
+
+Results and declared errors compare their values.
+
+### 7.6 Values
+
+Trace Core values compare by exact structural representation:
+
+- scalar `AnyValue` variants must match;
+- arrays compare in order;
+- key/value lists compare by unique key, independent of entry order.
+
+Linked values additionally use registry semantics:
+
+- records require the same declared fields;
+- tagged unions require the same variant and equivalent payload;
+- tuples compare by position;
+- sets compare as unordered duplicate-free collections;
+- maps compare as unordered key/value collections;
+- integer widths and ranges must be valid.
+
+The Strict policy compares valid floating-point values exactly. Other policies
+may define tolerance.
+
+### 7.7 Faults
+
+Faults pair only with faults. The Strict policy compares:
+
+- `conformance.fault.type`;
+- `conformance.fault.message`, including presence or absence.
+
+It ignores:
+
+- `conformance.fault.native_type`;
+- `conformance.fault.observer`;
+- process exit code, signal, timeout, phase, and operation-attribution
+  diagnostics.
+
+### 7.8 Parallel regions
+
+Direct children of `conformance.parallel` are unordered.
+
+Branches with unique semantic identities pair by fixed span name and, for
+operations:
+
+```text
+(conformance.component.id, conformance.operation.name)
+```
+
+The Strict policy reports duplicate branches with the same semantic identity as
+ambiguous rather than selecting a pairing.
+
+Each paired branch is then compared recursively using the Strict policy.
+
+### 7.9 Timing and metadata
+
+The Strict policy uses timestamps only to establish sequential child-span order.
+It does not compare:
+
+- absolute timestamps;
+- durations;
+- trace IDs or span IDs;
+- OTLP batch or file position;
+- resource attributes other than required CTSC registry linkage;
+- instrumentation scope details;
+- producer-specific extensions.
+
+## 8. Custom policies
+
+A custom policy may relax, strengthen, or replace Strict behavior. Examples
+include:
+
+- selecting a scenario subset;
+- allowing additional observations;
+- matching repeated operations by inputs;
+- applying floating-point tolerances;
+- comparing only fault occurrence;
+- pairing duplicate parallel branches by application-specific keys;
+- comparing performance durations;
+- including selected extension namespaces.
+
+Custom policy behavior is interoperable only when its identity, version, and
+effective configuration are shared with every participant interpreting the
+result.

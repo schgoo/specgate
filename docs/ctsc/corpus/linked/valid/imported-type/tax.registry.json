@@ -1,0 +1,24 @@
+{
+  "format": "ctsc.registry",
+  "formatVersion": "0.1.0",
+  "registryId": "urn:ctsc:registry:example.tax:1",
+  "version": "1.0.0",
+  "components": [
+    {
+      "id": "example.tax",
+      "operations": [],
+      "types": [
+        {
+          "name": "TaxAmount",
+          "kind": "record",
+          "fields": [
+            {
+              "name": "amount_cents",
+              "type": { "kind": "primitive", "name": "i64" }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

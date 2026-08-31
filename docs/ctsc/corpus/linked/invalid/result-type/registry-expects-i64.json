@@ -2,6 +2,7 @@
   "format": "ctsc.registry",
   "formatVersion": "0.1.0",
   "registryId": "urn:ctsc:registry:invalid.result-type:1",
+  "version": "1.0.0",
   "components": [
     {
       "id": "example.answer",
@@ -11,7 +12,10 @@
           "inputs": [],
           "observations": [],
           "outcomes": {
-            "result": { "kind": "primitive", "name": "i64" }
+            "result": {
+              "kind": "primitive",
+              "name": "i64"
+            }
           }
         }
       ],

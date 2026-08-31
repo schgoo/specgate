@@ -7,32 +7,46 @@ CTSC uses standard OpenTelemetry Protocol (OTLP) traces without adding fields to
 the OTLP data model. Domain-specific semantics are expressed through fixed span
 and event names plus `conformance.*` attributes.
 
+## Conformance levels
+
+CTSC defines three validation levels:
+
+1. **Trace Core** validates an OTLP trace independently against CTSC trace
+   conventions.
+2. **Registry** validates a registry document independently against the CTSC
+   registry schema and resolution rules.
+3. **Linked** validates a trace against the exact registry document it
+   references.
+
+Linked validation takes:
+
+```text
+trace + root registry + required imported registries
+```
+
+It first requires valid Trace Core and Registry artifacts, verifies the
+registry ID, version, and digest carried by the trace, resolves observed
+operations and types, and validates trace inputs, observations, and outcomes
+against the registry. Linked is a validation mode, not another CTSC document
+format.
+
+## Documents and supporting artifacts
+
 This directory contains the **0.1 draft**:
 
-- [`specification.md`](specification.md) — trace, registry, normalization, and
-  producer requirements.
-- [`comparison.md`](comparison.md) — normalization, pairing, ordering, and
-  comparison requirements.
+- [`trace.md`](trace.md) — OTLP trace format and generation requirements.
+- [`registry.md`](registry.md) — registry documents, operations, types, imports,
+  and resolution.
+- [`comparison.md`](comparison.md) — configurable comparison-policy contract
+  and optional CTSC Strict reference policy.
 - [`ctsc-registry-0.1.schema.json`](ctsc-registry-0.1.schema.json) — JSON Schema
   for modular registry documents.
-- [`corpus/registry/valid/order-pricing.registry.json`](corpus/registry/valid/order-pricing.registry.json)
-  — registry example.
-- [`corpus/trace/valid/sequential.otlp.json`](corpus/trace/valid/sequential.otlp.json) — sequential
-  run/scenario/operation example.
-- [`corpus/trace/valid/parallel.otlp.json`](corpus/trace/valid/parallel.otlp.json) — explicit
-  parallel-region example.
-- [`corpus/trace/valid/supervisor-fault.otlp.json`](corpus/trace/valid/supervisor-fault.otlp.json)
-  — target-process failure recorded by a surviving supervisor.
-- [`corpus/trace/valid/unit.otlp.json`](corpus/trace/valid/unit.otlp.json) — successful operation
-  completion without a value channel.
-- [`corpus/trace/valid/outcomes.otlp.json`](corpus/trace/valid/outcomes.otlp.json) — empty and
-  declared-error operation outcomes.
-
-CTSC defines three conformance levels:
-
-1. **Trace Core** — standalone behavioral OTLP traces.
-2. **Registry** — standalone structural registry documents.
-3. **Full** — traces linked to exact registry content.
+- [`corpus/registry/`](corpus/registry/) — valid and invalid registry examples,
+  including imports and dependencies.
+- [`corpus/trace/`](corpus/trace/) — valid and invalid OTLP JSON and streaming
+  JSONL examples.
+- [`corpus/linked/`](corpus/linked/) — self-contained valid and invalid
+  trace/registry pairs.
 
 The draft is not yet a stable compatibility commitment.
 
@@ -47,28 +61,37 @@ corpus/
 │   ├── valid/
 │   └── invalid/
 ├── trace/
-    ├── valid/
-    └── invalid/
-└── full/
+│   ├── valid/
+│   └── invalid/
+└── linked/
     ├── valid/
     │   ├── registry.json
-    │   └── trace.otlp.json
+    │   ├── trace.otlp.json
+    │   └── imported-type/
+    │       ├── registry.json
+    │       ├── tax.registry.json
+    │       └── trace.otlp.json
     └── invalid/
-        ├── registry-expects-i64.json
-        └── trace-returns-string.otlp.json
+        ├── result-type/
+        │   ├── registry-expects-i64.json
+        │   └── trace-returns-string.otlp.json
+        └── version-mismatch/
+            ├── registry.json
+            └── trace.otlp.json
 ```
 
-The Full corpus pairs are self-contained copies of a registry and trace. The
-valid pair conforms at both Trace Core and Registry levels. The invalid pair is
-individually valid at those levels but fails Full validation because its result
-value does not match the registry type.
+Linked corpus pairs are self-contained copies of their root registry, trace,
+and any required imported registries. Valid pairs conform independently at
+Trace Core and Registry levels and together at Linked level. Invalid pairs
+conform independently but fail Linked validation for the documented linkage or
+type mismatch.
 
-Validate the Full pairs directly:
+Validate the Linked pairs directly:
 
 ```powershell
-python docs\ctsc\validate.py full `
-  docs\ctsc\corpus\full\valid\trace.otlp.json `
-  docs\ctsc\corpus\full\valid\registry.json
+python docs\ctsc\validate.py linked `
+  docs\ctsc\corpus\linked\valid\trace.otlp.json `
+  docs\ctsc\corpus\linked\valid\registry.json
 ```
 
 ## Validate the draft artifacts
@@ -84,10 +107,11 @@ Validate individual documents:
 ```powershell
 python docs\ctsc\validate.py registry registry.json
 python docs\ctsc\validate.py trace traces.otlp.json
-python docs\ctsc\validate.py full traces.otlp.json registry.json
+python docs\ctsc\validate.py linked traces.otlp.json registry.json
 ```
 
 The convenience validator checks registry schema and local references, official
 OTLP JSON decoding, CTSC hierarchy and required attributes, concrete
-`AnyValue` encoding, terminal outcomes, and local Full trace-to-registry
-linkage. Imported-registry retrieval and trace comparison are not implemented.
+`AnyValue` encoding, terminal outcomes, and local Linked trace-to-registry
+linkage. Registry validation resolves local `file:` imports. Linked validation
+of imported types, non-file retrieval, and trace comparison are not implemented.

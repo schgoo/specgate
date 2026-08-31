@@ -2,6 +2,7 @@
   "format": "ctsc.registry",
   "formatVersion": "0.1.0",
   "registryId": "urn:ctsc:registry:example.values:1",
+  "version": "1.0.0",
   "components": [
     {
       "id": "example.values",
@@ -10,27 +11,87 @@
           "name": "emit_values",
           "inputs": [],
           "observations": [
-            { "name": "string_value", "type": { "kind": "primitive", "name": "string" } },
-            { "name": "bool_value", "type": { "kind": "primitive", "name": "bool" } },
-            { "name": "i32_value", "type": { "kind": "primitive", "name": "i32" } },
-            { "name": "i64_value", "type": { "kind": "primitive", "name": "i64" } },
-            { "name": "u32_value", "type": { "kind": "primitive", "name": "u32" } },
-            { "name": "u64_value", "type": { "kind": "primitive", "name": "u64" } },
-            { "name": "f32_value", "type": { "kind": "primitive", "name": "f32" } },
-            { "name": "f64_value", "type": { "kind": "primitive", "name": "f64" } },
-            { "name": "bytes_value", "type": { "kind": "primitive", "name": "bytes" } },
+            {
+              "name": "string_value",
+              "type": {
+                "kind": "primitive",
+                "name": "string"
+              }
+            },
+            {
+              "name": "bool_value",
+              "type": {
+                "kind": "primitive",
+                "name": "bool"
+              }
+            },
+            {
+              "name": "i32_value",
+              "type": {
+                "kind": "primitive",
+                "name": "i32"
+              }
+            },
+            {
+              "name": "i64_value",
+              "type": {
+                "kind": "primitive",
+                "name": "i64"
+              }
+            },
+            {
+              "name": "u32_value",
+              "type": {
+                "kind": "primitive",
+                "name": "u32"
+              }
+            },
+            {
+              "name": "u64_value",
+              "type": {
+                "kind": "primitive",
+                "name": "u64"
+              }
+            },
+            {
+              "name": "f32_value",
+              "type": {
+                "kind": "primitive",
+                "name": "f32"
+              }
+            },
+            {
+              "name": "f64_value",
+              "type": {
+                "kind": "primitive",
+                "name": "f64"
+              }
+            },
+            {
+              "name": "bytes_value",
+              "type": {
+                "kind": "primitive",
+                "name": "bytes"
+              }
+            },
             {
               "name": "list_value",
               "type": {
                 "kind": "list",
-                "items": { "kind": "primitive", "name": "i32" }
+                "items": {
+                  "kind": "primitive",
+                  "name": "i32"
+                }
               }
             },
             {
               "name": "set_value",
               "type": {
                 "kind": "set",
-                "items": { "kind": "primitive", "name": "string" }
+                "items": {
+                  "kind": "primitive",
+                  "name": "string"
+                }
               }
             },
             {
@@ -38,8 +99,14 @@
               "type": {
                 "kind": "tuple",
                 "items": [
-                  { "kind": "primitive", "name": "i32" },
-                  { "kind": "primitive", "name": "string" }
+                  {
+                    "kind": "primitive",
+                    "name": "i32"
+                  },
+                  {
+                    "kind": "primitive",
+                    "name": "string"
+                  }
                 ]
               }
             },
@@ -47,25 +114,43 @@
               "name": "string_map_value",
               "type": {
                 "kind": "map",
-                "keys": { "kind": "primitive", "name": "string" },
-                "values": { "kind": "primitive", "name": "i32" }
+                "keys": {
+                  "kind": "primitive",
+                  "name": "string"
+                },
+                "values": {
+                  "kind": "primitive",
+                  "name": "i32"
+                }
               }
             },
             {
               "name": "integer_map_value",
               "type": {
                 "kind": "map",
-                "keys": { "kind": "primitive", "name": "i32" },
-                "values": { "kind": "primitive", "name": "string" }
+                "keys": {
+                  "kind": "primitive",
+                  "name": "i32"
+                },
+                "values": {
+                  "kind": "primitive",
+                  "name": "string"
+                }
               }
             },
             {
               "name": "record_value",
-              "type": { "kind": "named", "name": "SampleRecord" }
+              "type": {
+                "kind": "named",
+                "name": "SampleRecord"
+              }
             },
             {
               "name": "tagged_union_value",
-              "type": { "kind": "named", "name": "Choice" }
+              "type": {
+                "kind": "named",
+                "name": "Choice"
+              }
             }
           ],
           "outcomes": {}
@@ -76,23 +161,49 @@
           "name": "SampleRecord",
           "kind": "record",
           "fields": [
-            { "name": "id", "type": { "kind": "primitive", "name": "i64" } },
-            { "name": "name", "type": { "kind": "primitive", "name": "string" } },
-            { "name": "active", "type": { "kind": "primitive", "name": "bool" } }
+            {
+              "name": "id",
+              "type": {
+                "kind": "primitive",
+                "name": "i64"
+              }
+            },
+            {
+              "name": "name",
+              "type": {
+                "kind": "primitive",
+                "name": "string"
+              }
+            },
+            {
+              "name": "active",
+              "type": {
+                "kind": "primitive",
+                "name": "bool"
+              }
+            }
           ]
         },
         {
           "name": "Choice",
           "kind": "tagged_union",
           "variants": [
-            { "name": "Empty" },
+            {
+              "name": "Empty"
+            },
             {
               "name": "Number",
-              "payload": { "kind": "primitive", "name": "i32" }
+              "payload": {
+                "kind": "primitive",
+                "name": "i32"
+              }
             },
             {
               "name": "Record",
-              "payload": { "kind": "named", "name": "SampleRecord" }
+              "payload": {
+                "kind": "named",
+                "name": "SampleRecord"
+              }
             }
           ]
         }

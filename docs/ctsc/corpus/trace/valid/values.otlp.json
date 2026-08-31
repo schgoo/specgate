@@ -46,9 +46,15 @@
             }
           },
           {
+            "key": "conformance.registry.version",
+            "value": {
+              "stringValue": "1.0.0"
+            }
+          },
+          {
             "key": "conformance.registry.digest",
             "value": {
-              "stringValue": "sha256:2f0e44d2370d752f3c072f9f6051d8cd33927854ebff0a89a68ddccb45d35625"
+              "stringValue": "sha256:cb939bdd4e5bcf909159774d44c6869a992bbf58d0c58767e3651449d27d0f11"
             }
           },
           {
@@ -159,6 +165,24 @@
                       "key": "conformance.observation.value",
                       "value": {
                         "stringValue": "hello"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "timeUnixNano": "6000003000",
+                  "name": "conformance.observation",
+                  "attributes": [
+                    {
+                      "key": "conformance.observation.name",
+                      "value": {
+                        "stringValue": "string_value"
+                      }
+                    },
+                    {
+                      "key": "conformance.observation.value",
+                      "value": {
+                        "stringValue": "world"
                       }
                     }
                   ]

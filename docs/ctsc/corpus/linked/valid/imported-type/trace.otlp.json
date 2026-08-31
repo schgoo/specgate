@@ -6,7 +6,7 @@
           {
             "key": "service.name",
             "value": {
-              "stringValue": "ctsc-invalid-full-example"
+              "stringValue": "ctsc-imported-type-example"
             }
           },
           {
@@ -42,19 +42,25 @@
           {
             "key": "conformance.registry.id",
             "value": {
-              "stringValue": "urn:ctsc:registry:invalid.result-type:1"
+              "stringValue": "urn:ctsc:registry:example.orders:1"
+            }
+          },
+          {
+            "key": "conformance.registry.version",
+            "value": {
+              "stringValue": "1.0.0"
             }
           },
           {
             "key": "conformance.registry.digest",
             "value": {
-              "stringValue": "sha256:0978a7bb50e0030f1556d799b2bfdd4146d2033a07283a0df78d16b0ea2c2dd7"
+              "stringValue": "sha256:1bf5ebc3625803d5def01d034c9a3ed936ec5e9396fb4f07cb05ecf190502f37"
             }
           },
           {
             "key": "conformance.registry.uri",
             "value": {
-              "stringValue": "file:./registry-expects-i64.json"
+              "stringValue": "file:./registry.json"
             }
           }
         ]
@@ -67,17 +73,17 @@
           },
           "spans": [
             {
-              "traceId": "99999999999999999999999999999999",
-              "spanId": "9999999999999901",
+              "traceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "spanId": "aaaaaaaaaaaaaa01",
               "name": "conformance.run",
               "kind": 1,
-              "startTimeUnixNano": "9000000000",
-              "endTimeUnixNano": "9000005000",
+              "startTimeUnixNano": "10000000000",
+              "endTimeUnixNano": "10000005000",
               "attributes": [
                 {
                   "key": "conformance.run.id",
                   "value": {
-                    "stringValue": "run-invalid-result-type"
+                    "stringValue": "run-imported-type"
                   }
                 }
               ],
@@ -86,18 +92,18 @@
               }
             },
             {
-              "traceId": "99999999999999999999999999999999",
-              "spanId": "9999999999999902",
-              "parentSpanId": "9999999999999901",
+              "traceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "spanId": "aaaaaaaaaaaaaa02",
+              "parentSpanId": "aaaaaaaaaaaaaa01",
               "name": "conformance.scenario",
               "kind": 1,
-              "startTimeUnixNano": "9000001000",
-              "endTimeUnixNano": "9000004000",
+              "startTimeUnixNano": "10000001000",
+              "endTimeUnixNano": "10000004000",
               "attributes": [
                 {
                   "key": "conformance.scenario.name",
                   "value": {
-                    "stringValue": "result_type_mismatch"
+                    "stringValue": "calculate_tax"
                   }
                 },
                 {
@@ -112,24 +118,24 @@
               }
             },
             {
-              "traceId": "99999999999999999999999999999999",
-              "spanId": "9999999999999903",
-              "parentSpanId": "9999999999999902",
+              "traceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "spanId": "aaaaaaaaaaaaaa03",
+              "parentSpanId": "aaaaaaaaaaaaaa02",
               "name": "conformance.operation",
               "kind": 1,
-              "startTimeUnixNano": "9000002000",
-              "endTimeUnixNano": "9000003000",
+              "startTimeUnixNano": "10000002000",
+              "endTimeUnixNano": "10000003000",
               "attributes": [
                 {
                   "key": "conformance.component.id",
                   "value": {
-                    "stringValue": "example.answer"
+                    "stringValue": "example.orders"
                   }
                 },
                 {
                   "key": "conformance.operation.name",
                   "value": {
-                    "stringValue": "answer"
+                    "stringValue": "calculate_tax"
                   }
                 },
                 {
@@ -143,13 +149,22 @@
               ],
               "events": [
                 {
-                  "timeUnixNano": "9000002900",
+                  "timeUnixNano": "10000002900",
                   "name": "conformance.result",
                   "attributes": [
                     {
                       "key": "conformance.result.value",
                       "value": {
-                        "stringValue": "42"
+                        "kvlistValue": {
+                          "values": [
+                            {
+                              "key": "amount_cents",
+                              "value": {
+                                "intValue": "800"
+                              }
+                            }
+                          ]
+                        }
                       }
                     }
                   ]

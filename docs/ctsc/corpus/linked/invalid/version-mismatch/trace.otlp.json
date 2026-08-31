@@ -46,15 +46,21 @@
             }
           },
           {
+            "key": "conformance.registry.version",
+            "value": {
+              "stringValue": "2.0.0"
+            }
+          },
+          {
             "key": "conformance.registry.digest",
             "value": {
-              "stringValue": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+              "stringValue": "sha256:f83aa6049f54fd995a48a1641294372ad190c3aca3a6dff03adbc6df96b31fdb"
             }
           },
           {
             "key": "conformance.registry.uri",
             "value": {
-              "stringValue": "file:../../registry/valid/order-pricing.registry.json"
+              "stringValue": "file:./registry.json"
             }
           }
         ]
