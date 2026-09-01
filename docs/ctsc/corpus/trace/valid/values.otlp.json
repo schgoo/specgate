@@ -54,7 +54,7 @@
           {
             "key": "conformance.registry.digest",
             "value": {
-              "stringValue": "sha256:cb939bdd4e5bcf909159774d44c6869a992bbf58d0c58767e3651449d27d0f11"
+              "stringValue": "sha256:5a23688066e9468b968c688a9496447cbd19f4d9541149802a073944ef892a96"
             }
           },
           {
@@ -309,6 +309,60 @@
                       "key": "conformance.observation.value",
                       "value": {
                         "doubleValue": 1.25
+                      }
+                    }
+                  ]
+                },
+                {
+                  "timeUnixNano": "6000003020",
+                  "name": "conformance.observation",
+                  "attributes": [
+                    {
+                      "key": "conformance.observation.name",
+                      "value": {
+                        "stringValue": "f32_nan"
+                      }
+                    },
+                    {
+                      "key": "conformance.observation.value",
+                      "value": {
+                        "doubleValue": "NaN"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "timeUnixNano": "6000003021",
+                  "name": "conformance.observation",
+                  "attributes": [
+                    {
+                      "key": "conformance.observation.name",
+                      "value": {
+                        "stringValue": "f64_positive_infinity"
+                      }
+                    },
+                    {
+                      "key": "conformance.observation.value",
+                      "value": {
+                        "doubleValue": "Infinity"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "timeUnixNano": "6000003022",
+                  "name": "conformance.observation",
+                  "attributes": [
+                    {
+                      "key": "conformance.observation.name",
+                      "value": {
+                        "stringValue": "f64_negative_infinity"
+                      }
+                    },
+                    {
+                      "key": "conformance.observation.value",
+                      "value": {
+                        "doubleValue": "-Infinity"
                       }
                     }
                   ]

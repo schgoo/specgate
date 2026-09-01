@@ -373,8 +373,19 @@ whitespace, separators, decimal points, and exponent notation are invalid.
 
 Registry `f32` and `f64` values use `doubleValue`.
 
-An `f32` value MUST be exactly representable as IEEE 754 binary32. An `f64`
-accepts any finite IEEE 754 binary64 value. Non-finite values are invalid CTSC.
+Finite `f32` values MUST be exactly representable as IEEE 754 binary32. Finite
+`f64` values use IEEE 754 binary64.
+
+CTSC accepts the standard OTLP JSON representations for non-finite values:
+
+```json
+{"doubleValue": "NaN"}
+{"doubleValue": "Infinity"}
+{"doubleValue": "-Infinity"}
+```
+
+No other string value is valid for `doubleValue`. OTLP does not preserve NaN
+payload bits, so CTSC represents all NaN payloads as `NaN`.
 
 Floating-point equality and tolerance belong to comparison policy.
 

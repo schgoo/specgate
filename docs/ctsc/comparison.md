@@ -178,6 +178,13 @@ unordered, but MUST declare that deviation from the registry type semantics.
 The Strict policy compares valid floating-point values exactly. Other policies
 may define tolerance.
 
+For non-finite values, Strict compares the normalized OTLP symbols:
+
+- `NaN` equals `NaN`;
+- `Infinity` equals `Infinity`;
+- `-Infinity` equals `-Infinity`;
+- finite and non-finite values differ.
+
 ### 7.7 Faults
 
 Faults pair only with faults. The Strict policy compares:

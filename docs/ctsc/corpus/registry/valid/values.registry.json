@@ -68,6 +68,27 @@
               }
             },
             {
+              "name": "f32_nan",
+              "type": {
+                "kind": "primitive",
+                "name": "f32"
+              }
+            },
+            {
+              "name": "f64_positive_infinity",
+              "type": {
+                "kind": "primitive",
+                "name": "f64"
+              }
+            },
+            {
+              "name": "f64_negative_infinity",
+              "type": {
+                "kind": "primitive",
+                "name": "f64"
+              }
+            },
+            {
               "name": "bytes_value",
               "type": {
                 "kind": "primitive",

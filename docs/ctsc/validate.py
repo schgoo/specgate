@@ -54,6 +54,7 @@ ANY_VALUE_KEYS = {
     "arrayValue",
     "kvlistValue",
 }
+SPECIAL_FLOATS = {"NaN", "Infinity", "-Infinity"}
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 TRACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 SPAN_ID_RE = re.compile(r"^[0-9a-f]{16}$")
@@ -134,7 +135,10 @@ def validate_any_value(value: dict[str, Any], location: str, validator: Validato
     kind = next(iter(selected))
     if kind == "doubleValue":
         number = value[kind]
-        if (
+        if isinstance(number, str):
+            if number not in SPECIAL_FLOATS:
+                validator.error(location, "invalid symbolic doubleValue")
+        elif (
             isinstance(number, bool)
             or not isinstance(number, (int, float))
             or not math.isfinite(float(number))
@@ -410,7 +414,10 @@ def validate_value_type(
             elif int(text) > 2**64 - 1:
                 validator.error(location, "value is outside u64 range")
         elif primitive == "f32":
-            number = float(value["doubleValue"])
+            raw_number = value["doubleValue"]
+            if isinstance(raw_number, str):
+                return
+            number = float(raw_number)
             try:
                 round_trip = struct.unpack("!f", struct.pack("!f", number))[0]
             except (OverflowError, struct.error):
