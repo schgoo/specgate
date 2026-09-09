@@ -80,6 +80,7 @@ readme:
     cd rust && cargo doc2readme -p specgate-harness --lib --template crates/README.j2 --out crates/specgate-harness/README.md
     cd rust && cargo doc2readme -p specgate --lib --template crates/README.j2 --out crates/specgate/README.md
     cd rust && cargo doc2readme -p specgate-cli --lib --template crates/README.j2 --out crates/specgate-cli/README.md
+    cd rust && cargo doc2readme -p specgate-ctsc --lib --template crates/README.j2 --out crates/specgate-ctsc/README.md
 
 # Check READMEs are up to date
 readme-check:
@@ -90,6 +91,7 @@ readme-check:
     cd rust && cargo doc2readme -p specgate-harness --lib --template crates/README.j2 --out crates/specgate-harness/README.md --check
     cd rust && cargo doc2readme -p specgate --lib --template crates/README.j2 --out crates/specgate/README.md --check
     cd rust && cargo doc2readme -p specgate-cli --lib --template crates/README.j2 --out crates/specgate-cli/README.md --check
+    cd rust && cargo doc2readme -p specgate-ctsc --lib --template crates/README.j2 --out crates/specgate-ctsc/README.md --check
 
 # Build C# fixtures
 dotnet-build:

@@ -1,0 +1,101 @@
+# yaml-language-server: $schema=../spec-schema.json
+spec_version: "0.4.0"
+name: specgate.ctsc
+binding: ../bindings/rust-ctsc.yaml
+
+operations:
+  translate_legacy_trace:
+    desc: >
+      Translate one legacy flat operation trace into its CTSC semantic
+      projection. Input echoes become operation inputs, ordinary events become
+      observations, and the terminal legacy event selects the CTSC completion
+      state.
+    inputs:
+      scenario_name: string
+      component_id: string
+      legacy_trace_json: string
+    outputs:
+      - scenario_name: string
+      - component_id: string
+      - operation_name: string
+      - inputs_json: string
+      - observations_json: string
+      - completion: string
+      - completion_value_json: string
+
+cases:
+  - name: stateless_result
+    desc: Input echoes are removed from observations and projected onto the operation inputs.
+    operation: translate_legacy_trace
+    inputs:
+      scenario_name: add_2_3
+      component_id: fixture.stateless_add
+      legacy_trace_json: >
+        [{"kind":"Run","operation":"add"},
+        {"kind":"Event","name":"add.a","value":2},
+        {"kind":"Event","name":"add.b","value":3},
+        {"kind":"Event","name":"$result","value":5}]
+    expected:
+      - scenario_name: add_2_3
+      - component_id: fixture.stateless_add
+      - operation_name: add
+      - inputs_json: '{"a":2,"b":3}'
+      - observations_json: '{}'
+      - completion: result
+      - completion_value_json: "5"
+
+  - name: observed_no_result
+    desc: Ordinary events become observations and an operation may complete without a result channel.
+    operation: translate_legacy_trace
+    inputs:
+      scenario_name: records_total
+      component_id: fixture.observation
+      legacy_trace_json: >
+        [{"kind":"Run","operation":"record_total"},
+        {"kind":"Event","name":"record_total.amount","value":7},
+        {"kind":"Event","name":"total","value":7}]
+    expected:
+      - scenario_name: records_total
+      - component_id: fixture.observation
+      - operation_name: record_total
+      - inputs_json: '{"amount":7}'
+      - observations_json: '{"total":7}'
+      - completion: none
+      - completion_value_json: ""
+
+  - name: unexpected_fault
+    desc: A legacy fault becomes a CTSC fault rather than a declared completion outcome.
+    operation: translate_legacy_trace
+    inputs:
+      scenario_name: crashes
+      component_id: fixture.fault
+      legacy_trace_json: >
+        [{"kind":"Run","operation":"explode"},
+        {"kind":"Event","name":"explode.code","value":9},
+        {"kind":"Event","name":"$fault","value":"boom"}]
+    expected:
+      - scenario_name: crashes
+      - component_id: fixture.fault
+      - operation_name: explode
+      - inputs_json: '{"code":9}'
+      - observations_json: '{}'
+      - completion: fault
+      - completion_value_json: '"boom"'
+
+  - name: preserve_single_entry_map
+    desc: A semantic map whose key resembles a legacy type name remains a map.
+    operation: translate_legacy_trace
+    inputs:
+      scenario_name: records_metric
+      component_id: fixture.observation
+      legacy_trace_json: >
+        [{"kind":"Run","operation":"record_metric"},
+        {"kind":"Event","name":"metric","value":{"Integer":7}}]
+    expected:
+      - scenario_name: records_metric
+      - component_id: fixture.observation
+      - operation_name: record_metric
+      - inputs_json: '{}'
+      - observations_json: '{"metric":{"Integer":7}}'
+      - completion: none
+      - completion_value_json: ""

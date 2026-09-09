@@ -570,6 +570,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "specgate-ctsc"
+version = "0.5.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "specgate",
+ "specgate-runtime",
+]
+
+[[package]]
 name = "specgate-fixtures"
 version = "0.1.0"
 dependencies = [

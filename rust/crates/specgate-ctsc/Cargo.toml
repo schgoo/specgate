@@ -1,0 +1,23 @@
+[package]
+name = "specgate-ctsc"
+version.workspace = true
+edition.workspace = true
+description = "CTSC projection for SpecGate — translates legacy flat operation traces into deterministic semantic CTSC format"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+specgate = { workspace = true }
+specgate-runtime = { workspace = true, features = ["specgate-trace"] }
+
+[dev-dependencies]
+specgate = { workspace = true, features = ["harness"] }
+
+[lints]
+workspace = true
