@@ -46,6 +46,21 @@ operations:
       - otlp_json: string
       - span_count: i32
 
+  encode_discovery_registry:
+    desc: >
+      Convert one component from SpecGate discovery metadata into a
+      deterministic CTSC registry document. The first slice covers non-setup
+      operations whose inputs and result use CTSC primitive types.
+    inputs:
+      registry_id: string
+      registry_version: string
+      component_id: string
+      discovery_json: string
+    outputs:
+      - registry_json: string
+      - operation_count: i32
+      - type_count: i32
+
 cases:
   - name: stateless_result
     desc: Input echoes are removed from observations and projected onto the operation inputs.
@@ -147,3 +162,20 @@ cases:
       - span_count: 3
       - otlp_json:
           $matches: '"name":"conformance.run".*"name":"conformance.scenario".*"conformance.scenario.name".*"add_2_3".*"name":"conformance.operation".*"conformance.component.id".*"fixture.stateless_add".*"conformance.operation.name".*"add".*"conformance.operation.inputs".*"a".*"intValue":"2".*"b".*"intValue":"3".*"name":"conformance.result".*"conformance.result.value".*"intValue":"5"'
+
+  - name: encode_stateless_discovery_as_registry
+    desc: Stateless primitive discovery metadata becomes a valid CTSC registry component.
+    operation: encode_discovery_registry
+    inputs:
+      registry_id: urn:ctsc:registry:fixture.stateless-add:1
+      registry_version: 1.0.0
+      component_id: fixture.stateless_add
+      discovery_json: >
+        {"operations":[{"name":"add","is_setup":false,"is_async":false,
+        "return_type":"i32","fills":"","component":"fixture.stateless_add",
+        "params":[["a","i32"],["b","i32"]]}],"types":[]}
+    expected:
+      - operation_count: 1
+      - type_count: 0
+      - registry_json:
+          $matches: '"format":"ctsc.registry".*"formatVersion":"0.1.0".*"registryId":"urn:ctsc:registry:fixture.stateless-add:1".*"version":"1.0.0".*"components".*"id":"fixture.stateless_add".*"operations".*"name":"add".*"inputs".*"name":"a".*"kind":"primitive".*"name":"i32".*"name":"b".*"kind":"primitive".*"name":"i32".*"observations":\[\].*"outcomes".*"result".*"kind":"primitive".*"name":"i32".*"types":\[\]'

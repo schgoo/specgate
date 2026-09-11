@@ -22,6 +22,11 @@
 //! scenario child, and one operation child. Caller-supplied identifiers,
 //! timestamp, tool version, and target metadata make production identity
 //! explicit while keeping tests reproducible.
+//!
+//! `encode_discovery_registry` projects one component from raw `SpecGate`
+//! discovery metadata into a compact, deterministic CTSC 0.1 registry. The
+//! initial projection supports non-setup operations whose ordered parameters
+//! and optional result use CTSC primitive types.
 
 use serde::{Deserialize, Serialize};
 use specgate::{SpecEvent, spec_component, spec_operation};
@@ -56,6 +61,17 @@ pub struct CtscOtlpEncoding {
     pub span_count: i32,
     #[spec_event]
     pub otlp_json: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, SpecEvent)]
+#[serde(rename_all = "snake_case")]
+pub struct CtscRegistryEncoding {
+    #[spec_event]
+    pub operation_count: i32,
+    #[spec_event]
+    pub type_count: i32,
+    #[spec_event]
+    pub registry_json: String,
 }
 
 /// The terminal legacy event, if any, that selects the CTSC completion state.
@@ -237,6 +253,204 @@ pub fn encode_legacy_trace_otlp(
 
     CtscOtlpEncoding { otlp_json, span_count: 3 }
 }
+
+#[spec_operation("encode_discovery_registry")]
+pub fn encode_discovery_registry(
+    registry_id: String,
+    registry_version: String,
+    component_id: String,
+    discovery_json: String,
+) -> CtscRegistryEncoding {
+    encode_discovery_registry_result(registry_id, registry_version, component_id, &discovery_json)
+        .unwrap_or_else(|reason| panic!("failed to encode discovery registry: {reason}"))
+}
+
+fn encode_discovery_registry_result(
+    registry_id: String,
+    registry_version: String,
+    component_id: String,
+    discovery_json: &str,
+) -> Result<CtscRegistryEncoding, String> {
+    let discovery: DiscoveryRegistry =
+        serde_json::from_str(discovery_json).map_err(|error| format!("malformed discovery JSON: {error}"))?;
+    let named_types = discovery
+        .types
+        .iter()
+        .map(|ty| ty.name.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut operations = discovery
+        .operations
+        .iter()
+        .filter(|operation| !operation.is_setup && operation.component == component_id)
+        .map(|operation| operation.to_ctsc(&named_types))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    if operations.is_empty() {
+        return Err(format!("no non-setup operations found for component '{component_id}'"));
+    }
+    operations.sort_by(|left, right| left.name.cmp(&right.name));
+
+    let operation_count = i32::try_from(operations.len()).map_err(|_error| "operation count exceeds i32".to_string())?;
+    let document = RegistryDocument {
+        format: "ctsc.registry",
+        format_version: "0.1.0",
+        registry_id,
+        version: registry_version,
+        components: vec![RegistryComponent {
+            id: component_id,
+            operations,
+            types: Vec::new(),
+        }],
+    };
+    let registry_json = serde_json::to_string(&document).map_err(|error| format!("registry JSON serialization failed: {error}"))?;
+
+    Ok(CtscRegistryEncoding {
+        operation_count,
+        type_count: 0,
+        registry_json,
+    })
+}
+
+#[derive(Deserialize)]
+struct DiscoveryRegistry {
+    operations: Vec<DiscoveryOperation>,
+    types: Vec<DiscoveryType>,
+}
+
+#[derive(Deserialize)]
+struct DiscoveryOperation {
+    name: String,
+    is_setup: bool,
+    #[serde(default)]
+    return_type: String,
+    component: String,
+    params: Vec<(String, String)>,
+}
+
+impl DiscoveryOperation {
+    fn to_ctsc(&self, named_types: &std::collections::BTreeSet<&str>) -> Result<RegistryOperation, String> {
+        let inputs = self
+            .params
+            .iter()
+            .map(|(name, native_type)| {
+                Ok(NamedValue {
+                    name: name.clone(),
+                    value_type: primitive_type(native_type, named_types)?,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        let result = if is_unit_type(&self.return_type) {
+            None
+        } else {
+            Some(primitive_type(&self.return_type, named_types)?)
+        };
+
+        Ok(RegistryOperation {
+            name: self.name.clone(),
+            inputs,
+            observations: Vec::new(),
+            outcomes: RegistryOutcomes { result },
+        })
+    }
+}
+
+#[derive(Deserialize)]
+struct DiscoveryType {
+    name: String,
+}
+
+fn primitive_type(native_type: &str, named_types: &std::collections::BTreeSet<&str>) -> Result<RegistryTypeRef, String> {
+    let normalized = normalize_native_type(native_type);
+    let primitive = match normalized.as_str() {
+        "()" | "unit" => "unit",
+        "string" | "String" | "str" => "string",
+        "bool" => "bool",
+        "i32" => "i32",
+        "i64" => "i64",
+        "u32" => "u32",
+        "u64" => "u64",
+        "f32" => "f32",
+        "f64" => "f64",
+        "bytes" | "Vec<u8>" | "[u8]" => "bytes",
+        _ if named_types.contains(normalized.as_str()) => {
+            return Err(format!("named type '{normalized}' is not supported by registry encoding"));
+        }
+        _ => return Err(format!("unsupported type '{native_type}'")),
+    };
+    Ok(RegistryTypeRef {
+        kind: "primitive",
+        name: primitive,
+    })
+}
+
+fn is_unit_type(native_type: &str) -> bool {
+    let normalized = normalize_native_type(native_type);
+    normalized.is_empty() || normalized == "()" || normalized == "unit"
+}
+
+fn normalize_native_type(native_type: &str) -> String {
+    let mut ty = native_type.trim();
+    while let Some(rest) = ty.strip_prefix('&') {
+        ty = rest.trim_start();
+        if let Some(lifetime_tail) = ty
+            .strip_prefix('\'')
+            .and_then(|rest| rest.split_once(char::is_whitespace).map(|(_, tail)| tail))
+        {
+            ty = lifetime_tail.trim_start();
+        }
+        if let Some(rest) = ty.strip_prefix("mut ") {
+            ty = rest.trim_start();
+        }
+    }
+    ty.chars().filter(|character| !character.is_whitespace()).collect()
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RegistryDocument {
+    format: &'static str,
+    format_version: &'static str,
+    registry_id: String,
+    version: String,
+    components: Vec<RegistryComponent>,
+}
+
+#[derive(Serialize)]
+struct RegistryComponent {
+    id: String,
+    operations: Vec<RegistryOperation>,
+    types: Vec<RegistryNamedType>,
+}
+
+#[derive(Serialize)]
+struct RegistryOperation {
+    name: String,
+    inputs: Vec<NamedValue>,
+    observations: Vec<NamedValue>,
+    outcomes: RegistryOutcomes,
+}
+
+#[derive(Serialize)]
+struct NamedValue {
+    name: String,
+    #[serde(rename = "type")]
+    value_type: RegistryTypeRef,
+}
+
+#[derive(Serialize)]
+struct RegistryOutcomes {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    result: Option<RegistryTypeRef>,
+}
+
+#[derive(Serialize)]
+struct RegistryTypeRef {
+    kind: &'static str,
+    name: &'static str,
+}
+
+#[derive(Serialize)]
+struct RegistryNamedType;
 
 fn project_legacy_trace(legacy_trace_json: &str) -> LegacyProjection {
     let trace_events: Vec<TraceEvent> = serde_json::from_str(legacy_trace_json).expect("valid trace JSON required");
@@ -579,6 +793,98 @@ mod tests {
     }
 
     #[test]
+    fn encode_stateless_discovery_as_registry() {
+        let result = encode_test_registry(
+            "fixture.stateless_add",
+            r#"{"operations":[{"name":"add","is_setup":false,"is_async":false,"return_type":"i32","fills":"","component":"fixture.stateless_add","params":[["a","i32"],["b","i32"]]}],"types":[]}"#,
+        );
+
+        assert_eq!(result.operation_count, 1);
+        assert_eq!(result.type_count, 0);
+        assert_eq!(
+            result.registry_json,
+            r#"{"format":"ctsc.registry","formatVersion":"0.1.0","registryId":"urn:ctsc:registry:test:1","version":"1.0.0","components":[{"id":"fixture.stateless_add","operations":[{"name":"add","inputs":[{"name":"a","type":{"kind":"primitive","name":"i32"}},{"name":"b","type":{"kind":"primitive","name":"i32"}}],"observations":[],"outcomes":{"result":{"kind":"primitive","name":"i32"}}}],"types":[]}]}"#
+        );
+    }
+
+    #[test]
+    fn registry_sorts_operations_but_preserves_parameter_order_and_filters_component_setups() {
+        let result = encode_test_registry(
+            "selected",
+            r#"{"operations":[
+                {"name":"zeta","is_setup":false,"return_type":"","component":"selected","params":[["second","u64"],["first","bool"]]},
+                {"name":"make_zeta","is_setup":true,"return_type":"State","component":"selected","params":[]},
+                {"name":"alpha","is_setup":false,"return_type":"String","component":"selected","params":[["value","&str"]]},
+                {"name":"ignored","is_setup":false,"return_type":"i32","component":"other","params":[]}
+            ],"types":[]}"#,
+        );
+        let document: serde_json::Value = serde_json::from_str(&result.registry_json).unwrap();
+        let operations = document["components"][0]["operations"].as_array().unwrap();
+
+        assert_eq!(operations.len(), 2);
+        assert_eq!(operations[0]["name"], "alpha");
+        assert_eq!(operations[1]["name"], "zeta");
+        assert_eq!(operations[1]["inputs"][0]["name"], "second");
+        assert_eq!(operations[1]["inputs"][1]["name"], "first");
+        assert_eq!(operations[1]["outcomes"], serde_json::json!({}));
+    }
+
+    #[test]
+    fn registry_maps_primitive_aliases_refs_bytes_and_unit() {
+        let result = encode_test_registry(
+            "selected",
+            r#"{"operations":[{"name":"primitives","is_setup":false,"return_type":"()","component":"selected","params":[
+                ["unit","unit"],["string","string"],["owned","String"],["slice","&'static str"],["flag","bool"],
+                ["i32","i32"],["i64","i64"],["u32","u32"],["u64","u64"],["f32","f32"],["f64","f64"],
+                ["bytes","Vec<u8>"],["borrowed_bytes","&[u8]"]
+            ]}],"types":[]}"#,
+        );
+        let document: serde_json::Value = serde_json::from_str(&result.registry_json).unwrap();
+        let inputs = document["components"][0]["operations"][0]["inputs"].as_array().unwrap();
+        let names = inputs
+            .iter()
+            .map(|input| input["type"]["name"].as_str().unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            names,
+            [
+                "unit", "string", "string", "string", "bool", "i32", "i64", "u32", "u64", "f32", "f64", "bytes", "bytes"
+            ]
+        );
+        assert_eq!(document["components"][0]["operations"][0]["outcomes"], serde_json::json!({}));
+    }
+
+    #[test]
+    fn registry_rejects_malformed_json() {
+        assert_registry_error("{", "malformed discovery JSON");
+    }
+
+    #[test]
+    fn registry_rejects_missing_component() {
+        assert_registry_error(
+            r#"{"operations":[{"name":"other","is_setup":false,"return_type":"i32","component":"other","params":[]}],"types":[]}"#,
+            "no non-setup operations found for component 'selected'",
+        );
+    }
+
+    #[test]
+    fn registry_rejects_unsupported_type() {
+        assert_registry_error(
+            r#"{"operations":[{"name":"bad","is_setup":false,"return_type":"usize","component":"selected","params":[]}],"types":[]}"#,
+            "unsupported type 'usize'",
+        );
+    }
+
+    #[test]
+    fn registry_rejects_unsupported_named_type() {
+        assert_registry_error(
+            r#"{"operations":[{"name":"bad","is_setup":false,"return_type":"Widget","component":"selected","params":[]}],"types":[{"name":"Widget"}]}"#,
+            "named type 'Widget' is not supported",
+        );
+    }
+
+    #[test]
     fn encode_operation_emits_spec_outputs_in_case_order() {
         specgate_runtime::reset();
         let result = encode_test_trace(r#"[{"kind":"Run","operation":"add"},{"kind":"Event","name":"$result","value":5}]"#);
@@ -701,5 +1007,25 @@ mod tests {
             "rust-reference".to_string(),
             "rust".to_string(),
         )
+    }
+
+    fn encode_test_registry(component_id: &str, discovery_json: &str) -> CtscRegistryEncoding {
+        encode_discovery_registry(
+            "urn:ctsc:registry:test:1".to_string(),
+            "1.0.0".to_string(),
+            component_id.to_string(),
+            discovery_json.to_string(),
+        )
+    }
+
+    fn assert_registry_error(discovery_json: &str, expected: &str) {
+        let panic =
+            std::panic::catch_unwind(|| encode_test_registry("selected", discovery_json)).expect_err("invalid discovery should panic");
+        let message = panic
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| panic.downcast_ref::<&str>().copied())
+            .expect("panic should contain a string");
+        assert!(message.contains(expected), "expected '{expected}' in '{message}'");
     }
 }

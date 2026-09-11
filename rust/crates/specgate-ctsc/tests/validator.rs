@@ -1,4 +1,4 @@
-use specgate_ctsc::encode_legacy_trace_otlp;
+use specgate_ctsc::{encode_discovery_registry, encode_legacy_trace_otlp};
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
@@ -20,22 +20,38 @@ fn generated_otlp_passes_ctsc_trace_validator_when_available() {
         "rust".to_string(),
     );
 
+    validate_generated_document("trace", "trace", &result.otlp_json);
+}
+
+#[test]
+fn generated_registry_passes_ctsc_registry_validator_when_available() {
+    let result = encode_discovery_registry(
+        "urn:ctsc:registry:fixture.stateless-add:1".to_string(),
+        "1.0.0".to_string(),
+        "fixture.stateless_add".to_string(),
+        r#"{"operations":[{"name":"add","is_setup":false,"is_async":false,"return_type":"i32","fills":"","component":"fixture.stateless_add","params":[["a","i32"],["b","i32"]]}],"types":[]}"#.to_string(),
+    );
+
+    validate_generated_document("registry", "registry", &result.registry_json);
+}
+
+fn validate_generated_document(kind: &str, file_label: &str, json: &str) {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let repo_root = manifest_dir.ancestors().nth(3).expect("failed to derive repository root");
     let output_dir = repo_root.join("rust").join("target");
     fs::create_dir_all(&output_dir).expect("failed to create validator output directory");
-    let trace_path = output_dir.join(format!("specgate-ctsc-validator-{}.json", std::process::id()));
-    fs::write(&trace_path, result.otlp_json).expect("failed to write generated OTLP JSON");
+    let document_path = output_dir.join(format!("specgate-ctsc-validator-{file_label}-{}.json", std::process::id()));
+    fs::write(&document_path, json).expect("failed to write generated CTSC JSON");
 
     let validator = repo_root.join("docs").join("ctsc").join("validate.py");
     if !validator.is_file() {
-        let _ = fs::remove_file(&trace_path);
+        let _ = fs::remove_file(&document_path);
         eprintln!("CTSC validator unavailable: {}", validator.display());
         return;
     }
 
-    let output = invoke_python_validator(&validator, &trace_path);
-    let _ = fs::remove_file(&trace_path);
+    let output = invoke_python_validator(&validator, kind, &document_path);
+    let _ = fs::remove_file(&document_path);
 
     let Some(output) = output else {
         eprintln!("CTSC validator unavailable: Python was not found");
@@ -52,19 +68,19 @@ fn generated_otlp_passes_ctsc_trace_validator_when_available() {
 
     assert!(
         output.status.success(),
-        "CTSC validator rejected generated OTLP:\nstdout: {stdout}\nstderr: {stderr}"
+        "CTSC validator rejected generated {kind}:\nstdout: {stdout}\nstderr: {stderr}"
     );
 }
 
-fn invoke_python_validator(validator: &Path, trace_path: &Path) -> Option<Output> {
+fn invoke_python_validator(validator: &Path, kind: &str, document_path: &Path) -> Option<Output> {
     let candidates: [(&str, &[&str]); 2] = [("python", &[]), ("py", &["-3"])];
 
     for (program, prefix_args) in candidates {
         let output = Command::new(program)
             .args(prefix_args)
             .arg(validator)
-            .arg("trace")
-            .arg(trace_path)
+            .arg(kind)
+            .arg(document_path)
             .output();
 
         match output {
