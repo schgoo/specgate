@@ -107,6 +107,11 @@ pub enum DiscoverOutcome {
     },
 }
 
+struct DiscoveredTarget {
+    outcome: TargetOutcome,
+    raw_registry_json: Option<String>,
+}
+
 /// Report the component's self-described schema for the spec at `spec_path`.
 ///
 /// Reads the spec's component and EVERY bound target, asks each self-describing
@@ -152,7 +157,7 @@ fn discover_inner(spec_path: &str) -> Result<DiscoverOutcome, String> {
         };
 
         let label = binding_target_label(bp, parsed.target.as_deref());
-        let outcome = discover_target(&binding, parsed.target.as_deref(), &component)?;
+        let outcome = discover_target(&binding, parsed.target.as_deref(), &component)?.outcome;
 
         if let TargetOutcome::SelfDescribed { schema } = &outcome
             && canonical.is_none()
@@ -171,6 +176,28 @@ fn discover_inner(spec_path: &str) -> Result<DiscoverOutcome, String> {
     }
 }
 
+/// Discover the raw registry JSON for one target in a binding file.
+///
+/// This is the narrow orchestration API used by clients that need the
+/// language-specific metadata before `SpecGate` normalizes it. Rust targets use
+/// link-time registration and C# targets use reflection over the built
+/// assembly; both paths share [`discover_target`]'s dispatch.
+///
+/// # Errors
+///
+/// Returns an error when the binding cannot be loaded, the selected target is
+/// missing, discovery fails, or the binding language has no discovery path.
+pub fn discover_registry_json(binding_path: &str, target_name: Option<&str>, component: &str) -> Result<String, String> {
+    let path = PathBuf::from(binding_path);
+    let path = std::fs::canonicalize(&path).unwrap_or(path);
+    let binding = crate::binding::load_binding(&path).ok_or_else(|| format!("binding '{binding_path}' not found or invalid"))?;
+    let discovered = discover_target(&binding, target_name, component)?;
+    discovered.raw_registry_json.ok_or_else(|| match discovered.outcome {
+        TargetOutcome::NotSelfDescribing { reason } => reason,
+        TargetOutcome::SelfDescribed { .. } => "target discovery produced no registry JSON".to_string(),
+    })
+}
+
 /// Discover one bound target, dispatching on the binding's language. Rust
 /// targets self-describe via link-time `discovery_json()`; C# targets
 /// self-describe via reflection over the compiled fixture assembly (see
@@ -179,7 +206,7 @@ fn discover_inner(spec_path: &str) -> Result<DiscoverOutcome, String> {
 /// Languages without a discovery mechanism (a `command` target, etc.) report
 /// [`TargetOutcome::NotSelfDescribing`]. Adding a new language's discovery is a
 /// matter of extending this dispatch.
-fn discover_target(binding: &crate::binding::Binding, target_name: Option<&str>, component: &str) -> Result<TargetOutcome, String> {
+fn discover_target(binding: &crate::binding::Binding, target_name: Option<&str>, component: &str) -> Result<DiscoveredTarget, String> {
     match binding.language.as_str() {
         "rust" => {
             let Some(target) = binding.target(target_name) else {
@@ -188,7 +215,10 @@ fn discover_target(binding: &crate::binding::Binding, target_name: Option<&str>,
             let json = run_discovery(&target.package_root)?;
             let registry = Registry::parse(&json)?;
             let schema = build_schema(&registry, component);
-            Ok(TargetOutcome::SelfDescribed { schema })
+            Ok(DiscoveredTarget {
+                outcome: TargetOutcome::SelfDescribed { schema },
+                raw_registry_json: Some(json),
+            })
         }
         "csharp" => {
             let Some(target) = binding.target(target_name) else {
@@ -197,10 +227,16 @@ fn discover_target(binding: &crate::binding::Binding, target_name: Option<&str>,
             let json = crate::csharp_discovery::run_csharp_discovery(target, component)?;
             let registry = Registry::parse(&json)?;
             let schema = build_schema_prenormalized(&registry, component);
-            Ok(TargetOutcome::SelfDescribed { schema })
+            Ok(DiscoveredTarget {
+                outcome: TargetOutcome::SelfDescribed { schema },
+                raw_registry_json: Some(json),
+            })
         }
-        other => Ok(TargetOutcome::NotSelfDescribing {
-            reason: format!("no discovery metadata emitted by {other} target"),
+        other => Ok(DiscoveredTarget {
+            outcome: TargetOutcome::NotSelfDescribing {
+                reason: format!("no discovery metadata emitted by {other} target"),
+            },
+            raw_registry_json: None,
         }),
     }
 }

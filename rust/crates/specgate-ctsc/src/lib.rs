@@ -265,7 +265,13 @@ pub fn encode_discovery_registry(
         .unwrap_or_else(|reason| panic!("failed to encode discovery registry: {reason}"))
 }
 
-fn encode_discovery_registry_result(
+/// Encode one component from raw `SpecGate` discovery metadata without panicking.
+///
+/// # Errors
+///
+/// Returns an error when the discovery JSON is malformed, contains unsupported
+/// types, or has no non-setup operations for `component_id`.
+pub fn encode_discovery_registry_result(
     registry_id: String,
     registry_version: String,
     component_id: String,

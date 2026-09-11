@@ -1,8 +1,9 @@
 //! Command-line interface for [SpecGate](https://github.com/schgoo/specgate):
-//! validate specs, run them through the harness, and extract specs from
-//! annotated code. This library backs the `specgate` binary and the
-//! integration-test suite; each command is also callable as a function
-//! (`validate`, `run`, `extract`).
+//! validate specs, run them through the harness, extract specs from
+//! annotated code, and discover implementation metadata as CTSC registries.
+//! This library backs the `specgate` binary and the integration-test suite;
+//! each command is also callable as a function (`validate`, `run`, `extract`,
+//! `discover`).
 //!
 //! # Commands
 //!
@@ -10,6 +11,7 @@
 //! specgate validate <spec-dir> [--strict] [--spec-only] [--assertions-dir <dir>]
 //! specgate run <spec.yaml> [--coverage] [--coverage-threshold <pct>] [--verbose] [--json]
 //! specgate extract <package-root> -o|--out <spec.yaml> [--component <name>] [--cases]
+//! specgate discover <binding.yaml> --component <id> --registry-id <id> --registry-version <version> -o|--out <registry.ctsc.json> [--target <name>]
 //! ```
 //!
 //! ## `validate`
@@ -55,16 +57,30 @@
 //! - `--cases` — also capture runnable cases from the crate's tests.
 //!
 //! Extraction is deterministic and uses no LLM.
+//!
+//! ## `discover`
+//!
+//! Loads one target from a binding, invokes its existing language-specific
+//! discovery mechanism (Rust link-time registration or C# reflection), and
+//! writes a compact deterministic CTSC registry document.
+//!
+//! - `--component <id>` — component whose operations to encode (required).
+//! - `--registry-id <id>` — CTSC registry identifier (required).
+//! - `--registry-version <version>` — registry version (required).
+//! - `-o`, `--out <registry.ctsc.json>` — output path (required).
+//! - `--target <name>` — binding target; omitted selects the default.
 
 // The crate-root default component for all annotated items in this crate's
 // submodules (extract/run/validate). Submodules reference the generated
 // `crate::__SPECGATE_COMPONENT` constant.
 specgate::spec_component!("specgate.cli");
 
+pub mod discover;
 pub mod extract;
 pub mod run;
 pub mod validate;
 
+pub use discover::{DiscoverOutcome, DiscoverReport, discover};
 pub use extract::{ExtractOutcome, ExtractReport, extract};
 pub use run::{CaseReport, RunOutcome, RunReport, TargetDivergence, run};
 pub use validate::{Severity, ValidateOutcome, ValidationFinding, ValidationReport, validate};

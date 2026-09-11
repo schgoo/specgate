@@ -2,13 +2,13 @@
 
 use std::process::ExitCode;
 
-use specgate_cli::{extract, run, validate};
+use specgate_cli::{discover, extract, run, validate};
 
 fn print_usage() {
     eprintln!(
         "usage: specgate <command> [options] <args>\n\
          \n\
-         commands:\n  validate <spec-dir> [--strict] [--spec-only] [--assertions-dir <dir>]\n  run <spec.yaml> [--coverage] [--coverage-threshold <pct>] [--verbose] [--json]\n  extract <package-root> -o|--out <spec.yaml> [--component <name>] [--cases]"
+         commands:\n  validate <spec-dir> [--strict] [--spec-only] [--assertions-dir <dir>]\n  run <spec.yaml> [--coverage] [--coverage-threshold <pct>] [--verbose] [--json]\n  extract <package-root> -o|--out <spec.yaml> [--component <name>] [--cases]\n  discover <binding.yaml> --component <id> --registry-id <id> --registry-version <version> -o|--out <registry.ctsc.json> [--target <name>]"
     );
 }
 
@@ -24,6 +24,7 @@ fn main() -> ExitCode {
         "validate" => cmd_validate(rest),
         "run" => cmd_run(rest),
         "extract" => cmd_extract(rest),
+        "discover" => cmd_discover(rest),
         "-h" | "--help" => {
             print_usage();
             ExitCode::from(0)
@@ -33,6 +34,72 @@ fn main() -> ExitCode {
             print_usage();
             ExitCode::from(2)
         }
+    }
+}
+
+fn cmd_discover(args: &[String]) -> ExitCode {
+    let mut binding: Option<String> = None;
+    let mut target = String::new();
+    let mut component: Option<String> = None;
+    let mut registry_id: Option<String> = None;
+    let mut registry_version: Option<String> = None;
+    let mut out: Option<String> = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            flag @ ("--target" | "--component" | "--registry-id" | "--registry-version" | "-o" | "--out") => {
+                if i + 1 >= args.len() {
+                    eprintln!("error: {flag} needs an argument");
+                    return ExitCode::from(2);
+                }
+                let value = args[i + 1].clone();
+                match flag {
+                    "--target" => target = value,
+                    "--component" => component = Some(value),
+                    "--registry-id" => registry_id = Some(value),
+                    "--registry-version" => registry_version = Some(value),
+                    "-o" | "--out" => out = Some(value),
+                    _ => {}
+                }
+                i += 2;
+            }
+            a if !a.starts_with('-') && binding.is_none() => {
+                binding = Some(a.to_string());
+                i += 1;
+            }
+            a => {
+                eprintln!("error: unexpected argument '{a}'");
+                return ExitCode::from(2);
+            }
+        }
+    }
+
+    let Some(binding) = binding else {
+        eprintln!("error: discover requires a binding file argument");
+        return ExitCode::from(2);
+    };
+    let Some(component) = component else {
+        eprintln!("error: discover requires --component <id>");
+        return ExitCode::from(2);
+    };
+    let Some(registry_id) = registry_id else {
+        eprintln!("error: discover requires --registry-id <id>");
+        return ExitCode::from(2);
+    };
+    let Some(registry_version) = registry_version else {
+        eprintln!("error: discover requires --registry-version <version>");
+        return ExitCode::from(2);
+    };
+    let Some(out) = out else {
+        eprintln!("error: discover requires -o/--out <registry.ctsc.json>");
+        return ExitCode::from(2);
+    };
+
+    let outcome = discover(&binding, &target, &component, &registry_id, &registry_version, &out);
+    print!("{}", discover::format_outcome(&outcome));
+    match outcome {
+        discover::DiscoverOutcome::Complete { .. } => ExitCode::from(0),
+        discover::DiscoverOutcome::Error { .. } => ExitCode::from(1),
     }
 }
 

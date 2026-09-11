@@ -42,6 +42,12 @@ types:
     cases: i32
     output_path: string
 
+  DiscoverReport:
+    component_id: string
+    operations: i32
+    types: i32
+    output_path: string
+
 operations:
   validate:
     desc: >
@@ -135,6 +141,30 @@ operations:
           oneof:
             Complete:
               report: ExtractReport
+            Error:
+              reason: string
+
+  discover:
+    desc: >
+      Discover one implementation target through its language-specific
+      metadata path and write a deterministic CTSC registry document. Rust
+      uses link-time registration and C# uses reflection over the built
+      assembly; both feed the same language-neutral CTSC encoder.
+    inputs:
+      binding: string
+      target:
+        type: string
+        default: ""
+        desc: Binding target name; empty selects the binding default
+      component: string
+      registry_id: string
+      registry_version: string
+      out: string
+    outputs:
+      - outcome:
+          oneof:
+            Complete:
+              report: DiscoverReport
             Error:
               reason: string
 
@@ -1207,6 +1237,46 @@ cases:
               operations: 4
               types: 1
               cases: 5
+
+  # ================================================================
+  # Discover — CTSC registry generation from implementation metadata
+  # ================================================================
+
+  - name: discover_rust_stateless_registry
+    desc: Rust link-time discovery emits the stateless fixture as a CTSC registry.
+    operation: discover
+    inputs:
+      binding: test/rust/crates/specgate-fixtures/specs/binding.yaml
+      target: ""
+      component: fixture.stateless_add
+      registry_id: urn:ctsc:registry:fixture.stateless-add:1
+      registry_version: 1.0.0
+      out: rust/target/ctsc-discover-rust.json
+    expected:
+      - $result:
+          Complete:
+            report:
+              component_id: fixture.stateless_add
+              operations: 1
+              types: 0
+
+  - name: discover_csharp_stateless_registry
+    desc: C# reflection discovery emits the same stateless CTSC registry.
+    operation: discover
+    inputs:
+      binding: test/rust/crates/specgate-fixtures/specs/csharp.yaml
+      target: ""
+      component: fixture.stateless_add
+      registry_id: urn:ctsc:registry:fixture.stateless-add:1
+      registry_version: 1.0.0
+      out: rust/target/ctsc-discover-csharp.json
+    expected:
+      - $result:
+          Complete:
+            report:
+              component_id: fixture.stateless_add
+              operations: 1
+              types: 0
 
   - name: run_extracted_cases_pass
     desc: >

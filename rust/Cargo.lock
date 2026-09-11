@@ -566,6 +566,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "specgate",
+ "specgate-ctsc",
  "specgate-harness",
 ]
 

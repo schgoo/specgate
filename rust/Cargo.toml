@@ -36,6 +36,7 @@ specgate-annotations = { path = "crates/specgate-annotations", version = "0.5.0"
 specgate-annotations-macros = { path = "crates/specgate-annotations-macros", version = "0.5.0" }
 specgate-runtime = { path = "crates/specgate-runtime", version = "0.5.0" }
 specgate-harness = { path = "crates/specgate-harness", version = "0.5.0" }
+specgate-ctsc = { path = "crates/specgate-ctsc", version = "0.5.0" }
 
 # Dependencies are fetched from crates.io normally.
 

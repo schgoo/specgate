@@ -36,7 +36,7 @@ pub use types::{CaseLevel, CaseResult, CaseStatus, CoverageOutcome, CoverageRepo
 // Public API — structural discovery (the schema counterpart to run_spec).
 pub use discovery::{
     DiscoverOutcome, DiscoveredField, DiscoveredInput, DiscoveredOperation, DiscoveredSchema, DiscoveredType, DiscoveredVariant,
-    TargetDiscovery, TargetOutcome, discover,
+    TargetDiscovery, TargetOutcome, discover, discover_registry_json,
 };
 
 // Internal types — exposed for integration tests within this crate,
