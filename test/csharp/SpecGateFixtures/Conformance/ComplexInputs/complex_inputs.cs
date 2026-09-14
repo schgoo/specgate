@@ -3,6 +3,7 @@ using SpecGate.Runtime;
 namespace SpecGateFixtures.Conformance.ComplexInputs;
 
 /// <summary>A single enum member supplied as structured list input.</summary>
+[SpecEvent]
 public class EnumMemberInput
 {
     /// <summary>The member's name.</summary>
@@ -15,6 +16,7 @@ public class EnumMemberInput
 }
 
 /// <summary>A two-dimensional point used as a struct input and output.</summary>
+[SpecEvent]
 public class Point
 {
     /// <summary>The x coordinate.</summary>
@@ -27,6 +29,7 @@ public class Point
 }
 
 /// <summary>An application configuration struct deserialized from a nested mapping input.</summary>
+[SpecEvent]
 public class AppConfig
 {
     /// <summary>The application name.</summary>
@@ -83,6 +86,7 @@ public sealed class ShapePoint : Shape
 }
 
 /// <summary>A postal address, used as a nested struct within <see cref="Person"/>.</summary>
+[SpecEvent]
 public class Address
 {
     /// <summary>The street line.</summary>
@@ -95,6 +99,7 @@ public class Address
 }
 
 /// <summary>A person with a nested <see cref="Address"/>, exercising nested struct input/output.</summary>
+[SpecEvent]
 public class Person
 {
     /// <summary>The person's name.</summary>

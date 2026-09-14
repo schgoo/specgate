@@ -61,8 +61,9 @@
 //! ## `discover`
 //!
 //! Loads one target from a binding, invokes its existing language-specific
-//! discovery mechanism (Rust link-time registration or C# reflection), and
-//! writes a compact deterministic CTSC registry document.
+//! discovery mechanism (Rust link-time registration or C# reflection), asks
+//! the harness for its normalized, setup-folded schema, and writes a compact
+//! deterministic CTSC registry document.
 //!
 //! - `--component <id>` — component whose operations to encode (required).
 //! - `--registry-id <id>` — CTSC registry identifier (required).

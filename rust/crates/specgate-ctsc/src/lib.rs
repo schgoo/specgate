@@ -23,15 +23,16 @@
 //! timestamp, tool version, and target metadata make production identity
 //! explicit while keeping tests reproducible.
 //!
-//! `encode_discovery_registry` projects one component from raw `SpecGate`
-//! discovery metadata into a compact, deterministic CTSC 0.1 registry. The
-//! initial projection supports non-setup operations whose ordered parameters
-//! and optional result use CTSC primitive types.
+//! `encode_discovery_registry` preserves the original raw-discovery projection
+//! for primitive operations. `encode_schema_registry` accepts the harness's
+//! normalized, setup-folded schema and emits named records, tagged unions, and
+//! recursive CTSC collection/option references without reimplementing
+//! language-specific discovery or normalization.
 
 use serde::{Deserialize, Serialize};
 use specgate::{SpecEvent, spec_component, spec_operation};
 use specgate_runtime::{TraceEvent, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 spec_component!("specgate.ctsc");
 
@@ -279,11 +280,7 @@ pub fn encode_discovery_registry_result(
 ) -> Result<CtscRegistryEncoding, String> {
     let discovery: DiscoveryRegistry =
         serde_json::from_str(discovery_json).map_err(|error| format!("malformed discovery JSON: {error}"))?;
-    let named_types = discovery
-        .types
-        .iter()
-        .map(|ty| ty.name.as_str())
-        .collect::<std::collections::BTreeSet<_>>();
+    let named_types = discovery.types.iter().map(|ty| ty.name.as_str()).collect::<BTreeSet<_>>();
     let mut operations = discovery
         .operations
         .iter()
@@ -317,6 +314,199 @@ pub fn encode_discovery_registry_result(
     })
 }
 
+#[spec_operation("encode_schema_registry")]
+pub fn encode_schema_registry(registry_id: String, registry_version: String, schema_json: String) -> CtscRegistryEncoding {
+    encode_schema_registry_result(registry_id, registry_version, &schema_json)
+        .unwrap_or_else(|reason| panic!("failed to encode normalized schema registry: {reason}"))
+}
+
+/// Encode one normalized, setup-folded `SpecGate` schema without panicking.
+///
+/// # Errors
+///
+/// Returns an error when the schema JSON is malformed, a named type
+/// declaration is unsupported, or a type reference is malformed, unsupported,
+/// or names a type absent from the schema.
+pub fn encode_schema_registry_result(
+    registry_id: String,
+    registry_version: String,
+    schema_json: &str,
+) -> Result<CtscRegistryEncoding, String> {
+    let schema: NormalizedSchema =
+        serde_json::from_str(schema_json).map_err(|error| format!("malformed normalized schema JSON: {error}"))?;
+    let named_types = schema.types.iter().map(|ty| ty.name.clone()).collect::<BTreeSet<_>>();
+    if named_types.len() != schema.types.len() {
+        return Err("normalized schema contains duplicate type names".to_string());
+    }
+
+    let mut operations = schema
+        .operations
+        .iter()
+        .map(|operation| operation.to_ctsc(&named_types))
+        .collect::<Result<Vec<_>, _>>()?;
+    operations.sort_by(|left, right| left.name.cmp(&right.name));
+
+    let mut types = schema
+        .types
+        .iter()
+        .map(|ty| ty.to_ctsc(&named_types))
+        .collect::<Result<Vec<_>, _>>()?;
+    types.sort_by(|left, right| left.name.cmp(&right.name));
+
+    let operation_count = i32::try_from(operations.len()).map_err(|_error| "operation count exceeds i32".to_string())?;
+    let type_count = i32::try_from(types.len()).map_err(|_error| "type count exceeds i32".to_string())?;
+    let document = RegistryDocument {
+        format: "ctsc.registry",
+        format_version: "0.1.0",
+        registry_id,
+        version: registry_version,
+        components: vec![RegistryComponent {
+            id: schema.component,
+            operations,
+            types,
+        }],
+    };
+    let registry_json = serde_json::to_string(&document).map_err(|error| format!("registry JSON serialization failed: {error}"))?;
+
+    Ok(CtscRegistryEncoding {
+        operation_count,
+        type_count,
+        registry_json,
+    })
+}
+
+#[derive(Deserialize)]
+struct NormalizedSchema {
+    component: String,
+    operations: Vec<NormalizedOperation>,
+    types: Vec<NormalizedType>,
+}
+
+#[derive(Deserialize)]
+struct NormalizedOperation {
+    name: String,
+    #[serde(rename = "is_async")]
+    _is_async: bool,
+    inputs: Vec<NormalizedInput>,
+    output: String,
+}
+
+impl NormalizedOperation {
+    fn to_ctsc(&self, named_types: &BTreeSet<String>) -> Result<RegistryOperation, String> {
+        let inputs = self
+            .inputs
+            .iter()
+            .map(|input| {
+                Ok(NamedValue {
+                    name: input.name.clone(),
+                    value_type: schema_type_ref(&input.ty, named_types)?,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        let result = if is_schema_unit_type(&self.output) {
+            None
+        } else {
+            Some(schema_type_ref(&self.output, named_types)?)
+        };
+
+        Ok(RegistryOperation {
+            name: self.name.clone(),
+            inputs,
+            observations: Vec::new(),
+            outcomes: RegistryOutcomes { result },
+        })
+    }
+}
+
+#[derive(Deserialize)]
+struct NormalizedInput {
+    name: String,
+    ty: String,
+}
+
+#[derive(Deserialize)]
+struct NormalizedType {
+    name: String,
+    kind: String,
+    #[serde(default)]
+    fields: Vec<NormalizedField>,
+    #[serde(default)]
+    variants: Vec<NormalizedVariant>,
+}
+
+impl NormalizedType {
+    fn to_ctsc(&self, named_types: &BTreeSet<String>) -> Result<RegistryNamedType, String> {
+        let shape = match self.kind.as_str() {
+            "struct" => {
+                if !self.variants.is_empty() {
+                    return Err(format!("struct type '{}' must not declare variants", self.name));
+                }
+                RegistryNamedTypeShape::Record {
+                    fields: normalized_fields(&self.fields, named_types)?,
+                }
+            }
+            "enum" => {
+                if !self.fields.is_empty() {
+                    return Err(format!("enum type '{}' must not declare fields", self.name));
+                }
+                if self.variants.is_empty() {
+                    return Err(format!("enum type '{}' must declare at least one variant", self.name));
+                }
+                RegistryNamedTypeShape::TaggedUnion {
+                    variants: self
+                        .variants
+                        .iter()
+                        .map(|variant| {
+                            let payload = if variant.fields.is_empty() {
+                                None
+                            } else {
+                                Some(RegistryTypeRef::Record {
+                                    fields: normalized_fields(&variant.fields, named_types)?,
+                                })
+                            };
+                            Ok(RegistryVariant {
+                                name: variant.name.clone(),
+                                payload,
+                            })
+                        })
+                        .collect::<Result<Vec<_>, String>>()?,
+                }
+            }
+            other => return Err(format!("unsupported normalized type kind '{other}' for '{}'", self.name)),
+        };
+
+        Ok(RegistryNamedType {
+            name: self.name.clone(),
+            shape,
+        })
+    }
+}
+
+#[derive(Deserialize)]
+struct NormalizedField {
+    name: String,
+    ty: String,
+}
+
+#[derive(Deserialize)]
+struct NormalizedVariant {
+    name: String,
+    #[serde(default)]
+    fields: Vec<NormalizedField>,
+}
+
+fn normalized_fields(fields: &[NormalizedField], named_types: &BTreeSet<String>) -> Result<Vec<NamedValue>, String> {
+    fields
+        .iter()
+        .map(|field| {
+            Ok(NamedValue {
+                name: field.name.clone(),
+                value_type: schema_type_ref(&field.ty, named_types)?,
+            })
+        })
+        .collect()
+}
+
 #[derive(Deserialize)]
 struct DiscoveryRegistry {
     operations: Vec<DiscoveryOperation>,
@@ -334,7 +524,7 @@ struct DiscoveryOperation {
 }
 
 impl DiscoveryOperation {
-    fn to_ctsc(&self, named_types: &std::collections::BTreeSet<&str>) -> Result<RegistryOperation, String> {
+    fn to_ctsc(&self, named_types: &BTreeSet<&str>) -> Result<RegistryOperation, String> {
         let inputs = self
             .params
             .iter()
@@ -365,7 +555,7 @@ struct DiscoveryType {
     name: String,
 }
 
-fn primitive_type(native_type: &str, named_types: &std::collections::BTreeSet<&str>) -> Result<RegistryTypeRef, String> {
+fn primitive_type(native_type: &str, named_types: &BTreeSet<&str>) -> Result<RegistryTypeRef, String> {
     let normalized = normalize_native_type(native_type);
     let primitive = match normalized.as_str() {
         "()" | "unit" => "unit",
@@ -383,10 +573,188 @@ fn primitive_type(native_type: &str, named_types: &std::collections::BTreeSet<&s
         }
         _ => return Err(format!("unsupported type '{native_type}'")),
     };
-    Ok(RegistryTypeRef {
-        kind: "primitive",
-        name: primitive,
+    Ok(RegistryTypeRef::Primitive {
+        name: primitive.to_string(),
     })
+}
+
+fn schema_type_ref(type_ref: &str, named_types: &BTreeSet<String>) -> Result<RegistryTypeRef, String> {
+    let mut parser = TypeRefParser {
+        input: type_ref,
+        position: 0,
+        named_types,
+    };
+    let parsed = parser.parse_type()?;
+    parser.skip_whitespace();
+    if parser.position != parser.input.len() {
+        return Err(format!(
+            "unexpected trailing input '{}' in type reference '{type_ref}'",
+            &parser.input[parser.position..]
+        ));
+    }
+    Ok(parsed)
+}
+
+struct TypeRefParser<'a> {
+    input: &'a str,
+    position: usize,
+    named_types: &'a BTreeSet<String>,
+}
+
+impl TypeRefParser<'_> {
+    fn parse_type(&mut self) -> Result<RegistryTypeRef, String> {
+        self.skip_whitespace();
+        if self.remaining().starts_with("()") {
+            self.position += 2;
+            return Ok(RegistryTypeRef::Primitive { name: "unit".to_string() });
+        }
+
+        let name = self.parse_identifier()?;
+        self.skip_whitespace();
+        if self.consume('<') {
+            let arguments = self.parse_arguments()?;
+            return Self::construct_generic(&name, arguments);
+        }
+
+        if is_ctsc_primitive(&name) {
+            Ok(RegistryTypeRef::Primitive { name })
+        } else if self.named_types.contains(&name) {
+            Ok(RegistryTypeRef::Named { name })
+        } else {
+            Err(format!("unknown named type '{name}'"))
+        }
+    }
+
+    fn parse_identifier(&mut self) -> Result<String, String> {
+        self.skip_whitespace();
+        let start = self.position;
+        while let Some(character) = self.remaining().chars().next() {
+            if character.is_alphanumeric() || matches!(character, '_' | ':' | '.') {
+                self.position += character.len_utf8();
+            } else {
+                break;
+            }
+        }
+        if self.position == start {
+            Err(format!("expected type name at byte {}", self.position))
+        } else {
+            Ok(self.input[start..self.position].to_string())
+        }
+    }
+
+    fn parse_arguments(&mut self) -> Result<Vec<RegistryTypeRef>, String> {
+        let mut arguments = Vec::new();
+        self.skip_whitespace();
+        if self.consume('>') {
+            return Ok(arguments);
+        }
+
+        loop {
+            arguments.push(self.parse_type()?);
+            self.skip_whitespace();
+            if self.consume('>') {
+                return Ok(arguments);
+            }
+            if self.consume(',') {
+                continue;
+            }
+            if self.position == self.input.len() {
+                return Err(format!("expected '>' at byte {}", self.position));
+            }
+            return Err(format!("expected ',' or '>' at byte {}", self.position));
+        }
+    }
+
+    fn construct_generic(name: &str, mut arguments: Vec<RegistryTypeRef>) -> Result<RegistryTypeRef, String> {
+        match name {
+            "List" | "list" => {
+                expect_type_argument_count(name, &arguments, 1)?;
+                Ok(RegistryTypeRef::List {
+                    items: Box::new(arguments.remove(0)),
+                })
+            }
+            "Set" | "set" => {
+                expect_type_argument_count(name, &arguments, 1)?;
+                Ok(RegistryTypeRef::Set {
+                    items: Box::new(arguments.remove(0)),
+                })
+            }
+            "Map" | "map" => {
+                expect_type_argument_count(name, &arguments, 2)?;
+                let values = arguments.remove(1);
+                let keys = arguments.remove(0);
+                Ok(RegistryTypeRef::Map {
+                    keys: Box::new(keys),
+                    values: Box::new(values),
+                })
+            }
+            "Tuple" | "tuple" => {
+                if arguments.is_empty() {
+                    return Err(format!("type constructor '{name}' expects at least 1 type argument"));
+                }
+                Ok(RegistryTypeRef::Tuple { items: arguments })
+            }
+            "Option" | "optional" => {
+                expect_type_argument_count(name, &arguments, 1)?;
+                Ok(RegistryTypeRef::TaggedUnion {
+                    variants: vec![
+                        RegistryVariant {
+                            name: "None".to_string(),
+                            payload: None,
+                        },
+                        RegistryVariant {
+                            name: "Some".to_string(),
+                            payload: Some(arguments.remove(0)),
+                        },
+                    ],
+                })
+            }
+            other => Err(format!("unsupported type constructor '{other}'")),
+        }
+    }
+
+    fn consume(&mut self, expected: char) -> bool {
+        self.skip_whitespace();
+        if self.remaining().starts_with(expected) {
+            self.position += expected.len_utf8();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn skip_whitespace(&mut self) {
+        while let Some(character) = self.remaining().chars().next() {
+            if character.is_whitespace() {
+                self.position += character.len_utf8();
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn remaining(&self) -> &str {
+        &self.input[self.position..]
+    }
+}
+
+fn expect_type_argument_count(name: &str, arguments: &[RegistryTypeRef], expected: usize) -> Result<(), String> {
+    if arguments.len() == expected {
+        Ok(())
+    } else {
+        Err(format!("type constructor '{name}' expects {expected} type arguments"))
+    }
+}
+
+fn is_ctsc_primitive(name: &str) -> bool {
+    matches!(
+        name,
+        "unit" | "string" | "bool" | "i32" | "i64" | "u32" | "u64" | "f32" | "f64" | "bytes"
+    )
+}
+
+fn is_schema_unit_type(type_ref: &str) -> bool {
+    matches!(type_ref.trim(), "" | "()" | "unit")
 }
 
 fn is_unit_type(native_type: &str) -> bool {
@@ -421,14 +789,14 @@ struct RegistryDocument {
     components: Vec<RegistryComponent>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct RegistryComponent {
     id: String,
     operations: Vec<RegistryOperation>,
     types: Vec<RegistryNamedType>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct RegistryOperation {
     name: String,
     inputs: Vec<NamedValue>,
@@ -436,27 +804,69 @@ struct RegistryOperation {
     outcomes: RegistryOutcomes,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct NamedValue {
     name: String,
     #[serde(rename = "type")]
     value_type: RegistryTypeRef,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct RegistryOutcomes {
     #[serde(skip_serializing_if = "Option::is_none")]
     result: Option<RegistryTypeRef>,
 }
 
-#[derive(Serialize)]
-struct RegistryTypeRef {
-    kind: &'static str,
-    name: &'static str,
+#[derive(Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum RegistryTypeRef {
+    Primitive {
+        name: String,
+    },
+    Named {
+        name: String,
+    },
+    List {
+        items: Box<RegistryTypeRef>,
+    },
+    Set {
+        items: Box<RegistryTypeRef>,
+    },
+    Map {
+        keys: Box<RegistryTypeRef>,
+        values: Box<RegistryTypeRef>,
+    },
+    Tuple {
+        items: Vec<RegistryTypeRef>,
+    },
+    Record {
+        fields: Vec<NamedValue>,
+    },
+    TaggedUnion {
+        variants: Vec<RegistryVariant>,
+    },
 }
 
-#[derive(Serialize)]
-struct RegistryNamedType;
+#[derive(Debug, Serialize)]
+struct RegistryVariant {
+    name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    payload: Option<RegistryTypeRef>,
+}
+
+#[derive(Debug, Serialize)]
+struct RegistryNamedType {
+    name: String,
+    #[serde(flatten)]
+    shape: RegistryNamedTypeShape,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum RegistryNamedTypeShape {
+    Record { fields: Vec<NamedValue> },
+    TaggedUnion { variants: Vec<RegistryVariant> },
+}
 
 fn project_legacy_trace(legacy_trace_json: &str) -> LegacyProjection {
     let trace_events: Vec<TraceEvent> = serde_json::from_str(legacy_trace_json).expect("valid trace JSON required");
@@ -668,7 +1078,6 @@ struct KeyValueList {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeSet;
 
     #[test]
     fn stateless_result() {
@@ -811,6 +1220,163 @@ mod tests {
             result.registry_json,
             r#"{"format":"ctsc.registry","formatVersion":"0.1.0","registryId":"urn:ctsc:registry:test:1","version":"1.0.0","components":[{"id":"fixture.stateless_add","operations":[{"name":"add","inputs":[{"name":"a","type":{"kind":"primitive","name":"i32"}},{"name":"b","type":{"kind":"primitive","name":"i32"}}],"observations":[],"outcomes":{"result":{"kind":"primitive","name":"i32"}}}],"types":[]}]}"#
         );
+    }
+
+    #[test]
+    fn encode_rich_normalized_schema_as_registry() {
+        let result = encode_schema_registry_result(
+            "urn:ctsc:registry:fixture.rich:1".to_string(),
+            "1.0.0".to_string(),
+            r#"{
+                "component":"fixture.rich",
+                "operations":[{
+                    "name":"transform",
+                    "is_async":false,
+                    "inputs":[
+                        {"name":"person","ty":"Person"},
+                        {"name":"points","ty":"List<Point>"},
+                        {"name":"tags","ty":"set<string>"},
+                        {"name":"scores","ty":"map<string, i64>"},
+                        {"name":"pair","ty":"tuple<i32, string>"},
+                        {"name":"fallback","ty":"Option<Point>"}
+                    ],
+                    "output":"Shape"
+                }],
+                "types":[
+                    {"name":"Shape","kind":"enum","fields":[],"variants":[
+                        {"name":"Circle","fields":[{"name":"radius","ty":"i32"}]},
+                        {"name":"Rectangle","fields":[{"name":"width","ty":"i32"},{"name":"height","ty":"i32"}]},
+                        {"name":"Point","fields":[]}
+                    ]},
+                    {"name":"Point","kind":"struct","fields":[{"name":"x","ty":"i32"},{"name":"y","ty":"i32"}],"variants":[]},
+                    {"name":"Person","kind":"struct","fields":[{"name":"name","ty":"string"},{"name":"location","ty":"Point"}],"variants":[]}
+                ]
+            }"#,
+        )
+        .expect("rich normalized schema should encode");
+
+        assert_eq!(result.operation_count, 1);
+        assert_eq!(result.type_count, 3);
+        assert!(!result.registry_json.contains('\n'));
+
+        let document: serde_json::Value = serde_json::from_str(&result.registry_json).unwrap();
+        let component = &document["components"][0];
+        assert_eq!(component["id"], "fixture.rich");
+        assert_eq!(
+            component["operations"][0]["inputs"][5]["type"],
+            serde_json::json!({
+                "kind": "tagged_union",
+                "variants": [
+                    {"name": "None"},
+                    {"name": "Some", "payload": {"kind": "named", "name": "Point"}}
+                ]
+            })
+        );
+        assert_eq!(
+            component["operations"][0]["inputs"][4]["type"],
+            serde_json::json!({
+                "kind": "tuple",
+                "items": [
+                    {"kind": "primitive", "name": "i32"},
+                    {"kind": "primitive", "name": "string"}
+                ]
+            })
+        );
+        assert_eq!(
+            component["types"][0],
+            serde_json::json!({
+                "name": "Person",
+                "kind": "record",
+                "fields": [
+                    {"name": "name", "type": {"kind": "primitive", "name": "string"}},
+                    {"name": "location", "type": {"kind": "named", "name": "Point"}}
+                ]
+            })
+        );
+        assert_eq!(
+            component["types"][2]["variants"],
+            serde_json::json!([
+                {
+                    "name": "Circle",
+                    "payload": {
+                        "kind": "record",
+                        "fields": [{"name": "radius", "type": {"kind": "primitive", "name": "i32"}}]
+                    }
+                },
+                {
+                    "name": "Rectangle",
+                    "payload": {
+                        "kind": "record",
+                        "fields": [
+                            {"name": "width", "type": {"kind": "primitive", "name": "i32"}},
+                            {"name": "height", "type": {"kind": "primitive", "name": "i32"}}
+                        ]
+                    }
+                },
+                {"name": "Point"}
+            ])
+        );
+    }
+
+    #[test]
+    fn schema_registry_recurses_and_normalizes_whitespace_deterministically() {
+        let compact = encode_test_schema_registry(
+            r#"{"component":"selected","operations":[{"name":"nested","is_async":false,"inputs":[{"name":"value","ty":"List<Option<map<string, Set<Item>>>>"}],"output":""}],"types":[{"name":"Item","kind":"struct","fields":[],"variants":[]}]}"#,
+        )
+        .unwrap();
+        let spaced = encode_test_schema_registry(
+            r#"{"component":"selected","operations":[{"name":"nested","is_async":false,"inputs":[{"name":"value","ty":" List < optional < Map < string , set < Item > > > > "}],"output":""}],"types":[{"name":"Item","kind":"struct","fields":[],"variants":[]}]}"#,
+        )
+        .unwrap();
+
+        assert_eq!(compact.registry_json, spaced.registry_json);
+    }
+
+    #[test]
+    fn schema_registry_sorts_operations_and_types_but_preserves_declared_order() {
+        let result = encode_test_schema_registry(
+            r#"{
+                "component":"selected",
+                "operations":[
+                    {"name":"zeta","is_async":false,"inputs":[{"name":"second","ty":"i64"},{"name":"first","ty":"bool"}],"output":""},
+                    {"name":"alpha","is_async":false,"inputs":[],"output":"Second"}
+                ],
+                "types":[
+                    {"name":"Second","kind":"enum","fields":[],"variants":[{"name":"B","fields":[]},{"name":"A","fields":[]}]},
+                    {"name":"First","kind":"struct","fields":[{"name":"z","ty":"i32"},{"name":"a","ty":"string"}],"variants":[]}
+                ]
+            }"#,
+        )
+        .unwrap();
+        let document: serde_json::Value = serde_json::from_str(&result.registry_json).unwrap();
+        let component = &document["components"][0];
+
+        assert_eq!(component["operations"][0]["name"], "alpha");
+        assert_eq!(component["operations"][1]["name"], "zeta");
+        assert_eq!(component["operations"][1]["inputs"][0]["name"], "second");
+        assert_eq!(component["operations"][1]["inputs"][1]["name"], "first");
+        assert_eq!(component["types"][0]["name"], "First");
+        assert_eq!(component["types"][0]["fields"][0]["name"], "z");
+        assert_eq!(component["types"][0]["fields"][1]["name"], "a");
+        assert_eq!(component["types"][1]["variants"][0]["name"], "B");
+        assert_eq!(component["types"][1]["variants"][1]["name"], "A");
+    }
+
+    #[test]
+    fn schema_registry_result_rejects_malformed_and_unsupported_refs_without_panicking() {
+        for (ty, expected) in [
+            ("List<i32", "expected '>'"),
+            ("Map<string>", "expects 2 type arguments"),
+            ("Result<i32, string>", "unsupported type constructor 'Result'"),
+            ("Missing", "unknown named type 'Missing'"),
+            ("List<i32> trailing", "unexpected trailing input"),
+        ] {
+            let schema = format!(
+                r#"{{"component":"selected","operations":[{{"name":"bad","is_async":false,"inputs":[{{"name":"value","ty":"{ty}"}}],"output":""}}],"types":[]}}"#
+            );
+            let error = encode_test_schema_registry(&schema).expect_err("invalid type reference should fail");
+            assert!(error.contains(expected), "expected '{expected}' in '{error}'");
+        }
     }
 
     #[test]
@@ -1022,6 +1588,10 @@ mod tests {
             component_id.to_string(),
             discovery_json.to_string(),
         )
+    }
+
+    fn encode_test_schema_registry(schema_json: &str) -> Result<CtscRegistryEncoding, String> {
+        encode_schema_registry_result("urn:ctsc:registry:test:1".to_string(), "1.0.0".to_string(), schema_json)
     }
 
     fn assert_registry_error(discovery_json: &str, expected: &str) {

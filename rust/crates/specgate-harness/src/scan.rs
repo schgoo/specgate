@@ -779,8 +779,12 @@ fn push_param(p: &str, out: &mut Vec<(String, String)>, takes_self: &mut bool) {
 }
 
 fn scan_type_name(rest: &str) -> Option<(String, bool)> {
-    // Skip whitespace, attributes, pub.
-    let s = rest.trim_start();
+    // Skip whitespace, helper attributes, and visibility between the derive
+    // and the type declaration.
+    let mut s = rest.trim_start();
+    while s.starts_with("#[") {
+        s = skip_outer_attribute(s)?.trim_start();
+    }
     let s = match s.strip_prefix("pub") {
         Some(r) => {
             let r = r.trim_start();
@@ -803,6 +807,38 @@ fn scan_type_name(rest: &str) -> Option<(String, bool)> {
     let s = s.trim_start();
     let end = s.find(|c: char| !(c.is_alphanumeric() || c == '_')).unwrap_or(s.len());
     Some((s[..end].to_string(), is_enum))
+}
+
+fn skip_outer_attribute(s: &str) -> Option<&str> {
+    let mut depth = 0usize;
+    let mut quote = None;
+    let mut escaped = false;
+
+    for (i, c) in s.char_indices() {
+        if let Some(delimiter) = quote {
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == delimiter {
+                quote = None;
+            }
+            continue;
+        }
+
+        match c {
+            '"' | '\'' => quote = Some(c),
+            '[' => depth += 1,
+            ']' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(&s[i + c.len_utf8()..]);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn find_iter(src: &str, needle: &str) -> Vec<usize> {
@@ -840,4 +876,25 @@ fn starts_word_at(chars: &[char], i: usize, w: &str) -> bool {
         }
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::scan;
+
+    #[test]
+    fn spec_event_derive_allows_intervening_helper_attributes() {
+        let annotated = scan(
+            r#"
+                #[derive(SpecEvent)]
+                #[spec_component("fixture.setup_with_params")]
+                pub struct Counter {
+                    #[spec_event]
+                    pub count: i32,
+                }
+            "#,
+        );
+
+        assert!(annotated.spec_event_structs.contains("Counter"));
+    }
 }

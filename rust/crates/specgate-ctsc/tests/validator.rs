@@ -1,4 +1,4 @@
-use specgate_ctsc::{encode_discovery_registry, encode_legacy_trace_otlp};
+use specgate_ctsc::{encode_discovery_registry, encode_legacy_trace_otlp, encode_schema_registry_result};
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
@@ -33,6 +33,38 @@ fn generated_registry_passes_ctsc_registry_validator_when_available() {
     );
 
     validate_generated_document("registry", "registry", &result.registry_json);
+}
+
+#[test]
+fn generated_schema_registry_passes_ctsc_registry_validator_when_available() {
+    let result = encode_schema_registry_result(
+        "urn:ctsc:registry:fixture.rich:1".to_string(),
+        "1.0.0".to_string(),
+        r#"{
+            "component":"fixture.rich",
+            "operations":[{
+                "name":"transform",
+                "is_async":false,
+                "inputs":[
+                    {"name":"person","ty":"Person"},
+                    {"name":"points","ty":"List<Point>"},
+                    {"name":"fallback","ty":"Option<Point>"}
+                ],
+                "output":"Shape"
+            }],
+            "types":[
+                {"name":"Person","kind":"struct","fields":[{"name":"name","ty":"string"},{"name":"location","ty":"Point"}],"variants":[]},
+                {"name":"Point","kind":"struct","fields":[{"name":"x","ty":"i32"},{"name":"y","ty":"i32"}],"variants":[]},
+                {"name":"Shape","kind":"enum","fields":[],"variants":[
+                    {"name":"Circle","fields":[{"name":"radius","ty":"i32"}]},
+                    {"name":"Point","fields":[]}
+                ]}
+            ]
+        }"#,
+    )
+    .expect("normalized schema should encode");
+
+    validate_generated_document("registry", "schema-registry", &result.registry_json);
 }
 
 fn validate_generated_document(kind: &str, file_label: &str, json: &str) {

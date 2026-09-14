@@ -518,6 +518,7 @@ foreach (Type type in allTypes)
             string ret = inner is null ? "" : MapWithNull(inner, innerInfo);
             string csReturn = MapRawCs(method.ReturnType, retInfo);
             collectEnabled = true;
+            if (inner is not null && HasSpecEvent(inner)) CollectType(inner);
             operations.Add(new
             {
                 name = setup.Name,

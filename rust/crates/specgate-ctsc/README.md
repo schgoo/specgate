@@ -30,17 +30,18 @@ scenario child, and one operation child. Caller-supplied identifiers,
 timestamp, tool version, and target metadata make production identity
 explicit while keeping tests reproducible.
 
-`encode_discovery_registry` projects one component from raw `SpecGate`
-discovery metadata into a compact, deterministic CTSC 0.1 registry. The
-initial projection supports non-setup operations whose ordered parameters
-and optional result use CTSC primitive types.
+`encode_discovery_registry` preserves the original raw-discovery projection
+for primitive operations. `encode_schema_registry` accepts the harness’s
+normalized, setup-folded schema and emits named records, tagged unions, and
+recursive CTSC collection/option references without reimplementing
+language-specific discovery or normalization.
 
 
 ---
 
 Part of the [SpecGate](https://github.com/schgoo/specgate) project.
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQbmReN9dOqGMIb9otqWGRls0MbbA5gMtcxfWobm07iTKD86xFhYvRhcoQbYe1FbIZbAdUb7_1vTn7iKPIb1RMVkoevFyMb3VL27r1_LCdhZIKDbXNwZWNnYXRlLWN0c2NlMC41LjBtc3BlY2dhdGVfY3RzY4Nwc3BlY2dhdGUtcnVudGltZWUwLjUuMHBzcGVjZ2F0ZV9ydW50aW1l
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQbmReN9dOqGMIb9otqWGRls0MbbA5gMtcxfWobm07iTKD86xFhYvRhcoQb7bdrJM0ssGAbz0MTaVkOHfkbp-gCl9ozLhEbZYj6Uwhgnm1hZIKDbXNwZWNnYXRlLWN0c2NlMC41LjBtc3BlY2dhdGVfY3RzY4Nwc3BlY2dhdGUtcnVudGltZWUwLjUuMHBzcGVjZ2F0ZV9ydW50aW1l
  [__link0]: https://docs.rs/specgate-runtime/0.5.0/specgate_runtime/?search=TraceEvent
  [__link1]: https://docs.rs/specgate-ctsc/0.5.0/specgate_ctsc/struct.CtscProjection.html
  [__link2]: https://docs.rs/specgate-runtime/0.5.0/specgate_runtime/?search=Value

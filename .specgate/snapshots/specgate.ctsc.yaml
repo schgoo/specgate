@@ -61,6 +61,20 @@ operations:
       - operation_count: i32
       - type_count: i32
 
+  encode_schema_registry:
+    desc: >
+      Convert one normalized, setup-folded implementation schema into a
+      deterministic CTSC registry component. Supports named records and tagged
+      unions plus list, set, map, tuple, and option-like type references.
+    inputs:
+      registry_id: string
+      registry_version: string
+      schema_json: string
+    outputs:
+      - registry_json: string
+      - operation_count: i32
+      - type_count: i32
+
 cases:
   - name: stateless_result
     desc: Input echoes are removed from observations and projected onto the operation inputs.
@@ -179,3 +193,32 @@ cases:
       - type_count: 0
       - registry_json:
           $matches: '"format":"ctsc.registry".*"formatVersion":"0.1.0".*"registryId":"urn:ctsc:registry:fixture.stateless-add:1".*"version":"1.0.0".*"components".*"id":"fixture.stateless_add".*"operations".*"name":"add".*"inputs".*"name":"a".*"kind":"primitive".*"name":"i32".*"name":"b".*"kind":"primitive".*"name":"i32".*"observations":\[\].*"outcomes".*"result".*"kind":"primitive".*"name":"i32".*"types":\[\]'
+
+  - name: encode_rich_normalized_schema_as_registry
+    desc: >
+      A normalized schema preserves named records and tagged unions while
+      recursively projecting every supported collection and option shape.
+    operation: encode_schema_registry
+    inputs:
+      registry_id: urn:ctsc:registry:fixture.rich:1
+      registry_version: 1.0.0
+      schema_json: >
+        {"component":"fixture.rich","operations":[{"name":"transform",
+        "is_async":false,"inputs":[{"name":"person","ty":"Person"},
+        {"name":"points","ty":"List<Point>"},{"name":"tags","ty":"set<string>"},
+        {"name":"scores","ty":"map<string, i64>"},
+        {"name":"pair","ty":"tuple<i32, string>"},
+        {"name":"fallback","ty":"Option<Point>"}],"output":"Shape"}],
+        "types":[{"name":"Person","kind":"struct","fields":[
+        {"name":"name","ty":"string"},{"name":"location","ty":"Point"}],
+        "variants":[]},{"name":"Point","kind":"struct","fields":[
+        {"name":"x","ty":"i32"},{"name":"y","ty":"i32"}],"variants":[]},
+        {"name":"Shape","kind":"enum","fields":[],"variants":[
+        {"name":"Circle","fields":[{"name":"radius","ty":"i32"}]},
+        {"name":"Rectangle","fields":[{"name":"width","ty":"i32"},
+        {"name":"height","ty":"i32"}]},{"name":"Point","fields":[]}]}]}
+    expected:
+      - operation_count: 1
+      - type_count: 3
+      - registry_json:
+          $matches: '"id":"fixture.rich".*"name":"transform".*"name":"person".*"kind":"named".*"name":"Person".*"name":"points".*"kind":"list".*"kind":"named".*"name":"Point".*"name":"tags".*"kind":"set".*"name":"string".*"name":"scores".*"kind":"map".*"name":"pair".*"kind":"tuple".*"name":"fallback".*"kind":"tagged_union".*"name":"None".*"name":"Some".*"name":"Shape".*"types".*"name":"Person".*"kind":"record".*"name":"location".*"kind":"named".*"name":"Point".*"name":"Shape".*"kind":"tagged_union".*"name":"Circle".*"kind":"record".*"name":"radius".*"name":"Rectangle".*"name":"width".*"name":"height".*"name":"Point"'

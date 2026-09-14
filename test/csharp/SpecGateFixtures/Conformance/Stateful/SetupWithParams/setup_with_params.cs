@@ -5,6 +5,7 @@ namespace SpecGateFixtures.Conformance.Stateful.SetupWithParams;
 /// State machine whose setup takes a parameter, verifying that setup inputs
 /// configure the initial state (here, the counter's starting value).
 /// </summary>
+[SpecEvent]
 public class Counter
 {
     /// <summary>The current count; each assignment is captured as a state mutation.</summary>

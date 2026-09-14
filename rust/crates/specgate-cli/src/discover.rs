@@ -1,10 +1,11 @@
 //! `specgate discover <binding.yaml> ...` — discover one implementation target
-//! and encode its raw metadata as a deterministic CTSC registry document.
+//! and encode its normalized, setup-folded schema as a deterministic CTSC
+//! registry document.
 
 use std::path::Path;
 
 use specgate::{SpecEvent, spec_operation};
-use specgate_ctsc::encode_discovery_registry_result;
+use specgate_ctsc::encode_schema_registry_result;
 
 /// Summary of a discovery run.
 #[derive(Debug, Clone, PartialEq, Eq, SpecEvent)]
@@ -48,16 +49,19 @@ impl std::fmt::Display for DiscoverOutcome {
 #[spec_operation("discover")]
 pub fn discover(binding: &str, target: &str, component: &str, registry_id: &str, registry_version: &str, out: &str) -> DiscoverOutcome {
     let target_name = if target.is_empty() { None } else { Some(target) };
-    let raw_json = match specgate_harness::discover_registry_json(binding, target_name, component) {
-        Ok(json) => json,
+    let schema = match specgate_harness::discover_target_schema(binding, target_name, component) {
+        Ok(schema) => schema,
         Err(reason) => return DiscoverOutcome::Error { reason },
     };
-    let encoded = match encode_discovery_registry_result(
-        registry_id.to_string(),
-        registry_version.to_string(),
-        component.to_string(),
-        &raw_json,
-    ) {
+    let schema_json = match serde_json::to_string(&schema) {
+        Ok(json) => json,
+        Err(error) => {
+            return DiscoverOutcome::Error {
+                reason: format!("failed to serialize normalized discovery schema: {error}"),
+            };
+        }
+    };
+    let encoded = match encode_schema_registry_result(registry_id.to_string(), registry_version.to_string(), &schema_json) {
         Ok(encoded) => encoded,
         Err(reason) => return DiscoverOutcome::Error { reason },
     };
@@ -97,6 +101,9 @@ pub fn format_outcome(outcome: &DiscoverOutcome) -> String {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use std::sync::Mutex;
+
+    static DISCOVERY_LOCK: Mutex<()> = Mutex::new(());
 
     fn repo_root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -113,29 +120,71 @@ mod tests {
             .join(format!("specgate-cli-{label}-{}.json", std::process::id()))
     }
 
-    fn discover_stateless(binding: &Path, output: &Path) -> DiscoverOutcome {
+    fn discover_component(binding: &Path, output: &Path, component: &str, registry_id: &str) -> DiscoverOutcome {
         discover(
             binding.to_str().expect("utf-8 binding path"),
             "",
-            "fixture.stateless_add",
-            "urn:ctsc:registry:fixture.stateless-add:1",
+            component,
+            registry_id,
             "1.0.0",
             output.to_str().expect("utf-8 output path"),
         )
     }
 
-    #[test]
-    fn discover_rust_stateless_registry() {
-        let output = output_path("discover-rust");
-        let binding = repo_root()
+    fn rust_binding() -> PathBuf {
+        repo_root()
             .join("test")
             .join("rust")
             .join("crates")
             .join("specgate-fixtures")
             .join("specs")
-            .join("binding.yaml");
+            .join("binding.yaml")
+    }
 
-        let outcome = discover_stateless(&binding, &output);
+    fn csharp_binding() -> PathBuf {
+        repo_root()
+            .join("test")
+            .join("rust")
+            .join("crates")
+            .join("specgate-fixtures")
+            .join("specs")
+            .join("csharp.yaml")
+    }
+
+    fn assert_complete<'a>(outcome: &'a DiscoverOutcome, language: &str) -> &'a DiscoverReport {
+        let DiscoverOutcome::Complete { report } = outcome else {
+            panic!("{language} discovery failed: {outcome}");
+        };
+        report
+    }
+
+    fn assert_registry_parity(component: &str, registry_id: &str, label: &str) {
+        let rust_output = output_path(&format!("{label}-parity-rust"));
+        let csharp_output = output_path(&format!("{label}-parity-csharp"));
+        let rust = discover_component(&rust_binding(), &rust_output, component, registry_id);
+        let csharp = discover_component(&csharp_binding(), &csharp_output, component, registry_id);
+
+        assert_complete(&rust, "Rust");
+        assert_complete(&csharp, "C#");
+        assert_eq!(
+            std::fs::read(&rust_output).expect("read Rust registry"),
+            std::fs::read(&csharp_output).expect("read C# registry"),
+            "Rust and C# registry JSON must be byte-identical"
+        );
+        let _ = std::fs::remove_file(rust_output);
+        let _ = std::fs::remove_file(csharp_output);
+    }
+
+    #[test]
+    fn discover_rust_stateless_registry() {
+        let _guard = DISCOVERY_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let output = output_path("discover-rust");
+        let outcome = discover_component(
+            &rust_binding(),
+            &output,
+            "fixture.stateless_add",
+            "urn:ctsc:registry:fixture.stateless-add:1",
+        );
 
         let DiscoverOutcome::Complete { report } = outcome else {
             panic!("Rust discovery failed: {outcome}");
@@ -152,40 +201,94 @@ mod tests {
     #[test]
     #[ignore = "builds C# via dotnet; slow"]
     fn discover_csharp_stateless_registry() {
-        let root = repo_root();
-        let rust_output = output_path("discover-parity-rust");
-        let csharp_output = output_path("discover-parity-csharp");
-        let rust_binding = root
-            .join("test")
-            .join("rust")
-            .join("crates")
-            .join("specgate-fixtures")
-            .join("specs")
-            .join("binding.yaml");
-        let csharp_binding = root
-            .join("test")
-            .join("rust")
-            .join("crates")
-            .join("specgate-fixtures")
-            .join("specs")
-            .join("csharp.yaml");
+        let _guard = DISCOVERY_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert_registry_parity("fixture.stateless_add", "urn:ctsc:registry:fixture.stateless-add:1", "stateless");
+    }
 
-        let rust = discover_stateless(&rust_binding, &rust_output);
-        let csharp = discover_stateless(&csharp_binding, &csharp_output);
-
-        assert!(matches!(rust, DiscoverOutcome::Complete { .. }), "Rust discovery failed: {rust}");
-        assert!(matches!(csharp, DiscoverOutcome::Complete { .. }), "C# discovery failed: {csharp}");
-        assert_eq!(
-            std::fs::read(&rust_output).expect("read Rust registry"),
-            std::fs::read(&csharp_output).expect("read C# registry"),
-            "Rust and C# registry JSON must be byte-identical"
+    #[test]
+    fn discover_rust_complex_registry() {
+        let _guard = DISCOVERY_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let output = output_path("discover-complex-rust");
+        let outcome = discover_component(
+            &rust_binding(),
+            &output,
+            "fixture.complex_inputs",
+            "urn:ctsc:registry:fixture.complex-inputs:1",
         );
-        let _ = std::fs::remove_file(rust_output);
-        let _ = std::fs::remove_file(csharp_output);
+        let report = assert_complete(&outcome, "Rust");
+        assert_eq!(report.operations, 13);
+        assert_eq!(report.types, 6);
+
+        let document: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&output).expect("read complex registry")).expect("valid registry JSON");
+        let component = &document["components"][0];
+        assert_eq!(component["types"][0]["name"], "Address");
+        assert_eq!(component["types"][5]["name"], "Shape");
+        assert_eq!(
+            component["operations"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|operation| operation["name"] == "find_point")
+                .unwrap()["outcomes"]["result"],
+            serde_json::json!({
+                "kind": "tagged_union",
+                "variants": [
+                    {"name": "None"},
+                    {"name": "Some", "payload": {"kind": "named", "name": "Point"}}
+                ]
+            })
+        );
+        let _ = std::fs::remove_file(output);
+    }
+
+    #[test]
+    #[ignore = "builds C# via dotnet; slow"]
+    fn discover_csharp_complex_registry() {
+        let _guard = DISCOVERY_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert_registry_parity("fixture.complex_inputs", "urn:ctsc:registry:fixture.complex-inputs:1", "complex");
+    }
+
+    #[test]
+    fn discover_rust_setup_folded_registry() {
+        let _guard = DISCOVERY_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let output = output_path("discover-setup-rust");
+        let outcome = discover_component(
+            &rust_binding(),
+            &output,
+            "fixture.setup_with_params",
+            "urn:ctsc:registry:fixture.setup-with-params:1",
+        );
+        let report = assert_complete(&outcome, "Rust");
+        assert_eq!(report.operations, 1);
+        assert_eq!(report.types, 1);
+
+        let document: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&output).expect("read setup registry")).expect("valid registry JSON");
+        assert_eq!(
+            document["components"][0]["operations"][0]["inputs"],
+            serde_json::json!([
+                {"name": "initial", "type": {"kind": "primitive", "name": "i32"}}
+            ]),
+            "setup construction input must be folded without receiver/Counter inputs"
+        );
+        let _ = std::fs::remove_file(output);
+    }
+
+    #[test]
+    #[ignore = "builds C# via dotnet; slow"]
+    fn discover_csharp_setup_folded_registry() {
+        let _guard = DISCOVERY_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert_registry_parity(
+            "fixture.setup_with_params",
+            "urn:ctsc:registry:fixture.setup-with-params:1",
+            "setup",
+        );
     }
 
     #[test]
     fn discover_returns_error_without_panicking() {
+        let _guard = DISCOVERY_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let output = output_path("discover-error");
         let outcome = discover(
             "missing-binding.yaml",

@@ -24,12 +24,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use serde::Serialize;
+
 // ---------------------------------------------------------------------------
 // Public discover API
 // ---------------------------------------------------------------------------
 
 /// One black-box operation input, with any setup construction params folded in.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DiscoveredInput {
     pub name: String,
     /// Normalized spec type, e.g. `"i32"`, `"List<i32>"`, `"Option<i32>"`.
@@ -37,7 +39,7 @@ pub struct DiscoveredInput {
 }
 
 /// One operation on the component's normalized surface.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DiscoveredOperation {
     pub name: String,
     pub is_async: bool,
@@ -47,14 +49,14 @@ pub struct DiscoveredOperation {
 }
 
 /// One named field (struct field or enum-variant field).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DiscoveredField {
     pub name: String,
     pub ty: String,
 }
 
 /// One enum variant. `fields` is empty for unit/tuple variants.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DiscoveredVariant {
     pub name: String,
     pub fields: Vec<DiscoveredField>,
@@ -62,7 +64,7 @@ pub struct DiscoveredVariant {
 
 /// One named complex type owned by the component. `kind` is `"struct"` or
 /// `"enum"`; structs populate `fields`, enums populate `variants`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DiscoveredType {
     pub name: String,
     pub kind: String,
@@ -71,7 +73,7 @@ pub struct DiscoveredType {
 }
 
 /// A component's normalized, folded schema.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DiscoveredSchema {
     pub component: String,
     pub operations: Vec<DiscoveredOperation>,
@@ -188,14 +190,37 @@ fn discover_inner(spec_path: &str) -> Result<DiscoverOutcome, String> {
 /// Returns an error when the binding cannot be loaded, the selected target is
 /// missing, discovery fails, or the binding language has no discovery path.
 pub fn discover_registry_json(binding_path: &str, target_name: Option<&str>, component: &str) -> Result<String, String> {
-    let path = PathBuf::from(binding_path);
-    let path = std::fs::canonicalize(&path).unwrap_or(path);
-    let binding = crate::binding::load_binding(&path).ok_or_else(|| format!("binding '{binding_path}' not found or invalid"))?;
+    let binding = load_target_binding(binding_path)?;
     let discovered = discover_target(&binding, target_name, component)?;
     discovered.raw_registry_json.ok_or_else(|| match discovered.outcome {
         TargetOutcome::NotSelfDescribing { reason } => reason,
         TargetOutcome::SelfDescribed { .. } => "target discovery produced no registry JSON".to_string(),
     })
+}
+
+/// Discover one target's normalized, setup-folded component schema.
+///
+/// This is the narrow structural API for clients that already have a binding
+/// path and component. It uses the same language dispatch, native type
+/// normalization, and invisible-setup folding as [`discover`].
+///
+/// # Errors
+///
+/// Returns an error when the binding cannot be loaded, the selected target is
+/// missing, discovery fails, or the binding language has no discovery path.
+pub fn discover_target_schema(binding_path: &str, target_name: Option<&str>, component: &str) -> Result<DiscoveredSchema, String> {
+    let binding = load_target_binding(binding_path)?;
+    let discovered = discover_target(&binding, target_name, component)?;
+    match discovered.outcome {
+        TargetOutcome::SelfDescribed { schema } => Ok(schema),
+        TargetOutcome::NotSelfDescribing { reason } => Err(reason),
+    }
+}
+
+fn load_target_binding(binding_path: &str) -> Result<crate::binding::Binding, String> {
+    let path = PathBuf::from(binding_path);
+    let path = std::fs::canonicalize(&path).unwrap_or(path);
+    crate::binding::load_binding(&path).ok_or_else(|| format!("binding '{binding_path}' not found or invalid"))
 }
 
 /// Discover one bound target, dispatching on the binding's language. Rust

@@ -26,6 +26,9 @@ Key design points:
   else is delegated to the real Rust toolchain.
 * Matching is a subsequence match with a rich operator set; async operations
   are driven on a per-target runtime (`smol` or `tokio`).
+* `discover_target_schema` exposes the same normalized, setup-folded
+  structural view for one binding target without leaking raw
+  language-specific discovery metadata.
 
 
 ---

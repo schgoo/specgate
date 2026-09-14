@@ -18,6 +18,9 @@
 //!   else is delegated to the real Rust toolchain.
 //! - Matching is a subsequence match with a rich operator set; async operations
 //!   are driven on a per-target runtime (`smol` or `tokio`).
+//! - `discover_target_schema` exposes the same normalized, setup-folded
+//!   structural view for one binding target without leaking raw
+//!   language-specific discovery metadata.
 
 mod binding;
 mod codegen;
@@ -36,7 +39,7 @@ pub use types::{CaseLevel, CaseResult, CaseStatus, CoverageOutcome, CoverageRepo
 // Public API — structural discovery (the schema counterpart to run_spec).
 pub use discovery::{
     DiscoverOutcome, DiscoveredField, DiscoveredInput, DiscoveredOperation, DiscoveredSchema, DiscoveredType, DiscoveredVariant,
-    TargetDiscovery, TargetOutcome, discover, discover_registry_json,
+    TargetDiscovery, TargetOutcome, discover, discover_registry_json, discover_target_schema,
 };
 
 // Internal types — exposed for integration tests within this crate,

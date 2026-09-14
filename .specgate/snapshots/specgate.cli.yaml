@@ -1278,6 +1278,78 @@ cases:
               operations: 1
               types: 0
 
+  - name: discover_rust_complex_registry
+    desc: Rust discovery exports named and collection types from the complex fixture.
+    operation: discover
+    inputs:
+      binding: test/rust/crates/specgate-fixtures/specs/binding.yaml
+      target: ""
+      component: fixture.complex_inputs
+      registry_id: urn:ctsc:registry:fixture.complex-inputs:1
+      registry_version: 1.0.0
+      out: rust/target/ctsc-discover-complex-rust.json
+    expected:
+      - $result:
+          Complete:
+            report:
+              component_id: fixture.complex_inputs
+              operations: 13
+              types: 6
+
+  - name: discover_csharp_complex_registry
+    desc: C# discovery exports the same named and collection type registry.
+    operation: discover
+    inputs:
+      binding: test/rust/crates/specgate-fixtures/specs/csharp.yaml
+      target: ""
+      component: fixture.complex_inputs
+      registry_id: urn:ctsc:registry:fixture.complex-inputs:1
+      registry_version: 1.0.0
+      out: rust/target/ctsc-discover-complex-csharp.json
+    expected:
+      - $result:
+          Complete:
+            report:
+              component_id: fixture.complex_inputs
+              operations: 13
+              types: 6
+
+  - name: discover_rust_setup_folded_registry
+    desc: Rust setup construction parameters become semantic operation inputs.
+    operation: discover
+    inputs:
+      binding: test/rust/crates/specgate-fixtures/specs/binding.yaml
+      target: ""
+      component: fixture.setup_with_params
+      registry_id: urn:ctsc:registry:fixture.setup-with-params:1
+      registry_version: 1.0.0
+      out: rust/target/ctsc-discover-setup-rust.json
+    expected:
+      - $result:
+          Complete:
+            report:
+              component_id: fixture.setup_with_params
+              operations: 1
+              types: 1
+
+  - name: discover_csharp_setup_folded_registry
+    desc: C# setup construction parameters produce the same semantic registry.
+    operation: discover
+    inputs:
+      binding: test/rust/crates/specgate-fixtures/specs/csharp.yaml
+      target: ""
+      component: fixture.setup_with_params
+      registry_id: urn:ctsc:registry:fixture.setup-with-params:1
+      registry_version: 1.0.0
+      out: rust/target/ctsc-discover-setup-csharp.json
+    expected:
+      - $result:
+          Complete:
+            report:
+              component_id: fixture.setup_with_params
+              operations: 1
+              types: 1
+
   - name: run_extracted_cases_pass
     desc: >
       The dogfood: the spec extracted from the cases fixture's own tests,

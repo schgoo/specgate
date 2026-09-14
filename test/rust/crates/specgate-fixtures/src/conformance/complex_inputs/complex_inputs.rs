@@ -8,6 +8,7 @@ use std::collections::HashMap;
 // ---------------------------------------------------------------------------
 
 #[derive(Serialize, Deserialize, SpecEvent)]
+#[spec_component("fixture.complex_inputs")]
 pub struct EnumMemberInput {
     #[spec_event]
     pub name: String,
@@ -16,6 +17,7 @@ pub struct EnumMemberInput {
 }
 
 #[derive(Serialize, Deserialize, SpecEvent)]
+#[spec_component("fixture.complex_inputs")]
 pub struct Point {
     #[spec_event]
     pub x: i32,
@@ -24,6 +26,7 @@ pub struct Point {
 }
 
 #[derive(Serialize, Deserialize, SpecEvent)]
+#[spec_component("fixture.complex_inputs")]
 pub struct AppConfig {
     #[spec_event]
     pub name: String,
@@ -34,6 +37,7 @@ pub struct AppConfig {
 }
 
 #[derive(Serialize, Deserialize, SpecEvent)]
+#[spec_component("fixture.complex_inputs")]
 pub enum Shape {
     Circle { radius: i32 },
     Rectangle { width: i32, height: i32 },
@@ -41,6 +45,7 @@ pub enum Shape {
 }
 
 #[derive(Serialize, Deserialize, SpecEvent)]
+#[spec_component("fixture.complex_inputs")]
 pub struct Address {
     #[spec_event]
     pub street: String,
@@ -49,6 +54,7 @@ pub struct Address {
 }
 
 #[derive(Serialize, Deserialize, SpecEvent)]
+#[spec_component("fixture.complex_inputs")]
 pub struct Person {
     #[spec_event]
     pub name: String,
