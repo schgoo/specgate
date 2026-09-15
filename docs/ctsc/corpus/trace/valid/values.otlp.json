@@ -12,7 +12,7 @@
           {
             "key": "conformance.version",
             "value": {
-              "stringValue": "0.1.0"
+              "stringValue": "0.2.0"
             }
           },
           {
@@ -54,7 +54,7 @@
           {
             "key": "conformance.registry.digest",
             "value": {
-              "stringValue": "sha256:5a23688066e9468b968c688a9496447cbd19f4d9541149802a073944ef892a96"
+              "stringValue": "sha256:f618830ab7102bcc2cd310121766fe07ff60106bead8d4e5f1b7e17b68632c97"
             }
           },
           {
@@ -588,6 +588,21 @@
                               "value": {
                                 "boolValue": true
                               }
+                            },
+                            {
+                              "key": "nickname",
+                              "value": {
+                                "kvlistValue": {
+                                  "values": [
+                                    {
+                                      "key": "Some",
+                                      "value": {
+                                        "stringValue": "sam"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
                             }
                           ]
                         }
@@ -621,14 +636,68 @@
                       }
                     }
                   ]
+                },
+                {
+                  "timeUnixNano": "6000003016",
+                  "name": "conformance.observation",
+                  "attributes": [
+                    {
+                      "key": "conformance.observation.name",
+                      "value": {
+                        "stringValue": "optional_present"
+                      }
+                    },
+                    {
+                      "key": "conformance.observation.value",
+                      "value": {
+                        "kvlistValue": {
+                          "values": [
+                            {
+                              "key": "Some",
+                              "value": {
+                                "stringValue": "present"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "timeUnixNano": "6000003017",
+                  "name": "conformance.observation",
+                  "attributes": [
+                    {
+                      "key": "conformance.observation.name",
+                      "value": {
+                        "stringValue": "optional_absent"
+                      }
+                    },
+                    {
+                      "key": "conformance.observation.value",
+                      "value": {
+                        "kvlistValue": {
+                          "values": [
+                            {
+                              "key": "None",
+                              "value": {
+                                "kvlistValue": {}
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               ]
             }
           ],
-          "schemaUrl": "https://example.com/ctsc/schema/0.1.0"
+          "schemaUrl": "https://example.com/ctsc/schema/0.2.0"
         }
       ],
-      "schemaUrl": "https://example.com/ctsc/schema/0.1.0"
+      "schemaUrl": "https://example.com/ctsc/schema/0.2.0"
     }
   ]
 }

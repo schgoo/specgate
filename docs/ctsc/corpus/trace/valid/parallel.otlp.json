@@ -12,7 +12,7 @@
           {
             "key": "conformance.version",
             "value": {
-              "stringValue": "0.1.0"
+              "stringValue": "0.2.0"
             }
           },
           {
@@ -334,10 +334,10 @@
               }
             }
           ],
-          "schemaUrl": "https://example.com/ctsc/schema/0.1.0"
+          "schemaUrl": "https://example.com/ctsc/schema/0.2.0"
         }
       ],
-      "schemaUrl": "https://example.com/ctsc/schema/0.1.0"
+      "schemaUrl": "https://example.com/ctsc/schema/0.2.0"
     }
   ]
 }

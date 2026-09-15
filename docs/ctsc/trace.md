@@ -1,4 +1,4 @@
-# CTSC Trace 0.1
+# CTSC Trace 0.2
 
 **Status:** Draft
 
@@ -37,6 +37,25 @@ Regardless of implementation:
 - all comparison-relevant telemetry MUST be retained;
 - implementation limitations MUST NOT change CTSC semantics.
 
+### 3.1 Language neutrality
+
+CTSC span names, attribute names, event names, registry types, and comparison
+semantics are language-neutral. A producer's language, runtime, and failure
+mechanisms MUST NOT change CTSC meaning.
+
+Language-specific knowledge belongs to the producer or binding, which normalizes
+it at the edge. Language-specific data MAY appear only as diagnostics carrying no
+comparison semantics, such as `conformance.fault.native_type`, or within a
+producer-namespaced extension.
+
+### 3.2 Non-interference
+
+Capture MUST NOT alter the target's observable behavior. A producer MUST NOT
+consume, advance, force, or otherwise mutate a value in order to record it, and
+MUST NOT introduce ordering, timing, or lifetime effects that the target would
+not otherwise exhibit. A value that cannot be recorded without such an effect
+MUST NOT be recorded.
+
 ## 4. Resource attributes
 
 CTSC-defined attributes use the `conformance.*` namespace. Producer-specific
@@ -46,7 +65,7 @@ Every resource containing CTSC spans MUST include:
 
 | Attribute | Type | Meaning |
 |---|---|---|
-| `conformance.version` | string | CTSC trace version (`0.1.0`) |
+| `conformance.version` | string | CTSC trace version (`0.2.0`) |
 | `conformance.tool.name` | string | Producing tool |
 | `conformance.tool.version` | string | Producing tool version |
 | `conformance.target.name` | string | Target label within the run |
@@ -75,7 +94,7 @@ context crosses a textual carrier. CTSC does not mandate the carrier.
 
 Failure to propagate context produces malformed CTSC hierarchy.
 
-OTLP span links MAY be preserved as non-CTSC telemetry. CTSC 0.1 does not use
+OTLP span links MAY be preserved as non-CTSC telemetry. CTSC 0.2 does not use
 links to establish hierarchy, ordering, or conformance semantics.
 
 ## 6. Spans
@@ -320,6 +339,7 @@ Every CTSC `AnyValue` MUST select one concrete OTLP value variant. An unset
 | non-string-keyed map | `arrayValue` of entry records |
 | unit | empty `kvlistValue` |
 | tagged union | single-key `kvlistValue` |
+| optional | single-key `kvlistValue` |
 
 ### 8.1 Lists, sets, and tuples
 
@@ -400,13 +420,31 @@ Variant names do not alter encoding or operation-completion rules. A tagged
 union remains a value unless the producer's operation-outcome mapping selects a
 completion state before encoding the payload.
 
-### 8.6 Linked type validation
+### 8.6 Optional
+
+An optional value uses a single-key `kvlistValue`. Absence uses the key `None`
+carrying unit. Presence uses the key `Some` carrying the declared value.
+
+```json
+{"kvlistValue": {"values": [{"key": "None", "value": {"kvlistValue": {}}}]}}
+```
+
+A record field whose declared type is optional MUST be present. An omitted field
+is malformed, not an absent optional.
+
+### 8.7 Linked type validation
 
 Every value validated in Linked mode has a concrete CTSC registry type.
 Third-party or unannotated source values are projected onto CTSC primitives,
 records, tagged unions, tuples, collections, and maps.
 
-Trace Core compares concrete `AnyValue` structure without registry types.
+Trace Core compares concrete `AnyValue` structure without registry types. No
+registry arbitrates projection in this mode, so producers MUST project
+equivalent source types identically, as required by the registry specification.
+An `optional<T>` value in particular MUST be encoded as `Some` or `None` even
+when the producer is not performing Linked validation; omitting the wrapper
+makes a present value indistinguishable from a non-optional one and reports a
+producer disagreement as a target difference.
 
 ## 9. Registry linkage
 
@@ -446,4 +484,13 @@ Producer-specific attributes MUST NOT alter standard CTSC meaning.
 
 Trace inputs, observations, results, errors, and faults may contain sensitive
 data. CTSC does not imply that values are safe to export to an observability
-backend. Producers SHOULD support local-only export, filtering, and redaction.
+backend. Producers SHOULD support local-only export and filtering.
+
+Producers MUST provide a means for users to redact values before export. CTSC
+does not specify that mechanism; a producer MAY use configuration, source
+annotations, or any other facility idiomatic to its platform.
+
+CTSC does not define how a redacted value is represented. Redaction removes
+information that comparison would otherwise use, so users are responsible for
+redacting the targets under comparison consistently; redacting a value in one
+target and not another reports as a difference.

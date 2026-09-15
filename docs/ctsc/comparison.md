@@ -1,4 +1,4 @@
-# CTSC Comparison 0.1
+# CTSC Comparison 0.2
 
 **Status:** Draft
 
@@ -103,7 +103,7 @@ A semantic mismatch location SHOULD include:
 - event or child-span position;
 - expected and actual semantic values.
 
-Diagnostic wording and serialization format are not defined by CTSC 0.1.
+Diagnostic wording and serialization format are not defined by CTSC 0.2.
 
 ## 7. CTSC Strict reference policy
 
