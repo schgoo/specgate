@@ -543,6 +543,32 @@ def validate_value_type(
         )
         return
 
+    if kind == "optional":
+        entries = kvlist_entries(value, location, validator)
+        if entries is None:
+            return
+        if len(entries) != 1:
+            validator.error(location, "optional must contain exactly one variant")
+            return
+        name, payload = next(iter(entries.items()))
+        if name not in {"None", "Some"}:
+            validator.error(location, f"unknown optional variant {name!r}")
+            return
+        payload_type = (
+            {"kind": "primitive", "name": "unit"}
+            if name == "None"
+            else type_ref["value"]
+        )
+        validate_value_type(
+            payload,
+            payload_type,
+            current_component,
+            components,
+            f"{location}.{name}",
+            validator,
+        )
+        return
+
     if kind == "map":
         key_type = type_ref["keys"]
         value_type = type_ref["values"]
@@ -674,6 +700,20 @@ def canonical_typed_value(
                 item["value"], payload_type, current_component, components
             ),
         )
+    if kind == "optional":
+        item = value["kvlistValue"]["values"][0]
+        payload_type = (
+            {"kind": "primitive", "name": "unit"}
+            if item["key"] == "None"
+            else type_ref["value"]
+        )
+        return (
+            "tagged_union",
+            item["key"],
+            canonical_typed_value(
+                item["value"], payload_type, current_component, components
+            ),
+        )
     if kind == "map":
         key_type = type_ref["keys"]
         value_type = type_ref["values"]
@@ -736,7 +776,7 @@ def load_registry_document(
     visiting.add(path)
     try:
         document = load_json(path)
-        schema = load_json(Path(__file__).with_name("ctsc-registry-0.1.schema.json"))
+        schema = load_json(Path(__file__).with_name("ctsc-registry-0.2.schema.json"))
         jsonschema.Draft202012Validator.check_schema(schema)
         schema_errors = list(jsonschema.Draft202012Validator(schema).iter_errors(document))
         for error in schema_errors:
@@ -1015,9 +1055,9 @@ def validate_trace(path: Path) -> tuple[list[dict[str, Any]], Validator]:
                 )
                 if key == "conformance.version" and actual is not None:
                     validator.require(
-                        actual == "0.1.0",
+                        actual == "0.2.0",
                         resource_location,
-                        "conformance.version must be '0.1.0'",
+                        "conformance.version must be '0.2.0'",
                     )
             spans.extend(
                 (span, resource_attributes, span_location)

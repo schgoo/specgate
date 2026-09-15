@@ -1,4 +1,4 @@
-# CTSC Registry 0.1
+# CTSC Registry 0.2
 
 **Status:** Draft
 
@@ -7,7 +7,7 @@
 This document defines the CTSC language-neutral structural registry.
 
 Registry documents conform to
-[`ctsc-registry-0.1.schema.json`](ctsc-registry-0.1.schema.json).
+[`ctsc-registry-0.2.schema.json`](ctsc-registry-0.2.schema.json).
 
 The words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY** are
 normative.
@@ -19,7 +19,7 @@ A registry document is one JSON object with:
 ```json
 {
   "format": "ctsc.registry",
-  "formatVersion": "0.1.0",
+  "formatVersion": "0.2.0",
   "registryId": "...",
   "version": "...",
   "components": []
@@ -210,13 +210,38 @@ Tagged unions may be named component types or inline type references:
 
 Variant names have no intrinsic CTSC meaning.
 
-### 5.8 Third-party types
+### 5.8 Optional
+
+Optional declares a value that may be absent.
+
+```json
+{
+  "kind": "optional",
+  "value": { "kind": "primitive", "name": "string" }
+}
+```
+
+An optional is structurally a tagged union with a `None` variant carrying unit
+and a `Some` variant carrying the declared value type. It is a distinct kind so
+that every producer encodes absence identically. `None` and `Some` are the only
+variant names to which CTSC assigns fixed meaning.
+
+Producers MUST project language optional, nullable, and maybe types onto this
+kind rather than onto a locally declared tagged union.
+
+### 5.9 Third-party types
 
 Third-party or unannotated source types are projected onto CTSC primitives,
 records, tagged unions, tuples, collections, and maps.
 
 The projection MAY be declared locally or reference a named type from another
 component or imported registry document.
+
+Projection MUST be deterministic, and MUST follow declared types wherever the
+producer can obtain them, including from the linked registry. Producers of
+traces intended for comparison MUST project equivalent source types identically,
+so that a difference between traces reflects a difference between targets rather
+than between producers.
 
 ## 6. Imports
 
