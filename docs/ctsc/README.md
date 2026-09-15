@@ -32,14 +32,14 @@ format.
 
 ## Documents and supporting artifacts
 
-This directory contains the **0.1 draft**:
+This directory contains the **0.2 draft**:
 
 - [`trace.md`](trace.md) — OTLP trace format and generation requirements.
 - [`registry.md`](registry.md) — registry documents, operations, types, imports,
   and resolution.
 - [`comparison.md`](comparison.md) — configurable comparison-policy contract
   and optional CTSC Strict reference policy.
-- [`ctsc-registry-0.1.schema.json`](ctsc-registry-0.1.schema.json) — JSON Schema
+- [`ctsc-registry-0.2.schema.json`](ctsc-registry-0.2.schema.json) — JSON Schema
   for modular registry documents.
 - [`corpus/registry/`](corpus/registry/) — valid and invalid registry examples,
   including imports and dependencies.

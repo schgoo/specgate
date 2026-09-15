@@ -1,18 +1,24 @@
 {
   "format": "ctsc.registry",
   "formatVersion": "0.2.0",
-  "registryId": "urn:ctsc:registry:invalid.empty:1",
+  "registryId": "urn:ctsc:registry:invalid.optional-encoding:1",
   "version": "1.0.0",
   "components": [
     {
-      "id": "invalid.empty",
+      "id": "example.lookup",
       "operations": [
         {
           "name": "find",
           "inputs": [],
           "observations": [],
           "outcomes": {
-            "empty": true
+            "result": {
+              "kind": "optional",
+              "value": {
+                "kind": "primitive",
+                "name": "string"
+              }
+            }
           }
         }
       ],

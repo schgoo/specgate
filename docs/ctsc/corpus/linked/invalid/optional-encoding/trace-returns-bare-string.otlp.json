@@ -42,7 +42,7 @@
           {
             "key": "conformance.registry.id",
             "value": {
-              "stringValue": "urn:ctsc:registry:invalid.result-type:1"
+              "stringValue": "urn:ctsc:registry:invalid.optional-encoding:1"
             }
           },
           {
@@ -54,13 +54,13 @@
           {
             "key": "conformance.registry.digest",
             "value": {
-              "stringValue": "sha256:9877ba663812cedc4e582b58395c8dc8feee7b4b8a2afba439266f898853e0b0"
+              "stringValue": "sha256:8e61c73579fce08b8bd225370eb844fe57251230f5519dd441142fdf60ade07c"
             }
           },
           {
             "key": "conformance.registry.uri",
             "value": {
-              "stringValue": "file:./registry-expects-i64.json"
+              "stringValue": "file:./registry-expects-optional.json"
             }
           }
         ]
@@ -73,8 +73,8 @@
           },
           "spans": [
             {
-              "traceId": "99999999999999999999999999999999",
-              "spanId": "9999999999999901",
+              "traceId": "88888888888888888888888888888888",
+              "spanId": "8888888888888801",
               "name": "conformance.run",
               "kind": 1,
               "startTimeUnixNano": "9000000000",
@@ -83,7 +83,7 @@
                 {
                   "key": "conformance.run.id",
                   "value": {
-                    "stringValue": "run-invalid-result-type"
+                    "stringValue": "run-invalid-optional-encoding"
                   }
                 }
               ],
@@ -92,9 +92,9 @@
               }
             },
             {
-              "traceId": "99999999999999999999999999999999",
-              "spanId": "9999999999999902",
-              "parentSpanId": "9999999999999901",
+              "traceId": "88888888888888888888888888888888",
+              "spanId": "8888888888888802",
+              "parentSpanId": "8888888888888801",
               "name": "conformance.scenario",
               "kind": 1,
               "startTimeUnixNano": "9000001000",
@@ -103,7 +103,7 @@
                 {
                   "key": "conformance.scenario.name",
                   "value": {
-                    "stringValue": "result_type_mismatch"
+                    "stringValue": "optional_collapsed_to_payload"
                   }
                 },
                 {
@@ -118,9 +118,9 @@
               }
             },
             {
-              "traceId": "99999999999999999999999999999999",
-              "spanId": "9999999999999903",
-              "parentSpanId": "9999999999999902",
+              "traceId": "88888888888888888888888888888888",
+              "spanId": "8888888888888803",
+              "parentSpanId": "8888888888888802",
               "name": "conformance.operation",
               "kind": 1,
               "startTimeUnixNano": "9000002000",
@@ -129,13 +129,13 @@
                 {
                   "key": "conformance.component.id",
                   "value": {
-                    "stringValue": "example.answer"
+                    "stringValue": "example.lookup"
                   }
                 },
                 {
                   "key": "conformance.operation.name",
                   "value": {
-                    "stringValue": "answer"
+                    "stringValue": "find"
                   }
                 },
                 {
@@ -155,7 +155,7 @@
                     {
                       "key": "conformance.result.value",
                       "value": {
-                        "stringValue": "42"
+                        "stringValue": "alice"
                       }
                     }
                   ]
