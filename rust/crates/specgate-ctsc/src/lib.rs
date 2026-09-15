@@ -1,5 +1,11 @@
-//! CTSC projection for `SpecGate` — translates legacy flat operation traces
-//! into deterministic semantic CTSC format.
+//! CTSC projection for `SpecGate` — encodes native structured operation
+//! capture and translates legacy flat traces for compatibility.
+//!
+//! Native synchronous Rust capture now creates operation spans at real
+//! `#[spec_operation]` invocation boundaries, including nested parentage,
+//! typed inputs and results, observations, logical timestamps, and status.
+//! The legacy `Run`/`Event` vector remains byte-compatible evidence, but its
+//! translation is a compatibility path rather than the production model.
 //!
 //! `translate_legacy_trace` walks a JSON-encoded sequence of legacy
 //! [`specgate_runtime::TraceEvent`]s — a leading `Run` event followed by
@@ -31,7 +37,10 @@
 
 use serde::{Deserialize, Serialize};
 use specgate::{SpecEvent, spec_component, spec_operation};
-use specgate_runtime::{TraceEvent, Value};
+use specgate_runtime::{
+    NativeCapture, NativeCaptureConfig, NativeCompletion, NativeOperationSpan, NativeStatus, TraceEvent, Value, finish_native_capture,
+    start_native_capture, take_traces,
+};
 use std::collections::{BTreeMap, BTreeSet};
 
 spec_component!("specgate.ctsc");
@@ -62,6 +71,17 @@ pub struct CtscOtlpEncoding {
     pub span_count: i32,
     #[spec_event]
     pub otlp_json: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, SpecEvent)]
+#[serde(rename_all = "snake_case")]
+pub struct CtscNativeCaptureEncoding {
+    #[spec_event]
+    pub span_count: i32,
+    #[spec_event]
+    pub otlp_json: String,
+    #[spec_event]
+    pub legacy_trace_json: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, SpecEvent)]
@@ -253,6 +273,232 @@ pub fn encode_legacy_trace_otlp(
     let otlp_json = serde_json::to_string(&document).expect("OTLP document serialization must succeed");
 
     CtscOtlpEncoding { otlp_json, span_count: 3 }
+}
+
+#[spec_operation("double", spec = "fixture.native_capture")]
+fn double(value: i32) -> i32 {
+    value * 2
+}
+
+#[spec_operation("add_after_double", spec = "fixture.native_capture")]
+fn add_after_double(value: i32) -> i32 {
+    double(value + 1) + 1
+}
+
+#[allow(clippy::too_many_arguments)]
+#[spec_operation("capture_native_rust_otlp")]
+pub fn capture_native_rust_otlp(
+    scenario_name: String,
+    trace_id: String,
+    run_span_id: String,
+    scenario_span_id: String,
+    operation_span_ids_json: String,
+    run_id: String,
+    start_time_unix_nano: i64,
+    clock_step_unix_nano: i64,
+    tool_version: String,
+    target_name: String,
+    target_language: String,
+    value: i32,
+) -> CtscNativeCaptureEncoding {
+    let operation_span_ids = serde_json::from_str::<Vec<String>>(&operation_span_ids_json)
+        .unwrap_or_else(|error| panic!("malformed operation span ID JSON: {error}"));
+    start_native_capture(NativeCaptureConfig {
+        scenario_name,
+        trace_id,
+        run_span_id,
+        scenario_span_id,
+        operation_span_ids,
+        start_time_unix_nano,
+        clock_step_unix_nano,
+    })
+    .unwrap_or_else(|error| panic!("failed to start native capture: {error}"));
+
+    let _compatibility_wrapper_trace = take_traces();
+    let result = add_after_double(value);
+    debug_assert_eq!(result, 7, "native fixture must preserve its specified result");
+    let legacy_trace_json =
+        serde_json::to_string(&take_traces()).unwrap_or_else(|error| panic!("failed to serialize compatibility trace: {error}"));
+    let capture = finish_native_capture().unwrap_or_else(|error| panic!("failed to finish native capture: {error}"));
+    let otlp_json = encode_native_capture(&capture, run_id, tool_version, target_name, target_language);
+    let span_count = i32::try_from(capture.operations.len() + 2).unwrap_or_else(|_error| panic!("native capture span count exceeds i32"));
+
+    CtscNativeCaptureEncoding {
+        span_count,
+        otlp_json,
+        legacy_trace_json,
+    }
+}
+
+fn encode_native_capture(
+    capture: &NativeCapture,
+    run_id: String,
+    tool_version: String,
+    target_name: String,
+    target_language: String,
+) -> String {
+    let run_status_code = status_code(capture.run.status);
+    let schema_url = "https://specgate.dev/ctsc/schema/0.1.0".to_string();
+    let mut spans = vec![
+        Span {
+            trace_id: capture.trace_id.clone(),
+            id: capture.run.span_id.clone(),
+            parent_id: None,
+            name: "conformance.run",
+            kind: 1,
+            start_time_unix_nano: capture.run.start_time_unix_nano.to_string(),
+            end_time_unix_nano: capture.run.end_time_unix_nano.to_string(),
+            attributes: vec![string_attribute("conformance.run.id", run_id)],
+            events: Vec::new(),
+            status: Status { code: run_status_code },
+        },
+        Span {
+            trace_id: capture.trace_id.clone(),
+            id: capture.scenario.span_id.clone(),
+            parent_id: capture.scenario.parent_span_id.clone(),
+            name: "conformance.scenario",
+            kind: 1,
+            start_time_unix_nano: capture.scenario.start_time_unix_nano.to_string(),
+            end_time_unix_nano: capture.scenario.end_time_unix_nano.to_string(),
+            attributes: vec![
+                string_attribute("conformance.scenario.name", capture.scenario_name.clone()),
+                integer_attribute("conformance.scenario.index", 0),
+            ],
+            events: Vec::new(),
+            status: Status {
+                code: status_code(capture.scenario.status),
+            },
+        },
+    ];
+    spans.extend(
+        capture
+            .operations
+            .iter()
+            .map(|operation| native_operation_span(&capture.trace_id, operation)),
+    );
+
+    let document = OtlpDocument {
+        resource_spans: vec![ResourceSpans {
+            resource: Resource {
+                attributes: vec![
+                    string_attribute("conformance.version", "0.1.0"),
+                    string_attribute("conformance.tool.name", "specgate"),
+                    string_attribute("conformance.tool.version", tool_version.clone()),
+                    string_attribute("conformance.target.name", target_name),
+                    string_attribute("conformance.target.language", target_language),
+                ],
+            },
+            scope_spans: vec![ScopeSpans {
+                scope: InstrumentationScope {
+                    name: "specgate.ctsc",
+                    version: tool_version,
+                },
+                spans,
+                schema_url: schema_url.clone(),
+            }],
+            schema_url,
+        }],
+    };
+    serde_json::to_string(&document).expect("native OTLP document serialization must succeed")
+}
+
+fn native_operation_span(trace_id: &str, operation: &NativeOperationSpan) -> Span {
+    let mut ordered_events = operation
+        .observations
+        .iter()
+        .map(|observation| {
+            (
+                observation.order,
+                SpanEvent {
+                    time_unix_nano: observation.time_unix_nano.to_string(),
+                    name: "conformance.observation",
+                    attributes: vec![
+                        string_attribute("conformance.observation.name", observation.name.clone()),
+                        KeyValue {
+                            key: "conformance.observation.value".to_string(),
+                            value: value_to_any_value(&observation.value),
+                        },
+                    ],
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    if let Some(completion) = &operation.completion {
+        ordered_events.push(match completion {
+            NativeCompletion::Result {
+                order,
+                time_unix_nano,
+                value,
+            } => (
+                *order,
+                SpanEvent {
+                    time_unix_nano: time_unix_nano.to_string(),
+                    name: "conformance.result",
+                    attributes: vec![KeyValue {
+                        key: "conformance.result.value".to_string(),
+                        value: value_to_any_value(value),
+                    }],
+                },
+            ),
+            NativeCompletion::Fault {
+                order,
+                time_unix_nano,
+                fault_type,
+                message,
+                observer,
+            } => (
+                *order,
+                SpanEvent {
+                    time_unix_nano: time_unix_nano.to_string(),
+                    name: "conformance.fault",
+                    attributes: vec![
+                        string_attribute("conformance.fault.type", fault_type.clone()),
+                        string_attribute("conformance.fault.message", message.clone()),
+                        string_attribute("conformance.fault.observer", observer.clone()),
+                    ],
+                },
+            ),
+        });
+    }
+    ordered_events.sort_by_key(|(order, _event)| *order);
+
+    Span {
+        trace_id: trace_id.to_string(),
+        id: operation.span_id.clone(),
+        parent_id: Some(operation.parent_span_id.clone()),
+        name: "conformance.operation",
+        kind: 1,
+        start_time_unix_nano: operation.start_time_unix_nano.to_string(),
+        end_time_unix_nano: operation.end_time_unix_nano.to_string(),
+        attributes: vec![
+            string_attribute("conformance.component.id", operation.component_id.clone()),
+            string_attribute("conformance.operation.name", operation.operation_name.clone()),
+            KeyValue {
+                key: "conformance.operation.inputs".to_string(),
+                value: AnyValue::Kvlist(KeyValueList {
+                    values: operation
+                        .inputs
+                        .iter()
+                        .map(|(key, value)| KeyValue {
+                            key: key.clone(),
+                            value: value_to_any_value(value),
+                        })
+                        .collect(),
+                }),
+            },
+        ],
+        events: ordered_events.into_iter().map(|(_order, event)| event).collect(),
+        status: Status {
+            code: status_code(operation.status),
+        },
+    }
+}
+
+const fn status_code(status: NativeStatus) -> i32 {
+    match status {
+        NativeStatus::Ok => 1,
+        NativeStatus::Error => 2,
+    }
 }
 
 #[spec_operation("encode_discovery_registry")]
@@ -1008,12 +1254,12 @@ struct InstrumentationScope {
 #[serde(rename_all = "camelCase")]
 struct Span {
     trace_id: String,
+    name: &'static str,
     #[serde(rename = "spanId")]
     id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "parentSpanId")]
     parent_id: Option<String>,
-    name: &'static str,
     kind: i32,
     start_time_unix_nano: String,
     end_time_unix_nano: String,
@@ -1205,6 +1451,52 @@ mod tests {
         );
         assert_eq!(spans[2]["events"][0]["timeUnixNano"], "1000000003");
         assert_eq!(spans[2]["events"][0]["attributes"][0]["value"]["intValue"], "5");
+    }
+
+    #[test]
+    fn capture_nested_rust_operations_as_native_ctsc() {
+        specgate_runtime::reset();
+        let result = capture_native_rust_otlp(
+            "nested_double".to_string(),
+            "22222222222222222222222222222222".to_string(),
+            "2222222222222201".to_string(),
+            "2222222222222202".to_string(),
+            r#"["2222222222222203","2222222222222204"]"#.to_string(),
+            "run-native-001".to_string(),
+            2_000_000_000,
+            100,
+            "0.5.0".to_string(),
+            "rust-reference".to_string(),
+            "rust".to_string(),
+            2,
+        );
+
+        assert_eq!(result.span_count, 4);
+        assert_eq!(
+            result.legacy_trace_json,
+            r#"[{"kind":"Run","operation":"add_after_double"},{"kind":"Event","name":"add_after_double.value","value":2},{"kind":"Run","operation":"double"},{"kind":"Event","name":"double.value","value":3},{"kind":"Event","name":"$result","value":6},{"kind":"Event","name":"$result","value":7}]"#
+        );
+        let document: serde_json::Value = serde_json::from_str(&result.otlp_json).unwrap();
+        let spans = document["resourceSpans"][0]["scopeSpans"][0]["spans"].as_array().unwrap();
+        assert_eq!(spans.len(), 4);
+        assert_eq!(spans[0]["spanId"], "2222222222222201");
+        assert_eq!(spans[0]["startTimeUnixNano"], "2000000000");
+        assert_eq!(spans[0]["endTimeUnixNano"], "2000000900");
+        assert_eq!(spans[1]["parentSpanId"], "2222222222222201");
+        assert_eq!(spans[1]["endTimeUnixNano"], "2000000800");
+        assert_eq!(spans[2]["parentSpanId"], "2222222222222202");
+        assert_eq!(spans[2]["attributes"][0]["value"]["stringValue"], "fixture.native_capture");
+        assert_eq!(spans[2]["attributes"][1]["value"]["stringValue"], "add_after_double");
+        assert_eq!(
+            spans[2]["attributes"][2]["value"]["kvlistValue"]["values"][0]["value"]["intValue"],
+            "2"
+        );
+        assert_eq!(spans[2]["events"][0]["timeUnixNano"], "2000000600");
+        assert_eq!(spans[2]["events"][0]["attributes"][0]["value"]["intValue"], "7");
+        assert_eq!(spans[3]["parentSpanId"], "2222222222222203");
+        assert_eq!(spans[3]["attributes"][1]["value"]["stringValue"], "double");
+        assert_eq!(spans[3]["events"][0]["attributes"][0]["value"]["intValue"], "6");
+        let _wrapper_outputs = take_traces();
     }
 
     #[test]
@@ -1460,7 +1752,7 @@ mod tests {
     fn encode_operation_emits_spec_outputs_in_case_order() {
         specgate_runtime::reset();
         let result = encode_test_trace(r#"[{"kind":"Run","operation":"add"},{"kind":"Event","name":"$result","value":5}]"#);
-        let traces = specgate_runtime::take_traces();
+        let traces = take_traces();
         let output_events = &traces[traces.len() - 3..];
 
         assert!(matches!(

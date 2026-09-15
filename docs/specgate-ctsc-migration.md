@@ -59,6 +59,13 @@ Begin with a compatibility translator from the existing flat trace:
 
 Generated scenarios initially contain ordered sibling operation spans.
 
+Native production capture has now started for synchronous Rust operations.
+`specgate-runtime` records explicit operation spans at annotation-generated
+invocation scopes, including nested parentage, semantic inputs, observations,
+completion, status, and logical timestamps. `specgate-ctsc` encodes those
+records directly as CTSC OTLP JSON. Legacy flat-trace translation remains only
+as a compatibility path and is not the source for native span structure.
+
 ## Phase 2: CTSC registry export
 
 Reuse Rust link-time discovery and C# reflection discovery, then replace the

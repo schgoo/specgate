@@ -5,8 +5,14 @@
 [![CI](https://github.com/schgoo/specgate/actions/workflows/ci.yml/badge.svg)](https://github.com/schgoo/specgate/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](../../LICENSE-MIT)
 
-CTSC projection for `SpecGate` — translates legacy flat operation traces
-into deterministic semantic CTSC format.
+CTSC projection for `SpecGate` — encodes native structured operation
+capture and translates legacy flat traces for compatibility.
+
+Native synchronous Rust capture now creates operation spans at real
+`#[spec_operation]` invocation boundaries, including nested parentage,
+typed inputs and results, observations, logical timestamps, and status.
+The legacy `Run`/`Event` vector remains byte-compatible evidence, but its
+translation is a compatibility path rather than the production model.
 
 `translate_legacy_trace` walks a JSON-encoded sequence of legacy
 [`specgate_runtime::TraceEvent`][__link0]s — a leading `Run` event followed by
@@ -41,7 +47,7 @@ language-specific discovery or normalization.
 
 Part of the [SpecGate](https://github.com/schgoo/specgate) project.
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQbmReN9dOqGMIb9otqWGRls0MbbA5gMtcxfWobm07iTKD86xFhYvRhcoQb7bdrJM0ssGAbz0MTaVkOHfkbp-gCl9ozLhEbZYj6Uwhgnm1hZIKDbXNwZWNnYXRlLWN0c2NlMC41LjBtc3BlY2dhdGVfY3RzY4Nwc3BlY2dhdGUtcnVudGltZWUwLjUuMHBzcGVjZ2F0ZV9ydW50aW1l
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQbmReN9dOqGMIb9otqWGRls0MbbA5gMtcxfWobm07iTKD86xFhYvRhcoQbViW9e_BDnB8btzPkGccSv8obgBVdb4cYvzgbrRnGTB43Wt9hZIKDbXNwZWNnYXRlLWN0c2NlMC41LjBtc3BlY2dhdGVfY3RzY4Nwc3BlY2dhdGUtcnVudGltZWUwLjUuMHBzcGVjZ2F0ZV9ydW50aW1l
  [__link0]: https://docs.rs/specgate-runtime/0.5.0/specgate_runtime/?search=TraceEvent
  [__link1]: https://docs.rs/specgate-ctsc/0.5.0/specgate_ctsc/struct.CtscProjection.html
  [__link2]: https://docs.rs/specgate-runtime/0.5.0/specgate_runtime/?search=Value

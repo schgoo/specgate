@@ -12,8 +12,9 @@
 //! - `spec_trace!(...)` — emit an inline trace checkpoint from within a body.
 //!
 //! These expand into calls into `::specgate_annotations::__rt` (which
-//! re-exports `specgate-runtime`); the expanded code emits real trace events at
-//! runtime.
+//! re-exports `specgate-runtime`); synchronous operation expansions open native
+//! structured capture scopes while continuing to emit the byte-compatible
+//! legacy `Run`/`Event` trace.
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
@@ -409,7 +410,8 @@ pub fn spec_operation(attr: TokenStream, item: TokenStream) -> TokenStream {
     visitor.visit_block_mut(&mut func.block);
     let body = &func.block;
 
-    let pre = build_pre_stmts(&op_name, &params, is_method, has_ref_param);
+    let component = component_tokens(spec.as_deref());
+    let pre = build_pre_stmts(&op_name, &component, &params, is_method, has_ref_param, is_async);
     // Post-body emission of `$result` (and, for struct returns, per-field
     // events). Moving this into the macro makes an annotated operation
     // self-emit its complete trace whether it is driven by the harness runner
@@ -439,10 +441,25 @@ pub fn spec_operation(attr: TokenStream, item: TokenStream) -> TokenStream {
                 __sg_ret
             })
         }
+    } else if is_async {
+        parse_quote!({
+            #(#pre)*
+            #[allow(clippy::redundant_closure_call)]
+            let __sg_ret = (async move #body).await;
+            __sg_native_scope
+                .complete_unit()
+                .unwrap_or_else(|__sg_error| panic!("failed to complete native unit operation: {}", __sg_error));
+            __sg_ret
+        })
     } else {
         parse_quote!({
             #(#pre)*
-            #body
+            #[allow(clippy::redundant_closure_call)]
+            let __sg_ret = (move || -> () #body)();
+            __sg_native_scope
+                .complete_unit()
+                .unwrap_or_else(|__sg_error| panic!("failed to complete native unit operation: {}", __sg_error));
+            __sg_ret
         })
     };
     *func.block = new_body;
@@ -454,7 +471,6 @@ pub fn spec_operation(attr: TokenStream, item: TokenStream) -> TokenStream {
     // forbidden as an associated item; a named `const` containing inner items
     // is allowed in both positions.
     let rt = rt();
-    let component = component_tokens(spec.as_deref());
     let fn_name = func.sig.ident.to_string();
     let const_ident = Ident::new(&format!("_SPECGATE_REG_{}", fn_name.to_uppercase()), func.sig.ident.span());
     let static_ident = Ident::new(&format!("_SPECGATE_STATIC_{}", fn_name.to_uppercase()), func.sig.ident.span());
@@ -494,9 +510,24 @@ pub fn spec_operation(attr: TokenStream, item: TokenStream) -> TokenStream {
     .into()
 }
 
-fn build_pre_stmts(op_name: &str, params: &[(Ident, Type, Option<String>)], _is_method: bool, _has_ref_param: bool) -> Vec<Stmt> {
+fn build_pre_stmts(
+    op_name: &str,
+    component: &TokenStream2,
+    params: &[(Ident, Type, Option<String>)],
+    _is_method: bool,
+    _has_ref_param: bool,
+    is_async: bool,
+) -> Vec<Stmt> {
     let rt = rt();
-    let mut out: Vec<Stmt> = vec![parse_quote!(#rt::emit_run(#op_name);)];
+    let scope: Stmt = if is_async {
+        parse_quote!(let mut __sg_native_scope = #rt::OperationScope::inactive();)
+    } else {
+        parse_quote!(
+            let mut __sg_native_scope = #rt::begin_native_operation(#component, #op_name)
+                .unwrap_or_else(|__sg_error| panic!("failed to begin native operation: {}", __sg_error));
+        )
+    };
+    let mut out: Vec<Stmt> = vec![scope, parse_quote!(#rt::emit_run(#op_name);)];
     // Emit every parameter as an `op.<spec_name>` typed event via `ToSpecValue`.
     // All value-bearing params (primitives, structs, enums, collections) emit a
     // structured `Value` that round-trips correctly through the matcher. The event
@@ -510,7 +541,12 @@ fn build_pre_stmts(op_name: &str, params: &[(Ident, Type, Option<String>)], _is_
         let event_name = format!("{op_name}.{name}");
         if !is_mut_ref(ty) {
             out.push(parse_quote!(
-                #rt::emit_event_v(#event_name, #rt::ToSpecValue::to_spec_value(&#id));
+                #rt::emit_input_event_v(
+                    &mut __sg_native_scope,
+                    #event_name,
+                    #name,
+                    #rt::ToSpecValue::to_spec_value(&#id),
+                );
             ));
         }
     }
@@ -547,12 +583,12 @@ fn build_post_emit(output: &ReturnType) -> Option<TokenStream2> {
                 Ok(__sg_v) => {
                     let mut __sg_m = ::std::collections::BTreeMap::new();
                     __sg_m.insert("Ok".to_string(), #rt::ToSpecValue::to_spec_value(__sg_v));
-                    #rt::emit_event_v("$result", #rt::Value::Map(__sg_m));
+                    #rt::emit_result_event_v(&mut __sg_native_scope, #rt::Value::Map(__sg_m));
                 }
                 Err(__sg_e) => {
                     let mut __sg_m = ::std::collections::BTreeMap::new();
                     __sg_m.insert("Err".to_string(), #rt::Value::String(::std::format!("{}", __sg_e)));
-                    #rt::emit_event_v("$result", #rt::Value::Map(__sg_m));
+                    #rt::emit_result_event_v(&mut __sg_native_scope, #rt::Value::Map(__sg_m));
                 }
             }
         },
@@ -561,19 +597,22 @@ fn build_post_emit(output: &ReturnType) -> Option<TokenStream2> {
                 Some(__sg_v) => {
                     let mut __sg_m = ::std::collections::BTreeMap::new();
                     __sg_m.insert("Some".to_string(), #rt::ToSpecValue::to_spec_value(__sg_v));
-                    #rt::emit_event_v("$result", #rt::Value::Map(__sg_m));
+                    #rt::emit_result_event_v(&mut __sg_native_scope, #rt::Value::Map(__sg_m));
                 }
                 None => {
                     let mut __sg_m = ::std::collections::BTreeMap::new();
                     __sg_m.insert("None".to_string(), #rt::Value::Map(::std::collections::BTreeMap::new()));
-                    #rt::emit_event_v("$result", #rt::Value::Map(__sg_m));
+                    #rt::emit_result_event_v(&mut __sg_native_scope, #rt::Value::Map(__sg_m));
                 }
             }
         },
         ReturnKind::Other => {
             if is_printable_param(ty) {
                 quote! {
-                    #rt::emit_event_v("$result", #rt::ToSpecValue::to_spec_value(&__sg_ret));
+                    #rt::emit_result_event_v(
+                        &mut __sg_native_scope,
+                        #rt::ToSpecValue::to_spec_value(&__sg_ret),
+                    );
                 }
             } else {
                 quote! {
@@ -582,7 +621,7 @@ fn build_post_emit(output: &ReturnType) -> Option<TokenStream2> {
                         use #rt::ReturnEmitToSpec as _;
                         use #rt::ReturnEmitDisplay as _;
                         use #rt::ReturnEmitNone as _;
-                        (&&&&#rt::ReturnEmit(&__sg_ret)).emit_result();
+                        (&&&&#rt::ReturnEmit(&__sg_ret)).emit_result(&mut __sg_native_scope);
                     }
                 }
             }

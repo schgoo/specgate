@@ -19,8 +19,9 @@ Procedural macros for `SpecGate` annotations.
 * `spec_trace!(...)` — emit an inline trace checkpoint from within a body.
 
 These expand into calls into `::specgate_annotations::__rt` (which
-re-exports `specgate-runtime`); the expanded code emits real trace events at
-runtime.
+re-exports `specgate-runtime`); synchronous operation expansions open native
+structured capture scopes while continuing to emit the byte-compatible
+legacy `Run`/`Event` trace.
 
 
 ---

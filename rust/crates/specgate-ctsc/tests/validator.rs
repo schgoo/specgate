@@ -1,4 +1,4 @@
-use specgate_ctsc::{encode_discovery_registry, encode_legacy_trace_otlp, encode_schema_registry_result};
+use specgate_ctsc::{capture_native_rust_otlp, encode_discovery_registry, encode_legacy_trace_otlp, encode_schema_registry_result};
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
@@ -21,6 +21,26 @@ fn generated_otlp_passes_ctsc_trace_validator_when_available() {
     );
 
     validate_generated_document("trace", "trace", &result.otlp_json);
+}
+
+#[test]
+fn native_generated_otlp_passes_ctsc_trace_validator_when_available() {
+    let result = capture_native_rust_otlp(
+        "nested_double".to_string(),
+        "22222222222222222222222222222222".to_string(),
+        "2222222222222201".to_string(),
+        "2222222222222202".to_string(),
+        r#"["2222222222222203","2222222222222204"]"#.to_string(),
+        "run-native-001".to_string(),
+        2_000_000_000,
+        100,
+        "0.5.0".to_string(),
+        "rust-reference".to_string(),
+        "rust".to_string(),
+        2,
+    );
+
+    validate_generated_document("trace", "native-trace", &result.otlp_json);
 }
 
 #[test]

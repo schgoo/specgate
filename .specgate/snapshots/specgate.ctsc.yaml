@@ -75,6 +75,32 @@ operations:
       - operation_count: i32
       - type_count: i32
 
+  capture_native_rust_otlp:
+    desc: >
+      Capture real nested synchronous Rust operation invocations directly as
+      CTSC spans. Annotation-generated scopes supply component and operation
+      identity, typed inputs, results, parentage, and terminal status while the
+      existing flat Run/Event trace remains available as a compatibility view.
+      Caller-supplied IDs and logical clock settings keep the conformance case
+      deterministic.
+    inputs:
+      scenario_name: string
+      trace_id: string
+      run_span_id: string
+      scenario_span_id: string
+      operation_span_ids_json: string
+      run_id: string
+      start_time_unix_nano: i64
+      clock_step_unix_nano: i64
+      tool_version: string
+      target_name: string
+      target_language: string
+      value: i32
+    outputs:
+      - otlp_json: string
+      - span_count: i32
+      - legacy_trace_json: string
+
 cases:
   - name: stateless_result
     desc: Input echoes are removed from observations and projected onto the operation inputs.
@@ -222,3 +248,30 @@ cases:
       - type_count: 3
       - registry_json:
           $matches: '"id":"fixture.rich".*"name":"transform".*"name":"person".*"kind":"named".*"name":"Person".*"name":"points".*"kind":"list".*"kind":"named".*"name":"Point".*"name":"tags".*"kind":"set".*"name":"string".*"name":"scores".*"kind":"map".*"name":"pair".*"kind":"tuple".*"name":"fallback".*"kind":"tagged_union".*"name":"None".*"name":"Some".*"name":"Shape".*"types".*"name":"Person".*"kind":"record".*"name":"location".*"kind":"named".*"name":"Point".*"name":"Shape".*"kind":"tagged_union".*"name":"Circle".*"kind":"record".*"name":"radius".*"name":"Rectangle".*"name":"width".*"name":"height".*"name":"Point"'
+
+  - name: capture_nested_rust_operations_as_native_ctsc
+    desc: >
+      The outer operation is a scenario child and the inner operation is its
+      child. Both carry typed inputs and results captured at their real
+      invocation boundaries, while the legacy compatibility trace preserves
+      the same nested Run/Event evidence.
+    operation: capture_native_rust_otlp
+    inputs:
+      scenario_name: nested_double
+      trace_id: "22222222222222222222222222222222"
+      run_span_id: "2222222222222201"
+      scenario_span_id: "2222222222222202"
+      operation_span_ids_json: '["2222222222222203","2222222222222204"]'
+      run_id: run-native-001
+      start_time_unix_nano: 2000000000
+      clock_step_unix_nano: 100
+      tool_version: 0.5.0
+      target_name: rust-reference
+      target_language: rust
+      value: 2
+    expected:
+      - span_count: 4
+      - otlp_json:
+          $matches: '"name":"conformance.run".*"spanId":"2222222222222201".*"name":"conformance.scenario".*"spanId":"2222222222222202".*"parentSpanId":"2222222222222201".*"name":"conformance.operation".*"spanId":"2222222222222203".*"parentSpanId":"2222222222222202".*"conformance.component.id".*"fixture.native_capture".*"conformance.operation.name".*"add_after_double".*"conformance.operation.inputs".*"value".*"intValue":"2".*"name":"conformance.result".*"intValue":"7".*"name":"conformance.operation".*"spanId":"2222222222222204".*"parentSpanId":"2222222222222203".*"conformance.operation.name".*"double".*"conformance.operation.inputs".*"value".*"intValue":"3".*"name":"conformance.result".*"intValue":"6"'
+      - legacy_trace_json:
+          $matches: '"kind":"Run","operation":"add_after_double".*"name":"add_after_double.value","value":2.*"kind":"Run","operation":"double".*"name":"double.value","value":3.*"name":"\$result","value":6.*"name":"\$result","value":7'

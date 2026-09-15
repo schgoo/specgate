@@ -15,6 +15,10 @@ Re-exports the proc-macros from `specgate-annotations-macros`
 `use specgate_annotations::*;` (or `use specgate::*;` via the umbrella
 crate) to pull in everything at once.
 
+Synchronous operation annotations also provide native structured invocation
+boundaries to the runtime when a capture session is active. Existing flat
+trace emission remains available as the compatibility view.
+
 Annotations are zero-cost in production: without the trace feature the
 macros expand to no-ops.
 

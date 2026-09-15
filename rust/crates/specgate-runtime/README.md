@@ -7,10 +7,11 @@
 
 `SpecGate` runtime — the support library the annotation macros expand into.
 
-Provides the thread-local trace buffer, the mock table, the `SpecEvent` /
-`ToSpecValue` traits, the structured `Value` type (the universal trace
-value), and the link-time operation/type registry that
-`specgate extract` reads to derive a spec from annotated code.
+Provides the thread-local compatibility trace buffer, native structured
+operation capture, the mock table, the `SpecEvent` / `ToSpecValue` traits,
+the structured `Value` type (the universal trace value), and the link-time
+operation/type registry that `specgate extract` reads to derive a spec from
+annotated code.
 
 Companion to the `specgate-annotations` proc-macro crate: the macros expand
 into calls into this runtime, so user code never references it directly.
