@@ -79,10 +79,9 @@ operations:
     desc: >
       Capture real nested synchronous Rust operation invocations directly as
       CTSC spans. Annotation-generated scopes supply component and operation
-      identity, typed inputs, results, parentage, and terminal status while the
-      existing flat Run/Event trace remains available as a compatibility view.
+      identity, typed inputs, results, parentage, and terminal status.
       Caller-supplied IDs and logical clock settings keep the conformance case
-      deterministic.
+      deterministic. Native capture exposes only the CTSC artifact.
     inputs:
       scenario_name: string
       trace_id: string
@@ -99,7 +98,27 @@ operations:
     outputs:
       - otlp_json: string
       - span_count: i32
-      - legacy_trace_json: string
+
+  capture_native_optional_otlp:
+    desc: >
+      Capture an optional Rust input and result using CTSC 0.2 Some/None value
+      wrappers. Native capture has no parallel legacy value projection.
+    inputs:
+      scenario_name: string
+      trace_id: string
+      run_span_id: string
+      scenario_span_id: string
+      operation_span_id: string
+      run_id: string
+      start_time_unix_nano: i64
+      clock_step_unix_nano: i64
+      tool_version: string
+      target_name: string
+      target_language: string
+      present: bool
+      value: string
+    outputs:
+      - otlp_json: string
 
 cases:
   - name: stateless_result
@@ -218,7 +237,7 @@ cases:
       - operation_count: 1
       - type_count: 0
       - registry_json:
-          $matches: '"format":"ctsc.registry".*"formatVersion":"0.1.0".*"registryId":"urn:ctsc:registry:fixture.stateless-add:1".*"version":"1.0.0".*"components".*"id":"fixture.stateless_add".*"operations".*"name":"add".*"inputs".*"name":"a".*"kind":"primitive".*"name":"i32".*"name":"b".*"kind":"primitive".*"name":"i32".*"observations":\[\].*"outcomes".*"result".*"kind":"primitive".*"name":"i32".*"types":\[\]'
+          $matches: '"format":"ctsc.registry".*"formatVersion":"0.2.0".*"registryId":"urn:ctsc:registry:fixture.stateless-add:1".*"version":"1.0.0".*"components".*"id":"fixture.stateless_add".*"operations".*"name":"add".*"inputs".*"name":"a".*"kind":"primitive".*"name":"i32".*"name":"b".*"kind":"primitive".*"name":"i32".*"observations":\[\].*"outcomes".*"result".*"kind":"primitive".*"name":"i32".*"types":\[\]'
 
   - name: encode_rich_normalized_schema_as_registry
     desc: >
@@ -247,14 +266,13 @@ cases:
       - operation_count: 1
       - type_count: 3
       - registry_json:
-          $matches: '"id":"fixture.rich".*"name":"transform".*"name":"person".*"kind":"named".*"name":"Person".*"name":"points".*"kind":"list".*"kind":"named".*"name":"Point".*"name":"tags".*"kind":"set".*"name":"string".*"name":"scores".*"kind":"map".*"name":"pair".*"kind":"tuple".*"name":"fallback".*"kind":"tagged_union".*"name":"None".*"name":"Some".*"name":"Shape".*"types".*"name":"Person".*"kind":"record".*"name":"location".*"kind":"named".*"name":"Point".*"name":"Shape".*"kind":"tagged_union".*"name":"Circle".*"kind":"record".*"name":"radius".*"name":"Rectangle".*"name":"width".*"name":"height".*"name":"Point"'
+          $matches: '"formatVersion":"0.2.0".*"id":"fixture.rich".*"name":"transform".*"name":"person".*"kind":"named".*"name":"Person".*"name":"points".*"kind":"list".*"kind":"named".*"name":"Point".*"name":"tags".*"kind":"set".*"name":"string".*"name":"scores".*"kind":"map".*"name":"pair".*"kind":"tuple".*"name":"fallback".*"kind":"optional".*"value".*"kind":"named".*"name":"Point".*"name":"Shape".*"types".*"name":"Person".*"kind":"record".*"name":"location".*"kind":"named".*"name":"Point".*"name":"Shape".*"kind":"tagged_union".*"name":"Circle".*"kind":"record".*"name":"radius".*"name":"Rectangle".*"name":"width".*"name":"height".*"name":"Point"'
 
   - name: capture_nested_rust_operations_as_native_ctsc
     desc: >
       The outer operation is a scenario child and the inner operation is its
       child. Both carry typed inputs and results captured at their real
-      invocation boundaries, while the legacy compatibility trace preserves
-      the same nested Run/Event evidence.
+      invocation boundaries. The operation exposes no legacy trace output.
     operation: capture_native_rust_otlp
     inputs:
       scenario_name: nested_double
@@ -273,5 +291,45 @@ cases:
       - span_count: 4
       - otlp_json:
           $matches: '"name":"conformance.run".*"spanId":"2222222222222201".*"name":"conformance.scenario".*"spanId":"2222222222222202".*"parentSpanId":"2222222222222201".*"name":"conformance.operation".*"spanId":"2222222222222203".*"parentSpanId":"2222222222222202".*"conformance.component.id".*"fixture.native_capture".*"conformance.operation.name".*"add_after_double".*"conformance.operation.inputs".*"value".*"intValue":"2".*"name":"conformance.result".*"intValue":"7".*"name":"conformance.operation".*"spanId":"2222222222222204".*"parentSpanId":"2222222222222203".*"conformance.operation.name".*"double".*"conformance.operation.inputs".*"value".*"intValue":"3".*"name":"conformance.result".*"intValue":"6"'
-      - legacy_trace_json:
-          $matches: '"kind":"Run","operation":"add_after_double".*"name":"add_after_double.value","value":2.*"kind":"Run","operation":"double".*"name":"double.value","value":3.*"name":"\$result","value":6.*"name":"\$result","value":7'
+
+  - name: capture_present_optional_with_ctsc_wrapper
+    desc: Present optional input and result use the Some wrapper in native CTSC.
+    operation: capture_native_optional_otlp
+    inputs:
+      scenario_name: optional_some
+      trace_id: "44444444444444444444444444444444"
+      run_span_id: "4444444444444401"
+      scenario_span_id: "4444444444444402"
+      operation_span_id: "4444444444444403"
+      run_id: run-optional-001
+      start_time_unix_nano: 4000000000
+      clock_step_unix_nano: 100
+      tool_version: 0.5.0
+      target_name: rust-reference
+      target_language: rust
+      present: true
+      value: alice
+    expected:
+      - otlp_json:
+          $matches: '"conformance.operation.name".*"echo_optional".*"conformance.operation.inputs".*"value".*"kvlistValue".*"key":"Some".*"stringValue":"alice".*"name":"conformance.result".*"key":"Some".*"stringValue":"alice"'
+
+  - name: capture_absent_optional_with_ctsc_wrapper
+    desc: Absent optional input and result use the None/unit wrapper in native CTSC.
+    operation: capture_native_optional_otlp
+    inputs:
+      scenario_name: optional_none
+      trace_id: "55555555555555555555555555555555"
+      run_span_id: "5555555555555501"
+      scenario_span_id: "5555555555555502"
+      operation_span_id: "5555555555555503"
+      run_id: run-optional-002
+      start_time_unix_nano: 5000000000
+      clock_step_unix_nano: 100
+      tool_version: 0.5.0
+      target_name: rust-reference
+      target_language: rust
+      present: false
+      value: ignored
+    expected:
+      - otlp_json:
+          $matches: '"conformance.operation.name".*"echo_optional".*"conformance.operation.inputs".*"value".*"kvlistValue".*"key":"None".*"value":\{"kvlistValue":\{\}\}.*"name":"conformance.result".*"key":"None".*"value":\{"kvlistValue":\{\}\}'

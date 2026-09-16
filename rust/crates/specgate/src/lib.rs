@@ -183,10 +183,11 @@ pub use specgate_annotations::{SpecEvent, spec_component, spec_mock, spec_operat
 /// ```
 pub mod __public_api_contract {}
 
-// Internal — needed by macro expansions but not user-facing
+// Internal — native projection plus transitional flat-trace support needed by
+// macro expansions and unmigrated extraction/harness consumers.
 #[doc(hidden)]
 pub use specgate_annotations::{
-    ToSpecValue, TraceEvent, Value, emit_event_v, emit_run, mock_lookup, record_event_only, reset, set_mock, take_traces,
+    ToNativeValue, ToSpecValue, TraceEvent, Value, emit_event_v, emit_run, mock_lookup, record_event_only, reset, set_mock, take_traces,
 };
 
 // The proc macros expand to `::specgate::__rt::...` so this module must exist.

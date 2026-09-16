@@ -16,8 +16,9 @@ Re-exports the proc-macros from `specgate-annotations-macros`
 crate) to pull in everything at once.
 
 Synchronous operation annotations also provide native structured invocation
-boundaries to the runtime when a capture session is active. Existing flat
-trace emission remains available as the compatibility view.
+boundaries to the runtime when a capture session is active. Flat trace
+emission remains temporarily for extraction and spec-harness consumers that
+do not yet have CTSC replacements.
 
 Annotations are zero-cost in production: without the trace feature the
 macros expand to no-ops.

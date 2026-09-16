@@ -20,8 +20,8 @@ Procedural macros for `SpecGate` annotations.
 
 These expand into calls into `::specgate_annotations::__rt` (which
 re-exports `specgate-runtime`); synchronous operation expansions open native
-structured capture scopes while continuing to emit the byte-compatible
-legacy `Run`/`Event` trace.
+structured capture scopes. They also emit the temporary flat `Run`/`Event`
+trace still consumed by extraction and the spec harness.
 
 
 ---

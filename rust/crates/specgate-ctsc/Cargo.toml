@@ -2,7 +2,7 @@
 name = "specgate-ctsc"
 version.workspace = true
 edition.workspace = true
-description = "CTSC projection for SpecGate — translates legacy flat operation traces into deterministic semantic CTSC format"
+description = "Native CTSC capture and transitional legacy trace projection for SpecGate"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
@@ -17,6 +17,7 @@ specgate = { workspace = true }
 specgate-runtime = { workspace = true, features = ["specgate-trace"] }
 
 [dev-dependencies]
+sha2 = { workspace = true }
 specgate = { workspace = true, features = ["harness"] }
 
 [lints]

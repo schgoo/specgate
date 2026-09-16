@@ -7,11 +7,14 @@
 
 `SpecGate` runtime — the support library the annotation macros expand into.
 
-Provides the thread-local compatibility trace buffer, native structured
-operation capture, the mock table, the `SpecEvent` / `ToSpecValue` traits,
-the structured `Value` type (the universal trace value), and the link-time
-operation/type registry that `specgate extract` reads to derive a spec from
-annotated code.
+Provides native structured operation capture plus the temporary flat trace
+buffer still used by extraction and the spec harness, the mock table, the
+`SpecEvent` / value-projection traits, the structured `Value` type, and the
+link-time operation/type registry that `specgate extract` reads.
+Isolated test processes can activate native capture through
+`SPECGATE_NATIVE_CAPTURE`; the first operation starts the session lazily and
+each completed top-level operation atomically refreshes a stable JSON
+sidecar containing the full scenario.
 
 Companion to the `specgate-annotations` proc-macro crate: the macros expand
 into calls into this runtime, so user code never references it directly.

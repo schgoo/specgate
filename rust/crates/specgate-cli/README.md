@@ -7,10 +7,11 @@
 
 Command-line interface for [SpecGate][__link0]:
 validate specs, run them through the harness, extract specs from
-annotated code, and discover implementation metadata as CTSC registries.
+annotated code, discover implementation metadata as CTSC registries, and
+capture passing Rust tests as native CTSC reference bundles.
 This library backs the `specgate` binary and the integration-test suite;
 each command is also callable as a function (`validate`, `run`, `extract`,
-`discover`).
+`discover`, `capture`).
 
 ## Commands
 
@@ -19,6 +20,7 @@ specgate validate <spec-dir> [--strict] [--spec-only] [--assertions-dir <dir>]
 specgate run <spec.yaml> [--coverage] [--coverage-threshold <pct>] [--verbose] [--json]
 specgate extract <package-root> -o|--out <spec.yaml> [--component <name>] [--cases]
 specgate discover <binding.yaml> --component <id> --registry-id <id> --registry-version <version> -o|--out <registry.ctsc.json> [--target <name>]
+specgate capture <binding.yaml> --out <dir> [--target <name>] [--component <id>]
 ```
 
 ### `validate`
@@ -77,6 +79,19 @@ deterministic CTSC registry document.
 * `--registry-version <version>` — registry version (required).
 * `-o`, `--out <registry.ctsc.json>` — output path (required).
 * `--target <name>` — binding target; omitted selects the default.
+
+### `capture`
+
+Runs every libtest test in isolation for one Rust binding target. Passing
+tests that invoke the selected component become ordered native CTSC
+scenarios; tests that do not invoke it are omitted. The deterministic output
+directory contains exactly `registry.ctsc.json`, `reference.otlp.json`, and
+`manifest.json`.
+
+* `--out <dir>` — output directory for the bundle (required).
+* `--target <name>` — binding target; omitted selects the default.
+* `--component <id>` — component to capture; omitted selects the sole
+  discovered component and errors when discovery is ambiguous.
 
 
 ---

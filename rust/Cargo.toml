@@ -30,6 +30,8 @@ quote = "1.0.45"
 proc-macro2 = "1.0.106"
 regex = "1.12"
 linkme = "0.3"
+sha2 = "0.10"
+tempfile = "3"
 specgate = { path = "crates/specgate", version = "0.5.0" }
 specgate-types = { path = "crates/specgate-types", version = "0.5.0" }
 specgate-annotations = { path = "crates/specgate-annotations", version = "0.5.0" }

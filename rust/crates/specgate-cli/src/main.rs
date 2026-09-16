@@ -2,13 +2,13 @@
 
 use std::process::ExitCode;
 
-use specgate_cli::{discover, extract, run, validate};
+use specgate_cli::{capture, discover, extract, run, validate};
 
 fn print_usage() {
     eprintln!(
         "usage: specgate <command> [options] <args>\n\
          \n\
-         commands:\n  validate <spec-dir> [--strict] [--spec-only] [--assertions-dir <dir>]\n  run <spec.yaml> [--coverage] [--coverage-threshold <pct>] [--verbose] [--json]\n  extract <package-root> -o|--out <spec.yaml> [--component <name>] [--cases]\n  discover <binding.yaml> --component <id> --registry-id <id> --registry-version <version> -o|--out <registry.ctsc.json> [--target <name>]"
+         commands:\n  validate <spec-dir> [--strict] [--spec-only] [--assertions-dir <dir>]\n  run <spec.yaml> [--coverage] [--coverage-threshold <pct>] [--verbose] [--json]\n  extract <package-root> -o|--out <spec.yaml> [--component <name>] [--cases]\n  discover <binding.yaml> --component <id> --registry-id <id> --registry-version <version> -o|--out <registry.ctsc.json> [--target <name>]\n  capture <binding.yaml> --out <dir> [--target <name>] [--component <id>]"
     );
 }
 
@@ -25,6 +25,7 @@ fn main() -> ExitCode {
         "run" => cmd_run(rest),
         "extract" => cmd_extract(rest),
         "discover" => cmd_discover(rest),
+        "capture" => cmd_capture(rest),
         "-h" | "--help" => {
             print_usage();
             ExitCode::from(0)
@@ -34,6 +35,68 @@ fn main() -> ExitCode {
             print_usage();
             ExitCode::from(2)
         }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct CaptureArgs {
+    binding: String,
+    target: String,
+    component: String,
+    out: String,
+}
+
+fn parse_capture_args(args: &[String]) -> Result<CaptureArgs, String> {
+    let mut binding = None;
+    let mut target = String::new();
+    let mut component = String::new();
+    let mut out = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            flag @ ("--target" | "--component" | "--out") => {
+                if i + 1 >= args.len() {
+                    return Err(format!("{flag} needs an argument"));
+                }
+                let value = args[i + 1].clone();
+                match flag {
+                    "--target" => target = value,
+                    "--component" => component = value,
+                    "--out" => out = Some(value),
+                    _ => {}
+                }
+                i += 2;
+            }
+            value if !value.starts_with('-') && binding.is_none() => {
+                binding = Some(value.to_string());
+                i += 1;
+            }
+            value => return Err(format!("unexpected argument '{value}'")),
+        }
+    }
+    let binding = binding.ok_or_else(|| "capture requires a binding file argument".to_string())?;
+    let out = out.ok_or_else(|| "capture requires --out <dir>".to_string())?;
+    Ok(CaptureArgs {
+        binding,
+        target,
+        component,
+        out,
+    })
+}
+
+fn cmd_capture(args: &[String]) -> ExitCode {
+    let parsed = match parse_capture_args(args) {
+        Ok(parsed) => parsed,
+        Err(reason) => {
+            eprintln!("error: {reason}");
+            return ExitCode::from(2);
+        }
+    };
+    let outcome = capture(&parsed.binding, &parsed.target, &parsed.component, &parsed.out);
+    print!("{}", capture::format_outcome(&outcome));
+    match outcome {
+        capture::CaptureOutcome::Complete { .. } => ExitCode::from(0),
+        capture::CaptureOutcome::Error { .. } => ExitCode::from(1),
     }
 }
 
@@ -52,6 +115,7 @@ fn cmd_discover(args: &[String]) -> ExitCode {
                     eprintln!("error: {flag} needs an argument");
                     return ExitCode::from(2);
                 }
+
                 let value = args[i + 1].clone();
                 match flag {
                     "--target" => target = value,
@@ -275,5 +339,44 @@ fn cmd_extract(args: &[String]) -> ExitCode {
     match &outcome {
         extract::ExtractOutcome::Error { .. } => ExitCode::from(1),
         extract::ExtractOutcome::Complete { .. } => ExitCode::from(0),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| (*value).to_string()).collect()
+    }
+
+    #[test]
+    fn parses_capture_command_arguments() {
+        assert_eq!(
+            parse_capture_args(&args(&[
+                "binding.yaml",
+                "--out",
+                "capture",
+                "--target",
+                "reference",
+                "--component",
+                "fixture.add",
+            ]))
+            .unwrap(),
+            CaptureArgs {
+                binding: "binding.yaml".to_string(),
+                target: "reference".to_string(),
+                component: "fixture.add".to_string(),
+                out: "capture".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn capture_parser_requires_output_directory() {
+        assert_eq!(
+            parse_capture_args(&args(&["binding.yaml"])).unwrap_err(),
+            "capture requires --out <dir>"
+        );
     }
 }

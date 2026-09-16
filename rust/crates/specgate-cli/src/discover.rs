@@ -193,7 +193,9 @@ mod tests {
         assert_eq!(report.operations, 1);
         assert_eq!(report.types, 0);
         let json = std::fs::read_to_string(&output).expect("read registry output");
-        assert_eq!(serde_json::from_str::<serde_json::Value>(&json).unwrap()["format"], "ctsc.registry");
+        let document = serde_json::from_str::<serde_json::Value>(&json).unwrap();
+        assert_eq!(document["format"], "ctsc.registry");
+        assert_eq!(document["formatVersion"], "0.2.0");
         assert!(!json.contains('\n'), "registry JSON must be compact");
         let _ = std::fs::remove_file(output);
     }
@@ -232,11 +234,8 @@ mod tests {
                 .find(|operation| operation["name"] == "find_point")
                 .unwrap()["outcomes"]["result"],
             serde_json::json!({
-                "kind": "tagged_union",
-                "variants": [
-                    {"name": "None"},
-                    {"name": "Some", "payload": {"kind": "named", "name": "Point"}}
-                ]
+                "kind": "optional",
+                "value": {"kind": "named", "name": "Point"}
             })
         );
         let _ = std::fs::remove_file(output);

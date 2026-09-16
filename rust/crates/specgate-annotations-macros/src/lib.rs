@@ -13,8 +13,8 @@
 //!
 //! These expand into calls into `::specgate_annotations::__rt` (which
 //! re-exports `specgate-runtime`); synchronous operation expansions open native
-//! structured capture scopes while continuing to emit the byte-compatible
-//! legacy `Run`/`Event` trace.
+//! structured capture scopes. They also emit the temporary flat `Run`/`Event`
+//! trace still consumed by extraction and the spec harness.
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
@@ -545,6 +545,7 @@ fn build_pre_stmts(
                     &mut __sg_native_scope,
                     #event_name,
                     #name,
+                    #rt::ToNativeValue::to_native_value(&#id),
                     #rt::ToSpecValue::to_spec_value(&#id),
                 );
             ));
@@ -581,28 +582,42 @@ fn build_post_emit(output: &ReturnType) -> Option<TokenStream2> {
         ReturnKind::Result => quote! {
             match &__sg_ret {
                 Ok(__sg_v) => {
-                    let mut __sg_m = ::std::collections::BTreeMap::new();
-                    __sg_m.insert("Ok".to_string(), #rt::ToSpecValue::to_spec_value(__sg_v));
-                    #rt::emit_result_event_v(&mut __sg_native_scope, #rt::Value::Map(__sg_m));
+                    let mut __sg_native_m = ::std::collections::BTreeMap::new();
+                    __sg_native_m.insert("Ok".to_string(), #rt::ToNativeValue::to_native_value(__sg_v));
+                    let mut __sg_compat_m = ::std::collections::BTreeMap::new();
+                    __sg_compat_m.insert("Ok".to_string(), #rt::ToSpecValue::to_spec_value(__sg_v));
+                    #rt::emit_result_event_v(
+                        &mut __sg_native_scope,
+                        #rt::Value::Map(__sg_native_m),
+                        #rt::Value::Map(__sg_compat_m),
+                    );
                 }
                 Err(__sg_e) => {
                     let mut __sg_m = ::std::collections::BTreeMap::new();
                     __sg_m.insert("Err".to_string(), #rt::Value::String(::std::format!("{}", __sg_e)));
-                    #rt::emit_result_event_v(&mut __sg_native_scope, #rt::Value::Map(__sg_m));
+                    let __sg_value = #rt::Value::Map(__sg_m);
+                    #rt::emit_result_event_v(&mut __sg_native_scope, __sg_value.clone(), __sg_value);
                 }
             }
         },
         ReturnKind::Option => quote! {
             match &__sg_ret {
                 Some(__sg_v) => {
-                    let mut __sg_m = ::std::collections::BTreeMap::new();
-                    __sg_m.insert("Some".to_string(), #rt::ToSpecValue::to_spec_value(__sg_v));
-                    #rt::emit_result_event_v(&mut __sg_native_scope, #rt::Value::Map(__sg_m));
+                    let mut __sg_native_m = ::std::collections::BTreeMap::new();
+                    __sg_native_m.insert("Some".to_string(), #rt::ToNativeValue::to_native_value(__sg_v));
+                    let mut __sg_compat_m = ::std::collections::BTreeMap::new();
+                    __sg_compat_m.insert("Some".to_string(), #rt::ToSpecValue::to_spec_value(__sg_v));
+                    #rt::emit_result_event_v(
+                        &mut __sg_native_scope,
+                        #rt::Value::Map(__sg_native_m),
+                        #rt::Value::Map(__sg_compat_m),
+                    );
                 }
                 None => {
                     let mut __sg_m = ::std::collections::BTreeMap::new();
                     __sg_m.insert("None".to_string(), #rt::Value::Map(::std::collections::BTreeMap::new()));
-                    #rt::emit_result_event_v(&mut __sg_native_scope, #rt::Value::Map(__sg_m));
+                    let __sg_value = #rt::Value::Map(__sg_m);
+                    #rt::emit_result_event_v(&mut __sg_native_scope, __sg_value.clone(), __sg_value);
                 }
             }
         },
@@ -611,6 +626,7 @@ fn build_post_emit(output: &ReturnType) -> Option<TokenStream2> {
                 quote! {
                     #rt::emit_result_event_v(
                         &mut __sg_native_scope,
+                        #rt::ToNativeValue::to_native_value(&__sg_ret),
                         #rt::ToSpecValue::to_spec_value(&__sg_ret),
                     );
                 }
@@ -769,6 +785,7 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
         let enum_name_lower = name.to_string().to_lowercase();
         let mut arms: Vec<TokenStream2> = Vec::new();
         let mut to_spec_value_arms: Vec<TokenStream2> = Vec::new();
+        let mut to_native_value_arms: Vec<TokenStream2> = Vec::new();
         // Registry: one entry per variant (name + named fields; tuple/unit empty).
         let mut variant_metas: Vec<TokenStream2> = Vec::new();
 
@@ -789,6 +806,16 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
                         }
                     });
                     to_spec_value_arms.push(quote! {
+                        #name::#vname => {
+                            let mut __sg_outer = ::std::collections::BTreeMap::new();
+                            __sg_outer.insert(
+                                #vname_str.to_string(),
+                                #rt::Value::Map(::std::collections::BTreeMap::new()),
+                            );
+                            #rt::Value::Map(__sg_outer)
+                        }
+                    });
+                    to_native_value_arms.push(quote! {
                         #name::#vname => {
                             let mut __sg_outer = ::std::collections::BTreeMap::new();
                             __sg_outer.insert(
@@ -847,6 +874,23 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
                             #rt::Value::Map(__sg_outer)
                         }
                     });
+                    to_native_value_arms.push(quote! {
+                        #name::#vname { #(#field_idents),* } => {
+                            let mut __sg_inner = ::std::collections::BTreeMap::new();
+                            #(
+                                __sg_inner.insert(
+                                    #field_strs.to_string(),
+                                    #rt::ToNativeValue::to_native_value(#field_idents),
+                                );
+                            )*
+                            let mut __sg_outer = ::std::collections::BTreeMap::new();
+                            __sg_outer.insert(
+                                #vname_str.to_string(),
+                                #rt::Value::Map(__sg_inner),
+                            );
+                            #rt::Value::Map(__sg_outer)
+                        }
+                    });
                 }
                 Fields::Unnamed(_) => {
                     // Tuple variants: emit only the variant name.
@@ -862,6 +906,16 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
                         }
                     });
                     to_spec_value_arms.push(quote! {
+                        #name::#vname(..) => {
+                            let mut __sg_outer = ::std::collections::BTreeMap::new();
+                            __sg_outer.insert(
+                                #vname_str.to_string(),
+                                #rt::Value::Map(::std::collections::BTreeMap::new()),
+                            );
+                            #rt::Value::Map(__sg_outer)
+                        }
+                    });
+                    to_native_value_arms.push(quote! {
                         #name::#vname(..) => {
                             let mut __sg_outer = ::std::collections::BTreeMap::new();
                             __sg_outer.insert(
@@ -896,6 +950,13 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
                     }
                 }
             }
+            impl #impl_g #rt::ToNativeValue for #name #ty_g #where_c {
+                fn to_native_value(&self) -> #rt::Value {
+                    match self {
+                        #(#to_native_value_arms)*
+                    }
+                }
+            }
             #reg
         };
         return out.into();
@@ -908,6 +969,7 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
     // fields are internal and excluded from both.
     let mut emits = Vec::new();
     let mut to_spec_value_inserts = Vec::new();
+    let mut to_native_value_inserts = Vec::new();
     // Registry: one `(spec_name, type)` entry per tagged field, in source order.
     let mut field_metas: Vec<TokenStream2> = Vec::new();
     if let Data::Struct(s) = &input.data {
@@ -951,6 +1013,12 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
                     #rt::ToSpecValue::to_spec_value(&self.#id),
                 );
             });
+            to_native_value_inserts.push(quote! {
+                __sg_m.insert(
+                    #fname.to_string(),
+                    #rt::ToNativeValue::to_native_value(&self.#id),
+                );
+            });
 
             // Per-field event for `emit_fields`, keyed by the same spec name.
             emits.push(quote! {
@@ -978,6 +1046,13 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
             fn to_spec_value(&self) -> #rt::Value {
                 let mut __sg_m = ::std::collections::BTreeMap::new();
                 #(#to_spec_value_inserts)*
+                #rt::Value::Map(__sg_m)
+            }
+        }
+        impl #impl_g #rt::ToNativeValue for #name #ty_g #where_c {
+            fn to_native_value(&self) -> #rt::Value {
+                let mut __sg_m = ::std::collections::BTreeMap::new();
+                #(#to_native_value_inserts)*
                 #rt::Value::Map(__sg_m)
             }
         }

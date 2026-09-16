@@ -1,10 +1,13 @@
 //! `SpecGate` runtime — the support library the annotation macros expand into.
 //!
-//! Provides the thread-local compatibility trace buffer, native structured
-//! operation capture, the mock table, the `SpecEvent` / `ToSpecValue` traits,
-//! the structured `Value` type (the universal trace value), and the link-time
-//! operation/type registry that `specgate extract` reads to derive a spec from
-//! annotated code.
+//! Provides native structured operation capture plus the temporary flat trace
+//! buffer still used by extraction and the spec harness, the mock table, the
+//! `SpecEvent` / value-projection traits, the structured `Value` type, and the
+//! link-time operation/type registry that `specgate extract` reads.
+//! Isolated test processes can activate native capture through
+//! `SPECGATE_NATIVE_CAPTURE`; the first operation starts the session lazily and
+//! each completed top-level operation atomically refreshes a stable JSON
+//! sidecar containing the full scenario.
 //!
 //! Companion to the `specgate-annotations` proc-macro crate: the macros expand
 //! into calls into this runtime, so user code never references it directly.
@@ -16,6 +19,8 @@ use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::Write as _;
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
 
 pub use linkme;
 
@@ -470,7 +475,7 @@ impl TraceEvent {
 // ---------------------------------------------------------------------------
 
 /// Deterministic configuration for one thread-local native capture session.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NativeCaptureConfig {
     pub scenario_name: String,
     pub trace_id: String,
@@ -481,8 +486,19 @@ pub struct NativeCaptureConfig {
     pub clock_step_unix_nano: i64,
 }
 
+/// Private-process activation payload for environment-driven native capture.
+///
+/// The CLI serializes this value into `SPECGATE_NATIVE_CAPTURE`; the first
+/// annotated synchronous operation in the isolated test process starts the
+/// session lazily and persists snapshots to `sidecar_path`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NativeCaptureEnvironmentConfig {
+    pub capture: NativeCaptureConfig,
+    pub sidecar_path: PathBuf,
+}
+
 /// A completed run or scenario span boundary.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NativeSpanBoundary {
     pub span_id: String,
     pub parent_span_id: Option<String>,
@@ -492,14 +508,15 @@ pub struct NativeSpanBoundary {
 }
 
 /// Terminal status for a native span.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum NativeStatus {
     Ok,
     Error,
 }
 
 /// One native observation captured while an operation scope is active.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NativeObservation {
     pub order: u64,
     pub time_unix_nano: i64,
@@ -508,7 +525,8 @@ pub struct NativeObservation {
 }
 
 /// The semantic completion recorded at an operation's actual return boundary.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum NativeCompletion {
     Result {
         order: u64,
@@ -525,7 +543,7 @@ pub enum NativeCompletion {
 }
 
 /// One completed native operation span.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NativeOperationSpan {
     pub order: u64,
     pub span_id: String,
@@ -541,7 +559,7 @@ pub struct NativeOperationSpan {
 }
 
 /// Completed native evidence for one deterministic run and scenario.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NativeCapture {
     pub trace_id: String,
     pub scenario_name: String,
@@ -568,6 +586,7 @@ struct PendingNativeOperation {
 #[derive(Debug)]
 struct NativeCaptureState {
     config: NativeCaptureConfig,
+    sidecar_path: Option<PathBuf>,
     run_start_time_unix_nano: i64,
     scenario_start_time_unix_nano: i64,
     next_time_unix_nano: i64,
@@ -663,7 +682,7 @@ impl OperationScope {
         let Some(operation_index) = self.operation_index else {
             return Ok(());
         };
-        let completed = with_native_state_mut(|state| {
+        let should_persist = with_native_state_mut(|state| {
             ensure_active_operation(state, operation_index)?;
             if state.operations[operation_index].status.is_some() {
                 return Err(format!(
@@ -686,12 +705,13 @@ impl OperationScope {
             operation.end_time_unix_nano = Some(end_time_unix_nano);
             operation.status = Some(NativeStatus::Ok);
             state.active_operations.pop();
-            Ok(())
-        });
-        if completed.is_ok() {
-            self.closed = true;
+            Ok(state.active_operations.is_empty() && state.sidecar_path.is_some())
+        })?;
+        self.closed = true;
+        if should_persist {
+            persist_active_native_capture()?;
         }
-        completed
+        Ok(())
     }
 }
 
@@ -711,7 +731,7 @@ impl Drop for OperationScope {
                 .and_then(|operation| operation.status)
                 .is_some()
             {
-                return Ok(());
+                return Ok(false);
             }
             ensure_active_operation(state, operation_index)?;
             if panicking {
@@ -728,7 +748,7 @@ impl Drop for OperationScope {
                 operation.end_time_unix_nano = Some(end_time_unix_nano);
                 operation.status = Some(NativeStatus::Error);
                 state.active_operations.pop();
-                Ok(())
+                Ok(state.active_operations.is_empty() && state.sidecar_path.is_some())
             } else {
                 let message = format!(
                     "native operation '{}' scope closed without completion",
@@ -739,10 +759,19 @@ impl Drop for OperationScope {
                 Err(message)
             }
         });
-        if let Err(error) = result
-            && !panicking
-        {
-            panic!("{error}");
+        match result {
+            Ok(true) => {
+                if let Err(error) = persist_active_native_capture() {
+                    if panicking {
+                        eprintln!("failed to persist native capture during unwind: {error}");
+                    } else {
+                        panic!("failed to persist native capture: {error}");
+                    }
+                }
+            }
+            Ok(false) => {}
+            Err(error) if !panicking => panic!("{error}"),
+            Err(error) => eprintln!("native capture failed during unwind: {error}"),
         }
     }
 }
@@ -754,7 +783,14 @@ impl Drop for OperationScope {
 /// Rejects malformed or duplicate identifiers, non-positive clock settings,
 /// and attempts to replace an active session.
 pub fn start_native_capture(config: NativeCaptureConfig) -> Result<(), String> {
+    start_native_capture_with_sidecar(config, None)
+}
+
+fn start_native_capture_with_sidecar(config: NativeCaptureConfig, sidecar_path: Option<PathBuf>) -> Result<(), String> {
     validate_native_capture_config(&config)?;
+    if sidecar_path.as_ref().is_some_and(|path| path.as_os_str().is_empty()) {
+        return Err("native capture sidecar path must not be empty".to_string());
+    }
     NATIVE_CAPTURE.with(|slot| {
         let mut slot = slot.borrow_mut();
         if slot.is_some() {
@@ -772,6 +808,7 @@ pub fn start_native_capture(config: NativeCaptureConfig) -> Result<(), String> {
             scenario_start_time_unix_nano,
             next_time_unix_nano,
             config,
+            sidecar_path,
             next_operation_id: 0,
             next_order: 0,
             active_operations: Vec::new(),
@@ -789,6 +826,7 @@ pub fn start_native_capture(config: NativeCaptureConfig) -> Result<(), String> {
 /// Returns an error when the deterministic operation ID list is exhausted or
 /// the logical clock cannot advance.
 pub fn begin_native_operation(component_id: &str, operation_name: &str) -> Result<OperationScope, String> {
+    activate_native_capture_from_environment()?;
     NATIVE_CAPTURE.with(|slot| {
         let mut slot = slot.borrow_mut();
         let Some(state) = slot.as_mut() else {
@@ -797,12 +835,7 @@ pub fn begin_native_operation(component_id: &str, operation_name: &str) -> Resul
         if let Some(error) = &state.terminal_error {
             return Err(error.clone());
         }
-        let span_id = state
-            .config
-            .operation_span_ids
-            .get(state.next_operation_id)
-            .cloned()
-            .ok_or_else(|| format!("native operation span ID list exhausted before '{operation_name}'"))?;
+        let span_id = next_operation_span_id(state)?;
         let parent_span_id = state.active_operations.last().map_or_else(
             || state.config.scenario_span_id.clone(),
             |index| state.operations[*index].span_id.clone(),
@@ -841,7 +874,7 @@ pub fn begin_native_operation(component_id: &str, operation_name: &str) -> Resul
 pub fn finish_native_capture() -> Result<NativeCapture, String> {
     NATIVE_CAPTURE.with(|slot| {
         let mut slot = slot.borrow_mut();
-        let Some(mut state) = slot.take() else {
+        let Some(state) = slot.take() else {
             return Err("no native capture session is active".to_string());
         };
         if !state.active_operations.is_empty() {
@@ -857,62 +890,152 @@ pub fn finish_native_capture() -> Result<NativeCapture, String> {
         if let Some(error) = state.terminal_error {
             return Err(error);
         }
-        if state.next_operation_id != state.config.operation_span_ids.len() {
+        if state.next_operation_id < state.config.operation_span_ids.len() {
             return Err(format!(
                 "native capture supplied {} operation span IDs but consumed {}",
                 state.config.operation_span_ids.len(),
                 state.next_operation_id
             ));
         }
-        let has_error = state
-            .operations
-            .iter()
-            .any(|operation| operation.status == Some(NativeStatus::Error));
-        let scenario_end_time_unix_nano = state.tick()?;
-        let run_end_time_unix_nano = state.tick()?;
-        let operations = state
-            .operations
-            .into_iter()
-            .map(|operation| {
-                Ok(NativeOperationSpan {
-                    order: operation.order,
-                    span_id: operation.span_id,
-                    parent_span_id: operation.parent_span_id,
-                    component_id: operation.component_id,
-                    operation_name: operation.operation_name,
-                    start_time_unix_nano: operation.start_time_unix_nano,
-                    end_time_unix_nano: operation
-                        .end_time_unix_nano
-                        .ok_or_else(|| "native capture contains an unclosed operation".to_string())?,
-                    status: operation
-                        .status
-                        .ok_or_else(|| "native capture contains an operation without status".to_string())?,
-                    inputs: operation.inputs,
-                    observations: operation.observations,
-                    completion: operation.completion,
-                })
+        build_native_capture(&state)
+    })
+}
+
+fn activate_native_capture_from_environment() -> Result<(), String> {
+    if NATIVE_CAPTURE.with(|slot| slot.borrow().is_some()) {
+        return Ok(());
+    }
+    let Some(encoded) = std::env::var_os("SPECGATE_NATIVE_CAPTURE") else {
+        return Ok(());
+    };
+    if encoded.is_empty() {
+        return Ok(());
+    }
+    let environment: NativeCaptureEnvironmentConfig = serde_json::from_str(&encoded.to_string_lossy())
+        .map_err(|error| format!("invalid SPECGATE_NATIVE_CAPTURE configuration: {error}"))?;
+    start_native_capture_with_sidecar(environment.capture, Some(environment.sidecar_path))
+}
+
+fn next_operation_span_id(state: &NativeCaptureState) -> Result<String, String> {
+    if let Some(span_id) = state.config.operation_span_ids.get(state.next_operation_id) {
+        return Ok(span_id.clone());
+    }
+
+    let mut candidate = u64::try_from(state.next_operation_id)
+        .map_err(|_error| "native operation span ID sequence overflow".to_string())?
+        .checked_add(1)
+        .ok_or_else(|| "native operation span ID sequence overflow".to_string())?;
+    loop {
+        let span_id = format!("{candidate:016x}");
+        let is_reserved = span_id == state.config.run_span_id
+            || span_id == state.config.scenario_span_id
+            || state.operations.iter().any(|operation| operation.span_id == span_id);
+        if !is_reserved {
+            return Ok(span_id);
+        }
+        candidate = candidate
+            .checked_add(1)
+            .ok_or_else(|| "native operation span ID sequence overflow".to_string())?;
+    }
+}
+
+fn persist_active_native_capture() -> Result<(), String> {
+    let (path, capture) = NATIVE_CAPTURE.with(|slot| {
+        let slot = slot.borrow();
+        let state = slot
+            .as_ref()
+            .ok_or_else(|| "native capture session ended before snapshot persistence".to_string())?;
+        let path = state
+            .sidecar_path
+            .clone()
+            .ok_or_else(|| "native capture has no sidecar path".to_string())?;
+        Ok::<(PathBuf, NativeCapture), String>((path, build_native_capture(state)?))
+    })?;
+    persist_capture_atomically(&path, &capture)
+}
+
+fn persist_capture_atomically(path: &Path, capture: &NativeCapture) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(parent)
+        .map_err(|error| format!("failed to create native capture sidecar directory {}: {error}", parent.display()))?;
+    let mut file = tempfile::NamedTempFile::new_in(parent).map_err(|error| format!("failed to create native capture sidecar: {error}"))?;
+    serde_json::to_writer(file.as_file_mut(), capture).map_err(|error| format!("failed to serialize native capture sidecar: {error}"))?;
+    file.as_file_mut()
+        .flush()
+        .map_err(|error| format!("failed to flush native capture sidecar: {error}"))?;
+    file.as_file()
+        .sync_all()
+        .map_err(|error| format!("failed to sync native capture sidecar: {error}"))?;
+    file.persist(path).map_err(|error| {
+        format!(
+            "failed to atomically persist native capture sidecar {}: {}",
+            path.display(),
+            error.error
+        )
+    })?;
+    Ok(())
+}
+
+fn build_native_capture(state: &NativeCaptureState) -> Result<NativeCapture, String> {
+    if !state.active_operations.is_empty() {
+        return Err("native capture contains active operation scopes".to_string());
+    }
+    if let Some(error) = &state.terminal_error {
+        return Err(error.clone());
+    }
+    let scenario_end_time_unix_nano = state.next_time_unix_nano;
+    let run_end_time_unix_nano = scenario_end_time_unix_nano
+        .checked_add(state.config.clock_step_unix_nano)
+        .ok_or_else(|| "native capture logical clock overflow".to_string())?;
+    let has_error = state
+        .operations
+        .iter()
+        .any(|operation| operation.status == Some(NativeStatus::Error));
+    let operations = state
+        .operations
+        .iter()
+        .map(|operation| {
+            Ok(NativeOperationSpan {
+                order: operation.order,
+                span_id: operation.span_id.clone(),
+                parent_span_id: operation.parent_span_id.clone(),
+                component_id: operation.component_id.clone(),
+                operation_name: operation.operation_name.clone(),
+                start_time_unix_nano: operation.start_time_unix_nano,
+                end_time_unix_nano: operation
+                    .end_time_unix_nano
+                    .ok_or_else(|| "native capture contains an unclosed operation".to_string())?,
+                status: operation
+                    .status
+                    .ok_or_else(|| "native capture contains an operation without status".to_string())?,
+                inputs: operation.inputs.clone(),
+                observations: operation.observations.clone(),
+                completion: operation.completion.clone(),
             })
-            .collect::<Result<Vec<_>, String>>()?;
-        let root_status = if has_error { NativeStatus::Error } else { NativeStatus::Ok };
-        Ok(NativeCapture {
-            trace_id: state.config.trace_id,
-            scenario_name: state.config.scenario_name,
-            run: NativeSpanBoundary {
-                span_id: state.config.run_span_id.clone(),
-                parent_span_id: None,
-                start_time_unix_nano: state.run_start_time_unix_nano,
-                end_time_unix_nano: run_end_time_unix_nano,
-                status: root_status,
-            },
-            scenario: NativeSpanBoundary {
-                span_id: state.config.scenario_span_id,
-                parent_span_id: Some(state.config.run_span_id),
-                start_time_unix_nano: state.scenario_start_time_unix_nano,
-                end_time_unix_nano: scenario_end_time_unix_nano,
-                status: root_status,
-            },
-            operations,
         })
+        .collect::<Result<Vec<_>, String>>()?;
+    let root_status = if has_error { NativeStatus::Error } else { NativeStatus::Ok };
+    Ok(NativeCapture {
+        trace_id: state.config.trace_id.clone(),
+        scenario_name: state.config.scenario_name.clone(),
+        run: NativeSpanBoundary {
+            span_id: state.config.run_span_id.clone(),
+            parent_span_id: None,
+            start_time_unix_nano: state.run_start_time_unix_nano,
+            end_time_unix_nano: run_end_time_unix_nano,
+            status: root_status,
+        },
+        scenario: NativeSpanBoundary {
+            span_id: state.config.scenario_span_id.clone(),
+            parent_span_id: Some(state.config.run_span_id.clone()),
+            start_time_unix_nano: state.scenario_start_time_unix_nano,
+            end_time_unix_nano: scenario_end_time_unix_nano,
+            status: root_status,
+        },
+        operations,
     })
 }
 
@@ -1002,7 +1125,7 @@ fn record_native_observation(name: &str, value: &Value) -> Result<(), String> {
 }
 
 // ---------------------------------------------------------------------------
-// Thread-local compatibility trace buffer + mock table.
+// Thread-local legacy trace buffer + mock table.
 // ---------------------------------------------------------------------------
 
 thread_local! {
@@ -1036,31 +1159,31 @@ pub fn emit_event_v(name: &str, value: Value) {
     });
 }
 
-/// Record one macro-generated operation input in native capture while
-/// preserving its compatibility `Event` byte-for-byte.
+/// Record one macro-generated operation input in native capture and in the
+/// temporary flat trace consumed by unmigrated extraction/harness paths.
 ///
 /// # Panics
 ///
 /// Panics when the active operation scope rejects a duplicate or out-of-order
 /// input.
-pub fn emit_input_event_v(scope: &mut OperationScope, name: &str, input_name: &str, value: Value) {
+pub fn emit_input_event_v(scope: &mut OperationScope, name: &str, input_name: &str, native_value: Value, compatibility_value: Value) {
     scope
-        .record_input(input_name, value.clone())
+        .record_input(input_name, native_value)
         .unwrap_or_else(|error| panic!("failed to record native operation input: {error}"));
-    emit_compatibility_event_v(name, value);
+    emit_compatibility_event_v(name, compatibility_value);
 }
 
-/// Complete one macro-generated operation result and preserve the compatibility
-/// `$result` event byte-for-byte.
+/// Complete one macro-generated operation result and record the temporary flat
+/// `$result` event consumed by unmigrated extraction/harness paths.
 ///
 /// # Panics
 ///
 /// Panics when the active operation scope is completed twice or out of order.
-pub fn emit_result_event_v(scope: &mut OperationScope, value: Value) {
+pub fn emit_result_event_v(scope: &mut OperationScope, native_value: Value, compatibility_value: Value) {
     scope
-        .complete_result(value.clone())
+        .complete_result(native_value)
         .unwrap_or_else(|error| panic!("failed to complete native operation result: {error}"));
-    emit_compatibility_event_v("$result", value);
+    emit_compatibility_event_v("$result", compatibility_value);
 }
 
 fn emit_compatibility_event_v(name: &str, value: Value) {
@@ -1164,7 +1287,7 @@ pub trait SpecEvent {
 /// enums. It lets return-value emission distinguish a struct return (which emits
 /// both its per-field events and a structured `$result`) from an enum return
 /// (which emits only the tagged `$result`). See [`ReturnEmit`].
-pub trait SpecEventStruct: SpecEvent + ToSpecValue {}
+pub trait SpecEventStruct: SpecEvent + ToSpecValue + ToNativeValue {}
 
 // ---------------------------------------------------------------------------
 // ToSpecValue — convert any annotated value to a structured `Value`.
@@ -1172,6 +1295,16 @@ pub trait SpecEventStruct: SpecEvent + ToSpecValue {}
 
 pub trait ToSpecValue {
     fn to_spec_value(&self) -> Value;
+}
+
+/// Convert an annotated value to its native CTSC semantic representation.
+///
+/// This remains separate from [`ToSpecValue`] because the temporary flat trace
+/// used by unmigrated consumers flattens optional inputs while CTSC 0.2
+/// preserves their `Some`/`None` discriminant. Implementations recurse through
+/// the collection shapes supported by [`ToSpecValue`].
+pub trait ToNativeValue {
+    fn to_native_value(&self) -> Value;
 }
 
 macro_rules! to_spec_value_int {
@@ -1304,6 +1437,149 @@ impl<T: ToSpecValue + ?Sized> ToSpecValue for Box<T> {
     }
 }
 
+macro_rules! to_native_value_int {
+    ($($t:ty),*) => {
+        $(impl ToNativeValue for $t {
+            fn to_native_value(&self) -> Value { Value::Integer(i64::from(*self)) }
+        })*
+    };
+}
+to_native_value_int!(i8, i16, i32, u8, u16, u32);
+
+impl ToNativeValue for isize {
+    fn to_native_value(&self) -> Value {
+        Value::Integer(*self as i64)
+    }
+}
+
+impl ToNativeValue for u64 {
+    #[allow(clippy::cast_possible_wrap)]
+    fn to_native_value(&self) -> Value {
+        Value::Integer(*self as i64)
+    }
+}
+
+impl ToNativeValue for usize {
+    #[allow(clippy::cast_possible_wrap)]
+    fn to_native_value(&self) -> Value {
+        Value::Integer(*self as i64)
+    }
+}
+
+impl ToNativeValue for i64 {
+    fn to_native_value(&self) -> Value {
+        Value::Integer(*self)
+    }
+}
+
+impl ToNativeValue for f32 {
+    fn to_native_value(&self) -> Value {
+        Value::Float(f64::from(*self))
+    }
+}
+
+impl ToNativeValue for f64 {
+    fn to_native_value(&self) -> Value {
+        Value::Float(*self)
+    }
+}
+
+impl ToNativeValue for bool {
+    fn to_native_value(&self) -> Value {
+        Value::Bool(*self)
+    }
+}
+
+impl ToNativeValue for char {
+    fn to_native_value(&self) -> Value {
+        Value::String(self.to_string())
+    }
+}
+
+impl ToNativeValue for str {
+    fn to_native_value(&self) -> Value {
+        Value::String(self.to_string())
+    }
+}
+
+impl ToNativeValue for String {
+    fn to_native_value(&self) -> Value {
+        Value::String(self.clone())
+    }
+}
+
+impl<T: ToNativeValue> ToNativeValue for Vec<T> {
+    fn to_native_value(&self) -> Value {
+        Value::List(self.iter().map(ToNativeValue::to_native_value).collect())
+    }
+}
+
+impl<T: ToNativeValue> ToNativeValue for [T] {
+    fn to_native_value(&self) -> Value {
+        Value::List(self.iter().map(ToNativeValue::to_native_value).collect())
+    }
+}
+
+impl<T: ToNativeValue, const N: usize> ToNativeValue for [T; N] {
+    fn to_native_value(&self) -> Value {
+        Value::List(self.iter().map(ToNativeValue::to_native_value).collect())
+    }
+}
+
+impl<T: ToNativeValue> ToNativeValue for BTreeMap<String, T> {
+    fn to_native_value(&self) -> Value {
+        Value::Map(self.iter().map(|(key, value)| (key.clone(), value.to_native_value())).collect())
+    }
+}
+
+impl<T: ToNativeValue, S: std::hash::BuildHasher> ToNativeValue for HashMap<String, T, S> {
+    fn to_native_value(&self) -> Value {
+        Value::Map(self.iter().map(|(key, value)| (key.clone(), value.to_native_value())).collect())
+    }
+}
+
+impl<T: ToNativeValue + Ord> ToNativeValue for BTreeSet<T> {
+    fn to_native_value(&self) -> Value {
+        Value::Set(self.iter().map(ToNativeValue::to_native_value).collect())
+    }
+}
+
+impl<T: ToNativeValue + Eq + std::hash::Hash, S: std::hash::BuildHasher> ToNativeValue for HashSet<T, S> {
+    fn to_native_value(&self) -> Value {
+        let mut values: Vec<Value> = self.iter().map(ToNativeValue::to_native_value).collect();
+        values.sort();
+        Value::Set(values.into_iter().collect())
+    }
+}
+
+impl<T: ToNativeValue> ToNativeValue for Option<T> {
+    fn to_native_value(&self) -> Value {
+        let (variant, payload) = match self {
+            Some(value) => ("Some", value.to_native_value()),
+            None => ("None", Value::Map(BTreeMap::new())),
+        };
+        Value::Map(BTreeMap::from([(variant.to_string(), payload)]))
+    }
+}
+
+impl ToNativeValue for Value {
+    fn to_native_value(&self) -> Value {
+        self.clone()
+    }
+}
+
+impl<T: ToNativeValue + ?Sized> ToNativeValue for &T {
+    fn to_native_value(&self) -> Value {
+        (**self).to_native_value()
+    }
+}
+
+impl<T: ToNativeValue + ?Sized> ToNativeValue for Box<T> {
+    fn to_native_value(&self) -> Value {
+        (**self).to_native_value()
+    }
+}
+
 // ---------------------------------------------------------------------------
 // ReturnEmit — autoref specialization that emits an operation's `$result` (and,
 // for struct returns, its per-field events) based on the return value's type.
@@ -1342,7 +1618,7 @@ impl<T: SpecEventStruct + ?Sized> ReturnEmitStruct for &&&ReturnEmit<'_, T> {
     #[inline]
     fn emit_result(&self, scope: &mut OperationScope) {
         self.0.emit_fields(None);
-        emit_result_event_v(scope, self.0.to_spec_value());
+        emit_result_event_v(scope, self.0.to_native_value(), self.0.to_spec_value());
     }
 }
 
@@ -1351,10 +1627,10 @@ pub trait ReturnEmitToSpec {
     fn emit_result(&self, scope: &mut OperationScope);
 }
 
-impl<T: ToSpecValue + ?Sized> ReturnEmitToSpec for &&ReturnEmit<'_, T> {
+impl<T: ToSpecValue + ToNativeValue + ?Sized> ReturnEmitToSpec for &&ReturnEmit<'_, T> {
     #[inline]
     fn emit_result(&self, scope: &mut OperationScope) {
-        emit_result_event_v(scope, self.0.to_spec_value());
+        emit_result_event_v(scope, self.0.to_native_value(), self.0.to_spec_value());
     }
 }
 
@@ -1366,7 +1642,8 @@ pub trait ReturnEmitDisplay {
 impl<T: std::fmt::Display + ?Sized> ReturnEmitDisplay for &ReturnEmit<'_, T> {
     #[inline]
     fn emit_result(&self, scope: &mut OperationScope) {
-        emit_result_event_v(scope, Value::String(format!("{}", self.0)));
+        let value = Value::String(format!("{}", self.0));
+        emit_result_event_v(scope, value.clone(), value);
     }
 }
 
@@ -1391,7 +1668,6 @@ impl<T: ?Sized> ReturnEmitNone for ReturnEmit<'_, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     fn native_config(operation_span_ids: &[&str]) -> NativeCaptureConfig {
         NativeCaptureConfig {
@@ -1463,14 +1739,45 @@ mod tests {
     }
 
     #[test]
-    fn native_capture_rejects_id_exhaustion_nested_finish_and_double_completion() {
+    fn native_capture_extends_explicit_ids_without_a_fixed_operation_cap() {
         start_native_capture(native_config(&["1111111111111103"])).unwrap();
         let mut scope = begin_native_operation("fixture.native", "outer").unwrap();
-        assert!(begin_native_operation("fixture.native", "inner").unwrap_err().contains("exhausted"));
+        let mut inner = begin_native_operation("fixture.native", "inner").unwrap();
         assert!(finish_native_capture().unwrap_err().contains("nested/unclosed"));
+        inner.complete_unit().unwrap();
         scope.complete_unit().unwrap();
         assert!(scope.complete_unit().unwrap_err().contains("completed twice"));
-        finish_native_capture().unwrap();
+        let capture = finish_native_capture().unwrap();
+        assert_eq!(capture.operations[0].span_id, "1111111111111103");
+        assert_ne!(capture.operations[1].span_id, capture.operations[0].span_id);
+    }
+
+    #[test]
+    fn native_capture_sidecar_types_have_stable_serde() {
+        start_native_capture(native_config(&[])).unwrap();
+        let mut scope = begin_native_operation("fixture.native", "serde").unwrap();
+        scope.record_input("value", Value::Integer(2)).unwrap();
+        scope.complete_result(Value::Integer(4)).unwrap();
+        let capture = finish_native_capture().unwrap();
+        let json = serde_json::to_string(&capture).unwrap();
+        assert_eq!(serde_json::from_str::<NativeCapture>(&json).unwrap(), capture);
+        assert!(json.contains(r#""status":"ok""#));
+        assert!(json.contains(r#""kind":"result""#));
+    }
+
+    #[test]
+    fn native_capture_keeps_multiple_top_level_invocations_in_one_scenario() {
+        start_native_capture(native_config(&[])).unwrap();
+        let mut first = begin_native_operation("fixture.native", "first").unwrap();
+        first.complete_result(Value::Integer(1)).unwrap();
+        let mut second = begin_native_operation("fixture.native", "second").unwrap();
+        second.complete_result(Value::Integer(2)).unwrap();
+
+        let capture = finish_native_capture().unwrap();
+        assert_eq!(capture.operations.len(), 2);
+        assert_eq!(capture.operations[0].parent_span_id, capture.scenario.span_id);
+        assert_eq!(capture.operations[1].parent_span_id, capture.scenario.span_id);
+        assert_ne!(capture.operations[0].span_id, capture.operations[1].span_id);
     }
 
     #[test]

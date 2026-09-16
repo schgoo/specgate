@@ -9,8 +9,9 @@
 //! crate) to pull in everything at once.
 //!
 //! Synchronous operation annotations also provide native structured invocation
-//! boundaries to the runtime when a capture session is active. Existing flat
-//! trace emission remains available as the compatibility view.
+//! boundaries to the runtime when a capture session is active. Flat trace
+//! emission remains temporarily for extraction and spec-harness consumers that
+//! do not yet have CTSC replacements.
 //!
 //! Annotations are zero-cost in production: without the trace feature the
 //! macros expand to no-ops.
@@ -19,19 +20,19 @@ pub use specgate_annotations_macros::{SpecEvent, spec_component, spec_mock, spec
 // Re-export the SpecEvent trait under the same name — traits live in the
 // type namespace while the derive macro lives in the macro namespace, so
 // they coexist without conflict.
-pub use specgate_runtime::{SpecEvent, ToSpecValue, TraceEvent, Value, take_traces};
+pub use specgate_runtime::{SpecEvent, ToNativeValue, ToSpecValue, TraceEvent, Value, take_traces};
 
 #[doc(hidden)]
 pub mod __rt {
     pub use specgate_runtime::linkme;
     pub use specgate_runtime::{
-        NativeCapture, NativeCaptureConfig, NativeCompletion, NativeObservation, NativeOperationSpan, NativeSpanBoundary, NativeStatus,
-        OpMeta, OperationScope, ReturnEmit, ReturnEmitDisplay, ReturnEmitNone, ReturnEmitStruct, ReturnEmitToSpec, SPECGATE_OPS,
-        SPECGATE_TYPES, SpecEvent, SpecEventStruct, ToSpecValue, TraceEvent, TypeMeta, Value, VariantMeta, begin_native_operation,
-        discovery_json, emit_event, emit_event_v, emit_input_event_v, emit_result_event_v, emit_run, finish_native_capture, mock_lookup,
-        record_event_only, reset, set_mock, start_native_capture, take_traces,
+        NativeCapture, NativeCaptureConfig, NativeCaptureEnvironmentConfig, NativeCompletion, NativeObservation, NativeOperationSpan,
+        NativeSpanBoundary, NativeStatus, OpMeta, OperationScope, ReturnEmit, ReturnEmitDisplay, ReturnEmitNone, ReturnEmitStruct,
+        ReturnEmitToSpec, SPECGATE_OPS, SPECGATE_TYPES, SpecEvent, SpecEventStruct, ToNativeValue, ToSpecValue, TraceEvent, TypeMeta,
+        Value, VariantMeta, begin_native_operation, discovery_json, emit_event, emit_event_v, emit_input_event_v, emit_result_event_v,
+        emit_run, finish_native_capture, mock_lookup, record_event_only, reset, set_mock, start_native_capture, take_traces,
     };
 }
 
-// Re-export auxiliary runtime helpers under their plain names too.
+// Transitional flat-trace helpers used by unmigrated extraction/harness code.
 pub use specgate_runtime::{emit_event_v, emit_run, mock_lookup, record_event_only, reset, set_mock};

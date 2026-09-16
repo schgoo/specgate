@@ -34,6 +34,12 @@ impl ToSpecValue for Severity {
     }
 }
 
+impl specgate::ToNativeValue for Severity {
+    fn to_native_value(&self) -> specgate::Value {
+        self.to_spec_value()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, SpecEvent)]
 pub struct ValidationFinding {
     #[spec_event]

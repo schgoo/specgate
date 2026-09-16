@@ -1,11 +1,19 @@
 //! CTSC projection for `SpecGate` — encodes native structured operation
-//! capture and translates legacy flat traces for compatibility.
+//! capture and provides transitional translation for legacy flat traces.
 //!
 //! Native synchronous Rust capture now creates operation spans at real
 //! `#[spec_operation]` invocation boundaries, including nested parentage,
-//! typed inputs and results, observations, logical timestamps, and status.
-//! The legacy `Run`/`Event` vector remains byte-compatible evidence, but its
-//! translation is a compatibility path rather than the production model.
+//! typed inputs and results, observations, logical timestamps, and status. Its
+//! public producer operations expose CTSC artifacts only.
+//! Native input/result projection is type-aware and recursively preserves CTSC
+//! 0.2 option wrappers inside supported collections and annotated records.
+//! Ordered native sidecars can be merged into one deterministic run with
+//! registry identity, version, and digest resource attributes for Linked
+//! validation.
+//!
+//! The legacy `Run`/`Event` buffer and the translation operations below remain
+//! temporarily for extraction and harness subsystems that do not yet have CTSC
+//! replacements. They are not a stable compatibility surface.
 //!
 //! `translate_legacy_trace` walks a JSON-encoded sequence of legacy
 //! [`specgate_runtime::TraceEvent`]s — a leading `Run` event followed by
@@ -24,7 +32,7 @@
 //! not a legacy tagged scalar, and is projected unchanged.
 //!
 //! `encode_legacy_trace_otlp` applies the same projection and emits one compact,
-//! deterministic CTSC 0.1 OTLP JSON document containing a run span, its
+//! deterministic CTSC 0.2 OTLP JSON document containing a run span, its
 //! scenario child, and one operation child. Caller-supplied identifiers,
 //! timestamp, tool version, and target metadata make production identity
 //! explicit while keeping tests reproducible.
@@ -39,11 +47,14 @@ use serde::{Deserialize, Serialize};
 use specgate::{SpecEvent, spec_component, spec_operation};
 use specgate_runtime::{
     NativeCapture, NativeCaptureConfig, NativeCompletion, NativeOperationSpan, NativeStatus, TraceEvent, Value, finish_native_capture,
-    start_native_capture, take_traces,
+    start_native_capture,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
 spec_component!("specgate.ctsc");
+
+const CTSC_VERSION: &str = "0.2.0";
+const CTSC_SCHEMA_URL: &str = "https://specgate.dev/ctsc/schema/0.2.0";
 
 #[derive(Debug, Clone, Serialize, Deserialize, SpecEvent)]
 #[serde(rename_all = "snake_case")]
@@ -80,8 +91,13 @@ pub struct CtscNativeCaptureEncoding {
     pub span_count: i32,
     #[spec_event]
     pub otlp_json: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, SpecEvent)]
+#[serde(rename_all = "snake_case")]
+pub struct CtscNativeOptionalCaptureEncoding {
     #[spec_event]
-    pub legacy_trace_json: String,
+    pub otlp_json: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, SpecEvent)]
@@ -190,12 +206,12 @@ pub fn encode_legacy_trace_otlp(
     }
 
     let operation_end_offset = 3 + i64::try_from(operation_events.len()).expect("event count must fit in i64");
-    let schema_url = "https://specgate.dev/ctsc/schema/0.1.0".to_string();
+    let schema_url = CTSC_SCHEMA_URL.to_string();
     let document = OtlpDocument {
         resource_spans: vec![ResourceSpans {
             resource: Resource {
                 attributes: vec![
-                    string_attribute("conformance.version", "0.1.0"),
+                    string_attribute("conformance.version", CTSC_VERSION),
                     string_attribute("conformance.tool.name", "specgate"),
                     string_attribute("conformance.tool.version", tool_version.clone()),
                     string_attribute("conformance.target.name", target_name),
@@ -285,6 +301,11 @@ fn add_after_double(value: i32) -> i32 {
     double(value + 1) + 1
 }
 
+#[spec_operation("echo_optional", spec = "fixture.native_capture")]
+fn echo_optional(value: Option<String>) -> Option<String> {
+    value
+}
+
 #[allow(clippy::too_many_arguments)]
 #[spec_operation("capture_native_rust_otlp")]
 pub fn capture_native_rust_otlp(
@@ -314,20 +335,50 @@ pub fn capture_native_rust_otlp(
     })
     .unwrap_or_else(|error| panic!("failed to start native capture: {error}"));
 
-    let _compatibility_wrapper_trace = take_traces();
     let result = add_after_double(value);
     debug_assert_eq!(result, 7, "native fixture must preserve its specified result");
-    let legacy_trace_json =
-        serde_json::to_string(&take_traces()).unwrap_or_else(|error| panic!("failed to serialize compatibility trace: {error}"));
     let capture = finish_native_capture().unwrap_or_else(|error| panic!("failed to finish native capture: {error}"));
     let otlp_json = encode_native_capture(&capture, run_id, tool_version, target_name, target_language);
     let span_count = i32::try_from(capture.operations.len() + 2).unwrap_or_else(|_error| panic!("native capture span count exceeds i32"));
 
-    CtscNativeCaptureEncoding {
-        span_count,
-        otlp_json,
-        legacy_trace_json,
-    }
+    CtscNativeCaptureEncoding { span_count, otlp_json }
+}
+
+#[allow(clippy::too_many_arguments)]
+#[spec_operation("capture_native_optional_otlp")]
+pub fn capture_native_optional_otlp(
+    scenario_name: String,
+    trace_id: String,
+    run_span_id: String,
+    scenario_span_id: String,
+    operation_span_id: String,
+    run_id: String,
+    start_time_unix_nano: i64,
+    clock_step_unix_nano: i64,
+    tool_version: String,
+    target_name: String,
+    target_language: String,
+    present: bool,
+    value: String,
+) -> CtscNativeOptionalCaptureEncoding {
+    start_native_capture(NativeCaptureConfig {
+        scenario_name,
+        trace_id,
+        run_span_id,
+        scenario_span_id,
+        operation_span_ids: vec![operation_span_id],
+        start_time_unix_nano,
+        clock_step_unix_nano,
+    })
+    .unwrap_or_else(|error| panic!("failed to start native optional capture: {error}"));
+
+    let input = present.then_some(value);
+    let result = echo_optional(input.clone());
+    debug_assert_eq!(result, input, "optional fixture must echo its input");
+    let capture = finish_native_capture().unwrap_or_else(|error| panic!("failed to finish native optional capture: {error}"));
+    let otlp_json = encode_native_capture(&capture, run_id, tool_version, target_name, target_language);
+
+    CtscNativeOptionalCaptureEncoding { otlp_json }
 }
 
 fn encode_native_capture(
@@ -338,7 +389,7 @@ fn encode_native_capture(
     target_language: String,
 ) -> String {
     let run_status_code = status_code(capture.run.status);
-    let schema_url = "https://specgate.dev/ctsc/schema/0.1.0".to_string();
+    let schema_url = CTSC_SCHEMA_URL.to_string();
     let mut spans = vec![
         Span {
             trace_id: capture.trace_id.clone(),
@@ -381,7 +432,7 @@ fn encode_native_capture(
         resource_spans: vec![ResourceSpans {
             resource: Resource {
                 attributes: vec![
-                    string_attribute("conformance.version", "0.1.0"),
+                    string_attribute("conformance.version", CTSC_VERSION),
                     string_attribute("conformance.tool.name", "specgate"),
                     string_attribute("conformance.tool.version", tool_version.clone()),
                     string_attribute("conformance.target.name", target_name),
@@ -400,6 +451,230 @@ fn encode_native_capture(
         }],
     };
     serde_json::to_string(&document).expect("native OTLP document serialization must succeed")
+}
+
+/// Merge ordered native scenario captures into one deterministic linked CTSC
+/// run.
+///
+/// Capture-local identifiers and logical timestamps are rebased into one
+/// non-zero trace/span sequence. Operation parentage, semantic inputs,
+/// observations, completions, and scenario order are preserved.
+///
+/// # Errors
+///
+/// Returns an error for an empty capture list, malformed native parentage,
+/// identifier exhaustion, timestamp overflow, or JSON serialization failure.
+#[allow(clippy::too_many_arguments)]
+pub fn encode_native_captures_otlp_result(
+    captures: &[NativeCapture],
+    tool_version: &str,
+    target_name: &str,
+    target_language: &str,
+    registry_id: &str,
+    registry_version: &str,
+    registry_digest: &str,
+) -> Result<CtscNativeCaptureEncoding, String> {
+    if captures.is_empty() {
+        return Err("cannot encode a CTSC run without captured scenarios".to_string());
+    }
+
+    let trace_id = "00000000000000000000000000000001".to_string();
+    let run_span_id = deterministic_span_id(1)?;
+    let mut next_span_id = 2_u64;
+    let mut next_scenario_time = 2_i64;
+    let mut scenario_spans = Vec::new();
+    let mut operation_count = 0_usize;
+    let mut run_has_error = false;
+
+    for (scenario_index, capture) in captures.iter().enumerate() {
+        let scenario_span_id = deterministic_span_id(next_span_id)?;
+        next_span_id = next_span_id
+            .checked_add(1)
+            .ok_or_else(|| "CTSC span ID sequence overflow".to_string())?;
+
+        let mut operation_ids = BTreeMap::new();
+        for operation in &capture.operations {
+            let span_id = deterministic_span_id(next_span_id)?;
+            next_span_id = next_span_id
+                .checked_add(1)
+                .ok_or_else(|| "CTSC span ID sequence overflow".to_string())?;
+            if operation_ids.insert(operation.span_id.clone(), span_id).is_some() {
+                return Err(format!(
+                    "native scenario '{}' contains duplicate operation span ID '{}'",
+                    capture.scenario_name, operation.span_id
+                ));
+            }
+        }
+
+        let time_offset = next_scenario_time
+            .checked_sub(capture.scenario.start_time_unix_nano)
+            .ok_or_else(|| "CTSC scenario timestamp offset overflow".to_string())?;
+        let scenario_end_time = offset_time(capture.scenario.end_time_unix_nano, time_offset)?;
+        let scenario_index = i64::try_from(scenario_index).map_err(|_error| "CTSC scenario index exceeds i64".to_string())?;
+        run_has_error |= capture.scenario.status == NativeStatus::Error;
+        scenario_spans.push(Span {
+            trace_id: trace_id.clone(),
+            id: scenario_span_id.clone(),
+            parent_id: Some(run_span_id.clone()),
+            name: "conformance.scenario",
+            kind: 1,
+            start_time_unix_nano: next_scenario_time.to_string(),
+            end_time_unix_nano: scenario_end_time.to_string(),
+            attributes: vec![
+                string_attribute("conformance.scenario.name", capture.scenario_name.clone()),
+                integer_attribute("conformance.scenario.index", scenario_index),
+            ],
+            events: Vec::new(),
+            status: Status {
+                code: status_code(capture.scenario.status),
+            },
+        });
+
+        for operation in &capture.operations {
+            let span_id = operation_ids
+                .get(&operation.span_id)
+                .cloned()
+                .ok_or_else(|| "native operation span ID mapping was not created".to_string())?;
+            let parent_span_id = if operation.parent_span_id == capture.scenario.span_id {
+                scenario_span_id.clone()
+            } else {
+                operation_ids.get(&operation.parent_span_id).cloned().ok_or_else(|| {
+                    format!(
+                        "native scenario '{}' operation '{}' has unresolved parent span '{}'",
+                        capture.scenario_name, operation.operation_name, operation.parent_span_id
+                    )
+                })?
+            };
+            let rebased = rebase_native_operation(operation, span_id, parent_span_id, time_offset)?;
+            scenario_spans.push(native_operation_span(&trace_id, &rebased));
+            operation_count = operation_count
+                .checked_add(1)
+                .ok_or_else(|| "CTSC operation count overflow".to_string())?;
+        }
+
+        next_scenario_time = scenario_end_time
+            .checked_add(1)
+            .ok_or_else(|| "CTSC logical timestamp overflow".to_string())?;
+    }
+
+    let run_end_time = next_scenario_time;
+    let mut spans = vec![Span {
+        trace_id: trace_id.clone(),
+        id: run_span_id,
+        parent_id: None,
+        name: "conformance.run",
+        kind: 1,
+        start_time_unix_nano: "1".to_string(),
+        end_time_unix_nano: run_end_time.to_string(),
+        attributes: vec![string_attribute("conformance.run.id", "specgate.capture")],
+        events: Vec::new(),
+        status: Status {
+            code: status_code(if run_has_error { NativeStatus::Error } else { NativeStatus::Ok }),
+        },
+    }];
+    spans.extend(scenario_spans);
+
+    let schema_url = CTSC_SCHEMA_URL.to_string();
+    let document = OtlpDocument {
+        resource_spans: vec![ResourceSpans {
+            resource: Resource {
+                attributes: vec![
+                    string_attribute("conformance.version", CTSC_VERSION),
+                    string_attribute("conformance.tool.name", "specgate"),
+                    string_attribute("conformance.tool.version", tool_version),
+                    string_attribute("conformance.target.name", target_name),
+                    string_attribute("conformance.target.language", target_language),
+                    string_attribute("conformance.registry.id", registry_id),
+                    string_attribute("conformance.registry.version", registry_version),
+                    string_attribute("conformance.registry.digest", registry_digest),
+                ],
+            },
+            scope_spans: vec![ScopeSpans {
+                scope: InstrumentationScope {
+                    name: "specgate.ctsc",
+                    version: tool_version.to_string(),
+                },
+                spans,
+                schema_url: schema_url.clone(),
+            }],
+            schema_url,
+        }],
+    };
+    let otlp_json = serde_json::to_string(&document).map_err(|error| format!("native CTSC OTLP serialization failed: {error}"))?;
+    let span_count =
+        i32::try_from(operation_count + captures.len() + 1).map_err(|_error| "native CTSC span count exceeds i32".to_string())?;
+    Ok(CtscNativeCaptureEncoding { span_count, otlp_json })
+}
+
+fn deterministic_span_id(value: u64) -> Result<String, String> {
+    if value == 0 {
+        return Err("CTSC span IDs must be non-zero".to_string());
+    }
+    Ok(format!("{value:016x}"))
+}
+
+fn offset_time(value: i64, offset: i64) -> Result<i64, String> {
+    value
+        .checked_add(offset)
+        .ok_or_else(|| "CTSC logical timestamp overflow".to_string())
+}
+
+fn rebase_native_operation(
+    operation: &NativeOperationSpan,
+    span_id: String,
+    parent_span_id: String,
+    time_offset: i64,
+) -> Result<NativeOperationSpan, String> {
+    let observations = operation
+        .observations
+        .iter()
+        .map(|observation| {
+            let mut observation = observation.clone();
+            observation.time_unix_nano = offset_time(observation.time_unix_nano, time_offset)?;
+            Ok(observation)
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let completion = operation
+        .completion
+        .as_ref()
+        .map(|completion| match completion {
+            NativeCompletion::Result {
+                order,
+                time_unix_nano,
+                value,
+            } => Ok::<NativeCompletion, String>(NativeCompletion::Result {
+                order: *order,
+                time_unix_nano: offset_time(*time_unix_nano, time_offset)?,
+                value: value.clone(),
+            }),
+            NativeCompletion::Fault {
+                order,
+                time_unix_nano,
+                fault_type,
+                message,
+                observer,
+            } => Ok::<NativeCompletion, String>(NativeCompletion::Fault {
+                order: *order,
+                time_unix_nano: offset_time(*time_unix_nano, time_offset)?,
+                fault_type: fault_type.clone(),
+                message: message.clone(),
+                observer: observer.clone(),
+            }),
+        })
+        .transpose()?;
+    Ok(NativeOperationSpan {
+        order: operation.order,
+        span_id,
+        parent_span_id,
+        component_id: operation.component_id.clone(),
+        operation_name: operation.operation_name.clone(),
+        start_time_unix_nano: offset_time(operation.start_time_unix_nano, time_offset)?,
+        end_time_unix_nano: offset_time(operation.end_time_unix_nano, time_offset)?,
+        status: operation.status,
+        inputs: operation.inputs.clone(),
+        observations,
+        completion,
+    })
 }
 
 fn native_operation_span(trace_id: &str, operation: &NativeOperationSpan) -> Span {
@@ -542,7 +817,7 @@ pub fn encode_discovery_registry_result(
     let operation_count = i32::try_from(operations.len()).map_err(|_error| "operation count exceeds i32".to_string())?;
     let document = RegistryDocument {
         format: "ctsc.registry",
-        format_version: "0.1.0",
+        format_version: CTSC_VERSION,
         registry_id,
         version: registry_version,
         components: vec![RegistryComponent {
@@ -603,7 +878,7 @@ pub fn encode_schema_registry_result(
     let type_count = i32::try_from(types.len()).map_err(|_error| "type count exceeds i32".to_string())?;
     let document = RegistryDocument {
         format: "ctsc.registry",
-        format_version: "0.1.0",
+        format_version: CTSC_VERSION,
         registry_id,
         version: registry_version,
         components: vec![RegistryComponent {
@@ -942,17 +1217,8 @@ impl TypeRefParser<'_> {
             }
             "Option" | "optional" => {
                 expect_type_argument_count(name, &arguments, 1)?;
-                Ok(RegistryTypeRef::TaggedUnion {
-                    variants: vec![
-                        RegistryVariant {
-                            name: "None".to_string(),
-                            payload: None,
-                        },
-                        RegistryVariant {
-                            name: "Some".to_string(),
-                            payload: Some(arguments.remove(0)),
-                        },
-                    ],
+                Ok(RegistryTypeRef::Optional {
+                    value: Box::new(arguments.remove(0)),
                 })
             }
             other => Err(format!("unsupported type constructor '{other}'")),
@@ -1085,11 +1351,11 @@ enum RegistryTypeRef {
     Tuple {
         items: Vec<RegistryTypeRef>,
     },
+    Optional {
+        value: Box<RegistryTypeRef>,
+    },
     Record {
         fields: Vec<NamedValue>,
-    },
-    TaggedUnion {
-        variants: Vec<RegistryVariant>,
     },
 }
 
@@ -1318,6 +1584,7 @@ struct ArrayValue {
 
 #[derive(Serialize)]
 struct KeyValueList {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     values: Vec<KeyValue>,
 }
 
@@ -1420,10 +1687,11 @@ mod tests {
         let resource_attributes = resource_spans["resource"]["attributes"].as_array().unwrap();
         let spans = document["resourceSpans"][0]["scopeSpans"][0]["spans"].as_array().unwrap();
 
-        assert_eq!(resource_spans["schemaUrl"], "https://specgate.dev/ctsc/schema/0.1.0");
+        assert_eq!(resource_spans["schemaUrl"], CTSC_SCHEMA_URL);
+        assert_eq!(document["resourceSpans"][0]["scopeSpans"][0]["schemaUrl"], CTSC_SCHEMA_URL);
         assert_eq!(resource_attributes.len(), 5);
         assert_eq!(resource_attributes[0]["key"], "conformance.version");
-        assert_eq!(resource_attributes[0]["value"]["stringValue"], "0.1.0");
+        assert_eq!(resource_attributes[0]["value"]["stringValue"], CTSC_VERSION);
         assert_eq!(resource_attributes[1]["key"], "conformance.tool.name");
         assert_eq!(resource_attributes[1]["value"]["stringValue"], "specgate");
         assert_eq!(resource_attributes[2]["key"], "conformance.tool.version");
@@ -1472,12 +1740,14 @@ mod tests {
         );
 
         assert_eq!(result.span_count, 4);
-        assert_eq!(
-            result.legacy_trace_json,
-            r#"[{"kind":"Run","operation":"add_after_double"},{"kind":"Event","name":"add_after_double.value","value":2},{"kind":"Run","operation":"double"},{"kind":"Event","name":"double.value","value":3},{"kind":"Event","name":"$result","value":6},{"kind":"Event","name":"$result","value":7}]"#
-        );
         let document: serde_json::Value = serde_json::from_str(&result.otlp_json).unwrap();
+        let resource_spans = &document["resourceSpans"][0];
+        let resource_attributes = resource_spans["resource"]["attributes"].as_array().unwrap();
         let spans = document["resourceSpans"][0]["scopeSpans"][0]["spans"].as_array().unwrap();
+        assert_eq!(resource_spans["schemaUrl"], CTSC_SCHEMA_URL);
+        assert_eq!(resource_spans["scopeSpans"][0]["schemaUrl"], CTSC_SCHEMA_URL);
+        assert_eq!(resource_attributes[0]["key"], "conformance.version");
+        assert_eq!(resource_attributes[0]["value"]["stringValue"], CTSC_VERSION);
         assert_eq!(spans.len(), 4);
         assert_eq!(spans[0]["spanId"], "2222222222222201");
         assert_eq!(spans[0]["startTimeUnixNano"], "2000000000");
@@ -1496,7 +1766,133 @@ mod tests {
         assert_eq!(spans[3]["parentSpanId"], "2222222222222203");
         assert_eq!(spans[3]["attributes"][1]["value"]["stringValue"], "double");
         assert_eq!(spans[3]["events"][0]["attributes"][0]["value"]["intValue"], "6");
-        let _wrapper_outputs = take_traces();
+    }
+
+    #[test]
+    fn merges_native_scenarios_into_one_deterministic_linked_run() {
+        let capture = |name: &str, trace_id: &str| {
+            start_native_capture(NativeCaptureConfig {
+                scenario_name: name.to_string(),
+                trace_id: trace_id.to_string(),
+                run_span_id: "aaaaaaaaaaaaaaa1".to_string(),
+                scenario_span_id: "aaaaaaaaaaaaaaa2".to_string(),
+                operation_span_ids: Vec::new(),
+                start_time_unix_nano: 0,
+                clock_step_unix_nano: 1,
+            })
+            .unwrap();
+            assert_eq!(double(2), 4);
+            finish_native_capture().unwrap()
+        };
+        let captures = vec![
+            capture("first", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            capture("second", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+        ];
+
+        let first = encode_native_captures_otlp_result(
+            &captures,
+            "0.5.0",
+            "default",
+            "rust",
+            "urn:ctsc:registry:fixture.native_capture",
+            "0.1.0",
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        )
+        .unwrap();
+        let second = encode_native_captures_otlp_result(
+            &captures,
+            "0.5.0",
+            "default",
+            "rust",
+            "urn:ctsc:registry:fixture.native_capture",
+            "0.1.0",
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        )
+        .unwrap();
+
+        assert_eq!(first.span_count, second.span_count);
+        assert_eq!(first.otlp_json, second.otlp_json);
+        assert_eq!(first.span_count, 5);
+        let document: serde_json::Value = serde_json::from_str(&first.otlp_json).unwrap();
+        let spans = document["resourceSpans"][0]["scopeSpans"][0]["spans"].as_array().unwrap();
+        assert_eq!(spans.iter().filter(|span| span["name"] == "conformance.run").count(), 1);
+        assert_eq!(spans.iter().filter(|span| span["name"] == "conformance.scenario").count(), 2);
+        assert_eq!(spans[1]["attributes"][1]["value"]["intValue"], "0");
+        assert_eq!(spans[3]["attributes"][1]["value"]["intValue"], "1");
+        let attributes = document["resourceSpans"][0]["resource"]["attributes"].as_array().unwrap();
+        assert!(attributes.iter().any(|attribute| {
+            attribute["key"] == "conformance.registry.digest"
+                && attribute["value"]["stringValue"] == "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }));
+    }
+
+    #[test]
+    fn capture_present_optional_with_ctsc_wrapper() {
+        specgate_runtime::reset();
+        let result = capture_native_optional_otlp(
+            "optional_some".to_string(),
+            "44444444444444444444444444444444".to_string(),
+            "4444444444444401".to_string(),
+            "4444444444444402".to_string(),
+            "4444444444444403".to_string(),
+            "run-optional-001".to_string(),
+            4_000_000_000,
+            100,
+            "0.5.0".to_string(),
+            "rust-reference".to_string(),
+            "rust".to_string(),
+            true,
+            "alice".to_string(),
+        );
+
+        let document: serde_json::Value = serde_json::from_str(&result.otlp_json).unwrap();
+        let operation = &document["resourceSpans"][0]["scopeSpans"][0]["spans"][2];
+        assert_eq!(
+            operation["attributes"][2]["value"]["kvlistValue"]["values"][0]["value"],
+            serde_json::json!({
+                "kvlistValue": {
+                    "values": [{"key": "Some", "value": {"stringValue": "alice"}}]
+                }
+            })
+        );
+        assert_eq!(
+            operation["events"][0]["attributes"][0]["value"],
+            serde_json::json!({
+                "kvlistValue": {
+                    "values": [{"key": "Some", "value": {"stringValue": "alice"}}]
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn capture_absent_optional_with_ctsc_wrapper() {
+        specgate_runtime::reset();
+        let result = capture_native_optional_otlp(
+            "optional_none".to_string(),
+            "55555555555555555555555555555555".to_string(),
+            "5555555555555501".to_string(),
+            "5555555555555502".to_string(),
+            "5555555555555503".to_string(),
+            "run-optional-002".to_string(),
+            5_000_000_000,
+            100,
+            "0.5.0".to_string(),
+            "rust-reference".to_string(),
+            "rust".to_string(),
+            false,
+            "ignored".to_string(),
+        );
+
+        let document: serde_json::Value = serde_json::from_str(&result.otlp_json).unwrap();
+        let operation = &document["resourceSpans"][0]["scopeSpans"][0]["spans"][2];
+        let expected = serde_json::json!({
+            "kvlistValue": {
+                "values": [{"key": "None", "value": {"kvlistValue": {}}}]
+            }
+        });
+        assert_eq!(operation["attributes"][2]["value"]["kvlistValue"]["values"][0]["value"], expected);
+        assert_eq!(operation["events"][0]["attributes"][0]["value"], expected);
     }
 
     #[test]
@@ -1510,7 +1906,7 @@ mod tests {
         assert_eq!(result.type_count, 0);
         assert_eq!(
             result.registry_json,
-            r#"{"format":"ctsc.registry","formatVersion":"0.1.0","registryId":"urn:ctsc:registry:test:1","version":"1.0.0","components":[{"id":"fixture.stateless_add","operations":[{"name":"add","inputs":[{"name":"a","type":{"kind":"primitive","name":"i32"}},{"name":"b","type":{"kind":"primitive","name":"i32"}}],"observations":[],"outcomes":{"result":{"kind":"primitive","name":"i32"}}}],"types":[]}]}"#
+            r#"{"format":"ctsc.registry","formatVersion":"0.2.0","registryId":"urn:ctsc:registry:test:1","version":"1.0.0","components":[{"id":"fixture.stateless_add","operations":[{"name":"add","inputs":[{"name":"a","type":{"kind":"primitive","name":"i32"}},{"name":"b","type":{"kind":"primitive","name":"i32"}}],"observations":[],"outcomes":{"result":{"kind":"primitive","name":"i32"}}}],"types":[]}]}"#
         );
     }
 
@@ -1557,11 +1953,8 @@ mod tests {
         assert_eq!(
             component["operations"][0]["inputs"][5]["type"],
             serde_json::json!({
-                "kind": "tagged_union",
-                "variants": [
-                    {"name": "None"},
-                    {"name": "Some", "payload": {"kind": "named", "name": "Point"}}
-                ]
+                "kind": "optional",
+                "value": {"kind": "named", "name": "Point"}
             })
         );
         assert_eq!(
@@ -1622,6 +2015,24 @@ mod tests {
         .unwrap();
 
         assert_eq!(compact.registry_json, spaced.registry_json);
+        let document: serde_json::Value = serde_json::from_str(&compact.registry_json).unwrap();
+        assert_eq!(
+            document["components"][0]["operations"][0]["inputs"][0]["type"],
+            serde_json::json!({
+                "kind": "list",
+                "items": {
+                    "kind": "optional",
+                    "value": {
+                        "kind": "map",
+                        "keys": {"kind": "primitive", "name": "string"},
+                        "values": {
+                            "kind": "set",
+                            "items": {"kind": "named", "name": "Item"}
+                        }
+                    }
+                }
+            })
+        );
     }
 
     #[test]
@@ -1752,7 +2163,7 @@ mod tests {
     fn encode_operation_emits_spec_outputs_in_case_order() {
         specgate_runtime::reset();
         let result = encode_test_trace(r#"[{"kind":"Run","operation":"add"},{"kind":"Event","name":"$result","value":5}]"#);
-        let traces = take_traces();
+        let traces = specgate_runtime::take_traces();
         let output_events = &traces[traces.len() - 3..];
 
         assert!(matches!(
@@ -1837,6 +2248,29 @@ mod tests {
         assert_eq!(
             encoded,
             r#"{"kvlistValue":{"values":[{"key":"map","value":{"kvlistValue":{"values":[{"key":"a","value":{"arrayValue":{"values":[{"boolValue":true},{"intValue":"-7"}]}}},{"key":"z","value":{"doubleValue":2.5}}]}}},{"key":"set","value":{"arrayValue":{"values":[{"boolValue":false},{"intValue":"4"},{"stringValue":"zeta"}]}}}]}}"#
+        );
+    }
+
+    #[test]
+    fn option_trace_values_remain_some_none_kvlists() {
+        let some = Value::Map(BTreeMap::from([("Some".to_string(), Value::Integer(7))]));
+        let none = Value::Map(BTreeMap::from([("None".to_string(), Value::Map(BTreeMap::new()))]));
+
+        assert_eq!(
+            serde_json::to_value(value_to_any_value(&some)).unwrap(),
+            serde_json::json!({
+                "kvlistValue": {
+                    "values": [{"key": "Some", "value": {"intValue": "7"}}]
+                }
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(value_to_any_value(&none)).unwrap(),
+            serde_json::json!({
+                "kvlistValue": {
+                    "values": [{"key": "None", "value": {"kvlistValue": {}}}]
+                }
+            })
         );
     }
 

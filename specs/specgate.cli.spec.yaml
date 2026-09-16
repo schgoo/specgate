@@ -48,6 +48,14 @@ types:
     types: i32
     output_path: string
 
+  CaptureReport:
+    component_id: string
+    scenarios: i32
+    operations: i32
+    registry_path: string
+    trace_path: string
+    manifest_path: string
+
 operations:
   validate:
     desc: >
@@ -165,6 +173,37 @@ operations:
           oneof:
             Complete:
               report: DiscoverReport
+            Error:
+              reason: string
+
+  capture:
+    desc: >
+      Run each passing Rust test in isolation with native CTSC capture enabled
+      and write one deterministic reference bundle. The bundle contains
+      registry.ctsc.json, reference.otlp.json, and manifest.json. Registry
+      identity is derived from the selected component and the initial version
+      is 0.1.0; automatic compatibility-based version evolution is separate.
+      Tests that exercise no operation in the selected component are omitted.
+      A captured operation tree is emitted directly from runtime scopes and is
+      never reconstructed from the legacy flat trace.
+    inputs:
+      binding: string
+      target:
+        type: string
+        default: ""
+        desc: Binding target name; empty selects the binding default
+      component:
+        type: string
+        default: ""
+        desc: >
+          Component to capture. Empty selects the sole discovered component;
+          an explicit ID is required when the target contains several.
+      out: string
+    outputs:
+      - outcome:
+          oneof:
+            Complete:
+              report: CaptureReport
             Error:
               reason: string
 
@@ -1349,6 +1388,31 @@ cases:
               component_id: fixture.setup_with_params
               operations: 1
               types: 1
+
+  # ================================================================
+  # Capture — deterministic CTSC reference bundle from existing tests
+  # ================================================================
+
+  - name: capture_rust_stateless_reference_bundle
+    desc: >
+      The stateless fixture's handwritten test becomes one CTSC scenario whose
+      add invocation is linked to the generated registry.
+    operation: capture
+    inputs:
+      binding: test/rust/crates/specgate-fixtures/specs/binding.yaml
+      target: ""
+      component: fixture.stateless_add
+      out: rust/target/ctsc-capture-stateless
+    expected:
+      - $result:
+          Complete:
+            report:
+              component_id: fixture.stateless_add
+              scenarios: 1
+              operations: 1
+              registry_path: rust/target/ctsc-capture-stateless/registry.ctsc.json
+              trace_path: rust/target/ctsc-capture-stateless/reference.otlp.json
+              manifest_path: rust/target/ctsc-capture-stateless/manifest.json
 
   - name: run_extracted_cases_pass
     desc: >

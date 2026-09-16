@@ -63,8 +63,9 @@ Native production capture has now started for synchronous Rust operations.
 `specgate-runtime` records explicit operation spans at annotation-generated
 invocation scopes, including nested parentage, semantic inputs, observations,
 completion, status, and logical timestamps. `specgate-ctsc` encodes those
-records directly as CTSC OTLP JSON. Legacy flat-trace translation remains only
-as a compatibility path and is not the source for native span structure.
+records directly as CTSC OTLP JSON and exposes no parallel legacy output.
+Legacy flat-trace translation remains only for extraction and harness paths
+that do not yet have CTSC replacements; it is not a compatibility promise.
 
 ## Phase 2: CTSC registry export
 
@@ -83,16 +84,24 @@ Keep raw implementation metadata separate from the language-neutral registry.
 
 ## Phase 3: Reference capture
 
-Evolve test-case extraction into:
+The first Rust reference-capture slice is implemented as:
 
 ```text
 existing tests
   -> isolated execution
+  -> environment-activated native operation scopes
   -> CTSC registry
   -> reference OTLP trace
 ```
 
-A capture bundle contains:
+`specgate capture <binding.yaml> --out <dir> [--target <name>]
+[--component <id>]` runs every libtest test in isolation. Passing tests that
+invoke the selected component become scenarios; unrelated and failing tests are
+omitted. Runtime sidecars contain native operation trees directly and never
+reconstruct them from `TraceEvent`, `SPECGATE_RECORD`, flat event names, or an
+extracted spec.
+
+The deterministic capture bundle contains:
 
 ```text
 capture/
@@ -103,6 +112,10 @@ capture/
 
 The manifest contains provenance, digests, target identity, and tool version,
 but no behavioral expectations.
+
+This slice supports Rust targets only and uses the initial registry version
+`0.1.0`. Compatibility-driven registry evolution and additional target
+languages remain later work.
 
 ## Phase 4: Static semantic linker
 
@@ -170,15 +183,20 @@ specgate validate <artifact>
 `diff` combines candidate replay and comparison and becomes the primary
 workflow.
 
-## Phase 8: Legacy retirement
+## Phase 8: Incremental legacy retirement
 
-After fixture parity:
+Remove each legacy output or subsystem when its CTSC replacement lands:
 
-1. Convert existing fixtures to capture bundles.
-2. Move self-hosting onto CTSC artifacts.
-3. Remove `.spec.yaml` assertion matching and spec-driven runner generation.
-4. Remove legacy case, assertion, and matcher types.
-5. Rename spec-oriented annotations and APIs in a separate compatibility phase.
+1. Native capture emits only CTSC artifacts.
+2. Convert existing fixtures to capture bundles.
+3. Move extraction and self-hosting onto CTSC artifacts, then remove flat trace
+   recording.
+4. Remove `.spec.yaml` assertion matching and spec-driven runner generation
+   after replay and comparison cover those workflows.
+5. Remove legacy case, assertion, matcher, and value-projection types when
+   their last consumers are gone.
+6. Rename spec-oriented annotations and APIs after the CTSC workflow is
+   complete; no compatibility layer is required.
 
 ## First vertical slice
 
@@ -186,7 +204,7 @@ Use the stateless-add Rust/C# fixture:
 
 ```text
 existing Rust test
-  -> legacy trace translated to CTSC
+  -> native CTSC operation capture
   -> generated CTSC registry
   -> reference OTLP trace
   -> statically linked C# invocation
