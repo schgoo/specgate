@@ -56,6 +56,13 @@ types:
     trace_path: string
     manifest_path: string
 
+  ReplayReport:
+    component_id: string
+    scenarios: i32
+    operations: i32
+    plans: i32
+    output_path: string
+
 operations:
   validate:
     desc: >
@@ -204,6 +211,33 @@ operations:
           oneof:
             Complete:
               report: CaptureReport
+            Error:
+              reason: string
+
+  replay:
+    desc: >
+      Compile a target-local invocation plan from a CTSC capture bundle and
+      candidate discovery metadata, then replay every reference scenario and
+      write an independent candidate OTLP trace. The first Rust slice supports
+      synchronous public free functions with primitive semantic inputs.
+      Component, operation, input name, input order, input type, and output
+      type must match exactly. Unsupported setups, methods, asynchronous
+      operations, structured values, missing operations, and ambiguous
+      mappings fail explicitly. Replay reads no .spec.yaml and invokes only
+      top-level reference operations; nested operations are captured behavior.
+    inputs:
+      capture_dir: string
+      binding: string
+      target:
+        type: string
+        default: ""
+        desc: Candidate binding target; empty selects the binding default
+      out: string
+    outputs:
+      - outcome:
+          oneof:
+            Complete:
+              report: ReplayReport
             Error:
               reason: string
 
@@ -1413,6 +1447,26 @@ cases:
               registry_path: rust/target/ctsc-capture-stateless/registry.ctsc.json
               trace_path: rust/target/ctsc-capture-stateless/reference.otlp.json
               manifest_path: rust/target/ctsc-capture-stateless/manifest.json
+
+  - name: replay_rust_stateless_reference_bundle
+    desc: >
+      Exact semantic identity links the captured add inputs to the candidate
+      Rust function and emits one independently captured candidate scenario.
+    operation: replay
+    inputs:
+      capture_dir: rust/target/ctsc-capture-stateless
+      binding: test/rust/crates/specgate-fixtures/specs/binding.yaml
+      target: ""
+      out: rust/target/ctsc-capture-stateless/candidate.otlp.json
+    expected:
+      - $result:
+          Complete:
+            report:
+              component_id: fixture.stateless_add
+              scenarios: 1
+              operations: 1
+              plans: 1
+              output_path: rust/target/ctsc-capture-stateless/candidate.otlp.json
 
   - name: run_extracted_cases_pass
     desc: >

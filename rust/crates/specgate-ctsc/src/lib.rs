@@ -10,6 +10,14 @@
 //! Ordered native sidecars can be merged into one deterministic run with
 //! registry identity, version, and digest resource attributes for Linked
 //! validation.
+//! Capture bundles can also be decoded through [`decode_replay_bundle_result`],
+//! which verifies manifest format/version, exact registry and trace digests,
+//! trace registry linkage, scenario order, operation declarations, and typed
+//! primitive inputs before returning ordered [`ReplayScenario`] values. The
+//! decoder exposes only top-level operations as replay instructions. Candidate
+//! native captures use [`encode_replayed_native_captures_otlp_result`] to retain
+//! the original registry identity while using deterministic IDs independent
+//! from the reference run.
 //!
 //! The legacy `Run`/`Event` buffer and the translation operations below remain
 //! temporarily for extraction and harness subsystems that do not yet have CTSC
@@ -44,6 +52,7 @@
 //! language-specific discovery or normalization.
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use specgate::{SpecEvent, spec_component, spec_operation};
 use specgate_runtime::{
     NativeCapture, NativeCaptureConfig, NativeCompletion, NativeOperationSpan, NativeStatus, TraceEvent, Value, finish_native_capture,
@@ -84,7 +93,7 @@ pub struct CtscOtlpEncoding {
     pub otlp_json: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, SpecEvent)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, SpecEvent)]
 #[serde(rename_all = "snake_case")]
 pub struct CtscNativeCaptureEncoding {
     #[spec_event]
@@ -109,6 +118,105 @@ pub struct CtscRegistryEncoding {
     pub type_count: i32,
     #[spec_event]
     pub registry_json: String,
+}
+
+/// A registry type used by typed replay decoding and semantic linking.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ReplayType {
+    Primitive { name: String },
+    Named { name: String },
+    List { items: Box<ReplayType> },
+    Set { items: Box<ReplayType> },
+    Map { keys: Box<ReplayType>, values: Box<ReplayType> },
+    Tuple { items: Vec<ReplayType> },
+    Optional { value: Box<ReplayType> },
+    Record { fields: Vec<ReplayRegistryInput> },
+}
+
+impl ReplayType {
+    /// Return the primitive name when this is a primitive type.
+    #[must_use]
+    pub fn primitive_name(&self) -> Option<&str> {
+        match self {
+            Self::Primitive { name } => Some(name),
+            _ => None,
+        }
+    }
+}
+
+/// One named value declaration in a replay registry operation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplayRegistryInput {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub value_type: ReplayType,
+}
+
+/// One linked operation declaration needed by the replay planner.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplayRegistryOperation {
+    pub component_id: String,
+    pub name: String,
+    pub inputs: Vec<ReplayRegistryInput>,
+    pub output: Option<ReplayType>,
+}
+
+/// Registry identity and operation declarations verified from a capture bundle.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplayRegistry {
+    pub id: String,
+    pub version: String,
+    pub digest: String,
+    pub operations: Vec<ReplayRegistryOperation>,
+}
+
+/// A losslessly decoded CTSC value supported by the first replay slice.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+pub enum ReplayValue {
+    Unit,
+    String(String),
+    Bool(bool),
+    I32(i32),
+    I64(i64),
+    U32(u32),
+    U64(u64),
+    F32Bits(u32),
+    F64Bits(u64),
+}
+
+/// One named semantic input decoded according to its linked registry type.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplayInput {
+    pub name: String,
+    pub value_type: ReplayType,
+    pub value: ReplayValue,
+}
+
+/// One top-level reference operation that must be invoked by replay.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplayOperation {
+    pub component_id: String,
+    pub operation_name: String,
+    pub inputs: Vec<ReplayInput>,
+    pub output: Option<ReplayType>,
+}
+
+/// One ordered reference scenario and its sequential top-level operations.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplayScenario {
+    pub name: String,
+    pub index: i64,
+    pub operations: Vec<ReplayOperation>,
+}
+
+/// A manifest-, digest-, registry-, and trace-linked replay bundle.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplayBundle {
+    pub component_id: String,
+    pub registry: ReplayRegistry,
+    pub scenarios: Vec<ReplayScenario>,
 }
 
 /// The terminal legacy event, if any, that selects the CTSC completion state.
@@ -474,13 +582,73 @@ pub fn encode_native_captures_otlp_result(
     registry_version: &str,
     registry_digest: &str,
 ) -> Result<CtscNativeCaptureEncoding, String> {
+    encode_native_captures_with_identity(
+        captures,
+        tool_version,
+        target_name,
+        target_language,
+        registry_id,
+        registry_version,
+        registry_digest,
+        "00000000000000000000000000000001",
+        1,
+        "specgate.capture",
+    )
+}
+
+/// Encode candidate replay captures as one deterministic run with identity
+/// independent from the reference capture encoder.
+///
+/// # Errors
+///
+/// Returns the same structural, identifier, timestamp, and serialization
+/// errors as [`encode_native_captures_otlp_result`].
+#[allow(clippy::too_many_arguments)]
+pub fn encode_replayed_native_captures_otlp_result(
+    captures: &[NativeCapture],
+    tool_version: &str,
+    target_name: &str,
+    target_language: &str,
+    registry_id: &str,
+    registry_version: &str,
+    registry_digest: &str,
+) -> Result<CtscNativeCaptureEncoding, String> {
+    encode_native_captures_with_identity(
+        captures,
+        tool_version,
+        target_name,
+        target_language,
+        registry_id,
+        registry_version,
+        registry_digest,
+        "00000000000000000000000000000002",
+        0x8000_0000_0000_0001,
+        "specgate.replay",
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn encode_native_captures_with_identity(
+    captures: &[NativeCapture],
+    tool_version: &str,
+    target_name: &str,
+    target_language: &str,
+    registry_id: &str,
+    registry_version: &str,
+    registry_digest: &str,
+    trace_id: &str,
+    first_span_id: u64,
+    run_id: &str,
+) -> Result<CtscNativeCaptureEncoding, String> {
     if captures.is_empty() {
         return Err("cannot encode a CTSC run without captured scenarios".to_string());
     }
 
-    let trace_id = "00000000000000000000000000000001".to_string();
-    let run_span_id = deterministic_span_id(1)?;
-    let mut next_span_id = 2_u64;
+    let trace_id = trace_id.to_string();
+    let run_span_id = deterministic_span_id(first_span_id)?;
+    let mut next_span_id = first_span_id
+        .checked_add(1)
+        .ok_or_else(|| "CTSC span ID sequence overflow".to_string())?;
     let mut next_scenario_time = 2_i64;
     let mut scenario_spans = Vec::new();
     let mut operation_count = 0_usize;
@@ -566,7 +734,7 @@ pub fn encode_native_captures_otlp_result(
         kind: 1,
         start_time_unix_nano: "1".to_string(),
         end_time_unix_nano: run_end_time.to_string(),
-        attributes: vec![string_attribute("conformance.run.id", "specgate.capture")],
+        attributes: vec![string_attribute("conformance.run.id", run_id)],
         events: Vec::new(),
         status: Status {
             code: status_code(if run_has_error { NativeStatus::Error } else { NativeStatus::Ok }),
@@ -604,6 +772,827 @@ pub fn encode_native_captures_otlp_result(
     let span_count =
         i32::try_from(operation_count + captures.len() + 1).map_err(|_error| "native CTSC span count exceeds i32".to_string())?;
     Ok(CtscNativeCaptureEncoding { span_count, otlp_json })
+}
+
+/// Decode and link-validate the three exact files in a capture bundle.
+///
+/// The manifest format/version, exact registry and trace digests, registry
+/// identity/version/digest trace attributes, span parentage, scenario order,
+/// operation declarations, input names, and supported typed values are checked
+/// before any replay scenario is returned. Only top-level operation spans are
+/// returned as replay instructions; nested operations are validated but remain
+/// observed reference behavior.
+///
+/// # Errors
+///
+/// Returns an actionable error for malformed JSON, invalid manifests or
+/// digests, broken trace linkage, empty scenarios, or unsupported values.
+pub fn decode_replay_bundle_result(manifest_json: &[u8], registry_json: &[u8], reference_otlp_json: &[u8]) -> Result<ReplayBundle, String> {
+    let manifest: CaptureManifestWire =
+        serde_json::from_slice(manifest_json).map_err(|error| format!("malformed capture manifest JSON: {error}"))?;
+    validate_capture_manifest(&manifest)?;
+
+    let registry_digest = replay_sha256_digest(registry_json);
+    if manifest.registry.digest != registry_digest {
+        return Err(format!(
+            "capture registry digest mismatch: manifest declares '{}' but exact registry bytes digest to '{registry_digest}'",
+            manifest.registry.digest
+        ));
+    }
+    let reference_digest = replay_sha256_digest(reference_otlp_json);
+    if manifest.reference.digest != reference_digest {
+        return Err(format!(
+            "capture reference digest mismatch: manifest declares '{}' but exact reference bytes digest to '{reference_digest}'",
+            manifest.reference.digest
+        ));
+    }
+
+    let registry_document: ReplayRegistryDocumentWire =
+        serde_json::from_slice(registry_json).map_err(|error| format!("malformed CTSC registry JSON: {error}"))?;
+    if registry_document.format != "ctsc.registry" || registry_document.format_version != CTSC_VERSION {
+        return Err(format!(
+            "unsupported CTSC registry format/version '{}/{}'; expected 'ctsc.registry/{CTSC_VERSION}'",
+            registry_document.format, registry_document.format_version
+        ));
+    }
+    if registry_document.registry_id != manifest.registry.id {
+        return Err(format!(
+            "capture manifest registry ID '{}' does not match registry document '{}'",
+            manifest.registry.id, registry_document.registry_id
+        ));
+    }
+    if registry_document.version != manifest.registry.version {
+        return Err(format!(
+            "capture manifest registry version '{}' does not match registry document '{}'",
+            manifest.registry.version, registry_document.version
+        ));
+    }
+
+    let registry = replay_registry(&registry_document, registry_digest)?;
+    if !registry
+        .operations
+        .iter()
+        .any(|operation| operation.component_id == manifest.component_id)
+    {
+        return Err(format!(
+            "capture component '{}' is absent from registry '{}'",
+            manifest.component_id, registry.id
+        ));
+    }
+
+    let document: ReplayOtlpDocumentWire =
+        serde_json::from_slice(reference_otlp_json).map_err(|error| format!("malformed reference OTLP JSON: {error}"))?;
+    let scenarios = decode_replay_scenarios(&document, &manifest, &registry)?;
+
+    Ok(ReplayBundle {
+        component_id: manifest.component_id,
+        registry,
+        scenarios,
+    })
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CaptureManifestWire {
+    format: String,
+    format_version: String,
+    component_id: String,
+    target: CaptureManifestTargetWire,
+    tool: CaptureManifestToolWire,
+    registry: CaptureManifestRegistryWire,
+    reference: CaptureManifestReferenceWire,
+    scenarios: CaptureManifestScenariosWire,
+}
+
+#[derive(Deserialize)]
+struct CaptureManifestTargetWire {
+    name: String,
+    language: String,
+}
+
+#[derive(Deserialize)]
+struct CaptureManifestToolWire {
+    name: String,
+    version: String,
+}
+
+#[derive(Deserialize)]
+struct CaptureManifestRegistryWire {
+    path: String,
+    id: String,
+    version: String,
+    digest: String,
+}
+
+#[derive(Deserialize)]
+struct CaptureManifestReferenceWire {
+    path: String,
+    digest: String,
+}
+
+#[derive(Deserialize)]
+struct CaptureManifestScenariosWire {
+    count: i32,
+    names: Vec<String>,
+}
+
+fn validate_capture_manifest(manifest: &CaptureManifestWire) -> Result<(), String> {
+    if manifest.format != "specgate.capture-manifest" || manifest.format_version != "0.1.0" {
+        return Err(format!(
+            "unsupported capture manifest format/version '{}/{}'; expected 'specgate.capture-manifest/0.1.0'",
+            manifest.format, manifest.format_version
+        ));
+    }
+    if manifest.registry.path != "registry.ctsc.json" {
+        return Err(format!(
+            "capture manifest registry path must be 'registry.ctsc.json', found '{}'",
+            manifest.registry.path
+        ));
+    }
+    if manifest.reference.path != "reference.otlp.json" {
+        return Err(format!(
+            "capture manifest reference path must be 'reference.otlp.json', found '{}'",
+            manifest.reference.path
+        ));
+    }
+    if manifest.component_id.is_empty()
+        || manifest.target.name.is_empty()
+        || manifest.target.language.is_empty()
+        || manifest.tool.name.is_empty()
+        || manifest.tool.version.is_empty()
+        || manifest.registry.id.is_empty()
+        || manifest.registry.version.is_empty()
+    {
+        return Err("capture manifest identity fields must not be empty".to_string());
+    }
+    validate_replay_digest("manifest registry", &manifest.registry.digest)?;
+    validate_replay_digest("manifest reference", &manifest.reference.digest)?;
+    let scenario_count =
+        i32::try_from(manifest.scenarios.names.len()).map_err(|_error| "capture manifest scenario count exceeds i32".to_string())?;
+    if manifest.scenarios.count != scenario_count {
+        return Err(format!(
+            "capture manifest scenario count {} does not match {} scenario names",
+            manifest.scenarios.count, scenario_count
+        ));
+    }
+    if manifest.scenarios.count <= 0 {
+        return Err("capture manifest must declare at least one scenario".to_string());
+    }
+    let unique_names = manifest.scenarios.names.iter().collect::<BTreeSet<_>>();
+    if unique_names.len() != manifest.scenarios.names.len() {
+        return Err("capture manifest contains duplicate scenario names".to_string());
+    }
+    Ok(())
+}
+
+fn validate_replay_digest(label: &str, digest: &str) -> Result<(), String> {
+    let valid = digest
+        .strip_prefix("sha256:")
+        .is_some_and(|hex| hex.len() == 64 && hex.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)));
+    if valid {
+        Ok(())
+    } else {
+        Err(format!(
+            "{label} digest must be 'sha256:' followed by 64 lowercase hexadecimal characters"
+        ))
+    }
+}
+
+fn replay_sha256_digest(bytes: &[u8]) -> String {
+    format!("sha256:{:x}", Sha256::digest(bytes))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReplayRegistryDocumentWire {
+    format: String,
+    format_version: String,
+    registry_id: String,
+    version: String,
+    components: Vec<RegistryComponent>,
+}
+
+fn replay_registry(document: &ReplayRegistryDocumentWire, digest: String) -> Result<ReplayRegistry, String> {
+    let mut component_ids = BTreeSet::new();
+    let mut operation_keys = BTreeSet::new();
+    let mut operations = Vec::new();
+    for component in &document.components {
+        if component.id.is_empty() || !component_ids.insert(component.id.as_str()) {
+            return Err(format!(
+                "CTSC registry contains an empty or duplicate component ID '{}'",
+                component.id
+            ));
+        }
+        for operation in &component.operations {
+            if operation.name.is_empty() || !operation_keys.insert((component.id.as_str(), operation.name.as_str())) {
+                return Err(format!(
+                    "CTSC registry contains an empty or duplicate operation '{}::{}'",
+                    component.id, operation.name
+                ));
+            }
+            let input_names = operation.inputs.iter().map(|input| input.name.as_str()).collect::<BTreeSet<_>>();
+            if input_names.len() != operation.inputs.len() {
+                return Err(format!(
+                    "CTSC registry operation '{}::{}' contains duplicate input names",
+                    component.id, operation.name
+                ));
+            }
+            operations.push(ReplayRegistryOperation {
+                component_id: component.id.clone(),
+                name: operation.name.clone(),
+                inputs: operation.inputs.clone(),
+                output: operation.outcomes.result.clone(),
+            });
+        }
+    }
+    if operations.is_empty() {
+        return Err("CTSC registry contains no operations".to_string());
+    }
+    Ok(ReplayRegistry {
+        id: document.registry_id.clone(),
+        version: document.version.clone(),
+        digest,
+        operations,
+    })
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReplayOtlpDocumentWire {
+    resource_spans: Vec<ReplayResourceSpansWire>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReplayResourceSpansWire {
+    resource: ReplayResourceWire,
+    scope_spans: Vec<ReplayScopeSpansWire>,
+}
+
+#[derive(Deserialize)]
+struct ReplayResourceWire {
+    #[serde(default)]
+    attributes: Vec<ReplayKeyValueWire>,
+}
+
+#[derive(Deserialize)]
+struct ReplayScopeSpansWire {
+    #[serde(default)]
+    spans: Vec<ReplaySpanWire>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReplaySpanWire {
+    trace_id: String,
+    #[serde(rename = "spanId")]
+    span_id: String,
+    #[serde(default, rename = "parentSpanId")]
+    parent_span_id: String,
+    name: String,
+    start_time_unix_nano: String,
+    #[serde(default)]
+    attributes: Vec<ReplayKeyValueWire>,
+    #[serde(default)]
+    events: Vec<ReplayEventWire>,
+}
+
+#[derive(Deserialize)]
+struct ReplayEventWire {
+    name: String,
+    #[serde(default)]
+    attributes: Vec<ReplayKeyValueWire>,
+}
+
+#[derive(Deserialize)]
+struct ReplayKeyValueWire {
+    key: String,
+    value: ReplayAnyValueWire,
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize)]
+enum ReplayAnyValueWire {
+    #[serde(rename = "stringValue")]
+    String(String),
+    #[serde(rename = "boolValue")]
+    Bool(bool),
+    #[serde(rename = "intValue")]
+    Int(String),
+    #[serde(rename = "doubleValue")]
+    Double(ReplayDoubleWire),
+    #[serde(rename = "bytesValue")]
+    Bytes(String),
+    #[serde(rename = "arrayValue")]
+    Array(ReplayArrayWire),
+    #[serde(rename = "kvlistValue")]
+    Kvlist(ReplayKeyValueListWire),
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ReplayDoubleWire {
+    Number(f64),
+    Symbol(String),
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize)]
+struct ReplayArrayWire {
+    #[serde(default)]
+    values: Vec<ReplayAnyValueWire>,
+}
+
+#[derive(Deserialize)]
+struct ReplayKeyValueListWire {
+    #[serde(default)]
+    values: Vec<ReplayKeyValueWire>,
+}
+
+struct ReplaySpanRef<'a> {
+    span: &'a ReplaySpanWire,
+    position: usize,
+}
+
+struct ReplayScenarioRef<'a> {
+    trace_id: &'a str,
+    span_id: &'a str,
+    name: String,
+    index: i64,
+    position: usize,
+}
+
+fn decode_replay_scenarios(
+    document: &ReplayOtlpDocumentWire,
+    manifest: &CaptureManifestWire,
+    registry: &ReplayRegistry,
+) -> Result<Vec<ReplayScenario>, String> {
+    if document.resource_spans.len() != 1 {
+        return Err(format!(
+            "reference OTLP must contain exactly one resourceSpans entry, found {}",
+            document.resource_spans.len()
+        ));
+    }
+    let resource = &document.resource_spans[0];
+    let resource_attributes = replay_attribute_map(&resource.resource.attributes, "reference resource")?;
+    require_replay_string_attribute(
+        &resource_attributes,
+        "conformance.version",
+        "reference resource",
+        Some(CTSC_VERSION),
+    )?;
+    require_replay_string_attribute(&resource_attributes, "conformance.tool.name", "reference resource", None)?;
+    require_replay_string_attribute(&resource_attributes, "conformance.tool.version", "reference resource", None)?;
+    require_replay_string_attribute(&resource_attributes, "conformance.target.name", "reference resource", None)?;
+    require_replay_string_attribute(&resource_attributes, "conformance.target.language", "reference resource", None)?;
+    require_replay_string_attribute(
+        &resource_attributes,
+        "conformance.registry.id",
+        "reference resource",
+        Some(&registry.id),
+    )?;
+    require_replay_string_attribute(
+        &resource_attributes,
+        "conformance.registry.version",
+        "reference resource",
+        Some(&registry.version),
+    )?;
+    require_replay_string_attribute(
+        &resource_attributes,
+        "conformance.registry.digest",
+        "reference resource",
+        Some(&registry.digest),
+    )?;
+
+    let spans = resource
+        .scope_spans
+        .iter()
+        .flat_map(|scope| scope.spans.iter())
+        .enumerate()
+        .map(|(position, span)| ReplaySpanRef { span, position })
+        .collect::<Vec<_>>();
+    if spans.is_empty() {
+        return Err("reference OTLP contains no spans".to_string());
+    }
+
+    let mut by_id = BTreeMap::new();
+    for span_ref in &spans {
+        validate_replay_hex_id("trace ID", &span_ref.span.trace_id, 32)?;
+        validate_replay_hex_id("span ID", &span_ref.span.span_id, 16)?;
+        if by_id
+            .insert((span_ref.span.trace_id.as_str(), span_ref.span.span_id.as_str()), span_ref.span)
+            .is_some()
+        {
+            return Err(format!(
+                "reference OTLP contains duplicate span ID '{}' in trace '{}'",
+                span_ref.span.span_id, span_ref.span.trace_id
+            ));
+        }
+        parse_replay_time(&span_ref.span.start_time_unix_nano, &format!("span '{}'", span_ref.span.span_id))?;
+    }
+
+    let runs = spans
+        .iter()
+        .filter(|span_ref| span_ref.span.name == "conformance.run")
+        .collect::<Vec<_>>();
+    if runs.len() != 1 || !runs[0].span.parent_span_id.is_empty() {
+        return Err(format!(
+            "reference OTLP must contain exactly one root conformance.run span, found {}",
+            runs.len()
+        ));
+    }
+
+    let mut scenario_refs = Vec::new();
+    for span_ref in spans.iter().filter(|span_ref| span_ref.span.name == "conformance.scenario") {
+        let parent = by_id
+            .get(&(span_ref.span.trace_id.as_str(), span_ref.span.parent_span_id.as_str()))
+            .ok_or_else(|| format!("scenario span '{}' has an unresolved parent", span_ref.span.span_id))?;
+        if parent.name != "conformance.run" {
+            return Err(format!("scenario span '{}' parent is not conformance.run", span_ref.span.span_id));
+        }
+        let attributes = replay_attribute_map(&span_ref.span.attributes, &format!("scenario span '{}'", span_ref.span.span_id))?;
+        let name = require_replay_string_attribute(
+            &attributes,
+            "conformance.scenario.name",
+            &format!("scenario span '{}'", span_ref.span.span_id),
+            None,
+        )?
+        .to_string();
+        let index = require_replay_integer_attribute(
+            &attributes,
+            "conformance.scenario.index",
+            &format!("scenario span '{}'", span_ref.span.span_id),
+        )?;
+        if index < 0 {
+            return Err(format!("scenario '{name}' has negative index {index}"));
+        }
+        scenario_refs.push(ReplayScenarioRef {
+            trace_id: &span_ref.span.trace_id,
+            span_id: &span_ref.span.span_id,
+            name,
+            index,
+            position: span_ref.position,
+        });
+    }
+    scenario_refs.sort_by_key(|scenario| (scenario.index, scenario.position));
+    for (expected, scenario) in scenario_refs.iter().enumerate() {
+        let expected = i64::try_from(expected).map_err(|_error| "reference scenario index exceeds i64".to_string())?;
+        if scenario.index != expected {
+            return Err(format!(
+                "reference scenario indexes must be unique and contiguous from zero; expected {expected}, found {}",
+                scenario.index
+            ));
+        }
+    }
+    let trace_names = scenario_refs.iter().map(|scenario| scenario.name.as_str()).collect::<Vec<_>>();
+    let manifest_names = manifest.scenarios.names.iter().map(String::as_str).collect::<Vec<_>>();
+    if trace_names != manifest_names {
+        return Err(format!(
+            "reference scenario order/names {trace_names:?} do not match capture manifest {manifest_names:?}"
+        ));
+    }
+
+    let mut decoded_operations = BTreeMap::new();
+    for span_ref in spans.iter().filter(|span_ref| span_ref.span.name == "conformance.operation") {
+        let parent = by_id
+            .get(&(span_ref.span.trace_id.as_str(), span_ref.span.parent_span_id.as_str()))
+            .ok_or_else(|| format!("operation span '{}' has an unresolved parent", span_ref.span.span_id))?;
+        if parent.name != "conformance.scenario" && parent.name != "conformance.operation" {
+            return Err(format!(
+                "operation span '{}' parent '{}' is not a scenario or operation",
+                span_ref.span.span_id, parent.name
+            ));
+        }
+        decoded_operations.insert(
+            (span_ref.span.trace_id.as_str(), span_ref.span.span_id.as_str()),
+            decode_replay_operation(span_ref.span, registry)?,
+        );
+    }
+    if spans.iter().any(|span_ref| span_ref.span.name == "conformance.parallel") {
+        return Err("reference OTLP parallel spans are unsupported by the first replay slice".to_string());
+    }
+
+    let mut scenarios = Vec::new();
+    for scenario in scenario_refs {
+        let mut top_level = spans
+            .iter()
+            .filter(|span_ref| {
+                span_ref.span.name == "conformance.operation"
+                    && span_ref.span.trace_id == scenario.trace_id
+                    && span_ref.span.parent_span_id == scenario.span_id
+            })
+            .collect::<Vec<_>>();
+        top_level.sort_by_key(|span_ref| {
+            (
+                parse_replay_time(&span_ref.span.start_time_unix_nano, "top-level operation").unwrap_or(i64::MAX),
+                span_ref.position,
+            )
+        });
+        if top_level.is_empty() {
+            return Err(format!("reference scenario '{}' contains no top-level operations", scenario.name));
+        }
+        let operations = top_level
+            .into_iter()
+            .map(|span_ref| {
+                decoded_operations
+                    .get(&(span_ref.span.trace_id.as_str(), span_ref.span.span_id.as_str()))
+                    .cloned()
+                    .ok_or_else(|| format!("operation span '{}' was not decoded", span_ref.span.span_id))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        scenarios.push(ReplayScenario {
+            name: scenario.name,
+            index: scenario.index,
+            operations,
+        });
+    }
+    Ok(scenarios)
+}
+
+fn decode_replay_operation(span: &ReplaySpanWire, registry: &ReplayRegistry) -> Result<ReplayOperation, String> {
+    let location = format!("operation span '{}'", span.span_id);
+    let attributes = replay_attribute_map(&span.attributes, &location)?;
+    let component_id = require_replay_string_attribute(&attributes, "conformance.component.id", &location, None)?.to_string();
+    let operation_name = require_replay_string_attribute(&attributes, "conformance.operation.name", &location, None)?.to_string();
+    let declaration = registry
+        .operations
+        .iter()
+        .find(|operation| operation.component_id == component_id && operation.name == operation_name)
+        .ok_or_else(|| format!("reference {location} names unknown operation '{component_id}::{operation_name}'"))?;
+    let input_value = attributes
+        .get("conformance.operation.inputs")
+        .ok_or_else(|| format!("reference {location} is missing conformance.operation.inputs"))?;
+    let ReplayAnyValueWire::Kvlist(input_list) = input_value else {
+        return Err(format!("reference {location} operation inputs must use kvlistValue"));
+    };
+    let input_values = replay_kvlist_map(input_list, &format!("{location} inputs"))?;
+    if input_values.len() != declaration.inputs.len() {
+        return Err(format!(
+            "reference {location} input names do not match registry operation '{}::{}'",
+            declaration.component_id, declaration.name
+        ));
+    }
+    let mut inputs = Vec::new();
+    for input in &declaration.inputs {
+        let value = input_values.get(input.name.as_str()).ok_or_else(|| {
+            format!(
+                "reference {location} is missing declared input '{}' for '{}::{}'",
+                input.name, declaration.component_id, declaration.name
+            )
+        })?;
+        inputs.push(ReplayInput {
+            name: input.name.clone(),
+            value_type: input.value_type.clone(),
+            value: decode_replay_value(value, &input.value_type, &format!("{location} input '{}'", input.name))?,
+        });
+    }
+    for actual in input_values.keys() {
+        if !declaration.inputs.iter().any(|input| input.name == *actual) {
+            return Err(format!(
+                "reference {location} contains undeclared input '{actual}' for '{}::{}'",
+                declaration.component_id, declaration.name
+            ));
+        }
+    }
+
+    let mut result_count = 0_usize;
+    let mut has_fault = false;
+    for event in &span.events {
+        match event.name.as_str() {
+            "conformance.result" => {
+                result_count += 1;
+                let output = declaration.output.as_ref().ok_or_else(|| {
+                    format!(
+                        "reference {location} emits a result but registry operation '{}::{}' declares no result",
+                        declaration.component_id, declaration.name
+                    )
+                })?;
+                let event_attributes = replay_attribute_map(&event.attributes, &format!("{location} result"))?;
+                let value = event_attributes
+                    .get("conformance.result.value")
+                    .ok_or_else(|| format!("reference {location} result is missing conformance.result.value"))?;
+                let _ = decode_replay_value(value, output, &format!("{location} result"))?;
+            }
+            "conformance.observation" => {
+                let event_attributes = replay_attribute_map(&event.attributes, &format!("{location} observation"))?;
+                let name = require_replay_string_attribute(
+                    &event_attributes,
+                    "conformance.observation.name",
+                    &format!("{location} observation"),
+                    None,
+                )?;
+                return Err(format!(
+                    "reference {location} contains unsupported observation '{name}' in the first replay slice"
+                ));
+            }
+            "conformance.fault" => has_fault = true,
+            "conformance.empty" | "conformance.error" => {
+                return Err(format!("reference {location} contains unsupported terminal event '{}'", event.name));
+            }
+            other => return Err(format!("reference {location} contains unsupported CTSC event '{other}'")),
+        }
+    }
+    if result_count > 1 {
+        return Err(format!("reference {location} contains multiple result events"));
+    }
+    if declaration.output.is_some() && result_count == 0 && !has_fault {
+        return Err(format!(
+            "reference {location} has no result or fault for result-bearing operation '{}::{}'",
+            declaration.component_id, declaration.name
+        ));
+    }
+
+    Ok(ReplayOperation {
+        component_id,
+        operation_name,
+        inputs,
+        output: declaration.output.clone(),
+    })
+}
+
+fn replay_attribute_map<'a>(
+    attributes: &'a [ReplayKeyValueWire],
+    location: &str,
+) -> Result<BTreeMap<&'a str, &'a ReplayAnyValueWire>, String> {
+    let mut result = BTreeMap::new();
+    for attribute in attributes {
+        if result.insert(attribute.key.as_str(), &attribute.value).is_some() {
+            return Err(format!("{location} contains duplicate attribute '{}'", attribute.key));
+        }
+    }
+    Ok(result)
+}
+
+fn replay_kvlist_map<'a>(list: &'a ReplayKeyValueListWire, location: &str) -> Result<BTreeMap<&'a str, &'a ReplayAnyValueWire>, String> {
+    let mut result = BTreeMap::new();
+    for entry in &list.values {
+        if result.insert(entry.key.as_str(), &entry.value).is_some() {
+            return Err(format!("{location} contains duplicate key '{}'", entry.key));
+        }
+    }
+    Ok(result)
+}
+
+fn require_replay_string_attribute<'a>(
+    attributes: &'a BTreeMap<&str, &'a ReplayAnyValueWire>,
+    key: &str,
+    location: &str,
+    expected: Option<&str>,
+) -> Result<&'a str, String> {
+    let value = attributes
+        .get(key)
+        .ok_or_else(|| format!("{location} is missing string attribute '{key}'"))?;
+    let ReplayAnyValueWire::String(value) = value else {
+        return Err(format!("{location} attribute '{key}' must use stringValue"));
+    };
+    if let Some(expected) = expected
+        && value != expected
+    {
+        return Err(format!("{location} attribute '{key}' is '{value}', expected '{expected}'"));
+    }
+    Ok(value)
+}
+
+fn require_replay_integer_attribute(attributes: &BTreeMap<&str, &ReplayAnyValueWire>, key: &str, location: &str) -> Result<i64, String> {
+    let value = attributes
+        .get(key)
+        .ok_or_else(|| format!("{location} is missing integer attribute '{key}'"))?;
+    let ReplayAnyValueWire::Int(value) = value else {
+        return Err(format!("{location} attribute '{key}' must use intValue"));
+    };
+    value
+        .parse::<i64>()
+        .map_err(|error| format!("{location} attribute '{key}' is not an i64 decimal integer: {error}"))
+}
+
+fn validate_replay_hex_id(label: &str, value: &str, length: usize) -> Result<(), String> {
+    if value.len() != length
+        || value.bytes().all(|byte| byte == b'0')
+        || !value.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(format!(
+            "reference {label} '{value}' must be {length} lowercase hexadecimal characters and nonzero"
+        ));
+    }
+    Ok(())
+}
+
+fn parse_replay_time(value: &str, location: &str) -> Result<i64, String> {
+    let parsed = value
+        .parse::<i64>()
+        .map_err(|error| format!("{location} startTimeUnixNano is not an i64 decimal integer: {error}"))?;
+    if parsed < 0 {
+        return Err(format!("{location} startTimeUnixNano must be non-negative"));
+    }
+    Ok(parsed)
+}
+
+fn decode_replay_value(value: &ReplayAnyValueWire, value_type: &ReplayType, location: &str) -> Result<ReplayValue, String> {
+    let ReplayType::Primitive { name } = value_type else {
+        return Err(format!(
+            "{location} uses unsupported structured replay type {}",
+            replay_type_name(value_type)
+        ));
+    };
+    match name.as_str() {
+        "unit" => {
+            let ReplayAnyValueWire::Kvlist(list) = value else {
+                return Err(format!("{location} unit value must use kvlistValue"));
+            };
+            if !list.values.is_empty() {
+                return Err(format!("{location} unit value must be an empty kvlistValue"));
+            }
+            Ok(ReplayValue::Unit)
+        }
+        "string" => match value {
+            ReplayAnyValueWire::String(value) => Ok(ReplayValue::String(value.clone())),
+            _ => Err(format!("{location} string value must use stringValue")),
+        },
+        "bool" => match value {
+            ReplayAnyValueWire::Bool(value) => Ok(ReplayValue::Bool(*value)),
+            _ => Err(format!("{location} bool value must use boolValue")),
+        },
+        "i32" => decode_replay_integer(value, location, i64::from(i32::MIN), i64::from(i32::MAX))
+            .and_then(|value| i32::try_from(value).map(ReplayValue::I32).map_err(|error| error.to_string())),
+        "i64" => decode_replay_integer(value, location, i64::MIN, i64::MAX).map(ReplayValue::I64),
+        "u32" => decode_replay_integer(value, location, 0, i64::from(u32::MAX))
+            .and_then(|value| u32::try_from(value).map(ReplayValue::U32).map_err(|error| error.to_string())),
+        "u64" => {
+            let ReplayAnyValueWire::String(value) = value else {
+                return Err(format!("{location} u64 value must use stringValue"));
+            };
+            let parsed = value
+                .parse::<u64>()
+                .map_err(|error| format!("{location} is not a valid u64 decimal string: {error}"))?;
+            if parsed.to_string() != *value {
+                return Err(format!("{location} u64 value must use canonical unsigned decimal text"));
+            }
+            Ok(ReplayValue::U64(parsed))
+        }
+        "f32" => decode_replay_float(value, location, true),
+        "f64" => decode_replay_float(value, location, false),
+        "bytes" => Err(format!("{location} uses unsupported replay primitive 'bytes'")),
+        other => Err(format!("{location} uses unknown CTSC primitive '{other}'")),
+    }
+}
+
+fn decode_replay_integer(value: &ReplayAnyValueWire, location: &str, minimum: i64, maximum: i64) -> Result<i64, String> {
+    let ReplayAnyValueWire::Int(value) = value else {
+        return Err(format!("{location} integer value must use intValue"));
+    };
+    let parsed = value
+        .parse::<i64>()
+        .map_err(|error| format!("{location} is not a signed decimal integer: {error}"))?;
+    if parsed < minimum || parsed > maximum {
+        return Err(format!(
+            "{location} integer value {parsed} is outside supported range {minimum}..={maximum}"
+        ));
+    }
+    Ok(parsed)
+}
+
+fn decode_replay_float(value: &ReplayAnyValueWire, location: &str, narrow: bool) -> Result<ReplayValue, String> {
+    let ReplayAnyValueWire::Double(value) = value else {
+        return Err(format!("{location} floating-point value must use doubleValue"));
+    };
+    match value {
+        ReplayDoubleWire::Number(value) if narrow => {
+            let narrowed = value
+                .to_string()
+                .parse::<f32>()
+                .map_err(|error| format!("{location} value is outside f32 range: {error}"))?;
+            if f64::from(narrowed).to_bits() != value.to_bits() {
+                return Err(format!("{location} value is not exactly representable as f32"));
+            }
+            Ok(ReplayValue::F32Bits(narrowed.to_bits()))
+        }
+        ReplayDoubleWire::Number(value) => Ok(ReplayValue::F64Bits(value.to_bits())),
+        ReplayDoubleWire::Symbol(symbol) => {
+            let bits = match (narrow, symbol.as_str()) {
+                (true, "NaN") => return Ok(ReplayValue::F32Bits(f32::NAN.to_bits())),
+                (true, "Infinity") => return Ok(ReplayValue::F32Bits(f32::INFINITY.to_bits())),
+                (true, "-Infinity") => return Ok(ReplayValue::F32Bits(f32::NEG_INFINITY.to_bits())),
+                (false, "NaN") => f64::NAN.to_bits(),
+                (false, "Infinity") => f64::INFINITY.to_bits(),
+                (false, "-Infinity") => f64::NEG_INFINITY.to_bits(),
+                _ => return Err(format!("{location} contains invalid symbolic doubleValue '{symbol}'")),
+            };
+            Ok(ReplayValue::F64Bits(bits))
+        }
+    }
+}
+
+fn replay_type_name(value_type: &ReplayType) -> &'static str {
+    match value_type {
+        ReplayType::Primitive { .. } => "primitive",
+        ReplayType::Named { .. } => "named",
+        ReplayType::List { .. } => "list",
+        ReplayType::Set { .. } => "set",
+        ReplayType::Map { .. } => "map",
+        ReplayType::Tuple { .. } => "tuple",
+        ReplayType::Optional { .. } => "optional",
+        ReplayType::Record { .. } => "record",
+    }
 }
 
 fn deterministic_span_id(value: u64) -> Result<String, String> {
@@ -1301,14 +2290,14 @@ struct RegistryDocument {
     components: Vec<RegistryComponent>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct RegistryComponent {
     id: String,
     operations: Vec<RegistryOperation>,
     types: Vec<RegistryNamedType>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct RegistryOperation {
     name: String,
     inputs: Vec<NamedValue>,
@@ -1316,64 +2305,31 @@ struct RegistryOperation {
     outcomes: RegistryOutcomes,
 }
 
-#[derive(Debug, Serialize)]
-struct NamedValue {
-    name: String,
-    #[serde(rename = "type")]
-    value_type: RegistryTypeRef,
-}
+type NamedValue = ReplayRegistryInput;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct RegistryOutcomes {
     #[serde(skip_serializing_if = "Option::is_none")]
     result: Option<RegistryTypeRef>,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-enum RegistryTypeRef {
-    Primitive {
-        name: String,
-    },
-    Named {
-        name: String,
-    },
-    List {
-        items: Box<RegistryTypeRef>,
-    },
-    Set {
-        items: Box<RegistryTypeRef>,
-    },
-    Map {
-        keys: Box<RegistryTypeRef>,
-        values: Box<RegistryTypeRef>,
-    },
-    Tuple {
-        items: Vec<RegistryTypeRef>,
-    },
-    Optional {
-        value: Box<RegistryTypeRef>,
-    },
-    Record {
-        fields: Vec<NamedValue>,
-    },
-}
+type RegistryTypeRef = ReplayType;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct RegistryVariant {
     name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     payload: Option<RegistryTypeRef>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct RegistryNamedType {
     name: String,
     #[serde(flatten)]
     shape: RegistryNamedTypeShape,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum RegistryNamedTypeShape {
     Record { fields: Vec<NamedValue> },

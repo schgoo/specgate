@@ -1017,8 +1017,12 @@ mod tests {
     fn op(name: &str, is_setup: bool, return_type: &str, fills: &str, params: &[(&str, &str)]) -> OpInfo {
         OpInfo {
             name: name.into(),
+            module_path: String::new(),
+            fn_name: name.into(),
             is_setup,
             is_async: false,
+            is_method: false,
+            is_public: true,
             return_type: return_type.into(),
             fills: fills.into(),
             params: params.iter().map(|(a, b)| ((*a).to_string(), (*b).to_string())).collect(),

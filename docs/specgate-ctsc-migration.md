@@ -141,6 +141,17 @@ Explicit mappings cover:
 - outcome translation;
 - ignored or projected observations.
 
+The first linker slice targets synchronous public Rust free functions with
+primitive semantic inputs. It requires exact component, operation, input name,
+input order, input type, and output type identity. Setups, methods, async
+operations, structured values, and explicit mappings remain unsupported until
+their invocation-plan nodes are implemented; the linker rejects them rather
+than guessing.
+
+**Status:** the first linker slice is implemented. Replay builds a typed,
+serializable target-local plan from verified CTSC stimuli plus raw and
+normalized link-time discovery metadata before generating any candidate code.
+
 ## Phase 5: Candidate replay
 
 Read each reference scenario, select its top-level operations, feed semantic
@@ -149,6 +160,24 @@ trace.
 
 Implement Rust replay first, then route C# through the same language-neutral
 plan model.
+
+The initial command surface is:
+
+```text
+specgate replay <capture/> <candidate-binding.yaml> \
+  --out candidate.otlp.json [--target <name>]
+```
+
+Replay reads no `.spec.yaml`. It invokes only top-level operations from the
+reference scenarios; nested operations are independently observed from the
+candidate.
+
+**Status:** the first Rust replay slice is implemented for lossless CTSC
+`unit`, `string`, `bool`, `i32`, `i64`, `u32`, `u64`, `f32`, and `f64`
+values. Candidate scenarios are captured natively and encoded as one
+deterministic linked run with IDs independent from the reference. Strict
+comparison, structured values, setups/methods, async, and additional languages
+remain later slices.
 
 ## Phase 6: Differential comparison
 

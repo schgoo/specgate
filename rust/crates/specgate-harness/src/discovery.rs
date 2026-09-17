@@ -515,11 +515,16 @@ pub fn cargo_package_name(package_root: &Path) -> Option<String> {
 // Registry model (parsed from discovery JSON)
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone)]
 pub struct OpInfo {
     pub name: String,
+    pub module_path: String,
+    pub fn_name: String,
     pub is_setup: bool,
     pub is_async: bool,
+    pub is_method: bool,
+    pub is_public: bool,
     pub return_type: String,
     pub fills: String,
     pub params: Vec<(String, String)>,
@@ -623,8 +628,12 @@ impl Registry {
 fn parse_op(v: &serde_json::Value) -> OpInfo {
     OpInfo {
         name: str_field(v, "name"),
+        module_path: str_field(v, "module_path"),
+        fn_name: str_field(v, "fn_name"),
         is_setup: v.get("is_setup").and_then(serde_json::Value::as_bool).unwrap_or(false),
         is_async: v.get("is_async").and_then(serde_json::Value::as_bool).unwrap_or(false),
+        is_method: v.get("is_method").and_then(serde_json::Value::as_bool).unwrap_or(false),
+        is_public: v.get("is_public").and_then(serde_json::Value::as_bool).unwrap_or(true),
         return_type: str_field(v, "return_type"),
         fills: str_field(v, "fills"),
         params: parse_pairs(v.get("params")),

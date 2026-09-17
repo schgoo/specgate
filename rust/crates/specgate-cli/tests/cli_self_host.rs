@@ -21,6 +21,7 @@ fn repo_root() -> PathBuf {
 #[ignore = "doubly-nested CLI self-host run is slow; invoke with --ignored"]
 fn cli_spec_self_hosts() {
     let root = repo_root();
+    ensure_replay_capture_fixture(&root);
     let spec = root.join("specs/specgate.cli.spec.yaml");
     match run_spec(spec.to_str().expect("utf-8 path")) {
         RunOutcome::Error { reason } => panic!("CLI self-host run errored: {reason}"),
@@ -39,4 +40,31 @@ fn cli_spec_self_hosts() {
             );
         }
     }
+}
+
+fn ensure_replay_capture_fixture(root: &std::path::Path) {
+    let capture_dir = root.join("rust").join("target").join("ctsc-capture-stateless");
+    let complete = ["manifest.json", "registry.ctsc.json", "reference.otlp.json"]
+        .iter()
+        .all(|file| capture_dir.join(file).is_file());
+    if complete {
+        return;
+    }
+    let binding = root
+        .join("test")
+        .join("rust")
+        .join("crates")
+        .join("specgate-fixtures")
+        .join("specs")
+        .join("binding.yaml");
+    let outcome = specgate_cli::capture(
+        binding.to_str().expect("utf-8 binding path"),
+        "",
+        "fixture.stateless_add",
+        capture_dir.to_str().expect("utf-8 capture path"),
+    );
+    assert!(
+        matches!(outcome, specgate_cli::CaptureOutcome::Complete { .. }),
+        "failed to prepare replay capture fixture: {outcome}"
+    );
 }

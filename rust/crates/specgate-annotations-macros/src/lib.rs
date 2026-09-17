@@ -400,6 +400,7 @@ pub fn spec_operation(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let is_method = has_receiver(&func);
     let is_async = func.sig.asyncness.is_some();
+    let is_public = matches!(&func.vis, syn::Visibility::Public(_));
     let params = extract_param_renames(&mut func);
     let param_names: Vec<String> = params.iter().map(|(i, _, _)| i.to_string()).collect();
     let has_ref_param = params.iter().any(|(_, t, _)| is_reference(t));
@@ -500,6 +501,8 @@ pub fn spec_operation(attr: TokenStream, item: TokenStream) -> TokenStream {
                 fn_name: #fn_name,
                 is_setup: false,
                 is_async: #is_async,
+                is_method: #is_method,
+                is_public: #is_public,
                 params: &[#(#param_entries),*],
                 return_type: #ret_str,
                 fills: "",
@@ -698,6 +701,7 @@ pub fn spec_setup(attr: TokenStream, item: TokenStream) -> TokenStream {
     // #[spec_setup] attributes can stack on one function without colliding.
     let fn_name = func.sig.ident.to_string();
     let is_async = func.sig.asyncness.is_some();
+    let is_public = matches!(&func.vis, syn::Visibility::Public(_));
     let fills_str = fills.clone().unwrap_or_default();
     let suffix = sanitize_ident(&format!("{fn_name}_{op_name}_{fills_str}"));
     let const_ident = Ident::new(&format!("_SPECGATE_SETUP_REG_{suffix}"), func.sig.ident.span());
@@ -728,6 +732,8 @@ pub fn spec_setup(attr: TokenStream, item: TokenStream) -> TokenStream {
                 fn_name: #fn_name,
                 is_setup: true,
                 is_async: #is_async,
+                is_method: false,
+                is_public: #is_public,
                 params: &[#(#param_entries),*],
                 return_type: #ret_str,
                 fills: #fills_str,

@@ -13,6 +13,7 @@ rust-version.workspace = true
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 specgate = { workspace = true }
 specgate-runtime = { workspace = true, features = ["specgate-trace"] }
 

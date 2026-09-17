@@ -53,6 +53,8 @@ fn free_function_operation_is_registered() {
         json.contains("\"fn_name\":\"add\""),
         "free function operation 'add' must be registered in discovery_json; got: {json}"
     );
+    assert!(json.contains("\"is_method\":false"));
+    assert!(json.contains("\"is_public\":true"));
 }
 
 /// Method operations (with `&mut self` receiver) inside `impl` blocks must be
@@ -74,6 +76,7 @@ fn method_operation_inside_impl_block_is_registered() {
         json.contains("\"fn_name\":\"withdraw\""),
         "method operation 'withdraw' (impl Account) must be registered in discovery_json; got: {json}"
     );
+    assert!(json.contains("\"is_method\":true"));
 }
 
 /// `#[spec_setup]` functions must register metadata with `is_setup: true`.

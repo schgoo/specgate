@@ -1,10 +1,12 @@
 //! Command-line interface for [SpecGate](https://github.com/schgoo/specgate):
 //! validate specs, run them through the harness, extract specs from
 //! annotated code, discover implementation metadata as CTSC registries, and
-//! capture passing Rust tests as native CTSC reference bundles.
+//! capture passing Rust tests as native CTSC reference bundles. It can also
+//! compile a typed static invocation plan from a capture bundle and replay its
+//! top-level stimuli against a synchronous Rust candidate.
 //! This library backs the `specgate` binary and the integration-test suite;
 //! each command is also callable as a function (`validate`, `run`, `extract`,
-//! `discover`, `capture`).
+//! `discover`, `capture`, `replay`).
 //!
 //! # Commands
 //!
@@ -14,6 +16,7 @@
 //! specgate extract <package-root> -o|--out <spec.yaml> [--component <name>] [--cases]
 //! specgate discover <binding.yaml> --component <id> --registry-id <id> --registry-version <version> -o|--out <registry.ctsc.json> [--target <name>]
 //! specgate capture <binding.yaml> --out <dir> [--target <name>] [--component <id>]
+//! specgate replay <capture-dir> <candidate-binding.yaml> --out <candidate.otlp.json> [--target <name>]
 //! ```
 //!
 //! ## `validate`
@@ -85,6 +88,22 @@
 //! - `--target <name>` — binding target; omitted selects the default.
 //! - `--component <id>` — component to capture; omitted selects the sole
 //!   discovered component and errors when discovery is ambiguous.
+//!
+//! ## `replay`
+//!
+//! Reads `manifest.json`, `registry.ctsc.json`, and `reference.otlp.json` from
+//! a capture bundle, verifies their exact digests and linkage, decodes ordered
+//! top-level primitive operation stimuli, and builds a serializable target-local
+//! invocation plan from normalized plus raw link-time discovery metadata. It
+//! then compiles a temporary Rust binary that directly calls the candidate's
+//! public synchronous free functions and emits one independent linked CTSC run.
+//! Replay never reads a `.spec.yaml`.
+//!
+//! - `--out <candidate.otlp.json>` — candidate CTSC trace path (required).
+//! - `--target <name>` — candidate binding target; omitted selects the default.
+//!
+//! Methods, setups, async operations, structured values, bytes, non-Rust
+//! candidates, and semantic renames/coercions are rejected in this first slice.
 
 // The crate-root default component for all annotated items in this crate's
 // submodules (extract/run/validate). Submodules reference the generated
@@ -94,11 +113,13 @@ specgate::spec_component!("specgate.cli");
 pub mod capture;
 pub mod discover;
 pub mod extract;
+pub mod replay;
 pub mod run;
 pub mod validate;
 
 pub use capture::{CaptureOutcome, CaptureReport, capture};
 pub use discover::{DiscoverOutcome, DiscoverReport, discover};
 pub use extract::{ExtractOutcome, ExtractReport, extract};
+pub use replay::{ReplayInvocationPlan, ReplayOutcome, ReplayReport, replay};
 pub use run::{CaseReport, RunOutcome, RunReport, TargetDivergence, run};
 pub use validate::{Severity, ValidateOutcome, ValidationFinding, ValidationReport, validate};

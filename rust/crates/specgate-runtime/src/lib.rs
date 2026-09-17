@@ -30,6 +30,7 @@ pub use linkme;
 // ---------------------------------------------------------------------------
 
 /// Metadata about one annotated operation or setup.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone)]
 pub struct OpMeta {
     pub name: &'static str,
@@ -37,6 +38,8 @@ pub struct OpMeta {
     pub fn_name: &'static str,
     pub is_setup: bool,
     pub is_async: bool,
+    pub is_method: bool,
+    pub is_public: bool,
     pub params: &'static [(&'static str, &'static str)],
     pub return_type: &'static str,
     /// For setups: the operation parameter this setup fills (empty if unset).
@@ -124,12 +127,14 @@ pub fn discovery_json() -> String {
         }
         let _ = write!(
             out,
-            "{{\"name\":\"{}\",\"module_path\":\"{}\",\"fn_name\":\"{}\",\"is_setup\":{},\"is_async\":{},\"return_type\":\"{}\",\"fills\":\"{}\",\"component\":\"{}\",\"params\":",
+            "{{\"name\":\"{}\",\"module_path\":\"{}\",\"fn_name\":\"{}\",\"is_setup\":{},\"is_async\":{},\"is_method\":{},\"is_public\":{},\"return_type\":\"{}\",\"fills\":\"{}\",\"component\":\"{}\",\"params\":",
             json_escape(op.name),
             json_escape(op.module_path),
             json_escape(op.fn_name),
             op.is_setup,
             op.is_async,
+            op.is_method,
+            op.is_public,
             json_escape(op.return_type),
             json_escape(op.fills),
             json_escape(op.component),

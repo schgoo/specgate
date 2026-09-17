@@ -2,13 +2,13 @@
 
 use std::process::ExitCode;
 
-use specgate_cli::{capture, discover, extract, run, validate};
+use specgate_cli::{capture, discover, extract, replay, run, validate};
 
 fn print_usage() {
     eprintln!(
         "usage: specgate <command> [options] <args>\n\
          \n\
-         commands:\n  validate <spec-dir> [--strict] [--spec-only] [--assertions-dir <dir>]\n  run <spec.yaml> [--coverage] [--coverage-threshold <pct>] [--verbose] [--json]\n  extract <package-root> -o|--out <spec.yaml> [--component <name>] [--cases]\n  discover <binding.yaml> --component <id> --registry-id <id> --registry-version <version> -o|--out <registry.ctsc.json> [--target <name>]\n  capture <binding.yaml> --out <dir> [--target <name>] [--component <id>]"
+         commands:\n  validate <spec-dir> [--strict] [--spec-only] [--assertions-dir <dir>]\n  run <spec.yaml> [--coverage] [--coverage-threshold <pct>] [--verbose] [--json]\n  extract <package-root> -o|--out <spec.yaml> [--component <name>] [--cases]\n  discover <binding.yaml> --component <id> --registry-id <id> --registry-version <version> -o|--out <registry.ctsc.json> [--target <name>]\n  capture <binding.yaml> --out <dir> [--target <name>] [--component <id>]\n  replay <capture-dir> <candidate-binding.yaml> --out <candidate.otlp.json> [--target <name>]"
     );
 }
 
@@ -26,6 +26,7 @@ fn main() -> ExitCode {
         "extract" => cmd_extract(rest),
         "discover" => cmd_discover(rest),
         "capture" => cmd_capture(rest),
+        "replay" => cmd_replay(rest),
         "-h" | "--help" => {
             print_usage();
             ExitCode::from(0)
@@ -35,6 +36,68 @@ fn main() -> ExitCode {
             print_usage();
             ExitCode::from(2)
         }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct ReplayArgs {
+    capture_dir: String,
+    binding: String,
+    target: String,
+    out: String,
+}
+
+fn parse_replay_args(args: &[String]) -> Result<ReplayArgs, String> {
+    let mut positional = Vec::new();
+    let mut target = String::new();
+    let mut out = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            flag @ ("--target" | "--out") => {
+                if i + 1 >= args.len() {
+                    return Err(format!("{flag} needs an argument"));
+                }
+                let value = args[i + 1].clone();
+                match flag {
+                    "--target" => target = value,
+                    "--out" => out = Some(value),
+                    _ => {}
+                }
+                i += 2;
+            }
+            value if !value.starts_with('-') => {
+                positional.push(value.to_string());
+                i += 1;
+            }
+            value => return Err(format!("unexpected argument '{value}'")),
+        }
+    }
+    if positional.len() != 2 {
+        return Err("replay requires <capture-dir> and <candidate-binding.yaml>".to_string());
+    }
+    let out = out.ok_or_else(|| "replay requires --out <candidate.otlp.json>".to_string())?;
+    Ok(ReplayArgs {
+        capture_dir: positional.remove(0),
+        binding: positional.remove(0),
+        target,
+        out,
+    })
+}
+
+fn cmd_replay(args: &[String]) -> ExitCode {
+    let parsed = match parse_replay_args(args) {
+        Ok(parsed) => parsed,
+        Err(reason) => {
+            eprintln!("error: {reason}");
+            return ExitCode::from(2);
+        }
+    };
+    let outcome = replay(&parsed.capture_dir, &parsed.binding, &parsed.target, &parsed.out);
+    print!("{}", replay::format_outcome(&outcome));
+    match outcome {
+        replay::ReplayOutcome::Complete { .. } => ExitCode::from(0),
+        replay::ReplayOutcome::Error { .. } => ExitCode::from(1),
     }
 }
 
@@ -377,6 +440,39 @@ mod tests {
         assert_eq!(
             parse_capture_args(&args(&["binding.yaml"])).unwrap_err(),
             "capture requires --out <dir>"
+        );
+    }
+
+    #[test]
+    fn parses_replay_command_arguments() {
+        assert_eq!(
+            parse_replay_args(&args(&[
+                "capture",
+                "candidate.yaml",
+                "--out",
+                "candidate.otlp.json",
+                "--target",
+                "candidate",
+            ]))
+            .unwrap(),
+            ReplayArgs {
+                capture_dir: "capture".to_string(),
+                binding: "candidate.yaml".to_string(),
+                target: "candidate".to_string(),
+                out: "candidate.otlp.json".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn replay_parser_requires_two_paths_and_output() {
+        assert_eq!(
+            parse_replay_args(&args(&["capture"])).unwrap_err(),
+            "replay requires <capture-dir> and <candidate-binding.yaml>"
+        );
+        assert_eq!(
+            parse_replay_args(&args(&["capture", "candidate.yaml"])).unwrap_err(),
+            "replay requires --out <candidate.otlp.json>"
         );
     }
 }
