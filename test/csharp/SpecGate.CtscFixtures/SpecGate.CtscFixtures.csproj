@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>SpecGate.CtscFixtures</RootNamespace>
+    <AssemblyName>SpecGate.CtscFixtures</AssemblyName>
+    <Version>0.6.0</Version>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\csharp\SpecGate.Annotations\SpecGate.Annotations.csproj" />
+  </ItemGroup>
+</Project>

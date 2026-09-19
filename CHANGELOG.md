@@ -1,29 +1,21 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+## [Unreleased — 0.6.0]
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+### Changed
 
-## [Unreleased]
+- Replaced the legacy verification stack with CTSC-native discovery, capture,
+  and replay.
+- Added the focused `specgate-discovery` crate and one strict target-binding
+  resolver shared by all CLI commands.
+- Reduced Rust and C# fixtures to stateless, rich-type, and setup-discovery
+  coverage.
 
-### Added
+### Removed
 
-- `specgate` umbrella crate — single dependency for annotations + harness
-- `specgate-annotations` — proc macros for `#[spec_operation]`, `#[spec_setup]`, `#[derive(SpecEvent)]`, `spec_trace!`
-- `specgate-runtime` — thread-local trace buffer, `Value` type, `ToSpecValue` trait
-- `specgate-harness` — test harness: codegen, trace collection, subsequence matching
-- `specgate-cli` — `specgate validate` and `specgate run` commands
-- Spec schema v0.4.0 with operations, types, structured values, property tests
-- Assertion operators: `$eq`, `$size`, `$contains`, `$containsAll`, `$excludes`, `$match`, `$exists`, `$any`, `$type`, `$matches`, `$not`, `$gt`/`$gte`/`$lt`/`$lte`, `$every`
-- `$run`, `$unordered`, `$anywhere` trace directives
-- Multi-target binding with per-case target override
-- Enum `derive(SpecEvent)` — unit and named-field variants
-- Complex input deserialization via serde (structs, enums, lists, maps, optionals)
-- `ToSpecValue` impl for structs and enums via `derive(SpecEvent)`
-- Property test syntax (`kind: property`, generators, calls, `$assert`)
-- `specgate-trace` feature flag for zero-cost annotations in release builds
-- Level/source/async support on operations and cases
-- CLI validate: 14 static checks (schema, ops, inputs, deps, narratives, source visibility)
-- Dual license: MIT OR Apache-2.0
-- CI: GitHub Actions (build, test, clippy, fmt, deny) on ubuntu + windows
+- Spec-driven validation, execution, matching, extraction, code generation,
+  coverage, and self-hosting.
+- Flat trace recording and table-driven mock instrumentation.
+- The former harness/types crates and C# runtime/weaver projects.
+- The standalone Rust `specgate-annotations` facade; `specgate` is the sole
+  macro/runtime facade.

@@ -2,7 +2,7 @@
 name = "specgate-ctsc"
 version.workspace = true
 edition.workspace = true
-description = "Native CTSC capture and transitional legacy trace projection for SpecGate"
+description = "Native CTSC registry, trace, capture, and replay support for SpecGate"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
@@ -14,12 +14,12 @@ rust-version.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
-specgate = { workspace = true }
-specgate-runtime = { workspace = true, features = ["specgate-trace"] }
+specgate-runtime = { workspace = true }
 
 [dev-dependencies]
 sha2 = { workspace = true }
-specgate = { workspace = true, features = ["harness"] }
+specgate = { workspace = true }
+specgate-discovery = { workspace = true }
 
 [lints]
 workspace = true

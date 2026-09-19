@@ -1,8 +1,0 @@
-# Binding for fixture specs — points to the fixture crate
-language: rust
-targets:
-  default:
-    package_root: ..
-  tokio:
-    package_root: ..
-    runtime: tokio

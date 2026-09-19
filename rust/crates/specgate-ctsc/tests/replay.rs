@@ -1,10 +1,10 @@
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use specgate::__rt::{NativeCapture, NativeCaptureConfig, Value, begin_native_operation, finish_native_capture, start_native_capture};
 use specgate_ctsc::{
     ReplayValue, decode_replay_bundle_result, encode_native_captures_otlp_result, encode_replayed_native_captures_otlp_result,
     encode_schema_registry_result,
 };
+use specgate_runtime::{NativeCapture, NativeCaptureConfig, Value, begin_native_operation, finish_native_capture, start_native_capture};
 
 const REGISTRY_ID: &str = "urn:ctsc:registry:fixture.replay";
 const REGISTRY_VERSION: &str = "0.1.0";
@@ -139,7 +139,7 @@ fn replay_encoder_uses_independent_deterministic_ids() {
     let digest = digest(&registry);
     let reference = encode_native_captures_otlp_result(
         std::slice::from_ref(&capture),
-        "0.5.0",
+        "0.6.0",
         "reference",
         "rust",
         REGISTRY_ID,
@@ -149,7 +149,7 @@ fn replay_encoder_uses_independent_deterministic_ids() {
     .unwrap();
     let first = encode_replayed_native_captures_otlp_result(
         std::slice::from_ref(&capture),
-        "0.5.0",
+        "0.6.0",
         "candidate",
         "rust",
         REGISTRY_ID,
@@ -158,7 +158,7 @@ fn replay_encoder_uses_independent_deterministic_ids() {
     )
     .unwrap();
     let second =
-        encode_replayed_native_captures_otlp_result(&[capture], "0.5.0", "candidate", "rust", REGISTRY_ID, REGISTRY_VERSION, &digest)
+        encode_replayed_native_captures_otlp_result(&[capture], "0.6.0", "candidate", "rust", REGISTRY_ID, REGISTRY_VERSION, &digest)
             .unwrap();
 
     assert_eq!(first, second);
@@ -178,7 +178,7 @@ fn make_registry(schema: &str) -> Vec<u8> {
 fn reference_trace(capture: &NativeCapture, registry: &[u8]) -> String {
     encode_native_captures_otlp_result(
         std::slice::from_ref(capture),
-        "0.5.0",
+        "0.6.0",
         "reference",
         "rust",
         REGISTRY_ID,
@@ -195,7 +195,7 @@ fn make_manifest(registry: &[u8], trace: &[u8], names: &[&str]) -> Vec<u8> {
         "formatVersion": "0.1.0",
         "componentId": "fixture.replay",
         "target": {"name": "reference", "language": "rust"},
-        "tool": {"name": "specgate", "version": "0.5.0"},
+        "tool": {"name": "specgate", "version": "0.6.0"},
         "registry": {
             "path": "registry.ctsc.json",
             "id": REGISTRY_ID,

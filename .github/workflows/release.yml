@@ -15,40 +15,32 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.96.0"
-
-      - name: Publish specgate-runtime
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+      - name: Publish crates in dependency order
         working-directory: rust
-        run: cargo publish -p specgate-runtime --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
-      - name: Wait for index
-        run: sleep 30
-      - name: Publish specgate-annotations-macros
-        working-directory: rust
-        run: cargo publish -p specgate-annotations-macros --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
-      - name: Wait for index
-        run: sleep 30
-      - name: Publish specgate-annotations
-        working-directory: rust
-        run: cargo publish -p specgate-annotations --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
-      - name: Wait for index
-        run: sleep 30
-      - name: Publish specgate-types
-        working-directory: rust
-        run: cargo publish -p specgate-types --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
-      - name: Wait for index
-        run: sleep 30
-      - name: Publish specgate-harness
-        working-directory: rust
-        run: cargo publish -p specgate-harness --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
-      - name: Wait for index
-        run: sleep 30
-      - name: Publish specgate
-        working-directory: rust
-        run: cargo publish -p specgate --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
-      - name: Wait for index
-        run: sleep 30
-      - name: Publish specgate-cli
-        working-directory: rust
-        run: cargo publish -p specgate-cli --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          cargo package --workspace --no-verify
+          cargo publish -p specgate-runtime
+          sleep 30
+          cargo publish -p specgate-annotations-macros
+          sleep 30
+          cargo publish -p specgate
+          sleep 30
+          cargo publish -p specgate-discovery
+          sleep 30
+          cargo publish -p specgate-ctsc
+          sleep 30
+          cargo publish -p specgate-cli
+      - name: Pack C# annotations
+        env:
+          SOURCE_DATE_EPOCH: '315532800'
+        run: dotnet pack csharp/SpecGate.Annotations/SpecGate.Annotations.csproj -c Release -p:ContinuousIntegrationBuild=true -o artifacts/nuget
+      - name: Publish C# annotations
+        run: dotnet nuget push "artifacts/nuget/*.nupkg" --api-key "${{ secrets.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate
 
   binaries:
     runs-on: ${{ matrix.os }}

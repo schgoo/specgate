@@ -3,118 +3,24 @@
 [![crates.io](https://img.shields.io/crates/v/specgate-cli.svg)](https://crates.io/crates/specgate-cli)
 [![docs.rs](https://docs.rs/specgate-cli/badge.svg)](https://docs.rs/specgate-cli)
 [![CI](https://github.com/schgoo/specgate/actions/workflows/ci.yml/badge.svg)](https://github.com/schgoo/specgate/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](../../LICENSE-MIT)
+[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](../../../LICENSE-MIT)
 
-Command-line interface for [SpecGate][__link0]:
-validate specs, run them through the harness, extract specs from
-annotated code, discover implementation metadata as CTSC registries, and
-capture passing Rust tests as native CTSC reference bundles. It can also
-compile a typed static invocation plan from a capture bundle and replay its
-top-level stimuli against a synchronous Rust candidate.
-This library backs the `specgate` binary and the integration-test suite;
-each command is also callable as a function (`validate`, `run`, `extract`,
-`discover`, `capture`, `replay`).
-
-## Commands
+Command-line interface for `SpecGate`’s CTSC-native workflow.
 
 ```text
-specgate validate <spec-dir> [--strict] [--spec-only] [--assertions-dir <dir>]
-specgate run <spec.yaml> [--coverage] [--coverage-threshold <pct>] [--verbose] [--json]
-specgate extract <package-root> -o|--out <spec.yaml> [--component <name>] [--cases]
-specgate discover <binding.yaml> --component <id> --registry-id <id> --registry-version <version> -o|--out <registry.ctsc.json> [--target <name>]
+specgate discover <binding.yaml> --component <id> --registry-id <id> --registry-version <version> --out <registry.ctsc.json> [--target <name>]
 specgate capture <binding.yaml> --out <dir> [--target <name>] [--component <id>]
 specgate replay <capture-dir> <candidate-binding.yaml> --out <candidate.otlp.json> [--target <name>]
 ```
 
-### `validate`
-
-Checks every spec under `<spec-dir>` against the schema, then runs
-runnability checks that mirror the hard errors the harness would raise (no
-cases, an unresolvable binding, an unknown target, a missing
-`package_root`, an operation with no `#[spec_operation]`, unwireable
-setups, non-`pub` setups/input types).
-
-* `--spec-only` — skip checks that need the implementation source (for
-  authoring a spec before the code exists).
-* `--strict` — treat warnings as errors.
-* `--assertions-dir <dir>` — directory of source-assertion files to
-  cross-check provenance against.
-
-Exit code `0` on pass, `1` on failure.
-
-### `run`
-
-Generates, builds, and runs the harness for a single spec, reporting
-per-case pass/fail.
-
-* `--coverage` — measure the implementation crate’s code coverage.
-* `--coverage-threshold <pct>` — fail the run if coverage falls below
-  `<pct>` (implies `--coverage`).
-* `--verbose` — include passing cases in the human-readable case list.
-* `--json` — emit the full structured run report as JSON.
-
-Exit code `0` when all cases pass, `1` on any failure or error.
-
-### `extract`
-
-Derives a `.spec.yaml` (plus a sibling binding file) from an annotated
-crate — the reverse of implementing a spec. By default only the schema
-(operations, inputs/outputs, types) is derived, leaving `cases:` empty;
-with `--cases`, the crate’s existing tests are run under record mode and
-each passing test is captured as a case.
-
-* `-o`, `--out <spec.yaml>` — output path for the derived spec (required).
-* `--component <name>` — which component to extract (required when the
-  crate hosts more than one).
-* `--cases` — also capture runnable cases from the crate’s tests.
-
-Extraction is deterministic and uses no LLM.
-
-### `discover`
-
-Loads one target from a binding, invokes its existing language-specific
-discovery mechanism (Rust link-time registration or C# reflection), asks
-the harness for its normalized, setup-folded schema, and writes a compact
-deterministic CTSC registry document.
-
-* `--component <id>` — component whose operations to encode (required).
-* `--registry-id <id>` — CTSC registry identifier (required).
-* `--registry-version <version>` — registry version (required).
-* `-o`, `--out <registry.ctsc.json>` — output path (required).
-* `--target <name>` — binding target; omitted selects the default.
-
-### `capture`
-
-Runs every libtest test in isolation for one Rust binding target. Passing
-tests that invoke the selected component become ordered native CTSC
-scenarios; tests that do not invoke it are omitted. The deterministic output
-directory contains exactly `registry.ctsc.json`, `reference.otlp.json`, and
-`manifest.json`.
-
-* `--out <dir>` — output directory for the bundle (required).
-* `--target <name>` — binding target; omitted selects the default.
-* `--component <id>` — component to capture; omitted selects the sole
-  discovered component and errors when discovery is ambiguous.
-
-### `replay`
-
-Reads `manifest.json`, `registry.ctsc.json`, and `reference.otlp.json` from
-a capture bundle, verifies their exact digests and linkage, decodes ordered
-top-level primitive operation stimuli, and builds a serializable target-local
-invocation plan from normalized plus raw link-time discovery metadata. It
-then compiles a temporary Rust binary that directly calls the candidate’s
-public synchronous free functions and emits one independent linked CTSC run.
-Replay never reads a `.spec.yaml`.
-
-* `--out <candidate.otlp.json>` — candidate CTSC trace path (required).
-* `--target <name>` — candidate binding target; omitted selects the default.
-
-Methods, setups, async operations, structured values, bytes, non-Rust
-candidates, and semantic renames/coercions are rejected in this first slice.
+`discover` exports a deterministic CTSC registry from Rust link-time or C#
+compiled-assembly metadata. `capture` runs ordinary Rust tests in isolation
+and records passing native scenarios. `replay` verifies a capture bundle,
+statically links its top-level semantic inputs to a Rust candidate, and
+emits an independent deterministic CTSC trace. No command reads
+`.spec.yaml`.
 
 
 ---
 
 Part of the [SpecGate](https://github.com/schgoo/specgate) project.
-
- [__link0]: https://github.com/schgoo/specgate

@@ -1,20 +1,23 @@
 //! `specgate capture <binding.yaml> --out <dir>` — capture passing Rust tests
 //! as one deterministic native CTSC reference bundle.
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 use specgate::__rt::{NativeCapture, NativeCaptureConfig, NativeCaptureEnvironmentConfig};
 use specgate::{SpecEvent, spec_operation};
 use specgate_ctsc::{encode_native_captures_otlp_result, encode_schema_registry_result};
-use specgate_harness::discovery::{Registry, cargo_bin};
-use std::collections::{BTreeMap, BTreeSet};
+use specgate_discovery::binding::resolve_binding_target;
+use specgate_discovery::discovery::{Registry, cargo_bin, discover_resolved_target, normalize_registry};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 const REGISTRY_FILE: &str = "registry.ctsc.json";
 const TRACE_FILE: &str = "reference.otlp.json";
 const MANIFEST_FILE: &str = "manifest.json";
 const REGISTRY_VERSION: &str = "0.1.0";
+static CAPTURE_SCRATCH_ID: AtomicU64 = AtomicU64::new(0);
 
 /// Summary of a capture run.
 #[derive(Debug, Clone, PartialEq, Eq, SpecEvent)]
@@ -51,29 +54,6 @@ impl std::fmt::Display for CaptureOutcome {
             CaptureOutcome::Error { reason } => write!(f, "Error({reason})"),
         }
     }
-}
-
-#[derive(Debug, Deserialize)]
-struct BindingFile {
-    language: String,
-    targets: BTreeMap<String, BindingTarget>,
-}
-
-#[derive(Debug, Deserialize)]
-struct BindingTarget {
-    #[serde(default = "default_package_root")]
-    package_root: String,
-}
-
-fn default_package_root() -> String {
-    ".".to_string()
-}
-
-#[derive(Debug)]
-struct ResolvedTarget {
-    name: String,
-    language: String,
-    package_root: PathBuf,
 }
 
 #[derive(Debug)]
@@ -152,26 +132,27 @@ fn capture_result(binding: &str, target: &str, component: &str, out: &str) -> Re
     if out.is_empty() {
         return Err("capture requires a non-empty output directory".to_string());
     }
-    let resolved = resolve_target(binding, target)?;
+    let target_name = if target.is_empty() { None } else { Some(target) };
+    let resolved = resolve_binding_target(binding, target_name)?;
     if resolved.language != "rust" {
         return Err(format!(
             "capture currently supports only Rust targets; binding language is '{}'",
             resolved.language
         ));
     }
-    if !resolved.package_root.join("Cargo.toml").is_file() {
+    if !resolved.target.package_root.join("Cargo.toml").is_file() {
         return Err(format!(
             "capture target '{}' is not a Rust package (no Cargo.toml at {})",
             resolved.name,
-            resolved.package_root.display()
+            resolved.target.package_root.display()
         ));
     }
+    let discovered = discover_resolved_target(resolved, "")?;
+    let resolved = &discovered.target;
 
-    let target_name = if target.is_empty() { None } else { Some(target) };
-    let discovery_json = specgate_harness::discover_registry_json(binding, target_name, "")?;
-    let registry = Registry::parse(&discovery_json)?;
+    let registry = discovered.registry;
     let selected = select_component(&registry, component)?;
-    let schema = specgate_harness::discover_target_schema(binding, target_name, &selected)?;
+    let schema = normalize_registry(&registry, &resolved.language, &selected)?;
     let schema_json =
         serde_json::to_string(&schema).map_err(|error| format!("failed to serialize normalized discovery schema: {error}"))?;
     let registry_id = format!("urn:ctsc:registry:{selected}");
@@ -179,10 +160,10 @@ fn capture_result(binding: &str, target: &str, component: &str, out: &str) -> Re
     let registry_bytes = registry_encoding.registry_json.into_bytes();
     let registry_digest = sha256_digest(&registry_bytes);
 
-    let scratch = capture_scratch_dir(&resolved.package_root)?;
-    let test_binaries = build_test_binaries(&resolved.package_root, &scratch)?;
+    let scratch = capture_scratch_dir(&resolved.target.package_root)?;
+    let test_binaries = build_test_binaries(&resolved.target.package_root, scratch.as_ref())?;
     let tests = enumerate_tests(&test_binaries)?;
-    let captures = capture_passing_tests(&tests, &selected, &scratch)?;
+    let captures = capture_passing_tests(&tests, &selected, scratch.as_ref())?;
     if captures.is_empty() {
         return Err(format!(
             "no passing tests captured operations for component '{selected}'; add a handwritten test that invokes the component"
@@ -212,8 +193,8 @@ fn capture_result(binding: &str, target: &str, component: &str, out: &str) -> Re
         format_version: "0.1.0",
         component_id: selected.clone(),
         target: ManifestTarget {
-            name: resolved.name,
-            language: resolved.language,
+            name: resolved.name.clone(),
+            language: resolved.language.clone(),
         },
         tool: ManifestTool {
             name: "specgate",
@@ -253,39 +234,6 @@ fn capture_result(binding: &str, target: &str, component: &str, out: &str) -> Re
     })
 }
 
-fn resolve_target(binding_path: &str, requested_target: &str) -> Result<ResolvedTarget, String> {
-    let binding_path = PathBuf::from(binding_path);
-    let text = std::fs::read_to_string(&binding_path).map_err(|error| {
-        format!(
-            "binding '{binding_path_display}' not found or invalid: {error}",
-            binding_path_display = binding_path.display()
-        )
-    })?;
-    let binding: BindingFile =
-        serde_yaml::from_str(&text).map_err(|error| format!("binding '{}' not found or invalid: {error}", binding_path.display()))?;
-    let (name, target) = if requested_target.is_empty() {
-        binding
-            .targets
-            .get_key_value("default")
-            .or_else(|| binding.targets.first_key_value())
-            .ok_or_else(|| format!("binding '{}' contains no targets", binding_path.display()))?
-    } else {
-        binding.targets.get_key_value(requested_target).ok_or_else(|| {
-            format!(
-                "target '{requested_target}' not found in binding; available targets: {}",
-                binding.targets.keys().cloned().collect::<Vec<_>>().join(", ")
-            )
-        })?
-    };
-    let base = binding_path.parent().unwrap_or_else(|| Path::new("."));
-    let package_root = std::fs::canonicalize(base.join(&target.package_root)).unwrap_or_else(|_| base.join(&target.package_root));
-    Ok(ResolvedTarget {
-        name: name.clone(),
-        language: binding.language,
-        package_root,
-    })
-}
-
 fn select_component(registry: &Registry, component: &str) -> Result<String, String> {
     let components = registry.present_components();
     if component.is_empty() {
@@ -308,21 +256,13 @@ fn select_component(registry: &Registry, component: &str) -> Result<String, Stri
     }
 }
 
-fn capture_scratch_dir(package_root: &Path) -> Result<PathBuf, String> {
+fn capture_scratch_dir(package_root: &Path) -> Result<specgate_discovery::support::InvocationCache, String> {
     let package_name = package_root
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| format!("could not derive package name from {}", package_root.display()))?;
-    let scratch = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .expect("Rust workspace root")
-        .join("target")
-        .join("specgate-capture")
-        .join(package_name);
-    std::fs::create_dir_all(&scratch)
-        .map_err(|error| format!("failed to create capture scratch directory {}: {error}", scratch.display()))?;
-    Ok(scratch)
+    let invocation = CAPTURE_SCRATCH_ID.fetch_add(1, Ordering::Relaxed);
+    specgate_discovery::support::InvocationCache::create("capture", package_name, invocation)
 }
 
 fn build_test_binaries(package_root: &Path, scratch: &Path) -> Result<Vec<TestBinary>, String> {
@@ -520,26 +460,18 @@ pub fn format_outcome(outcome: &CaptureOutcome) -> String {
 mod tests {
     use super::*;
     use std::process::Output;
-    use std::sync::Mutex;
-
-    static CAPTURE_LOCK: Mutex<()> = Mutex::new(());
 
     fn repo_root() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        std::env::current_dir()
+            .unwrap()
             .ancestors()
-            .nth(3)
+            .find(|path| path.join("rust").join("Cargo.toml").is_file())
             .expect("repository root")
             .to_path_buf()
     }
 
     fn rust_binding() -> PathBuf {
-        repo_root()
-            .join("test")
-            .join("rust")
-            .join("crates")
-            .join("specgate-fixtures")
-            .join("specs")
-            .join("binding.yaml")
+        repo_root().join("test").join("bindings").join("rust.yaml")
     }
 
     fn output_dir(label: &str) -> PathBuf {
@@ -551,7 +483,6 @@ mod tests {
 
     #[test]
     fn capture_stateless_bundle_is_linked_and_byte_identical() {
-        let _guard = CAPTURE_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let first_dir = output_dir("first");
         let second_dir = output_dir("second");
         let _ = std::fs::remove_dir_all(&first_dir);
@@ -605,10 +536,7 @@ mod tests {
         assert_eq!(manifest["reference"]["path"], TRACE_FILE);
         assert_eq!(manifest["reference"]["digest"], sha256_digest(&trace));
         assert_eq!(manifest["scenarios"]["count"], 1);
-        assert_eq!(
-            manifest["scenarios"]["names"],
-            serde_json::json!(["conformance::basic::stateless_add::adds_two_and_three"])
-        );
+        assert_eq!(manifest["scenarios"]["names"], serde_json::json!(["stateless::add_two_and_three"]));
         validate_bundle_with_python(&first_dir);
 
         let _ = std::fs::remove_dir_all(first_dir);
@@ -617,20 +545,13 @@ mod tests {
 
     #[test]
     fn capture_errors_are_actionable() {
-        let _guard = CAPTURE_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let ambiguous = capture(rust_binding().to_str().unwrap(), "", "", output_dir("ambiguous").to_str().unwrap());
         assert!(matches!(
             ambiguous,
             CaptureOutcome::Error { reason } if reason.contains("multiple components present") && reason.contains("--component")
         ));
 
-        let csharp_binding = repo_root()
-            .join("test")
-            .join("rust")
-            .join("crates")
-            .join("specgate-fixtures")
-            .join("specs")
-            .join("csharp.yaml");
+        let csharp_binding = repo_root().join("test").join("bindings").join("csharp.yaml");
         let unsupported = capture(
             csharp_binding.to_str().unwrap(),
             "",
@@ -649,10 +570,9 @@ mod tests {
 
     #[test]
     fn capture_errors_when_no_passing_test_invokes_component() {
-        let _guard = CAPTURE_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let out = output_dir("no-scenarios");
         let _ = std::fs::remove_dir_all(&out);
-        let outcome = capture(rust_binding().to_str().unwrap(), "", "fixture.named_inputs", out.to_str().unwrap());
+        let outcome = capture(rust_binding().to_str().unwrap(), "", "fixture.faults", out.to_str().unwrap());
         assert!(matches!(
             outcome,
             CaptureOutcome::Error { reason } if reason.contains("no passing tests captured operations")

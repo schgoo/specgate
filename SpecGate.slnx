@@ -1,17 +1,9 @@
 <Solution>
   <Folder Name="/csharp/">
     <Project Path="csharp/SpecGate.Annotations/SpecGate.Annotations.csproj" />
-    <Project Path="csharp/SpecGate.Runtime/SpecGate.Runtime.csproj" />
-    <Project Path="csharp/SpecGate.Weaver/SpecGate.Weaver.csproj" />
   </Folder>
-  <Folder Name="/test/" />
   <Folder Name="/test/csharp/">
-    <Project Path="test/csharp/SpecGate.WitnessGenerator/SpecGate.WitnessGenerator.csproj" />
-    <Project Path="test/csharp/SpecGateFixtures/SpecGateFixtures.csproj" />
-    <Project Path="test/csharp/SpecGateFixtures.Net8/SpecGateFixtures.Net8.csproj" />
-  </Folder>
-  <Folder Name="/test/csharp/SpecGateFixtures/" />
-  <Folder Name="/test/csharp/SpecGateFixtures/Tests/">
-    <Project Path="test/csharp/SpecGateFixtures/Tests/SpecGateFixtures.Tests.csproj" />
+    <Project Path="test/csharp/SpecGate.CtscFixtures/SpecGate.CtscFixtures.csproj" />
+    <Project Path="test/csharp/SpecGate.CtscFixtures.Tests/SpecGate.CtscFixtures.Tests.csproj" />
   </Folder>
 </Solution>

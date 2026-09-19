@@ -2,7 +2,7 @@
 name = "specgate-runtime"
 version.workspace = true
 edition.workspace = true
-description = "Runtime trace buffer and Value types for SpecGate annotations"
+description = "Native CTSC capture runtime and metadata registry for SpecGate"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
@@ -16,9 +16,6 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 linkme = { workspace = true }
 tempfile = { workspace = true }
-
-[features]
-specgate-trace = []
 
 [lints]
 workspace = true

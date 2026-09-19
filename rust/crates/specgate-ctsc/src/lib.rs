@@ -1,141 +1,70 @@
-//! CTSC projection for `SpecGate` — encodes native structured operation
-//! capture and provides transitional translation for legacy flat traces.
+//! CTSC registry, trace, capture-bundle, and replay models for `SpecGate`.
 //!
-//! Native synchronous Rust capture now creates operation spans at real
-//! `#[spec_operation]` invocation boundaries, including nested parentage,
-//! typed inputs and results, observations, logical timestamps, and status. Its
-//! public producer operations expose CTSC artifacts only.
-//! Native input/result projection is type-aware and recursively preserves CTSC
-//! 0.2 option wrappers inside supported collections and annotated records.
-//! Ordered native sidecars can be merged into one deterministic run with
-//! registry identity, version, and digest resource attributes for Linked
-//! validation.
-//! Capture bundles can also be decoded through [`decode_replay_bundle_result`],
-//! which verifies manifest format/version, exact registry and trace digests,
-//! trace registry linkage, scenario order, operation declarations, and typed
-//! primitive inputs before returning ordered [`ReplayScenario`] values. The
-//! decoder exposes only top-level operations as replay instructions. Candidate
-//! native captures use [`encode_replayed_native_captures_otlp_result`] to retain
-//! the original registry identity while using deterministic IDs independent
-//! from the reference run.
-//!
-//! The legacy `Run`/`Event` buffer and the translation operations below remain
-//! temporarily for extraction and harness subsystems that do not yet have CTSC
-//! replacements. They are not a stable compatibility surface.
-//!
-//! `translate_legacy_trace` walks a JSON-encoded sequence of legacy
-//! [`specgate_runtime::TraceEvent`]s — a leading `Run` event followed by
-//! ordinary `Event`s — and re-projects it into a [`CtscProjection`]:
-//!
-//! - the leading `Run` event supplies `operation_name`;
-//! - an event named `<operation_name>.<field>` is un-prefixed and becomes an
-//!   operation input, keyed by `<field>`;
-//! - every other ordinary event becomes an observation, keyed by its own name;
-//! - the reserved `$result` / `$fault` event names select the terminal
-//!   `completion` state (`"result"`, `"fault"`, or `"none"` if neither
-//!   appears); that event's value becomes `completion_value_json`.
-//!
-//! Values keep their [`specgate_runtime::Value`] shape as-is: an event whose
-//! value happens to look like `{"Integer": 7}` is a genuine single-entry map,
-//! not a legacy tagged scalar, and is projected unchanged.
-//!
-//! `encode_legacy_trace_otlp` applies the same projection and emits one compact,
-//! deterministic CTSC 0.2 OTLP JSON document containing a run span, its
-//! scenario child, and one operation child. Caller-supplied identifiers,
-//! timestamp, tool version, and target metadata make production identity
-//! explicit while keeping tests reproducible.
-//!
-//! `encode_discovery_registry` preserves the original raw-discovery projection
-//! for primitive operations. `encode_schema_registry` accepts the harness's
-//! normalized, setup-folded schema and emits named records, tagged unions, and
-//! recursive CTSC collection/option references without reimplementing
-//! language-specific discovery or normalization.
+//! Native captures are encoded directly from real annotated operation
+//! boundaries, preserving nested parentage, typed inputs/results, observations,
+//! empty/error/fault completion, logical timestamps, and deterministic IDs.
+//! Registry encoding consumes normalized discovery metadata while retaining
+//! setup/dependency/outcome information. Observation declarations and
+//! comparison profiles remain future work.
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use specgate::{SpecEvent, spec_component, spec_operation};
-use specgate_runtime::{
-    NativeCapture, NativeCaptureConfig, NativeCompletion, NativeOperationSpan, NativeStatus, TraceEvent, Value, finish_native_capture,
-    start_native_capture,
-};
+use specgate_runtime::{NativeCapture, NativeCompletion, NativeOperationSpan, NativeStatus, Value};
 use std::collections::{BTreeMap, BTreeSet};
-
-spec_component!("specgate.ctsc");
 
 const CTSC_VERSION: &str = "0.2.0";
 const CTSC_SCHEMA_URL: &str = "https://specgate.dev/ctsc/schema/0.2.0";
 
-#[derive(Debug, Clone, Serialize, Deserialize, SpecEvent)]
-#[serde(rename_all = "snake_case")]
-pub struct CtscProjection {
-    #[spec_event]
-    pub scenario_name: String,
-    #[spec_event]
-    pub component_id: String,
-    #[spec_event]
-    pub operation_name: String,
-    #[spec_event]
-    pub inputs_json: String,
-    #[spec_event]
-    pub observations_json: String,
-    #[spec_event]
-    pub completion: String,
-    #[spec_event]
-    pub completion_value_json: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, SpecEvent)]
-#[serde(rename_all = "snake_case")]
-pub struct CtscOtlpEncoding {
-    #[spec_event]
-    pub span_count: i32,
-    #[spec_event]
-    pub otlp_json: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, SpecEvent)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct CtscNativeCaptureEncoding {
-    #[spec_event]
     pub span_count: i32,
-    #[spec_event]
     pub otlp_json: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, SpecEvent)]
-#[serde(rename_all = "snake_case")]
-pub struct CtscNativeOptionalCaptureEncoding {
-    #[spec_event]
-    pub otlp_json: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, SpecEvent)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct CtscRegistryEncoding {
-    #[spec_event]
     pub operation_count: i32,
-    #[spec_event]
     pub type_count: i32,
-    #[spec_event]
     pub registry_json: String,
 }
 
-/// A registry type used by typed replay decoding and semantic linking.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ReplayType {
-    Primitive { name: String },
-    Named { name: String },
-    List { items: Box<ReplayType> },
-    Set { items: Box<ReplayType> },
-    Map { keys: Box<ReplayType>, values: Box<ReplayType> },
-    Tuple { items: Vec<ReplayType> },
-    Optional { value: Box<ReplayType> },
-    Record { fields: Vec<ReplayRegistryInput> },
+    Primitive {
+        name: String,
+    },
+    Named {
+        name: String,
+        #[serde(rename = "componentId", default, skip_serializing_if = "Option::is_none")]
+        component_id: Option<String>,
+        #[serde(rename = "registryId", default, skip_serializing_if = "Option::is_none")]
+        registry_id: Option<String>,
+    },
+    List {
+        items: Box<ReplayType>,
+    },
+    Set {
+        items: Box<ReplayType>,
+    },
+    Map {
+        keys: Box<ReplayType>,
+        values: Box<ReplayType>,
+    },
+    Tuple {
+        items: Vec<ReplayType>,
+    },
+    Optional {
+        value: Box<ReplayType>,
+    },
+    Record {
+        fields: Vec<ReplayRegistryInput>,
+    },
 }
 
 impl ReplayType {
-    /// Return the primitive name when this is a primitive type.
     #[must_use]
     pub fn primitive_name(&self) -> Option<&str> {
         match self {
@@ -145,7 +74,6 @@ impl ReplayType {
     }
 }
 
-/// One named value declaration in a replay registry operation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReplayRegistryInput {
     pub name: String,
@@ -153,16 +81,22 @@ pub struct ReplayRegistryInput {
     pub value_type: ReplayType,
 }
 
-/// One linked operation declaration needed by the replay planner.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReplayRegistryOperation {
     pub component_id: String,
     pub name: String,
     pub inputs: Vec<ReplayRegistryInput>,
     pub output: Option<ReplayType>,
+    pub empty: bool,
+    pub errors: Vec<ReplayRegistryError>,
 }
 
-/// Registry identity and operation declarations verified from a capture bundle.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplayRegistryError {
+    pub name: String,
+    pub value_type: Option<ReplayType>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReplayRegistry {
     pub id: String,
@@ -171,7 +105,6 @@ pub struct ReplayRegistry {
     pub operations: Vec<ReplayRegistryOperation>,
 }
 
-/// A losslessly decoded CTSC value supported by the first replay slice.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum ReplayValue {
@@ -186,7 +119,6 @@ pub enum ReplayValue {
     F64Bits(u64),
 }
 
-/// One named semantic input decoded according to its linked registry type.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReplayInput {
     pub name: String,
@@ -194,7 +126,6 @@ pub struct ReplayInput {
     pub value: ReplayValue,
 }
 
-/// One top-level reference operation that must be invoked by replay.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReplayOperation {
     pub component_id: String,
@@ -203,7 +134,6 @@ pub struct ReplayOperation {
     pub output: Option<ReplayType>,
 }
 
-/// One ordered reference scenario and its sequential top-level operations.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReplayScenario {
     pub name: String,
@@ -211,354 +141,11 @@ pub struct ReplayScenario {
     pub operations: Vec<ReplayOperation>,
 }
 
-/// A manifest-, digest-, registry-, and trace-linked replay bundle.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReplayBundle {
     pub component_id: String,
     pub registry: ReplayRegistry,
     pub scenarios: Vec<ReplayScenario>,
-}
-
-/// The terminal legacy event, if any, that selects the CTSC completion state.
-enum Completion {
-    Result(Value),
-    Fault(Value),
-    None,
-}
-
-struct LegacyProjection {
-    operation_name: String,
-    inputs: BTreeMap<String, Value>,
-    observations: Vec<(String, Value)>,
-    completion: Completion,
-}
-
-#[spec_operation("translate_legacy_trace")]
-pub fn translate_legacy_trace(scenario_name: String, component_id: String, legacy_trace_json: String) -> CtscProjection {
-    let projection = project_legacy_trace(&legacy_trace_json);
-    let mut observations_map: BTreeMap<String, Value> = BTreeMap::new();
-    for (name, value) in projection.observations {
-        observations_map.insert(name, value);
-    }
-
-    let (completion, completion_value_json) = completion_strings(projection.completion);
-
-    CtscProjection {
-        scenario_name,
-        component_id,
-        operation_name: projection.operation_name,
-        inputs_json: to_json_string(&Value::Map(projection.inputs)),
-        observations_json: to_json_string(&Value::Map(observations_map)),
-        completion,
-        completion_value_json,
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-#[spec_operation("encode_legacy_trace_otlp")]
-pub fn encode_legacy_trace_otlp(
-    scenario_name: String,
-    component_id: String,
-    legacy_trace_json: String,
-    trace_id: String,
-    run_span_id: String,
-    scenario_span_id: String,
-    operation_span_id: String,
-    run_id: String,
-    start_time_unix_nano: i64,
-    tool_version: String,
-    target_name: String,
-    target_language: String,
-) -> CtscOtlpEncoding {
-    let projection = project_legacy_trace(&legacy_trace_json);
-    let operation_has_fault = matches!(projection.completion, Completion::Fault(_));
-    let status_code = if operation_has_fault { 2 } else { 1 };
-    let mut operation_events = projection
-        .observations
-        .into_iter()
-        .map(|(name, value)| {
-            otlp_event(
-                "conformance.observation",
-                vec![
-                    string_attribute("conformance.observation.name", name),
-                    KeyValue {
-                        key: "conformance.observation.value".to_string(),
-                        value: value_to_any_value(&value),
-                    },
-                ],
-            )
-        })
-        .collect::<Vec<_>>();
-
-    match projection.completion {
-        Completion::Result(value) => operation_events.push(otlp_event(
-            "conformance.result",
-            vec![KeyValue {
-                key: "conformance.result.value".to_string(),
-                value: value_to_any_value(&value),
-            }],
-        )),
-        Completion::Fault(value) => {
-            let mut attributes = vec![string_attribute("conformance.fault.type", "specgate.legacy_fault")];
-            if let Value::String(message) = value {
-                attributes.push(string_attribute("conformance.fault.message", message));
-            }
-            attributes.push(string_attribute("conformance.fault.observer", "target"));
-            operation_events.push(otlp_event("conformance.fault", attributes));
-        }
-        Completion::None => {}
-    }
-
-    for (index, event) in operation_events.iter_mut().enumerate() {
-        event.time_unix_nano = timestamp(start_time_unix_nano, 3 + i64::try_from(index).expect("event index must fit in i64"));
-    }
-
-    let operation_end_offset = 3 + i64::try_from(operation_events.len()).expect("event count must fit in i64");
-    let schema_url = CTSC_SCHEMA_URL.to_string();
-    let document = OtlpDocument {
-        resource_spans: vec![ResourceSpans {
-            resource: Resource {
-                attributes: vec![
-                    string_attribute("conformance.version", CTSC_VERSION),
-                    string_attribute("conformance.tool.name", "specgate"),
-                    string_attribute("conformance.tool.version", tool_version.clone()),
-                    string_attribute("conformance.target.name", target_name),
-                    string_attribute("conformance.target.language", target_language),
-                ],
-            },
-            scope_spans: vec![ScopeSpans {
-                scope: InstrumentationScope {
-                    name: "specgate.ctsc",
-                    version: tool_version,
-                },
-                spans: vec![
-                    Span {
-                        trace_id: trace_id.clone(),
-                        id: run_span_id.clone(),
-                        parent_id: None,
-                        name: "conformance.run",
-                        kind: 1,
-                        start_time_unix_nano: timestamp(start_time_unix_nano, 0),
-                        end_time_unix_nano: timestamp(start_time_unix_nano, operation_end_offset + 2),
-                        attributes: vec![string_attribute("conformance.run.id", run_id)],
-                        events: Vec::new(),
-                        status: Status { code: 1 },
-                    },
-                    Span {
-                        trace_id: trace_id.clone(),
-                        id: scenario_span_id.clone(),
-                        parent_id: Some(run_span_id),
-                        name: "conformance.scenario",
-                        kind: 1,
-                        start_time_unix_nano: timestamp(start_time_unix_nano, 1),
-                        end_time_unix_nano: timestamp(start_time_unix_nano, operation_end_offset + 1),
-                        attributes: vec![
-                            string_attribute("conformance.scenario.name", scenario_name),
-                            integer_attribute("conformance.scenario.index", 0),
-                        ],
-                        events: Vec::new(),
-                        status: Status { code: status_code },
-                    },
-                    Span {
-                        trace_id,
-                        id: operation_span_id,
-                        parent_id: Some(scenario_span_id),
-                        name: "conformance.operation",
-                        kind: 1,
-                        start_time_unix_nano: timestamp(start_time_unix_nano, 2),
-                        end_time_unix_nano: timestamp(start_time_unix_nano, operation_end_offset),
-                        attributes: vec![
-                            string_attribute("conformance.component.id", component_id),
-                            string_attribute("conformance.operation.name", projection.operation_name),
-                            KeyValue {
-                                key: "conformance.operation.inputs".to_string(),
-                                value: AnyValue::Kvlist(KeyValueList {
-                                    values: projection
-                                        .inputs
-                                        .into_iter()
-                                        .map(|(key, value)| KeyValue {
-                                            key,
-                                            value: value_to_any_value(&value),
-                                        })
-                                        .collect(),
-                                }),
-                            },
-                        ],
-                        events: operation_events,
-                        status: Status { code: status_code },
-                    },
-                ],
-                schema_url: schema_url.clone(),
-            }],
-            schema_url,
-        }],
-    };
-
-    let otlp_json = serde_json::to_string(&document).expect("OTLP document serialization must succeed");
-
-    CtscOtlpEncoding { otlp_json, span_count: 3 }
-}
-
-#[spec_operation("double", spec = "fixture.native_capture")]
-fn double(value: i32) -> i32 {
-    value * 2
-}
-
-#[spec_operation("add_after_double", spec = "fixture.native_capture")]
-fn add_after_double(value: i32) -> i32 {
-    double(value + 1) + 1
-}
-
-#[spec_operation("echo_optional", spec = "fixture.native_capture")]
-fn echo_optional(value: Option<String>) -> Option<String> {
-    value
-}
-
-#[allow(clippy::too_many_arguments)]
-#[spec_operation("capture_native_rust_otlp")]
-pub fn capture_native_rust_otlp(
-    scenario_name: String,
-    trace_id: String,
-    run_span_id: String,
-    scenario_span_id: String,
-    operation_span_ids_json: String,
-    run_id: String,
-    start_time_unix_nano: i64,
-    clock_step_unix_nano: i64,
-    tool_version: String,
-    target_name: String,
-    target_language: String,
-    value: i32,
-) -> CtscNativeCaptureEncoding {
-    let operation_span_ids = serde_json::from_str::<Vec<String>>(&operation_span_ids_json)
-        .unwrap_or_else(|error| panic!("malformed operation span ID JSON: {error}"));
-    start_native_capture(NativeCaptureConfig {
-        scenario_name,
-        trace_id,
-        run_span_id,
-        scenario_span_id,
-        operation_span_ids,
-        start_time_unix_nano,
-        clock_step_unix_nano,
-    })
-    .unwrap_or_else(|error| panic!("failed to start native capture: {error}"));
-
-    let result = add_after_double(value);
-    debug_assert_eq!(result, 7, "native fixture must preserve its specified result");
-    let capture = finish_native_capture().unwrap_or_else(|error| panic!("failed to finish native capture: {error}"));
-    let otlp_json = encode_native_capture(&capture, run_id, tool_version, target_name, target_language);
-    let span_count = i32::try_from(capture.operations.len() + 2).unwrap_or_else(|_error| panic!("native capture span count exceeds i32"));
-
-    CtscNativeCaptureEncoding { span_count, otlp_json }
-}
-
-#[allow(clippy::too_many_arguments)]
-#[spec_operation("capture_native_optional_otlp")]
-pub fn capture_native_optional_otlp(
-    scenario_name: String,
-    trace_id: String,
-    run_span_id: String,
-    scenario_span_id: String,
-    operation_span_id: String,
-    run_id: String,
-    start_time_unix_nano: i64,
-    clock_step_unix_nano: i64,
-    tool_version: String,
-    target_name: String,
-    target_language: String,
-    present: bool,
-    value: String,
-) -> CtscNativeOptionalCaptureEncoding {
-    start_native_capture(NativeCaptureConfig {
-        scenario_name,
-        trace_id,
-        run_span_id,
-        scenario_span_id,
-        operation_span_ids: vec![operation_span_id],
-        start_time_unix_nano,
-        clock_step_unix_nano,
-    })
-    .unwrap_or_else(|error| panic!("failed to start native optional capture: {error}"));
-
-    let input = present.then_some(value);
-    let result = echo_optional(input.clone());
-    debug_assert_eq!(result, input, "optional fixture must echo its input");
-    let capture = finish_native_capture().unwrap_or_else(|error| panic!("failed to finish native optional capture: {error}"));
-    let otlp_json = encode_native_capture(&capture, run_id, tool_version, target_name, target_language);
-
-    CtscNativeOptionalCaptureEncoding { otlp_json }
-}
-
-fn encode_native_capture(
-    capture: &NativeCapture,
-    run_id: String,
-    tool_version: String,
-    target_name: String,
-    target_language: String,
-) -> String {
-    let run_status_code = status_code(capture.run.status);
-    let schema_url = CTSC_SCHEMA_URL.to_string();
-    let mut spans = vec![
-        Span {
-            trace_id: capture.trace_id.clone(),
-            id: capture.run.span_id.clone(),
-            parent_id: None,
-            name: "conformance.run",
-            kind: 1,
-            start_time_unix_nano: capture.run.start_time_unix_nano.to_string(),
-            end_time_unix_nano: capture.run.end_time_unix_nano.to_string(),
-            attributes: vec![string_attribute("conformance.run.id", run_id)],
-            events: Vec::new(),
-            status: Status { code: run_status_code },
-        },
-        Span {
-            trace_id: capture.trace_id.clone(),
-            id: capture.scenario.span_id.clone(),
-            parent_id: capture.scenario.parent_span_id.clone(),
-            name: "conformance.scenario",
-            kind: 1,
-            start_time_unix_nano: capture.scenario.start_time_unix_nano.to_string(),
-            end_time_unix_nano: capture.scenario.end_time_unix_nano.to_string(),
-            attributes: vec![
-                string_attribute("conformance.scenario.name", capture.scenario_name.clone()),
-                integer_attribute("conformance.scenario.index", 0),
-            ],
-            events: Vec::new(),
-            status: Status {
-                code: status_code(capture.scenario.status),
-            },
-        },
-    ];
-    spans.extend(
-        capture
-            .operations
-            .iter()
-            .map(|operation| native_operation_span(&capture.trace_id, operation)),
-    );
-
-    let document = OtlpDocument {
-        resource_spans: vec![ResourceSpans {
-            resource: Resource {
-                attributes: vec![
-                    string_attribute("conformance.version", CTSC_VERSION),
-                    string_attribute("conformance.tool.name", "specgate"),
-                    string_attribute("conformance.tool.version", tool_version.clone()),
-                    string_attribute("conformance.target.name", target_name),
-                    string_attribute("conformance.target.language", target_language),
-                ],
-            },
-            scope_spans: vec![ScopeSpans {
-                scope: InstrumentationScope {
-                    name: "specgate.ctsc",
-                    version: tool_version,
-                },
-                spans,
-                schema_url: schema_url.clone(),
-            }],
-            schema_url,
-        }],
-    };
-    serde_json::to_string(&document).expect("native OTLP document serialization must succeed")
 }
 
 /// Merge ordered native scenario captures into one deterministic linked CTSC
@@ -1002,6 +589,16 @@ fn replay_registry(document: &ReplayRegistryDocumentWire, digest: String) -> Res
                 name: operation.name.clone(),
                 inputs: operation.inputs.clone(),
                 output: operation.outcomes.result.clone(),
+                empty: operation.outcomes.empty.unwrap_or(false),
+                errors: operation
+                    .outcomes
+                    .errors
+                    .iter()
+                    .map(|error| ReplayRegistryError {
+                        name: error.name.clone(),
+                        value_type: error.value_type.clone(),
+                    })
+                    .collect(),
             });
         }
     }
@@ -1356,6 +953,8 @@ fn decode_replay_operation(span: &ReplaySpanWire, registry: &ReplayRegistry) -> 
     }
 
     let mut result_count = 0_usize;
+    let mut empty_count = 0_usize;
+    let mut error_count = 0_usize;
     let mut has_fault = false;
     for event in &span.events {
         match event.name.as_str() {
@@ -1386,16 +985,42 @@ fn decode_replay_operation(span: &ReplaySpanWire, registry: &ReplayRegistry) -> 
                 ));
             }
             "conformance.fault" => has_fault = true,
-            "conformance.empty" | "conformance.error" => {
-                return Err(format!("reference {location} contains unsupported terminal event '{}'", event.name));
+            "conformance.empty" => {
+                empty_count += 1;
+                if !declaration.empty {
+                    return Err(format!(
+                        "reference {location} emits empty but registry operation '{}::{}' does not declare it",
+                        declaration.component_id, declaration.name
+                    ));
+                }
+            }
+            "conformance.error" => {
+                error_count += 1;
+                let attributes = replay_attribute_map(&event.attributes, &format!("{location} error"))?;
+                let name = require_replay_string_attribute(&attributes, "conformance.error.name", &format!("{location} error"), None)?;
+                let declared = declaration.errors.iter().find(|error| error.name == name).ok_or_else(|| {
+                    format!(
+                        "reference {location} emits undeclared error '{name}' for '{}::{}'",
+                        declaration.component_id, declaration.name
+                    )
+                })?;
+                match (&declared.value_type, attributes.get("conformance.error.value")) {
+                    (Some(value_type), Some(value)) => {
+                        let _ = decode_replay_value(value, value_type, &format!("{location} error '{name}'"))?;
+                    }
+                    (Some(_), None) => return Err(format!("reference {location} error '{name}' is missing its value")),
+                    (None, Some(_)) => return Err(format!("reference {location} error '{name}' declares no value")),
+                    (None, None) => {}
+                }
             }
             other => return Err(format!("reference {location} contains unsupported CTSC event '{other}'")),
         }
     }
-    if result_count > 1 {
-        return Err(format!("reference {location} contains multiple result events"));
+    let terminal_count = result_count + empty_count + error_count + usize::from(has_fault);
+    if terminal_count > 1 {
+        return Err(format!("reference {location} contains multiple terminal events"));
     }
-    if declaration.output.is_some() && result_count == 0 && !has_fault {
+    if declaration.output.is_some() && terminal_count == 0 {
         return Err(format!(
             "reference {location} has no result or fault for result-bearing operation '{}::{}'",
             declaration.component_id, declaration.name
@@ -1636,6 +1261,21 @@ fn rebase_native_operation(
                 time_unix_nano: offset_time(*time_unix_nano, time_offset)?,
                 value: value.clone(),
             }),
+            NativeCompletion::Empty { order, time_unix_nano } => Ok::<NativeCompletion, String>(NativeCompletion::Empty {
+                order: *order,
+                time_unix_nano: offset_time(*time_unix_nano, time_offset)?,
+            }),
+            NativeCompletion::Error {
+                order,
+                time_unix_nano,
+                name,
+                value,
+            } => Ok::<NativeCompletion, String>(NativeCompletion::Error {
+                order: *order,
+                time_unix_nano: offset_time(*time_unix_nano, time_offset)?,
+                name: name.clone(),
+                value: value.clone(),
+            }),
             NativeCompletion::Fault {
                 order,
                 time_unix_nano,
@@ -1704,6 +1344,36 @@ fn native_operation_span(trace_id: &str, operation: &NativeOperationSpan) -> Spa
                     }],
                 },
             ),
+            NativeCompletion::Empty { order, time_unix_nano } => (
+                *order,
+                SpanEvent {
+                    time_unix_nano: time_unix_nano.to_string(),
+                    name: "conformance.empty",
+                    attributes: Vec::new(),
+                },
+            ),
+            NativeCompletion::Error {
+                order,
+                time_unix_nano,
+                name,
+                value,
+            } => {
+                let mut attributes = vec![string_attribute("conformance.error.name", name.clone())];
+                if let Some(value) = value {
+                    attributes.push(KeyValue {
+                        key: "conformance.error.value".to_string(),
+                        value: value_to_any_value(value),
+                    });
+                }
+                (
+                    *order,
+                    SpanEvent {
+                        time_unix_nano: time_unix_nano.to_string(),
+                        name: "conformance.error",
+                        attributes,
+                    },
+                )
+            }
             NativeCompletion::Fault {
                 order,
                 time_unix_nano,
@@ -1765,71 +1435,6 @@ const fn status_code(status: NativeStatus) -> i32 {
     }
 }
 
-#[spec_operation("encode_discovery_registry")]
-pub fn encode_discovery_registry(
-    registry_id: String,
-    registry_version: String,
-    component_id: String,
-    discovery_json: String,
-) -> CtscRegistryEncoding {
-    encode_discovery_registry_result(registry_id, registry_version, component_id, &discovery_json)
-        .unwrap_or_else(|reason| panic!("failed to encode discovery registry: {reason}"))
-}
-
-/// Encode one component from raw `SpecGate` discovery metadata without panicking.
-///
-/// # Errors
-///
-/// Returns an error when the discovery JSON is malformed, contains unsupported
-/// types, or has no non-setup operations for `component_id`.
-pub fn encode_discovery_registry_result(
-    registry_id: String,
-    registry_version: String,
-    component_id: String,
-    discovery_json: &str,
-) -> Result<CtscRegistryEncoding, String> {
-    let discovery: DiscoveryRegistry =
-        serde_json::from_str(discovery_json).map_err(|error| format!("malformed discovery JSON: {error}"))?;
-    let named_types = discovery.types.iter().map(|ty| ty.name.as_str()).collect::<BTreeSet<_>>();
-    let mut operations = discovery
-        .operations
-        .iter()
-        .filter(|operation| !operation.is_setup && operation.component == component_id)
-        .map(|operation| operation.to_ctsc(&named_types))
-        .collect::<Result<Vec<_>, _>>()?;
-
-    if operations.is_empty() {
-        return Err(format!("no non-setup operations found for component '{component_id}'"));
-    }
-    operations.sort_by(|left, right| left.name.cmp(&right.name));
-
-    let operation_count = i32::try_from(operations.len()).map_err(|_error| "operation count exceeds i32".to_string())?;
-    let document = RegistryDocument {
-        format: "ctsc.registry",
-        format_version: CTSC_VERSION,
-        registry_id,
-        version: registry_version,
-        components: vec![RegistryComponent {
-            id: component_id,
-            operations,
-            types: Vec::new(),
-        }],
-    };
-    let registry_json = serde_json::to_string(&document).map_err(|error| format!("registry JSON serialization failed: {error}"))?;
-
-    Ok(CtscRegistryEncoding {
-        operation_count,
-        type_count: 0,
-        registry_json,
-    })
-}
-
-#[spec_operation("encode_schema_registry")]
-pub fn encode_schema_registry(registry_id: String, registry_version: String, schema_json: String) -> CtscRegistryEncoding {
-    encode_schema_registry_result(registry_id, registry_version, &schema_json)
-        .unwrap_or_else(|reason| panic!("failed to encode normalized schema registry: {reason}"))
-}
-
 /// Encode one normalized, setup-folded `SpecGate` schema without panicking.
 ///
 /// # Errors
@@ -1844,37 +1449,113 @@ pub fn encode_schema_registry_result(
 ) -> Result<CtscRegistryEncoding, String> {
     let schema: NormalizedSchema =
         serde_json::from_str(schema_json).map_err(|error| format!("malformed normalized schema JSON: {error}"))?;
-    let named_types = schema.types.iter().map(|ty| ty.name.clone()).collect::<BTreeSet<_>>();
-    if named_types.len() != schema.types.len() {
-        return Err("normalized schema contains duplicate type names".to_string());
+    let mut types_by_component = BTreeMap::new();
+    insert_component_type_names(&mut types_by_component, &schema.component, &schema.types)?;
+    for dependency in &schema.dependency_types {
+        insert_component_type_names(&mut types_by_component, &dependency.component, &dependency.types)?;
     }
+    let dependency_names = schema.dependencies.iter().cloned().collect::<BTreeSet<_>>();
+    if dependency_names.len() != schema.dependencies.len() {
+        return Err("normalized schema contains duplicate component dependencies".to_string());
+    }
+    let dependency_type_owners = schema
+        .dependency_types
+        .iter()
+        .map(|dependency| dependency.component.as_str())
+        .collect::<BTreeSet<_>>();
+    if dependency_type_owners.len() != schema.dependency_types.len() {
+        return Err("normalized schema contains duplicate dependency type components".to_string());
+    }
+    if let Some(missing) = dependency_names
+        .iter()
+        .find(|dependency| !dependency_type_owners.contains(dependency.as_str()))
+    {
+        return Err(format!("normalized schema dependency '{missing}' has no dependency type component"));
+    }
+    let all_components = dependency_type_owners
+        .iter()
+        .copied()
+        .chain(std::iter::once(schema.component.as_str()))
+        .collect::<BTreeSet<_>>();
+    for dependency in &schema.dependency_types {
+        if let Some(missing) = dependency
+            .dependencies
+            .iter()
+            .find(|required| !all_components.contains(required.as_str()))
+        {
+            return Err(format!(
+                "normalized dependency component '{}' references missing dependency '{missing}'",
+                dependency.component
+            ));
+        }
+    }
+    validate_normalized_dependency_cycles(&schema)?;
+    let context = TypeContext {
+        component: &schema.component,
+        dependencies: &dependency_names,
+        types_by_component: &types_by_component,
+    };
 
     let mut operations = schema
         .operations
         .iter()
-        .map(|operation| operation.to_ctsc(&named_types))
+        .map(|operation| operation.to_ctsc(&context))
         .collect::<Result<Vec<_>, _>>()?;
     operations.sort_by(|left, right| left.name.cmp(&right.name));
 
-    let mut types = schema
-        .types
-        .iter()
-        .map(|ty| ty.to_ctsc(&named_types))
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut types = schema.types.iter().map(|ty| ty.to_ctsc(&context)).collect::<Result<Vec<_>, _>>()?;
     types.sort_by(|left, right| left.name.cmp(&right.name));
 
     let operation_count = i32::try_from(operations.len()).map_err(|_error| "operation count exceeds i32".to_string())?;
-    let type_count = i32::try_from(types.len()).map_err(|_error| "type count exceeds i32".to_string())?;
+    let mut type_count = types.len();
+    let mut components = vec![RegistryComponent {
+        id: schema.component.clone(),
+        dependencies: schema
+            .dependencies
+            .iter()
+            .cloned()
+            .map(|component_id| RegistryComponentRef { component_id })
+            .collect(),
+        operations,
+        types,
+    }];
+    let mut dependencies = schema.dependency_types.iter().collect::<Vec<_>>();
+    dependencies.sort_by(|left, right| left.component.cmp(&right.component));
+    for dependency in dependencies {
+        let dependency_names = dependency.dependencies.iter().cloned().collect::<BTreeSet<_>>();
+        let dependency_context = TypeContext {
+            component: &dependency.component,
+            dependencies: &dependency_names,
+            types_by_component: &types_by_component,
+        };
+        let mut dependency_types = dependency
+            .types
+            .iter()
+            .map(|ty| ty.to_ctsc(&dependency_context))
+            .collect::<Result<Vec<_>, _>>()?;
+        dependency_types.sort_by(|left, right| left.name.cmp(&right.name));
+        type_count = type_count
+            .checked_add(dependency_types.len())
+            .ok_or_else(|| "type count overflow".to_string())?;
+        components.push(RegistryComponent {
+            id: dependency.component.clone(),
+            dependencies: dependency
+                .dependencies
+                .iter()
+                .cloned()
+                .map(|component_id| RegistryComponentRef { component_id })
+                .collect(),
+            operations: Vec::new(),
+            types: dependency_types,
+        });
+    }
+    let type_count = i32::try_from(type_count).map_err(|_error| "type count exceeds i32".to_string())?;
     let document = RegistryDocument {
         format: "ctsc.registry",
         format_version: CTSC_VERSION,
         registry_id,
         version: registry_version,
-        components: vec![RegistryComponent {
-            id: schema.component,
-            operations,
-            types,
-        }],
+        components,
     };
     let registry_json = serde_json::to_string(&document).map_err(|error| format!("registry JSON serialization failed: {error}"))?;
 
@@ -1888,8 +1569,89 @@ pub fn encode_schema_registry_result(
 #[derive(Deserialize)]
 struct NormalizedSchema {
     component: String,
+    #[serde(default)]
+    dependencies: Vec<String>,
+    #[serde(default)]
+    dependency_types: Vec<NormalizedDependencyTypes>,
     operations: Vec<NormalizedOperation>,
     types: Vec<NormalizedType>,
+}
+
+#[derive(Deserialize)]
+struct NormalizedDependencyTypes {
+    component: String,
+    #[serde(default)]
+    dependencies: Vec<String>,
+    types: Vec<NormalizedType>,
+}
+
+struct TypeContext<'a> {
+    component: &'a str,
+    dependencies: &'a BTreeSet<String>,
+    types_by_component: &'a BTreeMap<String, BTreeSet<String>>,
+}
+
+fn insert_component_type_names(
+    types_by_component: &mut BTreeMap<String, BTreeSet<String>>,
+    component: &str,
+    types: &[NormalizedType],
+) -> Result<(), String> {
+    if types_by_component.contains_key(component) {
+        return Err(format!("normalized schema repeats component type owner '{component}'"));
+    }
+    let names = types.iter().map(|ty| ty.name.clone()).collect::<BTreeSet<_>>();
+    if names.len() != types.len() {
+        return Err(format!("normalized component '{component}' contains duplicate type names"));
+    }
+    types_by_component.insert(component.to_string(), names);
+    Ok(())
+}
+
+fn validate_normalized_dependency_cycles(schema: &NormalizedSchema) -> Result<(), String> {
+    let mut graph = schema
+        .dependency_types
+        .iter()
+        .map(|dependency| (dependency.component.as_str(), dependency.dependencies.as_slice()))
+        .collect::<BTreeMap<_, _>>();
+    graph.insert(schema.component.as_str(), schema.dependencies.as_slice());
+    let mut complete = BTreeSet::new();
+    let mut visiting = Vec::new();
+    visit_normalized_dependency(&schema.component, &graph, &mut complete, &mut visiting)?;
+    if complete.len() != graph.len() {
+        let unreachable = graph
+            .keys()
+            .filter(|component| !complete.contains(**component))
+            .copied()
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(format!(
+            "normalized schema contains unreachable dependency components: {unreachable}"
+        ));
+    }
+    Ok(())
+}
+
+fn visit_normalized_dependency<'a>(
+    component: &'a str,
+    graph: &BTreeMap<&'a str, &'a [String]>,
+    complete: &mut BTreeSet<&'a str>,
+    visiting: &mut Vec<&'a str>,
+) -> Result<(), String> {
+    if complete.contains(component) {
+        return Ok(());
+    }
+    if let Some(position) = visiting.iter().position(|candidate| *candidate == component) {
+        let mut cycle = visiting[position..].to_vec();
+        cycle.push(component);
+        return Err(format!("component dependency cycle: {}", cycle.join(" -> ")));
+    }
+    visiting.push(component);
+    for dependency in graph.get(component).copied().unwrap_or_default() {
+        visit_normalized_dependency(dependency, graph, complete, visiting)?;
+    }
+    visiting.pop();
+    complete.insert(component);
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -1899,36 +1661,79 @@ struct NormalizedOperation {
     _is_async: bool,
     inputs: Vec<NormalizedInput>,
     output: String,
+    #[serde(default)]
+    empty: bool,
+    #[serde(default)]
+    errors: Vec<NormalizedError>,
+    #[serde(default)]
+    setups: Vec<NormalizedSetup>,
 }
 
 impl NormalizedOperation {
-    fn to_ctsc(&self, named_types: &BTreeSet<String>) -> Result<RegistryOperation, String> {
+    fn to_ctsc(&self, context: &TypeContext<'_>) -> Result<RegistryOperation, String> {
         let inputs = self
             .inputs
             .iter()
             .map(|input| {
                 Ok(NamedValue {
                     name: input.name.clone(),
-                    value_type: schema_type_ref(&input.ty, named_types)?,
+                    value_type: schema_type_ref(&input.ty, context)?,
                 })
             })
             .collect::<Result<Vec<_>, String>>()?;
         let result = if is_schema_unit_type(&self.output) {
             None
         } else {
-            Some(schema_type_ref(&self.output, named_types)?)
+            Some(schema_type_ref(&self.output, context)?)
         };
+        let errors = self
+            .errors
+            .iter()
+            .map(|error| {
+                Ok(RegistryErrorOutcome {
+                    name: error.name.clone(),
+                    value_type: if is_schema_unit_type(&error.ty) {
+                        None
+                    } else {
+                        Some(schema_type_ref(&error.ty, context)?)
+                    },
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
 
         Ok(RegistryOperation {
             name: self.name.clone(),
             inputs,
             observations: Vec::new(),
-            outcomes: RegistryOutcomes { result },
+            outcomes: RegistryOutcomes {
+                result,
+                empty: self.empty.then_some(true),
+                errors,
+            },
+            extensions: (!self.setups.is_empty()).then(|| {
+                BTreeMap::from([(
+                    "dev.specgate.setups".to_string(),
+                    serde_json::to_value(&self.setups).expect("normalized setups serialize"),
+                )])
+            }),
         })
     }
 }
 
 #[derive(Deserialize)]
+struct NormalizedError {
+    name: String,
+    ty: String,
+}
+
+#[derive(Deserialize, Serialize)]
+struct NormalizedSetup {
+    fills: String,
+    inputs: Vec<NormalizedInput>,
+    output: String,
+}
+
+#[derive(Deserialize, Serialize)]
 struct NormalizedInput {
     name: String,
     ty: String,
@@ -1945,14 +1750,14 @@ struct NormalizedType {
 }
 
 impl NormalizedType {
-    fn to_ctsc(&self, named_types: &BTreeSet<String>) -> Result<RegistryNamedType, String> {
+    fn to_ctsc(&self, context: &TypeContext<'_>) -> Result<RegistryNamedType, String> {
         let shape = match self.kind.as_str() {
             "struct" => {
                 if !self.variants.is_empty() {
                     return Err(format!("struct type '{}' must not declare variants", self.name));
                 }
                 RegistryNamedTypeShape::Record {
-                    fields: normalized_fields(&self.fields, named_types)?,
+                    fields: normalized_fields(&self.fields, context)?,
                 }
             }
             "enum" => {
@@ -1967,11 +1772,24 @@ impl NormalizedType {
                         .variants
                         .iter()
                         .map(|variant| {
-                            let payload = if variant.fields.is_empty() {
+                            if variant.tuple.is_some() && !variant.fields.is_empty() {
+                                return Err(format!(
+                                    "enum type '{}' variant '{}' must not declare both named and tuple payloads",
+                                    self.name, variant.name
+                                ));
+                            }
+                            let payload = if let Some(tuple) = &variant.tuple {
+                                Some(RegistryTypeRef::Tuple {
+                                    items: tuple
+                                        .iter()
+                                        .map(|field_type| schema_type_ref(field_type, context))
+                                        .collect::<Result<Vec<_>, _>>()?,
+                                })
+                            } else if variant.fields.is_empty() {
                                 None
                             } else {
                                 Some(RegistryTypeRef::Record {
-                                    fields: normalized_fields(&variant.fields, named_types)?,
+                                    fields: normalized_fields(&variant.fields, context)?,
                                 })
                             };
                             Ok(RegistryVariant {
@@ -2003,96 +1821,26 @@ struct NormalizedVariant {
     name: String,
     #[serde(default)]
     fields: Vec<NormalizedField>,
+    tuple: Option<Vec<String>>,
 }
 
-fn normalized_fields(fields: &[NormalizedField], named_types: &BTreeSet<String>) -> Result<Vec<NamedValue>, String> {
+fn normalized_fields(fields: &[NormalizedField], context: &TypeContext<'_>) -> Result<Vec<NamedValue>, String> {
     fields
         .iter()
         .map(|field| {
             Ok(NamedValue {
                 name: field.name.clone(),
-                value_type: schema_type_ref(&field.ty, named_types)?,
+                value_type: schema_type_ref(&field.ty, context)?,
             })
         })
         .collect()
 }
 
-#[derive(Deserialize)]
-struct DiscoveryRegistry {
-    operations: Vec<DiscoveryOperation>,
-    types: Vec<DiscoveryType>,
-}
-
-#[derive(Deserialize)]
-struct DiscoveryOperation {
-    name: String,
-    is_setup: bool,
-    #[serde(default)]
-    return_type: String,
-    component: String,
-    params: Vec<(String, String)>,
-}
-
-impl DiscoveryOperation {
-    fn to_ctsc(&self, named_types: &BTreeSet<&str>) -> Result<RegistryOperation, String> {
-        let inputs = self
-            .params
-            .iter()
-            .map(|(name, native_type)| {
-                Ok(NamedValue {
-                    name: name.clone(),
-                    value_type: primitive_type(native_type, named_types)?,
-                })
-            })
-            .collect::<Result<Vec<_>, String>>()?;
-        let result = if is_unit_type(&self.return_type) {
-            None
-        } else {
-            Some(primitive_type(&self.return_type, named_types)?)
-        };
-
-        Ok(RegistryOperation {
-            name: self.name.clone(),
-            inputs,
-            observations: Vec::new(),
-            outcomes: RegistryOutcomes { result },
-        })
-    }
-}
-
-#[derive(Deserialize)]
-struct DiscoveryType {
-    name: String,
-}
-
-fn primitive_type(native_type: &str, named_types: &BTreeSet<&str>) -> Result<RegistryTypeRef, String> {
-    let normalized = normalize_native_type(native_type);
-    let primitive = match normalized.as_str() {
-        "()" | "unit" => "unit",
-        "string" | "String" | "str" => "string",
-        "bool" => "bool",
-        "i32" => "i32",
-        "i64" => "i64",
-        "u32" => "u32",
-        "u64" => "u64",
-        "f32" => "f32",
-        "f64" => "f64",
-        "bytes" | "Vec<u8>" | "[u8]" => "bytes",
-        _ if named_types.contains(normalized.as_str()) => {
-            return Err(format!("named type '{normalized}' is not supported by registry encoding"));
-        }
-        _ => return Err(format!("unsupported type '{native_type}'")),
-    };
-    Ok(RegistryTypeRef::Primitive {
-        name: primitive.to_string(),
-    })
-}
-
-fn schema_type_ref(type_ref: &str, named_types: &BTreeSet<String>) -> Result<RegistryTypeRef, String> {
+fn schema_type_ref(type_ref: &str, context: &TypeContext<'_>) -> Result<RegistryTypeRef, String> {
     let mut parser = TypeRefParser {
         input: type_ref,
         position: 0,
-        named_types,
+        context,
     };
     let parsed = parser.parse_type()?;
     parser.skip_whitespace();
@@ -2108,7 +1856,7 @@ fn schema_type_ref(type_ref: &str, named_types: &BTreeSet<String>) -> Result<Reg
 struct TypeRefParser<'a> {
     input: &'a str,
     position: usize,
-    named_types: &'a BTreeSet<String>,
+    context: &'a TypeContext<'a>,
 }
 
 impl TypeRefParser<'_> {
@@ -2128,10 +1876,45 @@ impl TypeRefParser<'_> {
 
         if is_ctsc_primitive(&name) {
             Ok(RegistryTypeRef::Primitive { name })
-        } else if self.named_types.contains(&name) {
-            Ok(RegistryTypeRef::Named { name })
         } else {
-            Err(format!("unknown named type '{name}'"))
+            self.named_type(name)
+        }
+    }
+
+    fn named_type(&self, qualified_name: String) -> Result<RegistryTypeRef, String> {
+        if let Some((component, name)) = qualified_name.rsplit_once("::") {
+            if component != self.context.component && !self.context.dependencies.contains(component) {
+                return Err(format!(
+                    "named type '{qualified_name}' references undeclared component dependency '{component}'"
+                ));
+            }
+            let known = self
+                .context
+                .types_by_component
+                .get(component)
+                .is_some_and(|types| types.contains(name));
+            if !known {
+                return Err(format!("unknown named type '{qualified_name}'"));
+            }
+            return Ok(RegistryTypeRef::Named {
+                name: name.to_string(),
+                component_id: (component != self.context.component).then(|| component.to_string()),
+                registry_id: None,
+            });
+        }
+        let known = self
+            .context
+            .types_by_component
+            .get(self.context.component)
+            .is_some_and(|types| types.contains(&qualified_name));
+        if known {
+            Ok(RegistryTypeRef::Named {
+                name: qualified_name,
+                component_id: None,
+                registry_id: None,
+            })
+        } else {
+            Err(format!("unknown named type '{qualified_name}'"))
         }
     }
 
@@ -2258,28 +2041,6 @@ fn is_schema_unit_type(type_ref: &str) -> bool {
     matches!(type_ref.trim(), "" | "()" | "unit")
 }
 
-fn is_unit_type(native_type: &str) -> bool {
-    let normalized = normalize_native_type(native_type);
-    normalized.is_empty() || normalized == "()" || normalized == "unit"
-}
-
-fn normalize_native_type(native_type: &str) -> String {
-    let mut ty = native_type.trim();
-    while let Some(rest) = ty.strip_prefix('&') {
-        ty = rest.trim_start();
-        if let Some(lifetime_tail) = ty
-            .strip_prefix('\'')
-            .and_then(|rest| rest.split_once(char::is_whitespace).map(|(_, tail)| tail))
-        {
-            ty = lifetime_tail.trim_start();
-        }
-        if let Some(rest) = ty.strip_prefix("mut ") {
-            ty = rest.trim_start();
-        }
-    }
-    ty.chars().filter(|character| !character.is_whitespace()).collect()
-}
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RegistryDocument {
@@ -2293,8 +2054,16 @@ struct RegistryDocument {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct RegistryComponent {
     id: String,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    dependencies: Vec<RegistryComponentRef>,
     operations: Vec<RegistryOperation>,
     types: Vec<RegistryNamedType>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RegistryComponentRef {
+    component_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2303,6 +2072,8 @@ struct RegistryOperation {
     inputs: Vec<NamedValue>,
     observations: Vec<NamedValue>,
     outcomes: RegistryOutcomes,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extensions: Option<BTreeMap<String, serde_json::Value>>,
 }
 
 type NamedValue = ReplayRegistryInput;
@@ -2311,6 +2082,17 @@ type NamedValue = ReplayRegistryInput;
 struct RegistryOutcomes {
     #[serde(skip_serializing_if = "Option::is_none")]
     result: Option<RegistryTypeRef>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    empty: Option<bool>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    errors: Vec<RegistryErrorOutcome>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct RegistryErrorOutcome {
+    name: String,
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    value_type: Option<RegistryTypeRef>,
 }
 
 type RegistryTypeRef = ReplayType;
@@ -2336,60 +2118,11 @@ enum RegistryNamedTypeShape {
     TaggedUnion { variants: Vec<RegistryVariant> },
 }
 
-fn project_legacy_trace(legacy_trace_json: &str) -> LegacyProjection {
-    let trace_events: Vec<TraceEvent> = serde_json::from_str(legacy_trace_json).expect("valid trace JSON required");
-    let mut operation_name = String::new();
-    let mut events_iter = trace_events.iter().peekable();
-
-    if let Some(TraceEvent::Run { operation }) = events_iter.peek() {
-        operation_name.clone_from(operation);
-        events_iter.next();
-    }
-
-    let mut inputs = BTreeMap::new();
-    let mut observations = Vec::new();
-    let mut completion = Completion::None;
-    let input_prefix = format!("{operation_name}.");
-
-    for event in events_iter {
-        if let TraceEvent::Event { name, value } = event {
-            if name == "$result" {
-                completion = Completion::Result(value.clone());
-            } else if name == "$fault" {
-                completion = Completion::Fault(value.clone());
-            } else if let Some(field_name) = name.strip_prefix(&input_prefix) {
-                inputs.insert(field_name.to_string(), value.clone());
-            } else {
-                observations.push((name.clone(), value.clone()));
-            }
-        }
-    }
-
-    LegacyProjection {
-        operation_name,
-        inputs,
-        observations,
-        completion,
-    }
-}
-
-fn completion_strings(completion: Completion) -> (String, String) {
-    match completion {
-        Completion::Result(value) => ("result".to_string(), to_json_string(&value)),
-        Completion::Fault(value) => ("fault".to_string(), to_json_string(&value)),
-        Completion::None => ("none".to_string(), String::new()),
-    }
-}
-
-/// Serialize a Value to compact JSON string using its Serialize impl.
-fn to_json_string(v: &Value) -> String {
-    serde_json::to_string(v).unwrap_or_default()
-}
-
 fn value_to_any_value(value: &Value) -> AnyValue {
     match value {
         Value::String(value) => AnyValue::String(value.clone()),
         Value::Integer(value) => AnyValue::Int(value.to_string()),
+        Value::Unsigned(value) => AnyValue::String(value.to_string()),
         Value::Float(value) if value.is_nan() => AnyValue::Double(DoubleValue::Symbol("NaN")),
         Value::Float(value) if value.is_infinite() && value.is_sign_positive() => AnyValue::Double(DoubleValue::Symbol("Infinity")),
         Value::Float(value) if value.is_infinite() => AnyValue::Double(DoubleValue::Symbol("-Infinity")),
@@ -2425,18 +2158,6 @@ fn integer_attribute(key: &'static str, value: i64) -> KeyValue {
         key: key.to_string(),
         value: AnyValue::Int(value.to_string()),
     }
-}
-
-fn otlp_event(name: &'static str, attributes: Vec<KeyValue>) -> SpanEvent {
-    SpanEvent {
-        time_unix_nano: String::new(),
-        name,
-        attributes,
-    }
-}
-
-fn timestamp(start_time_unix_nano: i64, offset: i64) -> String {
-    start_time_unix_nano.saturating_add(offset).to_string()
 }
 
 #[derive(Serialize)]
@@ -2542,748 +2263,4 @@ struct ArrayValue {
 struct KeyValueList {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     values: Vec<KeyValue>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn stateless_result() {
-        let legacy_trace = r#"[{"kind":"Run","operation":"add"},{"kind":"Event","name":"add.a","value":2},{"kind":"Event","name":"add.b","value":3},{"kind":"Event","name":"$result","value":5}]"#;
-
-        let result = translate_legacy_trace("add_2_3".to_string(), "fixture.stateless_add".to_string(), legacy_trace.to_string());
-
-        assert_eq!(result.scenario_name, "add_2_3");
-        assert_eq!(result.component_id, "fixture.stateless_add");
-        assert_eq!(result.operation_name, "add");
-        assert_eq!(result.inputs_json, r#"{"a":2,"b":3}"#);
-        assert_eq!(result.observations_json, "{}");
-        assert_eq!(result.completion, "result");
-        assert_eq!(result.completion_value_json, "5");
-    }
-
-    #[test]
-    fn observed_no_result() {
-        let legacy_trace = r#"[{"kind":"Run","operation":"record_total"},{"kind":"Event","name":"record_total.amount","value":7},{"kind":"Event","name":"total","value":7}]"#;
-
-        let result = translate_legacy_trace(
-            "records_total".to_string(),
-            "fixture.observation".to_string(),
-            legacy_trace.to_string(),
-        );
-
-        assert_eq!(result.scenario_name, "records_total");
-        assert_eq!(result.component_id, "fixture.observation");
-        assert_eq!(result.operation_name, "record_total");
-        assert_eq!(result.inputs_json, r#"{"amount":7}"#);
-        assert_eq!(result.observations_json, r#"{"total":7}"#);
-        assert_eq!(result.completion, "none");
-        assert_eq!(result.completion_value_json, "");
-    }
-
-    #[test]
-    fn unexpected_fault() {
-        let legacy_trace = r#"[{"kind":"Run","operation":"explode"},{"kind":"Event","name":"explode.code","value":9},{"kind":"Event","name":"$fault","value":"boom"}]"#;
-
-        let result = translate_legacy_trace("crashes".to_string(), "fixture.fault".to_string(), legacy_trace.to_string());
-
-        assert_eq!(result.scenario_name, "crashes");
-        assert_eq!(result.component_id, "fixture.fault");
-        assert_eq!(result.operation_name, "explode");
-        assert_eq!(result.inputs_json, r#"{"code":9}"#);
-        assert_eq!(result.observations_json, "{}");
-        assert_eq!(result.completion, "fault");
-        assert_eq!(result.completion_value_json, r#""boom""#);
-    }
-
-    #[test]
-    fn preserve_single_entry_map() {
-        let legacy_trace = r#"[{"kind":"Run","operation":"record_metric"},{"kind":"Event","name":"metric","value":{"Integer":7}}]"#;
-
-        let result = translate_legacy_trace(
-            "records_metric".to_string(),
-            "fixture.observation".to_string(),
-            legacy_trace.to_string(),
-        );
-
-        assert_eq!(result.scenario_name, "records_metric");
-        assert_eq!(result.component_id, "fixture.observation");
-        assert_eq!(result.operation_name, "record_metric");
-        assert_eq!(result.inputs_json, "{}");
-        assert_eq!(result.observations_json, r#"{"metric":{"Integer":7}}"#);
-        assert_eq!(result.completion, "none");
-        assert_eq!(result.completion_value_json, "");
-    }
-
-    #[test]
-    fn encode_stateless_result_as_otlp() {
-        let legacy_trace = r#"[{"kind":"Run","operation":"add"},{"kind":"Event","name":"add.a","value":2},{"kind":"Event","name":"add.b","value":3},{"kind":"Event","name":"$result","value":5}]"#;
-
-        let result = encode_legacy_trace_otlp(
-            "add_2_3".to_string(),
-            "fixture.stateless_add".to_string(),
-            legacy_trace.to_string(),
-            "11111111111111111111111111111111".to_string(),
-            "1111111111111101".to_string(),
-            "1111111111111102".to_string(),
-            "1111111111111103".to_string(),
-            "run-001".to_string(),
-            1_000_000_000,
-            "0.5.0".to_string(),
-            "rust-reference".to_string(),
-            "rust".to_string(),
-        );
-
-        assert_eq!(result.span_count, 3);
-        assert!(!result.otlp_json.contains('\n'));
-        assert!(!result.otlp_json.contains(": "));
-        let document: serde_json::Value = serde_json::from_str(&result.otlp_json).unwrap();
-        let resource_spans = &document["resourceSpans"][0];
-        let resource_attributes = resource_spans["resource"]["attributes"].as_array().unwrap();
-        let spans = document["resourceSpans"][0]["scopeSpans"][0]["spans"].as_array().unwrap();
-
-        assert_eq!(resource_spans["schemaUrl"], CTSC_SCHEMA_URL);
-        assert_eq!(document["resourceSpans"][0]["scopeSpans"][0]["schemaUrl"], CTSC_SCHEMA_URL);
-        assert_eq!(resource_attributes.len(), 5);
-        assert_eq!(resource_attributes[0]["key"], "conformance.version");
-        assert_eq!(resource_attributes[0]["value"]["stringValue"], CTSC_VERSION);
-        assert_eq!(resource_attributes[1]["key"], "conformance.tool.name");
-        assert_eq!(resource_attributes[1]["value"]["stringValue"], "specgate");
-        assert_eq!(resource_attributes[2]["key"], "conformance.tool.version");
-        assert_eq!(resource_attributes[2]["value"]["stringValue"], "0.5.0");
-        assert_eq!(resource_attributes[3]["key"], "conformance.target.name");
-        assert_eq!(resource_attributes[3]["value"]["stringValue"], "rust-reference");
-        assert_eq!(resource_attributes[4]["key"], "conformance.target.language");
-        assert_eq!(resource_attributes[4]["value"]["stringValue"], "rust");
-        assert_eq!(spans.len(), 3);
-        assert_eq!(spans[0]["name"], "conformance.run");
-        assert_eq!(spans.iter().filter(|span| span["name"] == "conformance.run").count(), 1);
-        assert_eq!(spans.iter().filter(|span| span["name"] == "conformance.scenario").count(), 1);
-        assert_eq!(spans.iter().filter(|span| span["name"] == "conformance.operation").count(), 1);
-        assert_eq!(spans[0]["startTimeUnixNano"], "1000000000");
-        assert_eq!(spans[0]["endTimeUnixNano"], "1000000006");
-        assert_eq!(spans[1]["parentSpanId"], "1111111111111101");
-        assert_eq!(spans[1]["startTimeUnixNano"], "1000000001");
-        assert_eq!(spans[1]["endTimeUnixNano"], "1000000005");
-        assert_eq!(spans[2]["parentSpanId"], "1111111111111102");
-        assert_eq!(spans[2]["startTimeUnixNano"], "1000000002");
-        assert_eq!(spans[2]["endTimeUnixNano"], "1000000004");
-        assert_eq!(
-            spans[2]["attributes"][2]["value"]["kvlistValue"]["values"][0]["value"]["intValue"],
-            "2"
-        );
-        assert_eq!(spans[2]["events"][0]["timeUnixNano"], "1000000003");
-        assert_eq!(spans[2]["events"][0]["attributes"][0]["value"]["intValue"], "5");
-    }
-
-    #[test]
-    fn capture_nested_rust_operations_as_native_ctsc() {
-        specgate_runtime::reset();
-        let result = capture_native_rust_otlp(
-            "nested_double".to_string(),
-            "22222222222222222222222222222222".to_string(),
-            "2222222222222201".to_string(),
-            "2222222222222202".to_string(),
-            r#"["2222222222222203","2222222222222204"]"#.to_string(),
-            "run-native-001".to_string(),
-            2_000_000_000,
-            100,
-            "0.5.0".to_string(),
-            "rust-reference".to_string(),
-            "rust".to_string(),
-            2,
-        );
-
-        assert_eq!(result.span_count, 4);
-        let document: serde_json::Value = serde_json::from_str(&result.otlp_json).unwrap();
-        let resource_spans = &document["resourceSpans"][0];
-        let resource_attributes = resource_spans["resource"]["attributes"].as_array().unwrap();
-        let spans = document["resourceSpans"][0]["scopeSpans"][0]["spans"].as_array().unwrap();
-        assert_eq!(resource_spans["schemaUrl"], CTSC_SCHEMA_URL);
-        assert_eq!(resource_spans["scopeSpans"][0]["schemaUrl"], CTSC_SCHEMA_URL);
-        assert_eq!(resource_attributes[0]["key"], "conformance.version");
-        assert_eq!(resource_attributes[0]["value"]["stringValue"], CTSC_VERSION);
-        assert_eq!(spans.len(), 4);
-        assert_eq!(spans[0]["spanId"], "2222222222222201");
-        assert_eq!(spans[0]["startTimeUnixNano"], "2000000000");
-        assert_eq!(spans[0]["endTimeUnixNano"], "2000000900");
-        assert_eq!(spans[1]["parentSpanId"], "2222222222222201");
-        assert_eq!(spans[1]["endTimeUnixNano"], "2000000800");
-        assert_eq!(spans[2]["parentSpanId"], "2222222222222202");
-        assert_eq!(spans[2]["attributes"][0]["value"]["stringValue"], "fixture.native_capture");
-        assert_eq!(spans[2]["attributes"][1]["value"]["stringValue"], "add_after_double");
-        assert_eq!(
-            spans[2]["attributes"][2]["value"]["kvlistValue"]["values"][0]["value"]["intValue"],
-            "2"
-        );
-        assert_eq!(spans[2]["events"][0]["timeUnixNano"], "2000000600");
-        assert_eq!(spans[2]["events"][0]["attributes"][0]["value"]["intValue"], "7");
-        assert_eq!(spans[3]["parentSpanId"], "2222222222222203");
-        assert_eq!(spans[3]["attributes"][1]["value"]["stringValue"], "double");
-        assert_eq!(spans[3]["events"][0]["attributes"][0]["value"]["intValue"], "6");
-    }
-
-    #[test]
-    fn merges_native_scenarios_into_one_deterministic_linked_run() {
-        let capture = |name: &str, trace_id: &str| {
-            start_native_capture(NativeCaptureConfig {
-                scenario_name: name.to_string(),
-                trace_id: trace_id.to_string(),
-                run_span_id: "aaaaaaaaaaaaaaa1".to_string(),
-                scenario_span_id: "aaaaaaaaaaaaaaa2".to_string(),
-                operation_span_ids: Vec::new(),
-                start_time_unix_nano: 0,
-                clock_step_unix_nano: 1,
-            })
-            .unwrap();
-            assert_eq!(double(2), 4);
-            finish_native_capture().unwrap()
-        };
-        let captures = vec![
-            capture("first", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-            capture("second", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
-        ];
-
-        let first = encode_native_captures_otlp_result(
-            &captures,
-            "0.5.0",
-            "default",
-            "rust",
-            "urn:ctsc:registry:fixture.native_capture",
-            "0.1.0",
-            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        )
-        .unwrap();
-        let second = encode_native_captures_otlp_result(
-            &captures,
-            "0.5.0",
-            "default",
-            "rust",
-            "urn:ctsc:registry:fixture.native_capture",
-            "0.1.0",
-            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        )
-        .unwrap();
-
-        assert_eq!(first.span_count, second.span_count);
-        assert_eq!(first.otlp_json, second.otlp_json);
-        assert_eq!(first.span_count, 5);
-        let document: serde_json::Value = serde_json::from_str(&first.otlp_json).unwrap();
-        let spans = document["resourceSpans"][0]["scopeSpans"][0]["spans"].as_array().unwrap();
-        assert_eq!(spans.iter().filter(|span| span["name"] == "conformance.run").count(), 1);
-        assert_eq!(spans.iter().filter(|span| span["name"] == "conformance.scenario").count(), 2);
-        assert_eq!(spans[1]["attributes"][1]["value"]["intValue"], "0");
-        assert_eq!(spans[3]["attributes"][1]["value"]["intValue"], "1");
-        let attributes = document["resourceSpans"][0]["resource"]["attributes"].as_array().unwrap();
-        assert!(attributes.iter().any(|attribute| {
-            attribute["key"] == "conformance.registry.digest"
-                && attribute["value"]["stringValue"] == "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-        }));
-    }
-
-    #[test]
-    fn capture_present_optional_with_ctsc_wrapper() {
-        specgate_runtime::reset();
-        let result = capture_native_optional_otlp(
-            "optional_some".to_string(),
-            "44444444444444444444444444444444".to_string(),
-            "4444444444444401".to_string(),
-            "4444444444444402".to_string(),
-            "4444444444444403".to_string(),
-            "run-optional-001".to_string(),
-            4_000_000_000,
-            100,
-            "0.5.0".to_string(),
-            "rust-reference".to_string(),
-            "rust".to_string(),
-            true,
-            "alice".to_string(),
-        );
-
-        let document: serde_json::Value = serde_json::from_str(&result.otlp_json).unwrap();
-        let operation = &document["resourceSpans"][0]["scopeSpans"][0]["spans"][2];
-        assert_eq!(
-            operation["attributes"][2]["value"]["kvlistValue"]["values"][0]["value"],
-            serde_json::json!({
-                "kvlistValue": {
-                    "values": [{"key": "Some", "value": {"stringValue": "alice"}}]
-                }
-            })
-        );
-        assert_eq!(
-            operation["events"][0]["attributes"][0]["value"],
-            serde_json::json!({
-                "kvlistValue": {
-                    "values": [{"key": "Some", "value": {"stringValue": "alice"}}]
-                }
-            })
-        );
-    }
-
-    #[test]
-    fn capture_absent_optional_with_ctsc_wrapper() {
-        specgate_runtime::reset();
-        let result = capture_native_optional_otlp(
-            "optional_none".to_string(),
-            "55555555555555555555555555555555".to_string(),
-            "5555555555555501".to_string(),
-            "5555555555555502".to_string(),
-            "5555555555555503".to_string(),
-            "run-optional-002".to_string(),
-            5_000_000_000,
-            100,
-            "0.5.0".to_string(),
-            "rust-reference".to_string(),
-            "rust".to_string(),
-            false,
-            "ignored".to_string(),
-        );
-
-        let document: serde_json::Value = serde_json::from_str(&result.otlp_json).unwrap();
-        let operation = &document["resourceSpans"][0]["scopeSpans"][0]["spans"][2];
-        let expected = serde_json::json!({
-            "kvlistValue": {
-                "values": [{"key": "None", "value": {"kvlistValue": {}}}]
-            }
-        });
-        assert_eq!(operation["attributes"][2]["value"]["kvlistValue"]["values"][0]["value"], expected);
-        assert_eq!(operation["events"][0]["attributes"][0]["value"], expected);
-    }
-
-    #[test]
-    fn encode_stateless_discovery_as_registry() {
-        let result = encode_test_registry(
-            "fixture.stateless_add",
-            r#"{"operations":[{"name":"add","is_setup":false,"is_async":false,"return_type":"i32","fills":"","component":"fixture.stateless_add","params":[["a","i32"],["b","i32"]]}],"types":[]}"#,
-        );
-
-        assert_eq!(result.operation_count, 1);
-        assert_eq!(result.type_count, 0);
-        assert_eq!(
-            result.registry_json,
-            r#"{"format":"ctsc.registry","formatVersion":"0.2.0","registryId":"urn:ctsc:registry:test:1","version":"1.0.0","components":[{"id":"fixture.stateless_add","operations":[{"name":"add","inputs":[{"name":"a","type":{"kind":"primitive","name":"i32"}},{"name":"b","type":{"kind":"primitive","name":"i32"}}],"observations":[],"outcomes":{"result":{"kind":"primitive","name":"i32"}}}],"types":[]}]}"#
-        );
-    }
-
-    #[test]
-    fn encode_rich_normalized_schema_as_registry() {
-        let result = encode_schema_registry_result(
-            "urn:ctsc:registry:fixture.rich:1".to_string(),
-            "1.0.0".to_string(),
-            r#"{
-                "component":"fixture.rich",
-                "operations":[{
-                    "name":"transform",
-                    "is_async":false,
-                    "inputs":[
-                        {"name":"person","ty":"Person"},
-                        {"name":"points","ty":"List<Point>"},
-                        {"name":"tags","ty":"set<string>"},
-                        {"name":"scores","ty":"map<string, i64>"},
-                        {"name":"pair","ty":"tuple<i32, string>"},
-                        {"name":"fallback","ty":"Option<Point>"}
-                    ],
-                    "output":"Shape"
-                }],
-                "types":[
-                    {"name":"Shape","kind":"enum","fields":[],"variants":[
-                        {"name":"Circle","fields":[{"name":"radius","ty":"i32"}]},
-                        {"name":"Rectangle","fields":[{"name":"width","ty":"i32"},{"name":"height","ty":"i32"}]},
-                        {"name":"Point","fields":[]}
-                    ]},
-                    {"name":"Point","kind":"struct","fields":[{"name":"x","ty":"i32"},{"name":"y","ty":"i32"}],"variants":[]},
-                    {"name":"Person","kind":"struct","fields":[{"name":"name","ty":"string"},{"name":"location","ty":"Point"}],"variants":[]}
-                ]
-            }"#,
-        )
-        .expect("rich normalized schema should encode");
-
-        assert_eq!(result.operation_count, 1);
-        assert_eq!(result.type_count, 3);
-        assert!(!result.registry_json.contains('\n'));
-
-        let document: serde_json::Value = serde_json::from_str(&result.registry_json).unwrap();
-        let component = &document["components"][0];
-        assert_eq!(component["id"], "fixture.rich");
-        assert_eq!(
-            component["operations"][0]["inputs"][5]["type"],
-            serde_json::json!({
-                "kind": "optional",
-                "value": {"kind": "named", "name": "Point"}
-            })
-        );
-        assert_eq!(
-            component["operations"][0]["inputs"][4]["type"],
-            serde_json::json!({
-                "kind": "tuple",
-                "items": [
-                    {"kind": "primitive", "name": "i32"},
-                    {"kind": "primitive", "name": "string"}
-                ]
-            })
-        );
-        assert_eq!(
-            component["types"][0],
-            serde_json::json!({
-                "name": "Person",
-                "kind": "record",
-                "fields": [
-                    {"name": "name", "type": {"kind": "primitive", "name": "string"}},
-                    {"name": "location", "type": {"kind": "named", "name": "Point"}}
-                ]
-            })
-        );
-        assert_eq!(
-            component["types"][2]["variants"],
-            serde_json::json!([
-                {
-                    "name": "Circle",
-                    "payload": {
-                        "kind": "record",
-                        "fields": [{"name": "radius", "type": {"kind": "primitive", "name": "i32"}}]
-                    }
-                },
-                {
-                    "name": "Rectangle",
-                    "payload": {
-                        "kind": "record",
-                        "fields": [
-                            {"name": "width", "type": {"kind": "primitive", "name": "i32"}},
-                            {"name": "height", "type": {"kind": "primitive", "name": "i32"}}
-                        ]
-                    }
-                },
-                {"name": "Point"}
-            ])
-        );
-    }
-
-    #[test]
-    fn schema_registry_recurses_and_normalizes_whitespace_deterministically() {
-        let compact = encode_test_schema_registry(
-            r#"{"component":"selected","operations":[{"name":"nested","is_async":false,"inputs":[{"name":"value","ty":"List<Option<map<string, Set<Item>>>>"}],"output":""}],"types":[{"name":"Item","kind":"struct","fields":[],"variants":[]}]}"#,
-        )
-        .unwrap();
-        let spaced = encode_test_schema_registry(
-            r#"{"component":"selected","operations":[{"name":"nested","is_async":false,"inputs":[{"name":"value","ty":" List < optional < Map < string , set < Item > > > > "}],"output":""}],"types":[{"name":"Item","kind":"struct","fields":[],"variants":[]}]}"#,
-        )
-        .unwrap();
-
-        assert_eq!(compact.registry_json, spaced.registry_json);
-        let document: serde_json::Value = serde_json::from_str(&compact.registry_json).unwrap();
-        assert_eq!(
-            document["components"][0]["operations"][0]["inputs"][0]["type"],
-            serde_json::json!({
-                "kind": "list",
-                "items": {
-                    "kind": "optional",
-                    "value": {
-                        "kind": "map",
-                        "keys": {"kind": "primitive", "name": "string"},
-                        "values": {
-                            "kind": "set",
-                            "items": {"kind": "named", "name": "Item"}
-                        }
-                    }
-                }
-            })
-        );
-    }
-
-    #[test]
-    fn schema_registry_sorts_operations_and_types_but_preserves_declared_order() {
-        let result = encode_test_schema_registry(
-            r#"{
-                "component":"selected",
-                "operations":[
-                    {"name":"zeta","is_async":false,"inputs":[{"name":"second","ty":"i64"},{"name":"first","ty":"bool"}],"output":""},
-                    {"name":"alpha","is_async":false,"inputs":[],"output":"Second"}
-                ],
-                "types":[
-                    {"name":"Second","kind":"enum","fields":[],"variants":[{"name":"B","fields":[]},{"name":"A","fields":[]}]},
-                    {"name":"First","kind":"struct","fields":[{"name":"z","ty":"i32"},{"name":"a","ty":"string"}],"variants":[]}
-                ]
-            }"#,
-        )
-        .unwrap();
-        let document: serde_json::Value = serde_json::from_str(&result.registry_json).unwrap();
-        let component = &document["components"][0];
-
-        assert_eq!(component["operations"][0]["name"], "alpha");
-        assert_eq!(component["operations"][1]["name"], "zeta");
-        assert_eq!(component["operations"][1]["inputs"][0]["name"], "second");
-        assert_eq!(component["operations"][1]["inputs"][1]["name"], "first");
-        assert_eq!(component["types"][0]["name"], "First");
-        assert_eq!(component["types"][0]["fields"][0]["name"], "z");
-        assert_eq!(component["types"][0]["fields"][1]["name"], "a");
-        assert_eq!(component["types"][1]["variants"][0]["name"], "B");
-        assert_eq!(component["types"][1]["variants"][1]["name"], "A");
-    }
-
-    #[test]
-    fn schema_registry_result_rejects_malformed_and_unsupported_refs_without_panicking() {
-        for (ty, expected) in [
-            ("List<i32", "expected '>'"),
-            ("Map<string>", "expects 2 type arguments"),
-            ("Result<i32, string>", "unsupported type constructor 'Result'"),
-            ("Missing", "unknown named type 'Missing'"),
-            ("List<i32> trailing", "unexpected trailing input"),
-        ] {
-            let schema = format!(
-                r#"{{"component":"selected","operations":[{{"name":"bad","is_async":false,"inputs":[{{"name":"value","ty":"{ty}"}}],"output":""}}],"types":[]}}"#
-            );
-            let error = encode_test_schema_registry(&schema).expect_err("invalid type reference should fail");
-            assert!(error.contains(expected), "expected '{expected}' in '{error}'");
-        }
-    }
-
-    #[test]
-    fn registry_sorts_operations_but_preserves_parameter_order_and_filters_component_setups() {
-        let result = encode_test_registry(
-            "selected",
-            r#"{"operations":[
-                {"name":"zeta","is_setup":false,"return_type":"","component":"selected","params":[["second","u64"],["first","bool"]]},
-                {"name":"make_zeta","is_setup":true,"return_type":"State","component":"selected","params":[]},
-                {"name":"alpha","is_setup":false,"return_type":"String","component":"selected","params":[["value","&str"]]},
-                {"name":"ignored","is_setup":false,"return_type":"i32","component":"other","params":[]}
-            ],"types":[]}"#,
-        );
-        let document: serde_json::Value = serde_json::from_str(&result.registry_json).unwrap();
-        let operations = document["components"][0]["operations"].as_array().unwrap();
-
-        assert_eq!(operations.len(), 2);
-        assert_eq!(operations[0]["name"], "alpha");
-        assert_eq!(operations[1]["name"], "zeta");
-        assert_eq!(operations[1]["inputs"][0]["name"], "second");
-        assert_eq!(operations[1]["inputs"][1]["name"], "first");
-        assert_eq!(operations[1]["outcomes"], serde_json::json!({}));
-    }
-
-    #[test]
-    fn registry_maps_primitive_aliases_refs_bytes_and_unit() {
-        let result = encode_test_registry(
-            "selected",
-            r#"{"operations":[{"name":"primitives","is_setup":false,"return_type":"()","component":"selected","params":[
-                ["unit","unit"],["string","string"],["owned","String"],["slice","&'static str"],["flag","bool"],
-                ["i32","i32"],["i64","i64"],["u32","u32"],["u64","u64"],["f32","f32"],["f64","f64"],
-                ["bytes","Vec<u8>"],["borrowed_bytes","&[u8]"]
-            ]}],"types":[]}"#,
-        );
-        let document: serde_json::Value = serde_json::from_str(&result.registry_json).unwrap();
-        let inputs = document["components"][0]["operations"][0]["inputs"].as_array().unwrap();
-        let names = inputs
-            .iter()
-            .map(|input| input["type"]["name"].as_str().unwrap())
-            .collect::<Vec<_>>();
-
-        assert_eq!(
-            names,
-            [
-                "unit", "string", "string", "string", "bool", "i32", "i64", "u32", "u64", "f32", "f64", "bytes", "bytes"
-            ]
-        );
-        assert_eq!(document["components"][0]["operations"][0]["outcomes"], serde_json::json!({}));
-    }
-
-    #[test]
-    fn registry_rejects_malformed_json() {
-        assert_registry_error("{", "malformed discovery JSON");
-    }
-
-    #[test]
-    fn registry_rejects_missing_component() {
-        assert_registry_error(
-            r#"{"operations":[{"name":"other","is_setup":false,"return_type":"i32","component":"other","params":[]}],"types":[]}"#,
-            "no non-setup operations found for component 'selected'",
-        );
-    }
-
-    #[test]
-    fn registry_rejects_unsupported_type() {
-        assert_registry_error(
-            r#"{"operations":[{"name":"bad","is_setup":false,"return_type":"usize","component":"selected","params":[]}],"types":[]}"#,
-            "unsupported type 'usize'",
-        );
-    }
-
-    #[test]
-    fn registry_rejects_unsupported_named_type() {
-        assert_registry_error(
-            r#"{"operations":[{"name":"bad","is_setup":false,"return_type":"Widget","component":"selected","params":[]}],"types":[{"name":"Widget"}]}"#,
-            "named type 'Widget' is not supported",
-        );
-    }
-
-    #[test]
-    fn encode_operation_emits_spec_outputs_in_case_order() {
-        specgate_runtime::reset();
-        let result = encode_test_trace(r#"[{"kind":"Run","operation":"add"},{"kind":"Event","name":"$result","value":5}]"#);
-        let traces = specgate_runtime::take_traces();
-        let output_events = &traces[traces.len() - 3..];
-
-        assert!(matches!(
-            &output_events[0],
-            TraceEvent::Event { name, value: Value::Integer(3) } if name == "span_count"
-        ));
-        assert!(matches!(
-            &output_events[1],
-            TraceEvent::Event { name, value: Value::String(value) }
-                if name == "otlp_json" && value == &result.otlp_json
-        ));
-        assert!(matches!(
-            &output_events[2],
-            TraceEvent::Event { name, value: Value::Map(_) } if name == "$result"
-        ));
-    }
-
-    #[test]
-    fn observations_preserve_legacy_order() {
-        let legacy_trace =
-            r#"[{"kind":"Run","operation":"record"},{"kind":"Event","name":"z","value":1},{"kind":"Event","name":"a","value":true}]"#;
-
-        let result = encode_test_trace(legacy_trace);
-        let document: serde_json::Value = serde_json::from_str(&result.otlp_json).unwrap();
-        let events = document["resourceSpans"][0]["scopeSpans"][0]["spans"][2]["events"]
-            .as_array()
-            .unwrap();
-
-        assert_eq!(events[0]["name"], "conformance.observation");
-        assert_eq!(events[0]["attributes"][0]["value"]["stringValue"], "z");
-        assert_eq!(events[0]["attributes"][1]["value"]["intValue"], "1");
-        assert_eq!(events[1]["attributes"][0]["value"]["stringValue"], "a");
-        assert_eq!(events[1]["attributes"][1]["value"]["boolValue"], true);
-        assert_eq!(document["resourceSpans"][0]["scopeSpans"][0]["spans"][2]["status"]["code"], 1);
-    }
-
-    #[test]
-    fn no_result_emits_no_terminal_event() {
-        let result = encode_test_trace(r#"[{"kind":"Run","operation":"noop"}]"#);
-        let document: serde_json::Value = serde_json::from_str(&result.otlp_json).unwrap();
-        let operation = &document["resourceSpans"][0]["scopeSpans"][0]["spans"][2];
-
-        assert!(operation.get("events").is_none());
-        assert_eq!(operation["status"]["code"], 1);
-    }
-
-    #[test]
-    fn faults_use_minimal_deterministic_legacy_mapping() {
-        let legacy_trace = r#"[{"kind":"Run","operation":"explode"},{"kind":"Event","name":"$fault","value":"boom"}]"#;
-
-        let result = encode_test_trace(legacy_trace);
-        let document: serde_json::Value = serde_json::from_str(&result.otlp_json).unwrap();
-        let spans = document["resourceSpans"][0]["scopeSpans"][0]["spans"].as_array().unwrap();
-        let fault = &spans[2]["events"][0];
-
-        assert_eq!(spans[0]["status"]["code"], 1);
-        assert_eq!(spans[1]["status"]["code"], 2);
-        assert_eq!(spans[2]["status"]["code"], 2);
-        assert_eq!(fault["name"], "conformance.fault");
-        assert_eq!(fault["attributes"][0]["value"]["stringValue"], "specgate.legacy_fault");
-        assert_eq!(fault["attributes"][1]["value"]["stringValue"], "boom");
-        assert_eq!(fault["attributes"][2]["value"]["stringValue"], "target");
-    }
-
-    #[test]
-    fn recursively_encodes_values_with_stable_collection_order() {
-        let mut nested_map = BTreeMap::new();
-        nested_map.insert("z".to_string(), Value::Float(2.5));
-        nested_map.insert("a".to_string(), Value::List(vec![Value::Bool(true), Value::Integer(-7)]));
-
-        let mut set = BTreeSet::new();
-        set.insert(Value::String("zeta".to_string()));
-        set.insert(Value::Integer(4));
-        set.insert(Value::Bool(false));
-
-        let mut root = BTreeMap::new();
-        root.insert("set".to_string(), Value::Set(set));
-        root.insert("map".to_string(), Value::Map(nested_map));
-
-        let encoded = serde_json::to_string(&value_to_any_value(&Value::Map(root))).unwrap();
-
-        assert_eq!(
-            encoded,
-            r#"{"kvlistValue":{"values":[{"key":"map","value":{"kvlistValue":{"values":[{"key":"a","value":{"arrayValue":{"values":[{"boolValue":true},{"intValue":"-7"}]}}},{"key":"z","value":{"doubleValue":2.5}}]}}},{"key":"set","value":{"arrayValue":{"values":[{"boolValue":false},{"intValue":"4"},{"stringValue":"zeta"}]}}}]}}"#
-        );
-    }
-
-    #[test]
-    fn option_trace_values_remain_some_none_kvlists() {
-        let some = Value::Map(BTreeMap::from([("Some".to_string(), Value::Integer(7))]));
-        let none = Value::Map(BTreeMap::from([("None".to_string(), Value::Map(BTreeMap::new()))]));
-
-        assert_eq!(
-            serde_json::to_value(value_to_any_value(&some)).unwrap(),
-            serde_json::json!({
-                "kvlistValue": {
-                    "values": [{"key": "Some", "value": {"intValue": "7"}}]
-                }
-            })
-        );
-        assert_eq!(
-            serde_json::to_value(value_to_any_value(&none)).unwrap(),
-            serde_json::json!({
-                "kvlistValue": {
-                    "values": [{"key": "None", "value": {"kvlistValue": {}}}]
-                }
-            })
-        );
-    }
-
-    #[test]
-    fn encodes_symbolic_non_finite_floats() {
-        let values = Value::List(vec![
-            Value::Float(f64::NAN),
-            Value::Float(f64::INFINITY),
-            Value::Float(f64::NEG_INFINITY),
-        ]);
-
-        let encoded = serde_json::to_string(&value_to_any_value(&values)).unwrap();
-
-        assert_eq!(
-            encoded,
-            r#"{"arrayValue":{"values":[{"doubleValue":"NaN"},{"doubleValue":"Infinity"},{"doubleValue":"-Infinity"}]}}"#
-        );
-    }
-
-    fn encode_test_trace(legacy_trace: &str) -> CtscOtlpEncoding {
-        encode_legacy_trace_otlp(
-            "scenario".to_string(),
-            "fixture.component".to_string(),
-            legacy_trace.to_string(),
-            "11111111111111111111111111111111".to_string(),
-            "1111111111111101".to_string(),
-            "1111111111111102".to_string(),
-            "1111111111111103".to_string(),
-            "run-001".to_string(),
-            1_000_000_000,
-            "0.5.0".to_string(),
-            "rust-reference".to_string(),
-            "rust".to_string(),
-        )
-    }
-
-    fn encode_test_registry(component_id: &str, discovery_json: &str) -> CtscRegistryEncoding {
-        encode_discovery_registry(
-            "urn:ctsc:registry:test:1".to_string(),
-            "1.0.0".to_string(),
-            component_id.to_string(),
-            discovery_json.to_string(),
-        )
-    }
-
-    fn encode_test_schema_registry(schema_json: &str) -> Result<CtscRegistryEncoding, String> {
-        encode_schema_registry_result("urn:ctsc:registry:test:1".to_string(), "1.0.0".to_string(), schema_json)
-    }
-
-    fn assert_registry_error(discovery_json: &str, expected: &str) {
-        let panic =
-            std::panic::catch_unwind(|| encode_test_registry("selected", discovery_json)).expect_err("invalid discovery should panic");
-        let message = panic
-            .downcast_ref::<String>()
-            .map(String::as_str)
-            .or_else(|| panic.downcast_ref::<&str>().copied())
-            .expect("panic should contain a string");
-        assert!(message.contains(expected), "expected '{expected}' in '{message}'");
-    }
 }
