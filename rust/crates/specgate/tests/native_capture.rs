@@ -21,6 +21,31 @@ fn optional(value: Option<String>) -> Option<String> {
     value
 }
 
+#[spec_operation("async_value")]
+async fn async_value(value: i32) -> i32 {
+    value * 2
+}
+
+#[spec_operation("result_unit")]
+fn result_unit(fail: bool) -> Result<(), String> {
+    if fail { Err("failed".to_string()) } else { Ok(()) }
+}
+
+#[spec_operation("option_unit")]
+fn option_unit(present: bool) -> Option<()> {
+    present.then_some(())
+}
+
+#[spec_operation("result_error_unit")]
+fn result_error_unit(fail: bool) -> Result<i32, ()> {
+    if fail { Err(()) } else { Ok(7) }
+}
+
+#[spec_operation("result_both_unit")]
+fn result_both_unit(fail: bool) -> Result<(), ()> {
+    if fail { Err(()) } else { Ok(()) }
+}
+
 #[derive(Clone, SpecEvent)]
 struct OptionalRecord {
     #[spec_event]
@@ -41,7 +66,6 @@ fn config(operation_span_ids: &[&str]) -> specgate::__rt::NativeCaptureConfig {
 
 #[test]
 fn operation_macro_captures_components_nesting_results_and_observations() {
-    specgate::__rt::reset();
     specgate::__rt::start_native_capture(config(&["3333333333333303", "3333333333333304"])).unwrap();
 
     assert_eq!(outer(2), 7);
@@ -65,9 +89,7 @@ fn operation_macro_captures_components_nesting_results_and_observations() {
 
 #[test]
 fn operation_macro_is_compatible_without_capture_and_completes_unit_spans() {
-    specgate::__rt::reset();
     assert_eq!(outer(2), 7);
-    assert_eq!(specgate::__rt::take_traces().len(), 7);
 
     specgate::__rt::start_native_capture(config(&["3333333333333303"])).unwrap();
     unit();
@@ -79,7 +101,6 @@ fn operation_macro_is_compatible_without_capture_and_completes_unit_spans() {
 #[test]
 fn operation_macro_captures_native_optional_values() {
     for (input, native_variant) in [(Some("alice".to_string()), "Some"), (None, "None")] {
-        specgate::__rt::reset();
         specgate::__rt::start_native_capture(config(&["3333333333333303"])).unwrap();
         assert_eq!(optional(input.clone()), input);
 
@@ -89,14 +110,13 @@ fn operation_macro_captures_native_optional_values() {
         };
         assert_eq!(native_input.len(), 1);
         assert!(native_input.contains_key(native_variant));
-        let Some(specgate::__rt::NativeCompletion::Result {
-            value: Value::Map(native_result),
-            ..
-        }) = &capture.operations[0].completion
-        else {
-            panic!("native optional result must be a kvlist");
-        };
-        assert_eq!(native_result, native_input);
+        match (&input, &capture.operations[0].completion) {
+            (Some(_), Some(specgate::__rt::NativeCompletion::Result { value, .. })) => {
+                assert_eq!(value, native_input.get("Some").unwrap());
+            }
+            (None, Some(specgate::__rt::NativeCompletion::Empty { .. })) => {}
+            _ => panic!("unexpected optional completion"),
+        }
     }
 }
 
@@ -122,4 +142,64 @@ fn native_projection_recurses_through_collections_and_annotated_records() {
             ]),
         )]))
     );
+}
+
+#[test]
+fn async_operation_capture_is_rejected_before_polling_across_await() {
+    use std::future::Future;
+    use std::task::{Context, Poll, Waker};
+
+    let mut inactive = Box::pin(async_value(2));
+    let mut context = Context::from_waker(Waker::noop());
+    assert_eq!(inactive.as_mut().poll(&mut context), Poll::Ready(4));
+
+    specgate::__rt::start_native_capture(config(&[])).unwrap();
+    let mut captured = Box::pin(async_value(2));
+    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = captured.as_mut().poll(&mut context);
+    }));
+    assert!(panic.is_err());
+    assert!(specgate::__rt::finish_native_capture().unwrap().operations.is_empty());
+}
+
+#[test]
+fn unit_result_and_optional_unit_use_consistent_ctsc_completion() {
+    specgate::__rt::start_native_capture(config(&[])).unwrap();
+    assert_eq!(result_unit(false), Ok(()));
+    let capture = specgate::__rt::finish_native_capture().unwrap();
+    assert!(capture.operations[0].completion.is_none());
+
+    specgate::__rt::start_native_capture(config(&[])).unwrap();
+    assert_eq!(result_unit(true), Err("failed".to_string()));
+    let capture = specgate::__rt::finish_native_capture().unwrap();
+    assert!(matches!(
+        capture.operations[0].completion,
+        Some(specgate::__rt::NativeCompletion::Error {
+            value: Some(Value::String(_)),
+            ..
+        })
+    ));
+
+    for present in [true, false] {
+        specgate::__rt::start_native_capture(config(&[])).unwrap();
+        assert_eq!(option_unit(present), present.then_some(()));
+        let capture = specgate::__rt::finish_native_capture().unwrap();
+        assert!(matches!(
+            capture.operations[0].completion,
+            Some(specgate::__rt::NativeCompletion::Result { value: Value::Map(_), .. })
+        ));
+    }
+
+    specgate::__rt::start_native_capture(config(&[])).unwrap();
+    assert_eq!(result_error_unit(true), Err(()));
+    let capture = specgate::__rt::finish_native_capture().unwrap();
+    assert!(matches!(
+        capture.operations[0].completion,
+        Some(specgate::__rt::NativeCompletion::Error { value: None, .. })
+    ));
+
+    specgate::__rt::start_native_capture(config(&[])).unwrap();
+    assert_eq!(result_both_unit(false), Ok(()));
+    let capture = specgate::__rt::finish_native_capture().unwrap();
+    assert!(capture.operations[0].completion.is_none());
 }

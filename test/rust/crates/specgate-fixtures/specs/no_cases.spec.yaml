@@ -1,9 +1,0 @@
-spec_version: "0.4.0"
-name: fixture.no_cases
-binding: binding.yaml
-
-operations:
-  something:
-    desc: Placeholder operation.
-
-cases: []

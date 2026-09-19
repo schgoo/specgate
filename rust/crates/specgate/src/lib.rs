@@ -1,201 +1,42 @@
-//! # `SpecGate`
+//! Umbrella crate for `SpecGate`'s native CTSC annotation surface.
 //!
-//! Deterministic spec-based verification for LLM-implemented code.
+//! Add `specgate` to an implementation crate, declare a component, annotate
+//! operations/setups/types, and exercise behavior through ordinary tests.
+//! `specgate capture` records those real invocations as deterministic CTSC
+//! reference traces; `specgate replay` invokes a candidate from the captured
+//! semantic inputs. Async operations remain discoverable but are not natively
+//! captured until capture context becomes task-safe.
 //!
-//! Engineers write specs. LLMs implement them. `SpecGate` closes the gap by
-//! providing a non-stochastic harness that validates implementations against
-//! specs using runtime traces.
-//!
-//! ## What `SpecGate` can do
-//!
-//! - Assert on the runtime traces operations emit, with a rich set of matcher
-//!   operators (`$gt`, `$contains`, `$match`, `$type`, `$not`, ...) and position
-//!   directives (`$unordered`, `$anywhere`).
-//! - Model state via setups, mock dependencies, and capture structured values —
-//!   structs, enums, lists/maps/sets, and the built-in `value` type.
-//! - Optional inputs with defaults, property-based cases, and async operations
-//!   (driven on a `smol` or `tokio` runtime).
-//! - Group a crate's public API into components, and run in reverse with
-//!   `specgate extract` to derive a spec from annotated code.
-//!
-//! ## Usage
-//!
-//! Add to your `Cargo.toml`:
-//!
-//! ```toml
-//! [dependencies]
-//! specgate = "0.1"
-//!
-//! [dev-dependencies]
-//! specgate = { version = "0.1", features = ["harness"] }
-//! ```
-//!
-//! Annotate your code:
-//!
-//! ```rust,ignore
+//! ```rust
 //! use specgate::*;
 //!
-//! // Declare the component this crate implements (once, at the crate root).
-//! spec_component!("counter.service");
+//! spec_component!("example.math");
 //!
-//! // Capture selected fields of a struct into the trace.
-//! #[derive(SpecEvent)]
-//! struct Count {
-//!     #[spec_event]
-//!     value: i32,
+//! #[spec_operation("add")]
+//! pub fn add(a: i32, b: i32) -> i32 {
+//!     add_impl(a, b)
 //! }
 //!
-//! struct Counter {
-//!     value: i32,
+//! fn add_impl(a: i32, b: i32) -> i32 {
+//!     a + b
 //! }
 //!
-//! // A setup builds the receiver for stateful (method) operations;
-//! // `#[spec_input]` gives a parameter a language-neutral spec name.
-//! #[spec_setup("counter")]
-//! fn new_counter(#[spec_input("start")] initial: i32) -> Counter {
-//!     Counter { value: initial }
-//! }
-//!
-//! impl Counter {
-//!     #[spec_operation("increment")]
-//!     fn increment(&mut self, #[spec_input("by")] delta: i32) -> Count {
-//!         self.value += delta;
-//!         spec_trace!("after_add", &self.value); // inline trace checkpoint
-//!         Count { value: self.value }
-//!     }
-//! }
-//!
-//! // A free-function operation whose dependency call is mocked: the spec
-//! // supplies the response, so the real `Directory` is never hit under test.
-//! #[spec_operation("lookup")]
-//! fn lookup(dir: &Directory, id: &str) -> String {
-//!     #[spec_mock("dir")]
-//!     let name = dir.find(id);
-//!     name
-//! }
-//!
-//! struct Directory;
-//! impl Directory {
-//!     fn find(&self, _id: &str) -> String {
-//!         unreachable!("mocked under test")
-//!     }
-//! }
+//! fn main() {}
 //! ```
-//!
-//! Run your spec:
-//!
-//! ```rust,ignore
-//! #[test]
-//! fn spec_passes() {
-//!     let result = specgate::run_spec("specs/my-component.spec.yaml");
-//!     assert!(matches!(result, specgate::RunOutcome::Complete { .. }));
-//! }
-//! ```
-//!
-//! ## Annotation surface
-//!
-//! - `#[spec_operation("name")]` — mark a function as a spec operation.
-//! - `#[spec_setup("name")]` — build the receiver for stateful operations.
-//! - `#[spec_mock(...)]` — inject a table-driven mock dependency.
-//! - `#[derive(SpecEvent)]` + `#[spec_event]` — capture struct/enum fields.
-//! - `#[spec_input("name")]` — give a parameter a language-neutral spec name.
-//! - `spec_component!("name")` — declare the crate's component.
-//! - `spec_trace!(...)` — emit an inline trace checkpoint.
-//!
-//! ## Property Tests
-//!
-//! Specs can declare property-based test cases that generate random inputs
-//! and verify invariants across many iterations:
-//!
-//! ```yaml
-//! cases:
-//!   - name: add_commutative
-//!     kind: property
-//!     runs: 100
-//!     generators:
-//!       a: i32[-1000, 1000]
-//!       b: i32[-1000, 1000]
-//!     calls:
-//!       forward: { operation: add, inputs: { a: "{a}", b: "{b}" } }
-//!       reversed: { operation: add, inputs: { a: "{b}", b: "{a}" } }
-//!     expected:
-//!       - $assert: "forward.$result == reversed.$result"
-//! ```
-//!
-//! Generator types: `i32[min, max]`, `f64[min, max]`, `bool`,
-//! `string[min_len, max_len]`, `string[min, max, pattern: "regex"]`,
-//! `oneof["a", "b"]`, `list[type, len: min..max]`,
-//! `set[type, size: min..max]`, `map[key, value, size: min..max]`, `optional[type]`.
-//!
-//! On failure, the `CaseResult` includes a `counterexample` with the shrunk
-//! generator values that triggered the assertion failure, plus traces from
-//! the failing run.
-//!
-//! ## CLI
-//!
-//! Install the companion CLI for command-line validation and execution:
-//!
-//! ```bash
-//! cargo install specgate-cli
-//! specgate validate specs/
-//! specgate run specs/my-component.spec.yaml
-//! specgate extract path/to/crate -o specs/derived.spec.yaml
-//! ```
-//!
-//! ## Features
-//!
-//! - **`harness`** — enables `run_spec()` and the test harness (add to `[dev-dependencies]`)
-//! - **`trace`** — enables runtime trace collection (required for harness, zero-cost when off)
-//!
-//! ## Learn more
-//!
-//! ### Workspace crates
-//!
-//! `SpecGate` ships as a set of crates. Most users depend only on this umbrella
-//! crate (annotations + harness in one dependency), plus `specgate-cli` as a
-//! command-line tool.
-//!
-//! - `specgate` — this umbrella crate: annotations + harness in one dependency.
-//! - `specgate-cli` — the `specgate validate`, `run`, and `extract` CLI.
-//! - `specgate-harness` — the test harness: codegen, trace collection, matching.
-//! - `specgate-annotations` — the annotation facade.
-//! - `specgate-annotations-macros` — the proc macros behind the annotations.
-//! - `specgate-runtime` — the runtime trace buffer.
-//! - `specgate-types` — spec and binding parsing.
-//!
-//! Each crate's README lives under
-//! <https://github.com/schgoo/specgate/tree/main/rust/crates>
-//!
-//! ### Reference
-//!
-//! - [Knowledge base](https://github.com/schgoo/specgate/tree/main/docs/knowledge)
-//!   — spec format, annotations, bindings, extraction, and more.
-//! - [Fixture Catalog](https://github.com/schgoo/specgate/blob/main/docs/knowledge/fixtures.md)
-//!   — every feature demonstrated by a runnable fixture (the source-of-truth examples).
 
-// Public API — annotations
-pub use specgate_annotations::{SpecEvent, spec_component, spec_mock, spec_operation, spec_setup, spec_trace};
+#[allow(unused_extern_crates)]
+extern crate self as specgate;
 
-#[doc(hidden)]
-/// ```compile_fail
-/// use specgate::*;
-/// emit_event("x", "y"); // emit_event is not part of the public API
-/// ```
-pub mod __public_api_contract {}
+pub use specgate_annotations_macros::{SpecEvent, spec_component, spec_operation, spec_setup, spec_trace};
+pub use specgate_runtime::{SpecEvent, ToNativeValue, Value};
 
-// Internal — native projection plus transitional flat-trace support needed by
-// macro expansions and unmigrated extraction/harness consumers.
-#[doc(hidden)]
-pub use specgate_annotations::{
-    ToNativeValue, ToSpecValue, TraceEvent, Value, emit_event_v, emit_run, mock_lookup, record_event_only, reset, set_mock, take_traces,
-};
-
-// The proc macros expand to `::specgate::__rt::...` so this module must exist.
 #[doc(hidden)]
 pub mod __rt {
-    pub use specgate_annotations::__rt::*;
+    pub use specgate_runtime::linkme;
+    pub use specgate_runtime::{
+        NativeCapture, NativeCaptureConfig, NativeCaptureEnvironmentConfig, NativeCompletion, NativeObservation, NativeOperationSpan,
+        NativeSpanBoundary, NativeStatus, OpMeta, OperationScope, SPECGATE_OPS, SPECGATE_TYPES, SpecEvent, ToNativeValue, TypeMeta, Value,
+        VariantMeta, begin_native_operation, discovery_json, emit_event, finish_native_capture, reject_async_native_capture,
+        start_native_capture,
+    };
 }
-
-// Public API — harness (behind "harness" feature)
-#[cfg(feature = "harness")]
-pub use specgate_harness::{CaseStatus, RunOutcome, run_spec};
