@@ -459,7 +459,7 @@ pub fn format_outcome(outcome: &CaptureOutcome) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::process::Output;
+    use specgate_ctsc::validation::validate_bundle;
 
     fn repo_root() -> PathBuf {
         std::env::current_dir()
@@ -537,7 +537,8 @@ mod tests {
         assert_eq!(manifest["reference"]["digest"], sha256_digest(&trace));
         assert_eq!(manifest["scenarios"]["count"], 1);
         assert_eq!(manifest["scenarios"]["names"], serde_json::json!(["stateless::add_two_and_three"]));
-        validate_bundle_with_python(&first_dir);
+        let validation = validate_bundle(&first_dir);
+        assert!(validation.valid, "native bundle validation failed: {:#?}", validation.issues);
 
         let _ = std::fs::remove_dir_all(first_dir);
         let _ = std::fs::remove_dir_all(second_dir);
@@ -596,63 +597,5 @@ mod tests {
                 other => panic!("unexpected capture artifact: {other}"),
             })
             .collect()
-    }
-
-    fn validate_bundle_with_python(output_dir: &Path) {
-        let validator = repo_root().join("docs").join("ctsc").join("validate.py");
-        if !validator.is_file() {
-            eprintln!("CTSC validator unavailable: {}", validator.display());
-            return;
-        }
-        for (kind, args) in [
-            ("registry", vec![output_dir.join(REGISTRY_FILE)]),
-            ("trace", vec![output_dir.join(TRACE_FILE)]),
-            ("linked", vec![output_dir.join(TRACE_FILE), output_dir.join(REGISTRY_FILE)]),
-        ] {
-            let Some(output) = invoke_python(&validator, kind, &args) else {
-                eprintln!("CTSC validator unavailable: Python was not found");
-                return;
-            };
-            assert_validator_output(&output, kind);
-        }
-    }
-
-    fn invoke_python(validator: &Path, kind: &str, documents: &[PathBuf]) -> Option<Output> {
-        for (program, prefix_args) in [("python", &[][..]), ("py", &["-3"][..])] {
-            let output = Command::new(program)
-                .args(prefix_args)
-                .arg(validator)
-                .arg(kind)
-                .args(documents)
-                .output();
-            match output {
-                Ok(output) if python_launcher_is_unavailable(&output) => {}
-                Ok(output) => return Some(output),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => panic!("failed to invoke CTSC validator with {program}: {error}"),
-            }
-        }
-        None
-    }
-
-    fn python_launcher_is_unavailable(output: &Output) -> bool {
-        !output.status.success()
-            && (String::from_utf8_lossy(&output.stdout).contains("Python was not found")
-                || String::from_utf8_lossy(&output.stderr).contains("Python was not found"))
-    }
-
-    fn assert_validator_output(output: &Output, kind: &str) {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if !output.status.success()
-            && (stdout.contains("missing validator dependencies") || stderr.contains("missing validator dependencies"))
-        {
-            eprintln!("CTSC validator unavailable: {stdout}{stderr}");
-            return;
-        }
-        assert!(
-            output.status.success(),
-            "CTSC {kind} validator rejected generated bundle:\nstdout: {stdout}\nstderr: {stderr}"
-        );
     }
 }

@@ -827,9 +827,11 @@ pub fn format_outcome(outcome: &ReplayOutcome) -> String {
 mod tests {
     use super::*;
     use crate::capture::{CaptureOutcome, capture};
-    use specgate_ctsc::{ReplayOperation, ReplayRegistry, ReplayRegistryOperation, ReplayScenario};
+    use specgate_ctsc::{
+        ReplayOperation, ReplayRegistry, ReplayRegistryOperation, ReplayScenario,
+        validation::{validate_linked, validate_trace},
+    };
     use specgate_discovery::discovery::DiscoveredInput;
-    use std::process::Output;
 
     fn repo_root() -> PathBuf {
         std::env::current_dir()
@@ -979,8 +981,18 @@ mod tests {
         assert!(candidate_text.contains("\"intValue\":\"3\""));
         assert!(candidate_text.contains("\"conformance.result\""));
         assert!(candidate_text.contains("\"intValue\":\"5\""));
-        validate_with_python("trace", &first_output, None);
-        validate_with_python("linked", &first_output, Some(&capture_dir.join(REGISTRY_FILE)));
+        let trace_validation = validate_trace(&first_output);
+        assert!(
+            trace_validation.valid,
+            "native trace validation failed: {:#?}",
+            trace_validation.issues
+        );
+        let linked_validation = validate_linked(&first_output, &capture_dir.join(REGISTRY_FILE), &[]);
+        assert!(
+            linked_validation.valid,
+            "native linked validation failed: {:#?}",
+            linked_validation.issues
+        );
 
         let csharp_binding = repo_root().join("test").join("bindings").join("csharp.yaml");
         let unsupported_output = output_dir("unsupported-language").with_extension("otlp.json");
@@ -1281,51 +1293,5 @@ mod tests {
     fn assert_plan_error(candidate: &ResolvedCandidate, expected: &str) {
         let error = build_invocation_plan(&reference_bundle(), candidate).unwrap_err();
         assert!(error.contains(expected), "expected '{expected}' in '{error}'");
-    }
-
-    fn validate_with_python(kind: &str, trace: &Path, registry: Option<&Path>) {
-        let validator = repo_root().join("docs").join("ctsc").join("validate.py");
-        if !validator.is_file() {
-            return;
-        }
-        let output = invoke_python_validator(&validator, kind, trace, registry);
-        let Some(output) = output else {
-            return;
-        };
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if !output.status.success()
-            && (stdout.contains("missing validator dependencies") || stderr.contains("missing validator dependencies"))
-        {
-            return;
-        }
-        assert!(output.status.success(), "{kind} validation failed:\n{stdout}\n{stderr}");
-    }
-
-    fn invoke_python_validator(validator: &Path, kind: &str, trace: &Path, registry: Option<&Path>) -> Option<Output> {
-        for (program, prefix) in [("python", &[][..]), ("py", &["-3"][..])] {
-            let mut command = Command::new(program);
-            command.args(prefix).arg(validator).arg(kind).arg(trace);
-            if let Some(registry) = registry {
-                command.arg(registry);
-            }
-            match command.output() {
-                Ok(output) if python_unavailable(&output) => {}
-                Ok(output) => return Some(output),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => panic!("failed to invoke Python validator: {error}"),
-            }
-        }
-        None
-    }
-
-    fn python_unavailable(output: &Output) -> bool {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        !output.status.success()
-            && (stdout.contains("Python was not found")
-                || stderr.contains("Python was not found")
-                || stdout.contains("No suitable Python runtime found")
-                || stderr.contains("No suitable Python runtime found"))
     }
 }
