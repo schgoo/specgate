@@ -2,7 +2,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use specgate_ctsc::{
     ReplayValue, decode_replay_bundle_result, encode_native_captures_otlp_result, encode_replayed_native_captures_otlp_result,
-    encode_schema_registry_result,
+    encode_schema_registry_result, validation::validate_bundle,
 };
 use specgate_runtime::{NativeCapture, NativeCaptureConfig, Value, begin_native_operation, finish_native_capture, start_native_capture};
 
@@ -124,6 +124,24 @@ fn rejects_digest_linkage_empty_scenario_and_structured_values() {
         decode_replay_bundle_result(&structured_manifest, &structured_registry, structured_trace.as_bytes())
             .unwrap_err()
             .contains("unsupported structured replay type")
+    );
+
+    let bundle_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("rust root")
+        .join("target")
+        .join(format!("structured-bundle-{}", std::process::id()));
+    std::fs::create_dir_all(&bundle_dir).unwrap();
+    std::fs::write(bundle_dir.join("manifest.json"), &structured_manifest).unwrap();
+    std::fs::write(bundle_dir.join("registry.ctsc.json"), &structured_registry).unwrap();
+    std::fs::write(bundle_dir.join("reference.otlp.json"), structured_trace.as_bytes()).unwrap();
+    let report = validate_bundle(&bundle_dir);
+    std::fs::remove_dir_all(&bundle_dir).unwrap();
+    assert!(
+        report.valid,
+        "bundle validation must not inherit replay's structured-input restriction: {:#?}",
+        report.issues
     );
 }
 

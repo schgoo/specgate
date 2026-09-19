@@ -1,12 +1,14 @@
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use specgate::{SpecEvent, spec_component, spec_operation};
-use specgate_ctsc::{encode_native_captures_otlp_result, encode_schema_registry_result};
+use specgate_ctsc::{
+    encode_native_captures_otlp_result, encode_schema_registry_result,
+    validation::{validate_linked, validate_registry, validate_trace},
+};
 use specgate_discovery::discovery::{Registry, normalize_registry};
 use specgate_runtime::{NativeCaptureConfig, Value, begin_native_operation, finish_native_capture, start_native_capture};
 use std::fs;
 use std::path::Path;
-use std::process::{Command, Output};
 
 spec_component!("fixture.tuple_variants");
 
@@ -52,7 +54,7 @@ fn emit_hygienic_variant(named: bool) -> HygienicVariant {
 }
 
 #[test]
-fn native_generated_otlp_passes_ctsc_trace_validator_when_available() {
+fn native_generated_otlp_passes_native_ctsc_trace_validator() {
     let capture = native_capture("nested_double", Some("alice"));
     let result = encode_native_captures_otlp_result(
         &[capture],
@@ -69,7 +71,7 @@ fn native_generated_otlp_passes_ctsc_trace_validator_when_available() {
 }
 
 #[test]
-fn generated_optional_traces_match_linked_registry_when_available() {
+fn generated_optional_traces_match_native_linked_registry() {
     let registry_id = "urn:ctsc:registry:fixture.native-capture:1";
     let registry_version = "1.0.0";
     let registry = encode_schema_registry_result(
@@ -96,7 +98,7 @@ fn generated_optional_traces_match_linked_registry_when_available() {
 }
 
 #[test]
-fn generated_schema_registry_passes_ctsc_registry_validator_when_available() {
+fn generated_schema_registry_passes_native_ctsc_registry_validator() {
     let result = encode_schema_registry_result(
         "urn:ctsc:registry:fixture.rich:1".to_string(),
         "1.0.0".to_string(),
@@ -419,32 +421,16 @@ fn validate_generated_document(kind: &str, file_label: &str, json: &str) {
     let document_path = output_dir.join(format!("specgate-ctsc-validator-{file_label}-{}.json", std::process::id()));
     fs::write(&document_path, json).expect("failed to write generated CTSC JSON");
 
-    let validator = repo_root.join("docs").join("ctsc").join("validate.py");
-    if !validator.is_file() {
-        let _ = fs::remove_file(&document_path);
-        eprintln!("CTSC validator unavailable: {}", validator.display());
-        return;
-    }
-
-    let output = invoke_python_validator(&validator, kind, &document_path);
-    let _ = fs::remove_file(&document_path);
-
-    let Some(output) = output else {
-        eprintln!("CTSC validator unavailable: Python was not found");
-        return;
+    let report = if kind == "registry" {
+        validate_registry(&document_path, &[])
+    } else {
+        validate_trace(&document_path)
     };
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if !output.status.success() && (stdout.contains("missing validator dependencies") || stderr.contains("missing validator dependencies"))
-    {
-        eprintln!("CTSC validator unavailable: {stdout}{stderr}");
-        return;
-    }
-
+    let _ = fs::remove_file(&document_path);
     assert!(
-        output.status.success(),
-        "CTSC validator rejected generated {kind}:\nstdout: {stdout}\nstderr: {stderr}"
+        report.valid,
+        "native CTSC validator rejected generated {kind}: {:#?}",
+        report.issues
     );
 }
 
@@ -551,94 +537,12 @@ fn validate_generated_linked_documents(file_label: &str, trace_json: &str, regis
 
     fs::write(&trace_path, trace_json).expect("failed to write generated CTSC trace");
 
-    let validator = repo_root.join("docs").join("ctsc").join("validate.py");
-    if !validator.is_file() {
-        let _ = fs::remove_file(&trace_path);
-        let _ = fs::remove_file(&registry_path);
-        eprintln!("CTSC validator unavailable: {}", validator.display());
-        return;
-    }
-
-    let output = invoke_python_linked_validator(&validator, &trace_path, &registry_path);
+    let report = validate_linked(&trace_path, &registry_path, &[]);
     let _ = fs::remove_file(&trace_path);
     let _ = fs::remove_file(&registry_path);
-    assert_validator_output(output, "linked");
-}
-
-fn assert_validator_output(output: Option<Output>, kind: &str) {
-    let Some(output) = output else {
-        eprintln!("CTSC validator unavailable: Python was not found");
-        return;
-    };
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if !output.status.success() && (stdout.contains("missing validator dependencies") || stderr.contains("missing validator dependencies"))
-    {
-        eprintln!("CTSC validator unavailable: {stdout}{stderr}");
-        return;
-    }
-
     assert!(
-        output.status.success(),
-        "CTSC validator rejected generated {kind}:\nstdout: {stdout}\nstderr: {stderr}"
+        report.valid,
+        "native CTSC validator rejected generated linked documents: {:#?}",
+        report.issues
     );
-}
-
-fn invoke_python_validator(validator: &Path, kind: &str, document_path: &Path) -> Option<Output> {
-    let candidates: [(&str, &[&str]); 2] = [("python", &[]), ("py", &["-3"])];
-
-    for (program, prefix_args) in candidates {
-        let output = Command::new(program)
-            .args(prefix_args)
-            .arg(validator)
-            .arg(kind)
-            .arg(document_path)
-            .output();
-
-        match output {
-            Ok(output) if python_launcher_is_unavailable(&output) => {}
-            Ok(output) => return Some(output),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => panic!("failed to invoke CTSC validator with {program}: {error}"),
-        }
-    }
-
-    None
-}
-
-fn invoke_python_linked_validator(validator: &Path, trace_path: &Path, registry_path: &Path) -> Option<Output> {
-    let candidates: [(&str, &[&str]); 2] = [("python", &[]), ("py", &["-3"])];
-
-    for (program, prefix_args) in candidates {
-        let output = Command::new(program)
-            .args(prefix_args)
-            .arg(validator)
-            .arg("linked")
-            .arg(trace_path)
-            .arg(registry_path)
-            .output();
-
-        match output {
-            Ok(output) if python_launcher_is_unavailable(&output) => {}
-            Ok(output) => return Some(output),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => panic!("failed to invoke CTSC validator with {program}: {error}"),
-        }
-    }
-
-    None
-}
-
-fn python_launcher_is_unavailable(output: &Output) -> bool {
-    if output.status.success() {
-        return false;
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    stdout.contains("Python was not found")
-        || stderr.contains("Python was not found")
-        || stdout.contains("No suitable Python runtime found")
-        || stderr.contains("No suitable Python runtime found")
 }

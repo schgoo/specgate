@@ -17,6 +17,7 @@ reference target
   -> statically link top-level stimuli to a candidate
   -> replay
   -> emit an independent candidate CTSC trace
+  -> validate and compare with ctsc.strict/0.1.0
 ```
 
 ## Retained architecture
@@ -27,9 +28,10 @@ reference target
 - `specgate-discovery`: one strict binding resolver, Rust link-time discovery,
   C# compiled-assembly reflection, raw native invocation metadata, normalized
   DTOs, component-scoped setup folding, and transitive dependency closure.
-- `specgate-ctsc`: registry and native OTLP encoding, capture-bundle
-  digest/link verification, typed replay decoding, and deterministic IDs.
-- `specgate-cli`: `discover`, `capture`, and `replay`.
+- `specgate-ctsc`: registry and native OTLP encoding, reusable CTSC Registry,
+  Trace Core, Linked, and bundle validation, typed replay decoding,
+  deterministic IDs, and strict differential comparison.
+- `specgate-cli`: `discover`, `capture`, `replay`, `validate`, and `compare`.
 
 Rust and C# registry output is byte-identical for the stateless, rich-type, and
 setup-folding fixtures. Raw language-specific invocation metadata remains
@@ -51,11 +53,15 @@ generation to prevent split runtime/linkme/capture state.
 - Candidate replay supports synchronous public Rust free functions with
   lossless primitive inputs.
 - Setup-backed methods, async calls, structured replay values, explicit
-  mappings, C# replay, and differential comparison are not implemented.
+  mappings, and C# replay are not implemented.
 - Async metadata is retained for linking, but native capture rejects async
   operations before polling until capture context can propagate task-safely.
-- Native traces support observations and result/empty/declared-error/fault
-  completion, but registry observation declarations and comparison profiles are
-  future work.
+- Native validation supports JSON and JSONL traces, registry imports, exact
+  capture-bundle integrity, and linked type checking. Bundle validation is
+  intentionally independent from replay's narrower invocation decoder.
+- Differential comparison currently implements the fixed
+  `ctsc.strict/0.1.0` policy. Multiple-run selection, overlapping sequential
+  children, and duplicate parallel branch identities are rejected as
+  unsupported or ambiguous, as permitted by the policy.
 - Replay validates nested operations as observed behavior but invokes only
   top-level reference operations.

@@ -2,7 +2,7 @@ use std::process::Command;
 
 #[test]
 fn removed_commands_use_the_normal_unknown_command_error() {
-    for command in ["validate", "run", "extract"] {
+    for command in ["run", "extract"] {
         let output = Command::new(env!("CARGO_BIN_EXE_specgate"))
             .arg(command)
             .output()

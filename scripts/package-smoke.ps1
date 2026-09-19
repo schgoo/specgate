@@ -123,9 +123,11 @@ targets:
     Invoke-Checked $binary @('capture', $binding, '--component', 'fixture.packaged', '--out', $capture)
     Invoke-Checked $binary @('replay', $capture, $binding, '--out', $replay)
 
-    Invoke-Checked python @((Join-Path $root 'docs/ctsc/validate.py'), 'registry', $registry)
-    Invoke-Checked python @((Join-Path $root 'docs/ctsc/validate.py'), 'linked', (Join-Path $capture 'reference.otlp.json'), (Join-Path $capture 'registry.ctsc.json'))
-    Invoke-Checked python @((Join-Path $root 'docs/ctsc/validate.py'), 'linked', $replay, (Join-Path $capture 'registry.ctsc.json'))
+    Invoke-Checked $binary @('validate', 'registry', $registry)
+    Invoke-Checked $binary @('validate', 'linked', (Join-Path $capture 'reference.otlp.json'), (Join-Path $capture 'registry.ctsc.json'))
+    Invoke-Checked $binary @('validate', 'linked', $replay, (Join-Path $capture 'registry.ctsc.json'))
+    Invoke-Checked $binary @('validate', 'bundle', $capture)
+    Invoke-Checked $binary @('compare', (Join-Path $capture 'reference.otlp.json'), $replay, '--registry', (Join-Path $capture 'registry.ctsc.json'))
 
     $nuget = Join-Path $scratch 'nuget-a'
     $nugetRepeat = Join-Path $scratch 'nuget-b'
@@ -155,7 +157,7 @@ targets:
         throw 'C# annotations package is not byte-deterministic.'
     }
 
-    Write-Output 'Packaged-context discover/capture/replay smoke passed.'
+    Write-Output 'Packaged-context discover/capture/replay/validate/compare smoke passed.'
 }
 finally {
     Remove-Item Env:CARGO_HOME -ErrorAction SilentlyContinue

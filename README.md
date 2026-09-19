@@ -24,10 +24,19 @@ specgate capture test\bindings\rust.yaml `
 
 specgate replay capture test\bindings\rust.yaml `
   --out candidate.otlp.json
+
+specgate validate bundle capture
+
+specgate compare capture\reference.otlp.json candidate.otlp.json `
+  --registry capture\registry.ctsc.json
 ```
 
 `discover` supports Rust link-time metadata and C# compiled-assembly reflection.
-`capture` and `replay` currently support Rust. Capture bundles contain
+`capture` and `replay` currently support Rust. `validate` natively checks CTSC
+0.2 Registry, Trace Core, Linked, and capture-bundle semantics, including JSONL
+traces and local or explicit registry imports. `compare` applies the fixed
+`ctsc.strict/0.1.0` policy and reports stable semantic mismatch paths.
+Capture bundles contain
 `registry.ctsc.json`, `reference.otlp.json`, and `manifest.json`.
 Async operations are discoverable but rejected by native capture until capture
 context can propagate safely across executor threads.
@@ -51,8 +60,10 @@ renamed dependencies.
 
 - `rust/crates/specgate-runtime` — native capture and link-time metadata.
 - `rust/crates/specgate-discovery` — bindings, Rust/C# discovery, normalization.
-- `rust/crates/specgate-ctsc` — registry/trace encoding and replay decoding.
-- `rust/crates/specgate-cli` — `discover`, `capture`, and `replay`.
+- `rust/crates/specgate-ctsc` — registry/trace encoding, native validation,
+  strict comparison, and replay decoding.
+- `rust/crates/specgate-cli` — `discover`, `capture`, `replay`, `validate`, and
+  `compare`.
 - `test/rust/crates/specgate-ctsc-fixtures` — focused Rust fixtures.
 - `test/csharp/SpecGate.CtscFixtures` — annotation-only C# fixtures.
 - `docs/ctsc` — committed CTSC contracts, validator, and corpus.
