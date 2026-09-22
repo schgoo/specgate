@@ -27,6 +27,16 @@ pub(crate) struct CSharpBuildOutput {
     pub(crate) fixture_out: PathBuf,
 }
 
+/// One batched C# reflection run: the requested documents plus the complete
+/// operation-component inventory of the assembly that produced them.
+pub(crate) struct CSharpDiscoveryOutput {
+    /// One raw registry document per requested component, in request order.
+    pub(crate) documents: Vec<String>,
+    /// Every component named by a `[SpecOperation]` in the compiled assembly,
+    /// sorted and deduplicated — not just the requested ones.
+    pub(crate) present_components: Vec<String>,
+}
+
 /// Build the fixture's real C# project into `scratch/artifacts` and return the
 /// woven fixture assembly plus its copy-local output directory.
 pub(crate) fn build_real_csharp_project(
@@ -78,22 +88,32 @@ pub(crate) fn build_real_csharp_project(
     Ok(CSharpBuildOutput { fixture_dll, fixture_out })
 }
 
-/// Build and run the C# discovery program for `target`, scoped to `component`,
-/// and return the raw registry JSON it prints (same shape as the Rust runtime's
-/// `discovery_json()`: `{ "operations": [...], "types": [...] }`).
+/// Build the fixture once and reflect every requested `component` from the same
+/// compiled assembly, returning one raw registry JSON document per component in
+/// request order (each the same shape as the Rust runtime's `discovery_json()`:
+/// `{ "operations": [...], "types": [...] }`) plus the assembly's complete
+/// operation-component inventory.
 ///
-/// Scaffolds into the shared, component/framework-keyed discovery scratch dir.
-/// Callers that may run concurrently against the same component (e.g. the C#
-/// behavioral runner) must instead use [`run_csharp_discovery_in`] with a
-/// caller-private scratch dir to avoid clobbering the same `Runner.dll`.
+/// A single fixture build and a single runner compilation serve every component,
+/// so batch callers pay neither cost per component. Single-component discovery
+/// requests a one-element batch, keeping one code path.
+///
+/// Scaffolds into an invocation-unique discovery scratch dir, so concurrent
+/// discovery runs never clobber the same `Runner.dll`.
 ///
 /// # Errors
 ///
 /// Returns an error string when the scaffold, `dotnet` build/run, or output
 /// read fails.
-pub(crate) fn run_csharp_discovery(target: &crate::binding::Target, component: &str) -> Result<String, String> {
+pub(crate) fn run_csharp_discovery_many(target: &crate::binding::Target, components: &[&str]) -> Result<CSharpDiscoveryOutput, String> {
     let settings = crate::resolve_csharp_runner_settings(target);
-    let sanitized_component: String = component.chars().map(|c| if c.is_alphanumeric() { c } else { '_' }).collect();
+    let sanitized_label: String = components
+        .first()
+        .copied()
+        .unwrap_or("all")
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '_' })
+        .collect();
     let sanitized_framework: String = settings
         .framework
         .chars()
@@ -102,20 +122,29 @@ pub(crate) fn run_csharp_discovery(target: &crate::binding::Target, component: &
     let invocation = CSHARP_DISCOVERY_ID.fetch_add(1, Ordering::Relaxed);
     let scratch = crate::support::InvocationCache::create(
         "csharp-discovery",
-        &format!("{sanitized_component}_{sanitized_framework}"),
+        &format!("{sanitized_label}_{sanitized_framework}_{}", components.len()),
         invocation,
     )?;
-    run_csharp_discovery_in(target, component, scratch.path())
+    run_csharp_discovery_many_in(target, components, scratch.path())
 }
 
-/// Build and run the C# reflection self-report for `target`/`component`,
-/// scaffolding into `scratch`. Returns the raw registry JSON.
+/// Build and run the C# reflection self-report for `target`/`components`,
+/// scaffolding into `scratch`. Returns one raw registry JSON document per
+/// requested component, in request order, plus the compiled assembly's
+/// complete operation-component inventory.
 ///
 /// # Errors
 ///
 /// Returns an error string when the scaffold, `dotnet` build/run, or output
 /// read fails.
-pub(crate) fn run_csharp_discovery_in(target: &crate::binding::Target, component: &str, scratch: &Path) -> Result<String, String> {
+pub(crate) fn run_csharp_discovery_many_in(
+    target: &crate::binding::Target,
+    components: &[&str],
+    scratch: &Path,
+) -> Result<CSharpDiscoveryOutput, String> {
+    if components.is_empty() {
+        return Err("C# discovery requires at least one component".to_string());
+    }
     let settings = crate::resolve_csharp_runner_settings(target);
 
     // 1. Build the fixture's REAL project into a per-run isolated artifacts tree,
@@ -136,18 +165,19 @@ pub(crate) fn run_csharp_discovery_in(target: &crate::binding::Target, component
     let runner_csproj = csharp_runner_project(&settings, &fixture_out);
     std::fs::write(scratch.join("Runner.csproj"), runner_csproj).map_err(|e| format!("failed to write C# discovery Runner.csproj: {e}"))?;
 
-    let program = generate_csharp_discovery_program(component);
+    let program = generate_csharp_discovery_program(components);
     std::fs::write(scratch.join("Program.cs"), program).map_err(|e| format!("failed to write C# discovery Program.cs: {e}"))?;
 
-    let out_file = scratch.join("discovery.json");
-    let _ = std::fs::remove_file(&out_file);
+    let out_dir = scratch.join("discovery");
+    let _ = std::fs::remove_dir_all(&out_dir);
+    std::fs::create_dir_all(&out_dir).map_err(|e| format!("failed to create C# discovery output directory: {e}"))?;
 
     let mut cmd = Command::new("dotnet");
     cmd.arg("run")
         .arg("--project")
         .arg(scratch.join("Runner.csproj"))
         .arg("--")
-        .arg(&out_file)
+        .arg(&out_dir)
         .arg(&fixture_dll)
         .arg(&fixture_out)
         .current_dir(scratch);
@@ -163,11 +193,27 @@ pub(crate) fn run_csharp_discovery_in(target: &crate::binding::Target, component
         ));
     }
 
-    let json = std::fs::read_to_string(&out_file).map_err(|e| format!("C# discovery produced no output: {e}"))?;
-    if json.trim().is_empty() {
-        return Err("C# discovery produced empty output".to_string());
+    let mut documents = Vec::with_capacity(components.len());
+    for (index, component) in components.iter().enumerate() {
+        let out_file = out_dir.join(format!("{index}.json"));
+        let json =
+            std::fs::read_to_string(&out_file).map_err(|e| format!("C# discovery produced no output for component '{component}': {e}"))?;
+        if json.trim().is_empty() {
+            return Err(format!("C# discovery produced empty output for component '{component}'"));
+        }
+        documents.push(json);
     }
-    Ok(json)
+
+    let inventory_file = out_dir.join("components.json");
+    let inventory_json =
+        std::fs::read_to_string(&inventory_file).map_err(|e| format!("C# discovery produced no component inventory: {e}"))?;
+    let present_components: Vec<String> =
+        serde_json::from_str(&inventory_json).map_err(|e| format!("C# discovery emitted an unreadable component inventory: {e}"))?;
+
+    Ok(CSharpDiscoveryOutput {
+        documents,
+        present_components,
+    })
 }
 
 fn csharp_runner_project(settings: &crate::CSharpRunnerSettings, fixture_out: &Path) -> String {
@@ -215,14 +261,19 @@ fn strip_verbatim_prefix(p: &Path) -> PathBuf {
 }
 
 /// Render the discovery `Program.cs`: top-level statements that reflect over the
-/// compiled assembly and emit the raw registry JSON for `component`.
-fn generate_csharp_discovery_program(component: &str) -> String {
-    let component_literal = crate::csharp_string_literal(component);
-    CSHARP_DISCOVERY_PROGRAM.replace("__COMPONENT__", &component_literal)
+/// compiled assembly once and emit one raw registry JSON document per requested
+/// component.
+fn generate_csharp_discovery_program(components: &[&str]) -> String {
+    let literals = components
+        .iter()
+        .map(|component| crate::csharp_string_literal(component))
+        .collect::<Vec<_>>()
+        .join(", ");
+    CSHARP_DISCOVERY_PROGRAM.replace("__COMPONENTS__", &literals)
 }
 
-/// The C# discovery program template. `__COMPONENT__` is replaced with the
-/// target component name as a C# string literal.
+/// The C# discovery program template. `__COMPONENTS__` is replaced with the
+/// requested component names as a comma-separated C# string literal list.
 const CSHARP_DISCOVERY_PROGRAM: &str = r#"using SpecGate.Annotations;
 using System;
 using System.Collections.Generic;
@@ -233,10 +284,11 @@ using System.Runtime.Loader;
 using System.Text.Json;
 using System.Threading.Tasks;
 
-const string Component = __COMPONENT__;
+string[] requestedComponents = new[] { __COMPONENTS__ };
 
-// args[0] = output JSON path, args[1] = fixture assembly path, args[2] = the
+// args[0] = output directory, args[1] = fixture assembly path, args[2] = the
 // fixture's build output dir (holding its copy-local dependency assemblies).
+string outputDirectory = args[0];
 string fixtureDll = args[1];
 string fixtureOut = args[2];
 
@@ -456,8 +508,40 @@ List<string[]> SpecMembers(Type t)
     return result;
 }
 
+Directory.CreateDirectory(outputDirectory);
+
+// The complete operation-component inventory of the compiled assembly, which
+// is independent of what this run requested. Callers compare it against their
+// own expected coverage, so an undeclared component cannot hide.
+//
+// Method reflection is deliberately Public|NonPublic: an annotation on a
+// private method still declares a component, and hiding it here would let it
+// escape both the inventory and the semantic validation that rejects a
+// non-public operation. `is_public` below preserves the real accessibility, so
+// normalization still rejects it by name. DeclaredOnly stays, so an inherited
+// or compiler-generated member of a base type is never attributed to a
+// derived one.
+var inventory = allTypes
+    .SelectMany(type => type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+    .SelectMany(method => method.GetCustomAttributes<SpecOperationAttribute>())
+    .Select(operation => operation.Spec)
+    .Where(spec => !string.IsNullOrEmpty(spec))
+    .Select(spec => spec!)
+    .Distinct(StringComparer.Ordinal)
+    .OrderBy(spec => spec, StringComparer.Ordinal)
+    .ToArray();
+File.WriteAllText(Path.Combine(outputDirectory, "components.json"), JsonSerializer.Serialize(inventory));
+
+for (int componentIndex = 0; componentIndex < requestedComponents.Length; componentIndex++)
+{
+string Component = requestedComponents[componentIndex];
+operations = new List<object>();
+typeQueue = new List<Type>();
+seenTypes = new HashSet<Type>();
+collectEnabled = true;
+
 var selectedOperationNames = allTypes
-    .SelectMany(type => type.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+    .SelectMany(type => type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly))
     .SelectMany(method => method.GetCustomAttributes<SpecOperationAttribute>())
     .Where(operation => operation.Spec == Component)
     .Select(operation => operation.Name)
@@ -465,7 +549,7 @@ var selectedOperationNames = allTypes
 
 foreach (Type type in allTypes)
 {
-    foreach (MethodInfo method in type.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+    foreach (MethodInfo method in type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly))
     {
         foreach (SpecOperationAttribute op in method.GetCustomAttributes<SpecOperationAttribute>())
         {
@@ -507,7 +591,15 @@ foreach (Type type in allTypes)
         }
         foreach (SpecSetupAttribute setup in method.GetCustomAttributes<SpecSetupAttribute>())
         {
-            if (setup.Spec is not null && setup.Spec != Component) continue;
+            // An explicitly scoped setup belongs to exactly its own component.
+            // An unscoped setup belongs to whichever component declares the
+            // operation it prepares; without that guard it would leak into
+            // every requested component's document.
+            if (setup.Spec is not null)
+            {
+                if (setup.Spec != Component) continue;
+            }
+            else if (!selectedOperationNames.Contains(setup.Name)) continue;
             NullabilityInfo retInfo = ctx.Create(method.ReturnParameter);
             var (isAsync, inner, innerInfo) = Unwrap(method.ReturnType, retInfo);
             collectEnabled = false;
@@ -559,12 +651,82 @@ for (int i = 0; i < typeQueue.Count; i++)
 }
 
 var payload = new { operations = operations, types = typeRecords };
-File.WriteAllText(args[0], JsonSerializer.Serialize(payload));
+File.WriteAllText(Path.Combine(outputDirectory, componentIndex + ".json"), JsonSerializer.Serialize(payload));
+}
 "#;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An unscoped `[SpecSetup]` names an operation, not a component. Emitting
+    /// it into every requested component's document would invent setups — and
+    /// therefore folded input surfaces — for components that never declared
+    /// the operation.
+    #[test]
+    fn unscoped_setups_are_admitted_only_by_the_selected_operation_names() {
+        let program = generate_csharp_discovery_program(&["fixture.one", "fixture.two"]);
+        assert!(
+            program.contains("else if (!selectedOperationNames.Contains(setup.Name)) continue;"),
+            "an unscoped setup must be admitted only when this component declares its operation"
+        );
+        assert!(
+            !program.contains("if (setup.Spec is not null && setup.Spec != Component) continue;"),
+            "the permissive unscoped-setup guard must be gone"
+        );
+        assert!(
+            program.contains("if (setup.Spec != Component) continue;"),
+            "an explicitly scoped setup still belongs to exactly its own component"
+        );
+        assert!(program.contains("\"fixture.one\", \"fixture.two\""));
+    }
+
+    /// An annotation on a private method still declares a component. Scanning
+    /// only public methods would drop it from the inventory and from semantic
+    /// validation, so a private operation would silently pass instead of being
+    /// rejected by name.
+    #[test]
+    fn method_reflection_covers_non_public_declarations_without_inherited_members() {
+        let program = generate_csharp_discovery_program(&["fixture.one"]);
+        let method_flags =
+            "BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly";
+        assert_eq!(
+            program.matches(method_flags).count(),
+            3,
+            "the inventory, the selected operation names, and the per-type scan must all see non-public methods"
+        );
+        assert!(
+            !program.contains("BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly"),
+            "no method scan may remain public-only"
+        );
+        assert_eq!(
+            program.matches("GetMethods(").count(),
+            3,
+            "every method scan must go through the one audited flag set"
+        );
+        assert!(
+            program.contains("is_public = method.IsPublic,"),
+            "real accessibility must survive into the registry so normalization can reject a private operation"
+        );
+    }
+
+    /// Discovery reflects the assembly once, so the full inventory costs
+    /// nothing extra and lets callers detect components no request named.
+    #[test]
+    fn the_discovery_program_reports_the_whole_compiled_component_inventory() {
+        let program = generate_csharp_discovery_program(&["fixture.one"]);
+        assert!(program.contains("GetCustomAttributes<SpecOperationAttribute>()"));
+        assert!(
+            program.contains("File.WriteAllText(Path.Combine(outputDirectory, \"components.json\"), JsonSerializer.Serialize(inventory));"),
+            "the runner must emit the inventory beside the requested documents"
+        );
+        let inventory_at = program.find("var inventory").expect("inventory is built");
+        let loop_at = program.find("for (int componentIndex").expect("per-component loop");
+        assert!(
+            inventory_at < loop_at,
+            "the inventory is built from the same single reflection pass, before any per-component selection"
+        );
+    }
 
     #[test]
     fn runner_project_xml_escapes_hint_paths() {

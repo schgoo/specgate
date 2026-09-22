@@ -14,6 +14,11 @@ mod tests {
     use super::*;
 
     #[test]
+    fn umbrella_facade_doubles_its_input() {
+        assert_eq!(double(2), 4);
+    }
+
+    #[test]
     fn umbrella_facade_captures() {
         sg::__rt::start_native_capture(sg::__rt::NativeCaptureConfig {
             scenario_name: "umbrella".to_string(),

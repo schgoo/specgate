@@ -8,7 +8,7 @@ use specgate_ctsc::{
     ReplayBundle, ReplayInput, ReplayType, ReplayValue, decode_replay_bundle_result, encode_replayed_native_captures_otlp_result,
 };
 use specgate_discovery::binding::resolve_binding_target;
-use specgate_discovery::discovery::{DiscoveredOperation, DiscoveredSchema, OpInfo, Registry, discover_resolved_target};
+use specgate_discovery::discovery::{DiscoveredOperation, DiscoveredSchema, OpInfo, Registry, discover_many_resolved_target};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::io::Write as _;
@@ -26,6 +26,56 @@ const RUST_KEYWORDS: &[&str] = &[
 ];
 
 static REPLAY_SCRATCH_ID: AtomicU64 = AtomicU64::new(0);
+
+/// Stable categories for replay limitations that a caller may intentionally
+/// declare. Errors outside these known limitations remain unclassified and
+/// must not be accepted as evidence that replay is unsupported.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReplayFailureCategory {
+    StructuredValue,
+    SetupBackedOperation,
+    MethodOperation,
+    AsyncOperation,
+    UnsupportedLanguage,
+}
+
+#[cfg(test)]
+impl ReplayFailureCategory {
+    pub(crate) const fn code(self) -> &'static str {
+        match self {
+            Self::StructuredValue => "structured-value",
+            Self::SetupBackedOperation => "setup-backed-operation",
+            Self::MethodOperation => "method-operation",
+            Self::AsyncOperation => "async-operation",
+            Self::UnsupportedLanguage => "unsupported-language",
+        }
+    }
+}
+
+/// Classify only stable, intentional replay limitations.
+///
+/// This deliberately does not have a catch-all category: malformed bundles,
+/// discovery failures, missing operations, type mismatches, and runner errors
+/// are unrelated defects and must fail callers such as the golden gate.
+#[cfg(test)]
+pub(crate) fn replay_failure_category(reason: &str) -> Option<ReplayFailureCategory> {
+    if reason.contains("uses unsupported structured type") || reason.contains("uses unsupported structured replay type") {
+        Some(ReplayFailureCategory::StructuredValue)
+    } else if reason.contains("is setup-backed; replay does not yet construct setups") {
+        Some(ReplayFailureCategory::SetupBackedOperation)
+    } else if reason.contains("is a method; replay supports only free functions") {
+        Some(ReplayFailureCategory::MethodOperation)
+    } else if reason.contains("is async; replay supports only synchronous operations")
+        || reason.contains("is async in normalized discovery")
+    {
+        Some(ReplayFailureCategory::AsyncOperation)
+    } else if reason.starts_with("replay currently supports only Rust candidates; binding language is '") {
+        Some(ReplayFailureCategory::UnsupportedLanguage)
+    } else {
+        None
+    }
+}
 
 /// Summary of a replay run.
 #[derive(Debug, Clone, PartialEq, Eq, SpecEvent)]
@@ -158,9 +208,139 @@ fn replay_result(capture_dir: &str, binding: &str, target: &str, out: &str) -> R
     let candidate = discover_candidate(binding, target, &bundle.component_id)?;
     let plan = build_invocation_plan(&bundle, &candidate)?;
     let captures = execute_invocation_plan(&plan)?;
+    let mut report = write_replay_output(&plan, &captures, Path::new(out))?;
+    report.output_path = out.to_string();
+    Ok(report)
+}
+
+fn read_bundle_file(capture_dir: &Path, filename: &str) -> Result<Vec<u8>, String> {
+    let path = capture_dir.join(filename);
+    std::fs::read(&path).map_err(|error| format!("failed to read capture bundle file {}: {error}", path.display()))
+}
+
+/// One Rust candidate target discovered once and linked against many capture
+/// bundles.
+///
+/// Candidate discovery is the expensive part of replay, so a batch pays it a
+/// single time and every planned component reuses the same link-time metadata.
+#[derive(Debug)]
+pub(crate) struct ReplayCandidates {
+    target_name: String,
+    language: String,
+    package_name: String,
+    package_version: String,
+    package_root: PathBuf,
+    runtime: specgate_discovery::support::CargoPackageSource,
+    raw_registry: Registry,
+    schemas: BTreeMap<String, DiscoveredSchema>,
+}
+
+impl ReplayCandidates {
+    /// Resolve `binding`/`target` and discover every requested component once.
+    pub(crate) fn discover(binding: &str, target: &str, components: &[&str]) -> Result<Self, String> {
+        let target_name_arg = if target.is_empty() { None } else { Some(target) };
+        let resolved = resolve_binding_target(binding, target_name_arg)?;
+        let language = resolved.language.clone();
+        if language != "rust" {
+            return Err(format!(
+                "replay currently supports only Rust candidates; binding language is '{language}'"
+            ));
+        }
+        let discovered = discover_many_resolved_target(resolved, components)?;
+        let target_name = discovered.target.name.clone();
+        let cargo = discovered
+            .cargo_context
+            .clone()
+            .ok_or_else(|| "Rust discovery returned no Cargo source context".to_string())?;
+        let package_root = cargo.path;
+        if !package_root.join("Cargo.toml").is_file() {
+            return Err(format!(
+                "candidate target '{target_name}' is not a Rust package (no Cargo.toml at {})",
+                package_root.display()
+            ));
+        }
+        let raw_registry = discovered
+            .registries
+            .first()
+            .cloned()
+            .ok_or_else(|| "Rust discovery produced no registry document".to_string())?;
+        let mut schemas = BTreeMap::new();
+        for component in components.iter().filter(|name| !name.is_empty()) {
+            let schema = discovered
+                .schema(component)
+                .ok_or_else(|| format!("candidate discovery returned no metadata for component '{component}'"))?;
+            match schema {
+                Ok(schema) => {
+                    schemas.insert((*component).to_string(), schema.clone());
+                }
+                Err(reason) => return Err(reason.clone()),
+            }
+        }
+        Ok(Self {
+            target_name,
+            language,
+            package_name: cargo.package,
+            package_version: cargo.version,
+            package_root,
+            runtime: cargo.runtime,
+            raw_registry,
+            schemas,
+        })
+    }
+
+    fn component(&self, component: &str) -> Result<ResolvedCandidate, String> {
+        let schema = self
+            .schemas
+            .get(component)
+            .ok_or_else(|| format!("candidate was not discovered for component '{component}'"))?;
+        Ok(ResolvedCandidate {
+            target_name: self.target_name.clone(),
+            language: self.language.clone(),
+            package_name: self.package_name.clone(),
+            package_version: self.package_version.clone(),
+            package_root: self.package_root.clone(),
+            runtime: self.runtime.clone(),
+            raw_registry: self.raw_registry.clone(),
+            schema: schema.clone(),
+        })
+    }
+
+    /// Statically link one verified capture bundle to this candidate without
+    /// generating or building a runner.
+    #[cfg(test)]
+    pub(crate) fn plan(&self, capture_dir: &Path) -> Result<ReplayInvocationPlan, String> {
+        let manifest = read_bundle_file(capture_dir, MANIFEST_FILE)?;
+        let registry = read_bundle_file(capture_dir, REGISTRY_FILE)?;
+        let reference = read_bundle_file(capture_dir, REFERENCE_FILE)?;
+        let bundle = decode_replay_bundle_result(&manifest, &registry, &reference)?;
+        let candidate = self.component(&bundle.component_id)?;
+        build_invocation_plan(&bundle, &candidate)
+    }
+
+    /// Execute already-linked plans, reusing one generated runner package and
+    /// one Cargo target directory for the whole batch.
+    #[cfg(test)]
+    pub(crate) fn execute(&self, plans: &[(ReplayInvocationPlan, PathBuf)]) -> Result<Vec<ReplayReport>, String> {
+        let scratch = replay_scratch_dir()?;
+        let mut reports = Vec::with_capacity(plans.len());
+        for (plan, out) in plans {
+            if plan.target.package_name != self.package_name {
+                return Err(format!(
+                    "plan for '{}' targets package '{}', but this candidate is '{}'",
+                    plan.component_id, plan.target.package_name, self.package_name
+                ));
+            }
+            let captures = execute_invocation_plan_in(plan, scratch.path())?;
+            reports.push(write_replay_output(plan, &captures, out)?);
+        }
+        Ok(reports)
+    }
+}
+
+fn write_replay_output(plan: &ReplayInvocationPlan, captures: &[NativeCapture], out: &Path) -> Result<ReplayReport, String> {
     let target_identity = format!("candidate:{}:{}", plan.target.package_name, plan.target.name);
     let encoded = encode_replayed_native_captures_otlp_result(
-        &captures,
+        captures,
         env!("CARGO_PKG_VERSION"),
         &target_identity,
         &plan.target.language,
@@ -168,7 +348,7 @@ fn replay_result(capture_dir: &str, binding: &str, target: &str, out: &str) -> R
         &plan.registry_version,
         &plan.registry_digest,
     )?;
-    write_output_atomically(Path::new(out), encoded.otlp_json.as_bytes())?;
+    write_output_atomically(out, encoded.otlp_json.as_bytes())?;
 
     let scenarios = i32::try_from(plan.scenarios.len()).map_err(|_error| "replayed scenario count exceeds i32".to_string())?;
     let operation_count = plan.scenarios.iter().try_fold(0_usize, |count, scenario| {
@@ -179,52 +359,17 @@ fn replay_result(capture_dir: &str, binding: &str, target: &str, out: &str) -> R
     let operations = i32::try_from(operation_count).map_err(|_error| "replayed operation count exceeds i32".to_string())?;
     let plans = i32::try_from(plan.links.len()).map_err(|_error| "replay plan count exceeds i32".to_string())?;
     Ok(ReplayReport {
-        component_id: plan.component_id,
+        component_id: plan.component_id.clone(),
         scenarios,
         operations,
         plans,
-        output_path: out.to_string(),
+        output_path: out.display().to_string(),
     })
-}
-
-fn read_bundle_file(capture_dir: &Path, filename: &str) -> Result<Vec<u8>, String> {
-    let path = capture_dir.join(filename);
-    std::fs::read(&path).map_err(|error| format!("failed to read capture bundle file {}: {error}", path.display()))
 }
 
 fn discover_candidate(binding: &str, target: &str, component: &str) -> Result<ResolvedCandidate, String> {
-    let target_name_arg = if target.is_empty() { None } else { Some(target) };
-    let resolved = resolve_binding_target(binding, target_name_arg)?;
-    let language = resolved.language.clone();
-    if language != "rust" {
-        return Err(format!(
-            "replay currently supports only Rust candidates; binding language is '{language}'"
-        ));
-    }
-    let discovered = discover_resolved_target(resolved, component)?;
-    let target_name = discovered.target.name;
-    let cargo = discovered
-        .cargo_context
-        .ok_or_else(|| "Rust discovery returned no Cargo source context".to_string())?;
-    let package_root = cargo.path;
-    if !package_root.join("Cargo.toml").is_file() {
-        return Err(format!(
-            "candidate target '{target_name}' is not a Rust package (no Cargo.toml at {})",
-            package_root.display()
-        ));
-    }
-    Ok(ResolvedCandidate {
-        target_name,
-        language,
-        package_name: cargo.package,
-        package_version: cargo.version,
-        package_root,
-        runtime: cargo.runtime,
-        raw_registry: discovered.registry,
-        schema: discovered.schema,
-    })
+    ReplayCandidates::discover(binding, target, &[component])?.component(component)
 }
-
 fn build_invocation_plan(bundle: &ReplayBundle, candidate: &ResolvedCandidate) -> Result<ReplayInvocationPlan, String> {
     let mut links = Vec::new();
     let mut link_indexes = BTreeMap::new();
@@ -601,6 +746,7 @@ fn execute_invocation_plan_in(plan: &ReplayInvocationPlan, scratch: &Path) -> Re
         .map_err(|error| format!("failed to write replay runner source: {error}"))?;
 
     let sidecar = scratch.join("candidate-captures.json");
+    let _ = std::fs::remove_file(&sidecar);
     let mut command = Command::new(cargo_bin());
     command.arg("run").arg("--quiet");
     if let Some(config) = registry_config {
@@ -1128,11 +1274,40 @@ mod tests {
         };
         bundle.scenarios[0].operations[0].inputs[0].value_type = bundle.registry.operations[0].inputs[0].value_type.clone();
         let candidate = candidate_metadata(raw_operation("add"), normalized_operation("add"));
-        assert!(
-            build_invocation_plan(&bundle, &candidate)
-                .unwrap_err()
-                .contains("unsupported structured type")
+        let reason = build_invocation_plan(&bundle, &candidate).unwrap_err();
+        assert!(reason.contains("unsupported structured type"));
+        assert_eq!(replay_failure_category(&reason), Some(ReplayFailureCategory::StructuredValue));
+    }
+
+    #[test]
+    fn replay_failure_categories_are_stable_and_do_not_classify_unrelated_errors() {
+        for (reason, expected) in [
+            (
+                "candidate operation 'fixture.counter::increment' is setup-backed; replay does not yet construct setups",
+                ReplayFailureCategory::SetupBackedOperation,
+            ),
+            (
+                "candidate operation 'fixture.counter::increment' is a method; replay supports only free functions",
+                ReplayFailureCategory::MethodOperation,
+            ),
+            (
+                "candidate operation 'fixture.fetch::fetch' is async; replay supports only synchronous operations",
+                ReplayFailureCategory::AsyncOperation,
+            ),
+            (
+                "replay currently supports only Rust candidates; binding language is 'csharp'",
+                ReplayFailureCategory::UnsupportedLanguage,
+            ),
+        ] {
+            assert_eq!(replay_failure_category(reason), Some(expected), "{reason}");
+        }
+        assert_eq!(ReplayFailureCategory::StructuredValue.code(), "structured-value");
+        assert_eq!(
+            replay_failure_category("operation span '3' result uses unsupported structured replay type named"),
+            Some(ReplayFailureCategory::StructuredValue)
         );
+        assert_eq!(replay_failure_category("candidate is missing operation 'fixture.add::add'"), None);
+        assert_eq!(replay_failure_category("capture bundle digest mismatch"), None);
     }
 
     #[test]

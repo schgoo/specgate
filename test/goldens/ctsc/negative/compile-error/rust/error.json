@@ -1,0 +1,1 @@
+{"case":"negative/compile-error","category":"compile-error","component":"fixture.compile_error","detail":{"diagnosticCodes":[],"feature":"compile-error","intentionalSources":["compile_error.rs.in"]},"format":"specgate.ctsc-golden-error","formatVersion":"0.1.0","outcome":"failure","phase":"build"}

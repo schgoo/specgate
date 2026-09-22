@@ -36,7 +36,7 @@ pub mod __rt {
     pub use specgate_runtime::{
         NativeCapture, NativeCaptureConfig, NativeCaptureEnvironmentConfig, NativeCompletion, NativeObservation, NativeOperationSpan,
         NativeSpanBoundary, NativeStatus, OpMeta, OperationScope, SPECGATE_OPS, SPECGATE_TYPES, SpecEvent, ToNativeValue, TypeMeta, Value,
-        VariantMeta, begin_native_operation, discovery_json, emit_event, finish_native_capture, reject_async_native_capture,
-        start_native_capture,
+        VariantMeta, begin_native_operation, defer_setup_inputs, discovery_json, emit_event, finish_native_capture, record_setup_inputs,
+        reject_async_native_capture, start_native_capture,
     };
 }

@@ -3,6 +3,7 @@ members = [
     "crates/specgate-ctsc-fixtures",
     "crates/specgate-facade-umbrella",
 ]
+exclude = ["negative-fixtures/specgate-ctsc-negative-fixtures"]
 resolver = "3"
 
 [workspace.package]

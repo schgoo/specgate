@@ -195,7 +195,7 @@ mod tests {
         let output = output_path("discover-complex-rust");
         let outcome = discover_component(&rust_binding(), &output, "fixture.rich", "urn:ctsc:registry:fixture.rich:1");
         let report = assert_complete(&outcome, "Rust");
-        assert_eq!(report.operations, 1);
+        assert_eq!(report.operations, 2);
         assert_eq!(report.types, 3);
 
         let document: serde_json::Value =
@@ -229,7 +229,7 @@ mod tests {
         let output = output_path("discover-setup-rust");
         let outcome = discover_component(&rust_binding(), &output, "fixture.setup", "urn:ctsc:registry:fixture.setup:1");
         let report = assert_complete(&outcome, "Rust");
-        assert_eq!(report.operations, 1);
+        assert_eq!(report.operations, 2);
         assert_eq!(report.types, 1);
 
         let document: serde_json::Value =
@@ -279,6 +279,43 @@ mod tests {
         assert!(task.output.is_empty());
         assert!(task.is_async);
         assert_eq!(task.errors[0].ty, "string");
+    }
+
+    #[test]
+    fn discover_many_shares_one_pass_and_keeps_cross_language_schemas() {
+        use specgate_discovery::discovery::discover_many_target;
+
+        let rust_components = ["fixture.rich", "fixture.setup", "fixture.stateless_add"];
+        let rust = discover_many_target(rust_binding().to_str().unwrap(), None, &rust_components).expect("batched Rust discovery");
+        assert_eq!(rust.raw_registry_json.len(), 1, "Rust link-time discovery self-reports once");
+        assert_eq!(rust.registries.len(), 1);
+        for component in rust_components {
+            let discovered = rust
+                .components
+                .get(component)
+                .unwrap_or_else(|| panic!("missing Rust metadata for {component}"));
+            assert_eq!(discovered.registry_index, 0, "every Rust component shares one document");
+            assert!(discovered.schema.is_ok(), "{component} normalization failed");
+        }
+        assert!(rust.registry("fixture.rich").is_some());
+        assert!(rust.raw_registry_json("fixture.setup").is_some());
+
+        let csharp_components = ["fixture.rich", "fixture.stateless_add"];
+        let csharp = discover_many_target(csharp_binding().to_str().unwrap(), None, &csharp_components).expect("batched C# discovery");
+        assert_eq!(csharp.raw_registry_json.len(), 2, "C# reflection emits one document per component");
+        for (position, component) in csharp_components.iter().enumerate() {
+            let discovered = csharp
+                .components
+                .get(*component)
+                .unwrap_or_else(|| panic!("missing C# metadata for {component}"));
+            assert_eq!(discovered.registry_index, position, "C# documents stay aligned with request order");
+            let csharp_schema = discovered.schema.as_ref().expect("C# schema");
+            let rust_schema = rust.schema(component).expect("Rust schema").as_ref().expect("Rust schema");
+            assert_eq!(
+                csharp_schema, rust_schema,
+                "batched C# discovery must normalize to the Rust canonical for {component}"
+            );
+        }
     }
 
     #[test]

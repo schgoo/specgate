@@ -7,6 +7,13 @@
 //! each completed top-level operation atomically refreshes a stable JSON
 //! sidecar containing the full scenario.
 //!
+//! Captured inputs are the registry's black-box surface, not the raw call:
+//! `#[spec_setup]` producers record their construction inputs, and the
+//! operation they build adopts those inputs in place of the parameters the
+//! setup fills. Attribution is by setup declaration, so running one declaration
+//! twice in a capture is accepted only when both runs record value-identical
+//! inputs; differing repeats are rejected rather than misattributed.
+//!
 //! Companion to the `specgate-annotations-macros` proc-macro crate: the macros expand
 //! into calls into this runtime, so user code never references it directly.
 
@@ -500,8 +507,26 @@ struct PendingNativeOperation {
     end_time_unix_nano: Option<i64>,
     status: Option<NativeStatus>,
     inputs: BTreeMap<String, Value>,
+    /// Operation parameters a registered setup constructs. The registry folds
+    /// them away, so the black-box input set carries the setup's construction
+    /// inputs instead of the parameter the setup filled.
+    setup_filled_parameters: BTreeSet<String>,
     observations: Vec<NativeObservation>,
     completion: Option<NativeCompletion>,
+}
+
+/// Link-time identity of one `#[spec_setup]` declaration.
+///
+/// Stacking several setup annotations on one producer, or registering several
+/// producers for one operation, yields distinct keys, so every declaration
+/// keeps its own recorded construction inputs.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct PendingSetupKey {
+    component_id: String,
+    operation_name: String,
+    module_path: String,
+    fn_name: String,
+    fills: String,
 }
 
 #[derive(Debug)]
@@ -570,6 +595,9 @@ impl OperationScope {
             let operation = &mut state.operations[operation_index];
             if operation.status.is_some() {
                 return Err(format!("native operation '{}' is already complete", operation.operation_name));
+            }
+            if operation.setup_filled_parameters.contains(name) {
+                return Ok(());
             }
             if operation.inputs.insert(name.to_string(), value).is_some() {
                 return Err(format!(
@@ -824,6 +852,7 @@ pub fn begin_native_operation(component_id: &str, operation_name: &str) -> Resul
             return Err(error.clone());
         }
 
+        let (inputs, setup_filled_parameters) = folded_setup_inputs(component_id, operation_name)?;
         let span_id = next_operation_span_id(state)?;
         let parent_span_id = state.active_operations.last().map_or_else(
             || state.config.scenario_span_id.clone(),
@@ -841,7 +870,8 @@ pub fn begin_native_operation(component_id: &str, operation_name: &str) -> Resul
             start_time_unix_nano,
             end_time_unix_nano: None,
             status: None,
-            inputs: BTreeMap::new(),
+            inputs,
+            setup_filled_parameters,
             observations: Vec::new(),
             completion: None,
         });
@@ -852,6 +882,319 @@ pub fn begin_native_operation(component_id: &str, operation_name: &str) -> Resul
             closed: false,
         })
     })
+}
+
+#[derive(Debug)]
+#[doc(hidden)]
+pub struct DeferredSetupInputs {
+    component_id: &'static str,
+    operation_name: &'static str,
+    module_path: &'static str,
+    fn_name: &'static str,
+    fills: &'static str,
+    inputs: Option<Vec<(String, Value)>>,
+}
+
+#[doc(hidden)]
+#[must_use]
+pub fn defer_setup_inputs<F>(
+    component_id: &'static str,
+    operation_name: &'static str,
+    module_path: &'static str,
+    fn_name: &'static str,
+    fills: &'static str,
+    inputs: F,
+) -> DeferredSetupInputs
+where
+    F: FnOnce() -> Vec<(String, Value)>,
+{
+    DeferredSetupInputs {
+        component_id,
+        operation_name,
+        module_path,
+        fn_name,
+        fills,
+        inputs: native_capture_is_active_or_requested().then(inputs),
+    }
+}
+
+impl Drop for DeferredSetupInputs {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            return;
+        }
+        let Some(inputs) = self.inputs.take() else {
+            return;
+        };
+        record_setup_inputs(
+            self.component_id,
+            self.operation_name,
+            self.module_path,
+            self.fn_name,
+            self.fills,
+            || inputs,
+        )
+        .unwrap_or_else(|error| panic!("failed to record native setup inputs: {error}"));
+    }
+}
+
+/// Record one `#[spec_setup]` producer's semantic construction inputs.
+///
+/// Registry discovery folds a setup's parameters into the public input surface
+/// of the operation it constructs, so the next invocation of that exact
+/// component + operation adopts these values as its own black-box inputs.
+/// Values are projected only while a capture session is active or requested,
+/// so ordinary runs pay nothing and observe no behavior change.
+///
+/// Attribution is by declaration, not by constructed instance: nothing links a
+/// returned receiver back to the call that produced it. Running one setup
+/// declaration twice in a single capture is therefore accepted only when both
+/// runs record value-identical inputs; differing inputs are ambiguous and are
+/// rejected instead of silently attributing the last construction to every
+/// later invocation.
+///
+/// # Errors
+///
+/// Returns an error when one setup declares the same input name twice, or when
+/// one setup declaration runs twice in a capture with differing inputs.
+pub fn record_setup_inputs<F>(
+    component_id: &str,
+    operation_name: &str,
+    module_path: &str,
+    fn_name: &str,
+    fills: &str,
+    inputs: F,
+) -> Result<(), String>
+where
+    F: FnOnce() -> Vec<(String, Value)>,
+{
+    if !native_capture_is_active_or_requested() {
+        return Ok(());
+    }
+    let mut recorded = BTreeMap::new();
+    for (name, value) in inputs() {
+        if recorded.insert(name.clone(), value).is_some() {
+            return Err(format!(
+                "setup '{fn_name}' for '{component_id}::{operation_name}' records input '{name}' twice"
+            ));
+        }
+    }
+    let key = PendingSetupKey {
+        component_id: component_id.to_string(),
+        operation_name: operation_name.to_string(),
+        module_path: module_path.to_string(),
+        fn_name: fn_name.to_string(),
+        fills: fills.to_string(),
+    };
+    PENDING_SETUP_INPUTS.with(|pending| {
+        let mut pending = pending.borrow_mut();
+        match pending.get(&key) {
+            Some(existing) if setup_inputs_are_identical(existing, &recorded) => Ok(()),
+            Some(existing) => Err(format!(
+                "setup '{fn_name}' for '{component_id}::{operation_name}' ran twice in one capture with different inputs \
+                 ({} then {}); capture attributes construction inputs by declaration and cannot tell which instance a later \
+                 '{operation_name}' invocation used. Capture one construction per scenario, or record identical inputs.",
+                describe_setup_inputs(existing),
+                describe_setup_inputs(&recorded)
+            )),
+            None => {
+                pending.insert(key, recorded);
+                Ok(())
+            }
+        }
+    })
+}
+
+/// Exact structural identity of two recorded construction input maps.
+///
+/// Deliberately stricter than [`Value`]'s `PartialEq`, which equates a list
+/// with a set and an integer with a float. Repeat construction is accepted only
+/// when the two recordings are the same value in the same representation.
+fn setup_inputs_are_identical(left: &BTreeMap<String, Value>, right: &BTreeMap<String, Value>) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right.iter())
+            .all(|((left_name, left_value), (right_name, right_value))| {
+                left_name == right_name && values_are_identical(left_value, right_value)
+            })
+}
+
+fn values_are_identical(left: &Value, right: &Value) -> bool {
+    match (left, right) {
+        (Value::String(left), Value::String(right)) => left == right,
+        (Value::Integer(left), Value::Integer(right)) => left == right,
+        (Value::Unsigned(left), Value::Unsigned(right)) => left == right,
+        (Value::Float(left), Value::Float(right)) => left.to_bits() == right.to_bits(),
+        (Value::Bool(left), Value::Bool(right)) => left == right,
+        (Value::List(left), Value::List(right)) => {
+            left.len() == right.len() && left.iter().zip(right.iter()).all(|(left, right)| values_are_identical(left, right))
+        }
+        (Value::Set(left), Value::Set(right)) => {
+            left.len() == right.len() && left.iter().zip(right.iter()).all(|(left, right)| values_are_identical(left, right))
+        }
+        (Value::Map(left), Value::Map(right)) => {
+            left.len() == right.len()
+                && left
+                    .iter()
+                    .zip(right.iter())
+                    .all(|((left_key, left_value), (right_key, right_value))| {
+                        left_key == right_key && values_are_identical(left_value, right_value)
+                    })
+        }
+        _ => false,
+    }
+}
+
+/// Render one recorded construction input map for an actionable error message.
+fn describe_setup_inputs(inputs: &BTreeMap<String, Value>) -> String {
+    if inputs.is_empty() {
+        return "no inputs".to_string();
+    }
+    inputs
+        .iter()
+        .map(|(name, value)| format!("{name}={value:?}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// True when a native capture session is active or the environment requests one.
+fn native_capture_is_active_or_requested() -> bool {
+    NATIVE_CAPTURE.with(|slot| slot.borrow().is_some())
+        || std::env::var_os("SPECGATE_NATIVE_CAPTURE").is_some_and(|value| !value.is_empty())
+}
+
+/// Construction inputs recorded for one exact component + operation key.
+///
+/// Attribution never crosses a component or operation boundary: only setups
+/// registered for this exact operation contribute. Discovery rejects a
+/// component whose folded surface carries one input name twice, so a duplicate
+/// here is a real metadata fault rather than something to silently merge.
+fn recorded_setup_inputs(component_id: &str, operation_name: &str) -> Result<BTreeMap<String, Value>, String> {
+    PENDING_SETUP_INPUTS.with(|pending| {
+        let pending = pending.borrow();
+        let mut merged: BTreeMap<String, Value> = BTreeMap::new();
+        for (key, inputs) in pending
+            .iter()
+            .filter(|(key, _inputs)| key.component_id == component_id && key.operation_name == operation_name)
+        {
+            for (name, value) in inputs {
+                if merged.insert(name.clone(), value.clone()).is_some() {
+                    return Err(format!(
+                        "setups for '{component_id}::{operation_name}' record input '{name}' twice; setup '{}' collides with an earlier producer",
+                        key.fn_name
+                    ));
+                }
+            }
+        }
+        Ok(merged)
+    })
+}
+
+#[derive(Debug)]
+enum SetupContribution {
+    Receiver,
+    Parameter(String),
+}
+
+#[derive(Debug)]
+struct ExpectedSetupProvenance {
+    key: PendingSetupKey,
+    contribution: SetupContribution,
+}
+
+fn folded_setup_inputs(component_id: &str, operation_name: &str) -> Result<(BTreeMap<String, Value>, BTreeSet<String>), String> {
+    let Some(operation) = SPECGATE_OPS
+        .iter()
+        .find(|candidate| !candidate.is_setup && candidate.component == component_id && candidate.name == operation_name)
+    else {
+        return Ok((recorded_setup_inputs(component_id, operation_name)?, BTreeSet::new()));
+    };
+
+    let mut filled = BTreeSet::new();
+    let mut required_setups = Vec::new();
+    let mut receiver_claimed = false;
+    for setup in SPECGATE_OPS
+        .iter()
+        .filter(|candidate| candidate.is_setup && candidate.component == component_id && candidate.name == operation_name)
+    {
+        let contribution = if setup.fills.is_empty() {
+            let candidates = operation
+                .params
+                .iter()
+                .filter(|(name, declared)| {
+                    !filled.contains(*name) && normalize_declared_type(declared) == normalize_declared_type(setup.return_type)
+                })
+                .map(|(name, _declared)| (*name).to_string())
+                .collect::<Vec<_>>();
+            match candidates.as_slice() {
+                [only] => Some(SetupContribution::Parameter(only.clone())),
+                [] if !receiver_claimed => {
+                    receiver_claimed = true;
+                    Some(SetupContribution::Receiver)
+                }
+                _ => None,
+            }
+        } else if operation.params.iter().any(|(name, _declared)| *name == setup.fills) {
+            Some(SetupContribution::Parameter(setup.fills.to_string()))
+        } else {
+            None
+        };
+
+        if let Some(contribution) = contribution {
+            if let SetupContribution::Parameter(name) = &contribution {
+                filled.insert(name.clone());
+            }
+            required_setups.push(ExpectedSetupProvenance {
+                key: PendingSetupKey {
+                    component_id: setup.component.to_string(),
+                    operation_name: setup.name.to_string(),
+                    module_path: setup.module_path.to_string(),
+                    fn_name: setup.fn_name.to_string(),
+                    fills: setup.fills.to_string(),
+                },
+                contribution,
+            });
+        }
+    }
+
+    PENDING_SETUP_INPUTS.with(|pending| {
+        let pending = pending.borrow();
+        let mut merged = BTreeMap::new();
+        for setup in &required_setups {
+            let Some(inputs) = pending.get(&setup.key) else {
+                return Err(format!(
+                    "native capture for '{component_id}::{operation_name}' requires successful provenance from {}; invoke that #[spec_setup] during this capture and let it return successfully before calling '{operation_name}'",
+                    describe_expected_setup_provenance(setup)
+                ));
+            };
+            for (name, value) in inputs {
+                if merged.insert(name.clone(), value.clone()).is_some() {
+                    return Err(format!(
+                        "setups for '{component_id}::{operation_name}' record input '{name}' twice; setup '{}' collides with an earlier producer",
+                        setup.key.fn_name
+                    ));
+                }
+            }
+        }
+        Ok((merged, filled))
+    })
+}
+
+fn describe_expected_setup_provenance(setup: &ExpectedSetupProvenance) -> String {
+    let function = format!("'{}::{}'", setup.key.module_path, setup.key.fn_name);
+    match &setup.contribution {
+        SetupContribution::Receiver => format!("setup {function} constructing the receiver"),
+        SetupContribution::Parameter(name) if setup.key.fills.is_empty() => {
+            format!("setup {function} inferring folded parameter '{name}'")
+        }
+        SetupContribution::Parameter(name) => format!("setup {function} filling parameter '{name}'"),
+    }
+}
+
+/// Collapse declared-type whitespace the way discovery does before comparing.
+fn normalize_declared_type(declared: &str) -> String {
+    declared.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Reject async operation capture before a future crosses an `.await`.
@@ -865,9 +1208,7 @@ pub fn begin_native_operation(component_id: &str, operation_name: &str) -> Resul
 /// Returns an explicit unsupported error when an in-process or
 /// environment-requested native capture is active.
 pub fn reject_async_native_capture(component_id: &str, operation_name: &str) -> Result<(), String> {
-    let active = NATIVE_CAPTURE.with(|slot| slot.borrow().is_some());
-    let requested = std::env::var_os("SPECGATE_NATIVE_CAPTURE").is_some_and(|value| !value.is_empty());
-    if active || requested {
+    if native_capture_is_active_or_requested() {
         Err(format!(
             "native capture of async operation '{component_id}::{operation_name}' is unsupported until capture context is task-safe"
         ))
@@ -898,6 +1239,10 @@ pub fn finish_native_capture() -> Result<NativeCapture, String> {
             *slot = Some(state);
             return Err(format!("native capture has nested/unclosed operation scopes: {names}"));
         }
+        // The session is gone for good from here on, so its recorded setup
+        // construction inputs must not reach the next one. Restored sessions
+        // above keep theirs.
+        PENDING_SETUP_INPUTS.with(|pending| pending.borrow_mut().clear());
         if let Some(error) = state.terminal_error {
             return Err(error);
         }
@@ -965,6 +1310,17 @@ fn persist_active_native_capture() -> Result<(), String> {
     persist_capture_atomically(&path, &capture)
 }
 
+/// How many times a sidecar replacement is retried before it is reported.
+///
+/// One scenario rewrites its sidecar after every top-level operation, so the
+/// same destination is replaced many times in a few milliseconds. On Windows a
+/// replacement transiently fails with "access is denied" whenever another
+/// process — a virus scanner, a search indexer — still holds the file it just
+/// saw appear. Retrying is not papering over a race in the capture itself: the
+/// serialized bytes are already complete and durable, and only the final rename
+/// is retried.
+const SIDECAR_PERSIST_ATTEMPTS: u32 = 12;
+
 fn persist_capture_atomically(path: &Path, capture: &NativeCapture) -> Result<(), String> {
     let parent = path
         .parent()
@@ -980,13 +1336,22 @@ fn persist_capture_atomically(path: &Path, capture: &NativeCapture) -> Result<()
     file.as_file()
         .sync_all()
         .map_err(|error| format!("failed to sync native capture sidecar: {error}"))?;
-    file.persist(path).map_err(|error| {
-        format!(
-            "failed to atomically persist native capture sidecar {}: {}",
-            path.display(),
-            error.error
-        )
-    })?;
+    for attempt in 1..=SIDECAR_PERSIST_ATTEMPTS {
+        match file.persist(path) {
+            Ok(_persisted) => return Ok(()),
+            Err(rejected) if attempt < SIDECAR_PERSIST_ATTEMPTS => {
+                file = rejected.file;
+                std::thread::sleep(std::time::Duration::from_millis(u64::from(attempt) * 10));
+            }
+            Err(rejected) => {
+                return Err(format!(
+                    "failed to atomically persist native capture sidecar {} after {SIDECAR_PERSIST_ATTEMPTS} attempts: {}",
+                    path.display(),
+                    rejected.error
+                ));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -1141,6 +1506,8 @@ fn record_native_observation(name: &str, value: &Value) -> Result<(), String> {
 
 thread_local! {
     static NATIVE_CAPTURE: RefCell<Option<NativeCaptureState>> = const { RefCell::new(None) };
+    static PENDING_SETUP_INPUTS: RefCell<BTreeMap<PendingSetupKey, BTreeMap<String, Value>>> =
+        const { RefCell::new(BTreeMap::new()) };
 }
 
 /// Record a typed observation on the currently active operation.
@@ -1360,6 +1727,157 @@ mod tests {
             start_time_unix_nano: 1_000,
             clock_step_unix_nano: 10,
         }
+    }
+
+    #[test]
+    fn setup_inputs_are_recorded_only_while_a_session_is_active() {
+        assert!(recorded_setup_inputs("fixture.native", "increment").unwrap().is_empty());
+        record_setup_inputs("fixture.native", "increment", "fixture", "make", "", || {
+            vec![("initial".to_string(), Value::Integer(4))]
+        })
+        .unwrap();
+        assert!(
+            recorded_setup_inputs("fixture.native", "increment").unwrap().is_empty(),
+            "an inactive, unrequested capture records nothing"
+        );
+
+        start_native_capture(native_config(&[])).unwrap();
+        record_setup_inputs("fixture.native", "increment", "fixture", "make", "", || {
+            vec![("initial".to_string(), Value::Integer(4))]
+        })
+        .unwrap();
+        let mut scope = begin_native_operation("fixture.native", "increment").unwrap();
+        scope.complete_unit().unwrap();
+
+        let capture = finish_native_capture().unwrap();
+        assert_eq!(
+            capture.operations[0].inputs,
+            BTreeMap::from([("initial".to_string(), Value::Integer(4))])
+        );
+        assert!(
+            recorded_setup_inputs("fixture.native", "increment").unwrap().is_empty(),
+            "finishing a session clears recorded setup inputs"
+        );
+    }
+
+    #[test]
+    fn setup_inputs_reject_duplicate_names_instead_of_guessing() {
+        start_native_capture(native_config(&[])).unwrap();
+        record_setup_inputs("fixture.native", "combine", "fixture", "make", "left", || {
+            vec![("seed".to_string(), Value::Integer(1))]
+        })
+        .unwrap();
+        record_setup_inputs("fixture.native", "combine", "fixture", "make", "right", || {
+            vec![("seed".to_string(), Value::Integer(2))]
+        })
+        .unwrap();
+        assert_eq!(
+            recorded_setup_inputs("fixture.native", "combine").unwrap_err(),
+            "setups for 'fixture.native::combine' record input 'seed' twice; setup 'make' collides with an earlier producer"
+        );
+        assert_eq!(
+            record_setup_inputs("fixture.native", "combine", "fixture", "make", "left", || {
+                vec![("seed".to_string(), Value::Integer(1)), ("seed".to_string(), Value::Integer(2))]
+            })
+            .unwrap_err(),
+            "setup 'make' for 'fixture.native::combine' records input 'seed' twice"
+        );
+        finish_native_capture().unwrap();
+    }
+
+    #[test]
+    fn repeating_one_setup_declaration_with_identical_inputs_is_accepted() {
+        start_native_capture(native_config(&[])).unwrap();
+        for _run in 0..2 {
+            record_setup_inputs("fixture.native", "increment", "fixture", "make", "", || {
+                vec![("initial".to_string(), Value::Integer(4))]
+            })
+            .unwrap();
+        }
+        assert_eq!(
+            recorded_setup_inputs("fixture.native", "increment").unwrap(),
+            BTreeMap::from([("initial".to_string(), Value::Integer(4))]),
+            "a repeat construction with the same inputs is unambiguous"
+        );
+        finish_native_capture().unwrap();
+    }
+
+    #[test]
+    fn repeating_one_setup_declaration_with_different_inputs_is_rejected() {
+        start_native_capture(native_config(&[])).unwrap();
+        record_setup_inputs("fixture.native", "increment", "fixture", "make", "", || {
+            vec![("initial".to_string(), Value::Integer(4))]
+        })
+        .unwrap();
+        let error = record_setup_inputs("fixture.native", "increment", "fixture", "make", "", || {
+            vec![("initial".to_string(), Value::Integer(9))]
+        })
+        .unwrap_err();
+        assert_eq!(
+            error,
+            "setup 'make' for 'fixture.native::increment' ran twice in one capture with different inputs \
+             (initial=Integer(4) then initial=Integer(9)); capture attributes construction inputs by declaration and \
+             cannot tell which instance a later 'increment' invocation used. Capture one construction per scenario, or \
+             record identical inputs."
+        );
+        assert_eq!(
+            recorded_setup_inputs("fixture.native", "increment").unwrap(),
+            BTreeMap::from([("initial".to_string(), Value::Integer(4))]),
+            "a rejected repeat leaves the first construction untouched"
+        );
+        finish_native_capture().unwrap();
+    }
+
+    #[test]
+    fn repeat_setup_identity_is_exact_rather_than_value_equality() {
+        assert!(!setup_inputs_are_identical(
+            &BTreeMap::from([("seed".to_string(), Value::Integer(1))]),
+            &BTreeMap::from([("seed".to_string(), Value::Float(1.0))])
+        ));
+        assert!(!setup_inputs_are_identical(
+            &BTreeMap::from([("seed".to_string(), Value::List(vec![Value::Integer(1)]))]),
+            &BTreeMap::from([("seed".to_string(), Value::Set(BTreeSet::from([Value::Integer(1)])))])
+        ));
+        assert!(!setup_inputs_are_identical(
+            &BTreeMap::from([("seed".to_string(), Value::Integer(1))]),
+            &BTreeMap::new()
+        ));
+        assert!(setup_inputs_are_identical(
+            &BTreeMap::from([(
+                "seed".to_string(),
+                Value::Map(BTreeMap::from([("a".to_string(), Value::Bool(true))]))
+            )]),
+            &BTreeMap::from([(
+                "seed".to_string(),
+                Value::Map(BTreeMap::from([("a".to_string(), Value::Bool(true))]))
+            )])
+        ));
+    }
+
+    #[test]
+    fn a_finished_session_leaves_no_setup_inputs_for_the_next_one() {
+        start_native_capture(native_config(&[])).unwrap();
+        record_setup_inputs("fixture.native", "increment", "fixture", "make", "", || {
+            vec![("initial".to_string(), Value::Integer(4))]
+        })
+        .unwrap();
+        finish_native_capture().unwrap();
+
+        start_native_capture(native_config(&[])).unwrap();
+        assert!(
+            recorded_setup_inputs("fixture.native", "increment").unwrap().is_empty(),
+            "a new session must not inherit the previous session's construction inputs"
+        );
+        record_setup_inputs("fixture.native", "increment", "fixture", "make", "", || {
+            vec![("initial".to_string(), Value::Integer(9))]
+        })
+        .unwrap();
+        assert_eq!(
+            recorded_setup_inputs("fixture.native", "increment").unwrap(),
+            BTreeMap::from([("initial".to_string(), Value::Integer(9))]),
+            "stale state would have made this differing repeat ambiguous"
+        );
+        finish_native_capture().unwrap();
     }
 
     #[test]

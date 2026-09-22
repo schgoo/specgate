@@ -16,6 +16,40 @@ tests; do not introduce a parallel assertion language or flat trace sink.
 Use `binding-schema.json` for Rust/C# target bindings. The active CLI commands
 are `discover`, `capture`, and `replay`.
 
+## Golden matrix
+
+`test/goldens/ctsc/matrix.json` is the reviewable configuration for the whole
+fixture corpus. Edit it by hand when you add, remove, or reclassify a fixture:
+every annotated fixture source must belong to a row, every discovered component
+needs a row, and each row states its language phases, expected outcome, parity
+mode, linkage mode, replay mode, and any limitation. Linkage is `linked` for
+every row that captures a bundle and `not-applicable` for discovery-only rows;
+a bundle that will not link is a defect to fix, not a row to annotate. A
+`parity` exception must also list every allowed Rust-vs-C# difference as a JSON
+Pointer plus the exact value each language emits; the harness requires the
+observed difference set to equal the declared one.
+
+The check runs in both directions: the components each compiled target actually
+declares must be exactly the components the matrix rows name, and every
+enumerated fixture test must pass under golden capture. Every discovered
+operation must be exercised by a captured trace (nested calls count), unless
+the row's `captureExclusions` names the exact operation with a stable code and
+reason. Unsupported replay rows likewise declare the exact `expectCategory`;
+an unrelated planner or discovery error never satisfies them. Build negatives
+reject any compiler error without primary spans exclusively in the row's
+intentional sources, even when the intended error is also present.
+
+Every other file under `test/goldens/ctsc` is generated. Do not hand-edit them.
+
+```powershell
+just ctsc-goldens-update   # regenerate artifacts after an intended change
+just ctsc-goldens-check    # regenerate into scratch and byte-compare (part of just check)
+```
+
+After an intentional change, run `just ctsc-goldens-update`, review the
+artifact diff as carefully as the code diff, then confirm
+`just ctsc-goldens-check` passes.
+
 ## Gate
 
 Run from the repository root:
@@ -26,7 +60,8 @@ just check
 
 The gate covers Rust build/tests/clippy/fmt/licenses, generated crate READMEs,
 the CTSC Python corpus and linked validators, a deterministic capture-to-replay
-smoke, and the retained C# build/tests/format/analyzers.
+smoke, the CTSC golden matrix check, and the retained C# build/tests/format/
+analyzers.
 
 Run `just package-smoke` for release changes; it packages all six retained crates,
 installs the packaged CLI, and exercises registry-dependency

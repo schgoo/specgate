@@ -48,6 +48,15 @@ ctsc-validate:
 ctsc-smoke:
     pwsh -NoLogo -NoProfile -File scripts/ctsc-smoke.ps1
 
+ctsc-goldens-regressions:
+    pwsh -NoLogo -NoProfile -File scripts/ctsc-goldens-tests.ps1
+
+ctsc-goldens-update: ctsc-goldens-regressions
+    pwsh -NoLogo -NoProfile -File scripts/ctsc-goldens.ps1 -Mode Update
+
+ctsc-goldens-check: ctsc-goldens-regressions
+    pwsh -NoLogo -NoProfile -File scripts/ctsc-goldens.ps1 -Mode Check
+
 package-smoke:
     pwsh -NoLogo -NoProfile -File scripts/package-smoke.ps1
 
@@ -63,4 +72,4 @@ format-cs:
 format-check-cs:
     dotnet format SpecGate.slnx --verify-no-changes
 
-check: build test clippy format-check deny readme-check ctsc-validate ctsc-smoke dotnet-build dotnet-test format-check-cs
+check: build test clippy format-check deny readme-check ctsc-validate ctsc-smoke ctsc-goldens-check dotnet-build dotnet-test format-check-cs

@@ -1,0 +1,1 @@
+{"format":"ctsc.registry","formatVersion":"0.2.0","registryId":"urn:ctsc:registry:fixture.async_fetch","version":"0.1.0","components":[{"id":"fixture.async_fetch","operations":[{"name":"fetch","inputs":[{"name":"url","type":{"kind":"primitive","name":"string"}}],"observations":[],"outcomes":{"result":{"kind":"primitive","name":"string"}}}],"types":[]}]}

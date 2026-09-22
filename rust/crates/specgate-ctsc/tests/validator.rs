@@ -31,7 +31,7 @@ enum HygienicVariant {
 }
 
 #[spec_operation("emit_tuple_variant")]
-fn emit_tuple_variant(multiple: bool) -> TupleVariant {
+pub fn emit_tuple_variant(multiple: bool) -> TupleVariant {
     if multiple {
         TupleVariant::Multiple(7, "seven".to_string())
     } else {
@@ -40,7 +40,7 @@ fn emit_tuple_variant(multiple: bool) -> TupleVariant {
 }
 
 #[spec_operation("emit_hygienic_variant", spec = "fixture.macro_hygiene")]
-fn emit_hygienic_variant(named: bool) -> HygienicVariant {
+pub fn emit_hygienic_variant(named: bool) -> HygienicVariant {
     if named {
         HygienicVariant::Named {
             payload: 7,
