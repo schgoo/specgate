@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>SpecGate.CliFixtures</RootNamespace>
+    <AssemblyName>SpecGate.CliFixtures</AssemblyName>
+    <Version>0.1.0</Version>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\..\..\..\csharp\SpecGate.Annotations\SpecGate.Annotations.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,5 @@
+# yaml-language-server: $schema=../../../../../binding-schema.json
+language: csharp
+targets:
+  default:
+    package_root: csharp

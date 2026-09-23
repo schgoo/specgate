@@ -1,0 +1,5 @@
+# yaml-language-server: $schema=../../../../../binding-schema.json
+language: rust
+targets:
+  default:
+    package_root: rust
