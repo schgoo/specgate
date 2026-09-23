@@ -989,7 +989,23 @@ mod tests {
     }
 
     fn rust_binding() -> PathBuf {
-        repo_root().join("test").join("bindings").join("rust.yaml")
+        repo_root()
+            .join("rust")
+            .join("crates")
+            .join("specgate-cli")
+            .join("tests")
+            .join("fixtures")
+            .join("rust.binding.yaml")
+    }
+
+    fn csharp_binding() -> PathBuf {
+        repo_root()
+            .join("rust")
+            .join("crates")
+            .join("specgate-cli")
+            .join("tests")
+            .join("fixtures")
+            .join("csharp.binding.yaml")
     }
 
     fn output_dir(label: &str) -> PathBuf {
@@ -1067,7 +1083,7 @@ mod tests {
     }
 
     #[test]
-    fn replay_stateless_capture_is_linked_independent_and_byte_identical() {
+    fn focused_replay_is_linked_independent_deterministic_and_preserves_strings() {
         let capture_dir = output_dir("capture");
         let first_output = output_dir("first").with_extension("otlp.json");
         let second_output = output_dir("second").with_extension("otlp.json");
@@ -1078,33 +1094,24 @@ mod tests {
         let captured = capture(
             rust_binding().to_str().unwrap(),
             "",
-            "fixture.stateless_add",
+            "fixture.cli.replay",
             capture_dir.to_str().unwrap(),
         );
         assert!(matches!(captured, CaptureOutcome::Complete { .. }), "capture failed: {captured}");
-        let first = replay(
-            capture_dir.to_str().unwrap(),
-            rust_binding().to_str().unwrap(),
-            "",
-            first_output.to_str().unwrap(),
-        );
-        let second = replay(
-            capture_dir.to_str().unwrap(),
-            rust_binding().to_str().unwrap(),
-            "",
-            second_output.to_str().unwrap(),
-        );
-        let ReplayOutcome::Complete { report } = first else {
-            panic!("first replay failed: {first}");
-        };
-        assert!(matches!(second, ReplayOutcome::Complete { .. }), "second replay failed: {second}");
+        let candidates =
+            ReplayCandidates::discover(rust_binding().to_str().unwrap(), "", &["fixture.cli.replay"]).expect("focused candidate discovery");
+        let plan = candidates.plan(&capture_dir).expect("focused replay plan");
+        let reports = candidates
+            .execute(&[(plan.clone(), first_output.clone()), (plan, second_output.clone())])
+            .expect("focused replay execution");
+        assert_eq!(reports.len(), 2);
         assert_eq!(
-            report,
+            reports[0],
             ReplayReport {
-                component_id: "fixture.stateless_add".to_string(),
-                scenarios: 1,
-                operations: 1,
-                plans: 1,
+                component_id: "fixture.cli.replay".to_string(),
+                scenarios: 2,
+                operations: 2,
+                plans: 2,
                 output_path: first_output.display().to_string(),
             }
         );
@@ -1118,7 +1125,7 @@ mod tests {
         assert_ne!(reference_trace, candidate_trace);
         let candidate_text = String::from_utf8(first_bytes).unwrap();
         assert!(candidate_text.contains("\"conformance.target.name\""));
-        assert!(candidate_text.contains("candidate:specgate-ctsc-fixtures:default"));
+        assert!(candidate_text.contains("candidate:specgate-cli-fixtures:default"));
         assert!(candidate_text.contains("\"conformance.operation.name\""));
         assert!(candidate_text.contains("\"add\""));
         assert!(candidate_text.contains("\"a\""));
@@ -1127,6 +1134,30 @@ mod tests {
         assert!(candidate_text.contains("\"intValue\":\"3\""));
         assert!(candidate_text.contains("\"conformance.result\""));
         assert!(candidate_text.contains("\"intValue\":\"5\""));
+
+        let echo = candidate["resourceSpans"][0]["scopeSpans"][0]["spans"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|span| {
+                span["attributes"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|attribute| attribute["key"] == "conformance.operation.name" && attribute["value"]["stringValue"] == "echo")
+            })
+            .expect("echo operation span");
+        let inputs = echo["attributes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|attribute| attribute["key"] == "conformance.operation.inputs")
+            .unwrap();
+        assert_eq!(
+            inputs["value"]["kvlistValue"]["values"][0]["value"]["stringValue"],
+            "nul:\0 backspace:\u{8} formfeed:\u{c} quote:\" slash:\\ cr:\r lf:\n tab:\t unicode:雪🙂"
+        );
+
         let trace_validation = validate_trace(&first_output);
         assert!(
             trace_validation.valid,
@@ -1140,12 +1171,11 @@ mod tests {
             linked_validation.issues
         );
 
-        let csharp_binding = repo_root().join("test").join("bindings").join("csharp.yaml");
         let unsupported_output = output_dir("unsupported-language").with_extension("otlp.json");
         assert!(matches!(
             replay(
                 capture_dir.to_str().unwrap(),
-                csharp_binding.to_str().unwrap(),
+                csharp_binding().to_str().unwrap(),
                 "",
                 unsupported_output.to_str().unwrap()
             ),
@@ -1171,55 +1201,23 @@ mod tests {
             "",
             replay_output.to_str().unwrap(),
         );
-        assert!(matches!(replayed, ReplayOutcome::Complete { .. }), "replay failed: {replayed}");
-        assert!(replay_output.is_file());
-    }
-
-    #[test]
-    fn replay_preserves_rust_native_string_escaping() {
-        let capture_dir = output_dir("string-capture");
-        let candidate_output = output_dir("string-candidate").with_extension("otlp.json");
-        let _ = std::fs::remove_dir_all(&capture_dir);
-        let _ = std::fs::remove_file(&candidate_output);
-
-        let captured = capture(
-            rust_binding().to_str().unwrap(),
-            "",
-            "fixture.strings",
-            capture_dir.to_str().unwrap(),
+        assert!(
+            matches!(
+                &replayed,
+                ReplayOutcome::Complete {
+                    report: ReplayReport {
+                        component_id,
+                        scenarios: 1,
+                        operations: 1,
+                        plans: 1,
+                        ..
+                    }
+                } if component_id == "fixture.configured"
+            ),
+            "replay failed: {replayed}"
         );
-        assert!(matches!(captured, CaptureOutcome::Complete { .. }), "capture failed: {captured}");
-        let replayed = replay(
-            capture_dir.to_str().unwrap(),
-            rust_binding().to_str().unwrap(),
-            "",
-            candidate_output.to_str().unwrap(),
-        );
-        assert!(matches!(replayed, ReplayOutcome::Complete { .. }), "replay failed: {replayed}");
-
-        let document: serde_json::Value = serde_json::from_slice(&std::fs::read(&candidate_output).unwrap()).unwrap();
-        let operation = document["resourceSpans"][0]["scopeSpans"][0]["spans"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|span| span["name"] == "conformance.operation")
-            .unwrap();
-        let inputs = operation["attributes"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|attribute| attribute["key"] == "conformance.operation.inputs")
-            .unwrap();
-        let value = inputs["value"]["kvlistValue"]["values"][0]["value"]["stringValue"]
-            .as_str()
-            .unwrap();
-        assert_eq!(
-            value,
-            "nul:\0 backspace:\u{8} formfeed:\u{c} quote:\" slash:\\ cr:\r lf:\n tab:\t unicode:雪🙂"
-        );
-
-        let _ = std::fs::remove_dir_all(capture_dir);
-        let _ = std::fs::remove_file(candidate_output);
+        let output = std::fs::read_to_string(&replay_output).unwrap();
+        assert!(output.contains("candidate:configured-candidate:default"));
     }
 
     #[test]

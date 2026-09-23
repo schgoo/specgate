@@ -226,19 +226,32 @@ fn capture_discovered_with(
     requests: &[CaptureRequest],
     reject_failed_tests: bool,
 ) -> Result<Vec<CaptureReport>, String> {
+    let executed = execute_capture_tests(discovered, requests)?;
+    write_capture_bundles(discovered, requests, &executed, reject_failed_tests)
+}
+
+fn execute_capture_tests(discovered: &TargetDiscovery, requests: &[CaptureRequest]) -> Result<ExecutedTests, String> {
     let resolved = &discovered.target;
     reject_async_setup_capture(&discovered.registry, requests)?;
     let scratch = capture_scratch_dir(&resolved.target.package_root)?;
     let test_binaries = build_test_binaries(&resolved.target.package_root, scratch.as_ref())?;
     let tests = enumerate_tests(&test_binaries)?;
-    let executed = run_passing_tests(&tests, scratch.as_ref())?;
+    run_passing_tests(&tests, scratch.as_ref())
+}
+
+fn write_capture_bundles(
+    discovered: &TargetDiscovery,
+    requests: &[CaptureRequest],
+    executed: &ExecutedTests,
+    reject_failed_tests: bool,
+) -> Result<Vec<CaptureReport>, String> {
     if reject_failed_tests {
-        reject_failed_test_batch(&executed)?;
+        reject_failed_test_batch(executed)?;
     }
 
     let mut encoded = Vec::with_capacity(requests.len());
     for request in requests {
-        encoded.push(encode_component_bundle(discovered, request, &executed)?);
+        encoded.push(encode_component_bundle(discovered, request, executed)?);
     }
 
     let mut reports = Vec::with_capacity(encoded.len());
@@ -700,8 +713,24 @@ mod tests {
             .to_path_buf()
     }
 
-    fn rust_binding() -> PathBuf {
-        repo_root().join("test").join("bindings").join("rust.yaml")
+    fn focused_rust_binding() -> PathBuf {
+        repo_root()
+            .join("rust")
+            .join("crates")
+            .join("specgate-cli")
+            .join("tests")
+            .join("fixtures")
+            .join("rust.binding.yaml")
+    }
+
+    fn focused_csharp_binding() -> PathBuf {
+        repo_root()
+            .join("rust")
+            .join("crates")
+            .join("specgate-cli")
+            .join("tests")
+            .join("fixtures")
+            .join("csharp.binding.yaml")
     }
 
     fn output_dir(label: &str) -> PathBuf {
@@ -713,65 +742,127 @@ mod tests {
 
     #[test]
     fn capture_stateless_bundle_is_linked_and_byte_identical() {
-        let first_dir = output_dir("first");
-        let second_dir = output_dir("second");
-        let _ = std::fs::remove_dir_all(&first_dir);
-        let _ = std::fs::remove_dir_all(&second_dir);
+        let root = output_dir("focused");
+        let _ = std::fs::remove_dir_all(&root);
+        let requests = vec![
+            request_at("fixture.cli.replay", root.join("batch-replay")),
+            request_at("fixture.cli.replay", root.join("repeat-replay")),
+            request_at("fixture.cli.setup", root.join("setup")),
+            request_at("fixture.cli.multiple", root.join("multiple")),
+        ];
+        let discovered = discover_capture_target(focused_rust_binding().to_str().unwrap(), "").expect("focused fixture discovery");
+        let executed = execute_capture_tests(&discovered, &requests).expect("focused fixture execution");
+        assert_eq!(executed.failures.len(), 1);
+        assert_eq!(executed.failures[0].scenario_name, "tests::deliberately_fails_for_strict_capture");
 
-        let first = capture(
-            rust_binding().to_str().unwrap(),
-            "",
-            "fixture.stateless_add",
-            first_dir.to_str().unwrap(),
+        let reports = write_capture_bundles(&discovered, &requests, &executed, false).expect("batched capture encoding");
+        assert_eq!(reports.len(), requests.len());
+        assert_eq!(
+            reports[0],
+            CaptureReport {
+                component_id: "fixture.cli.replay".to_string(),
+                scenarios: 2,
+                operations: 2,
+                registry_path: requests[0].out.join(REGISTRY_FILE).display().to_string(),
+                trace_path: requests[0].out.join(TRACE_FILE).display().to_string(),
+                manifest_path: requests[0].out.join(MANIFEST_FILE).display().to_string(),
+            }
         );
-        let second = capture(
-            rust_binding().to_str().unwrap(),
-            "",
-            "fixture.stateless_add",
-            second_dir.to_str().unwrap(),
-        );
-        let CaptureOutcome::Complete { report } = first else {
-            panic!("first capture failed: {first}");
-        };
-        assert!(matches!(second, CaptureOutcome::Complete { .. }), "second capture failed: {second}");
-        assert_eq!(report.component_id, "fixture.stateless_add");
-        assert_eq!(report.scenarios, 1);
-        assert_eq!(report.operations, 1);
+        assert_eq!(reports[2].scenarios, 1);
+        assert_eq!(reports[2].operations, 1);
+        assert_eq!(reports[3].scenarios, 1);
+        assert_eq!(reports[3].operations, 1);
 
-        let first_names = directory_file_names(&first_dir);
-        assert_eq!(first_names, vec![MANIFEST_FILE, TRACE_FILE, REGISTRY_FILE]);
+        let batch_dir = &requests[0].out;
+        let repeat_dir = &requests[1].out;
+        assert_eq!(directory_file_names(batch_dir), vec![MANIFEST_FILE, TRACE_FILE, REGISTRY_FILE]);
         for filename in [REGISTRY_FILE, TRACE_FILE, MANIFEST_FILE] {
             assert_eq!(
-                std::fs::read(first_dir.join(filename)).unwrap(),
-                std::fs::read(second_dir.join(filename)).unwrap(),
+                std::fs::read(batch_dir.join(filename)).unwrap(),
+                std::fs::read(repeat_dir.join(filename)).unwrap(),
                 "{filename} must be byte-identical across repeated capture"
             );
         }
 
-        let registry = std::fs::read(first_dir.join(REGISTRY_FILE)).unwrap();
-        let trace = std::fs::read(first_dir.join(TRACE_FILE)).unwrap();
-        let manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(first_dir.join(MANIFEST_FILE)).unwrap()).unwrap();
+        let registry = std::fs::read(batch_dir.join(REGISTRY_FILE)).unwrap();
+        let trace = std::fs::read(batch_dir.join(TRACE_FILE)).unwrap();
+        let manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(batch_dir.join(MANIFEST_FILE)).unwrap()).unwrap();
         assert_eq!(manifest["format"], "specgate.capture-manifest");
         assert_eq!(manifest["formatVersion"], "0.1.0");
-        assert_eq!(manifest["componentId"], "fixture.stateless_add");
+        assert_eq!(manifest["componentId"], "fixture.cli.replay");
         assert_eq!(manifest["target"], serde_json::json!({"name":"default","language":"rust"}));
         assert_eq!(
             manifest["tool"],
             serde_json::json!({"name":"specgate","version":env!("CARGO_PKG_VERSION")})
         );
         assert_eq!(manifest["registry"]["path"], REGISTRY_FILE);
-        assert_eq!(manifest["registry"]["id"], "urn:ctsc:registry:fixture.stateless_add");
+        assert_eq!(manifest["registry"]["id"], "urn:ctsc:registry:fixture.cli.replay");
         assert_eq!(manifest["registry"]["version"], REGISTRY_VERSION);
         assert_eq!(manifest["registry"]["digest"], sha256_digest(&registry));
         assert_eq!(manifest["reference"]["path"], TRACE_FILE);
         assert_eq!(manifest["reference"]["digest"], sha256_digest(&trace));
-        assert_eq!(manifest["scenarios"]["count"], 1);
-        assert_eq!(manifest["scenarios"]["names"], serde_json::json!(["stateless::add_two_and_three"]));
-        let validation = validate_bundle(&first_dir);
-        assert!(validation.valid, "native bundle validation failed: {:#?}", validation.issues);
+        assert_eq!(manifest["scenarios"]["count"], 2);
+        assert_eq!(
+            manifest["scenarios"]["names"],
+            serde_json::json!(["tests::adds_two_and_three", "tests::echoes_all_rust_string_escape_classes"])
+        );
 
-        let _ = std::fs::remove_dir_all(first_dir);
-        let _ = std::fs::remove_dir_all(second_dir);
+        // `capture` and `capture_many` differ only in request cardinality after
+        // this shared execution phase. Compare both encodings without rebuilding
+        // or rerunning the real fixture toolchain.
+        let single = request_at("fixture.cli.replay", root.join("single-replay"));
+        write_capture_bundles(&discovered, std::slice::from_ref(&single), &executed, false).expect("single capture encoding");
+        for filename in [REGISTRY_FILE, TRACE_FILE, MANIFEST_FILE] {
+            assert_eq!(
+                std::fs::read(batch_dir.join(filename)).unwrap(),
+                std::fs::read(single.out.join(filename)).unwrap(),
+                "{filename} must be byte-identical between batched and single capture"
+            );
+        }
+
+        for request in &requests[0..4] {
+            let linked = validate_linked(&request.out.join(TRACE_FILE), &request.out.join(REGISTRY_FILE), &[]);
+            assert!(linked.valid, "{} linked validation failed: {:#?}", request.component, linked.issues);
+            let bundle = validate_bundle(&request.out);
+            assert!(bundle.valid, "{} bundle validation failed: {:#?}", request.component, bundle.issues);
+        }
+
+        let setup = read_trace(&requests[2].out);
+        assert_eq!(
+            operation_inputs(&setup, "increment"),
+            vec![("initial".to_string(), serde_json::json!({ "intValue": "4" }))],
+            "setup construction input must be folded into the operation's public input surface"
+        );
+
+        let multiple_registry: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(requests[3].out.join(REGISTRY_FILE)).unwrap()).unwrap();
+        assert_eq!(
+            multiple_registry["components"][0]["operations"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|operation| operation["name"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["unexercised", "used"]
+        );
+        let multiple_trace = read_trace(&requests[3].out);
+        assert_eq!(operation_spans(&multiple_trace, "used").len(), 1);
+        assert!(operation_spans(&multiple_trace, "unexercised").is_empty());
+
+        let unused = request_at("fixture.cli.unused", root.join("unused"));
+        let no_match = write_capture_bundles(&discovered, std::slice::from_ref(&unused), &executed, false)
+            .expect_err("an unexercised component must be rejected");
+        assert!(no_match.contains("no passing tests captured operations for component 'fixture.cli.unused'"));
+        assert!(!unused.out.exists());
+
+        let strict = request_at("fixture.cli.replay", root.join("strict"));
+        let strict_error = write_capture_bundles(&discovered, std::slice::from_ref(&strict), &executed, true)
+            .expect_err("strict capture must reject the focused failing scenario");
+        assert!(strict_error.starts_with("1 fixture test(s) failed under capture"));
+        assert!(strict_error.contains("tests::deliberately_fails_for_strict_capture"));
+        assert!(!strict.out.exists());
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     fn attribute<'a>(span: &'a serde_json::Value, key: &str) -> Option<&'a serde_json::Value> {
@@ -809,83 +900,22 @@ mod tests {
         serde_json::from_slice(&std::fs::read(bundle.join(TRACE_FILE)).expect("captured trace")).expect("valid OTLP JSON")
     }
 
-    /// Capture must record the setup-folded public input surface the registry
-    /// declares, not the operation's raw Rust call.
-    #[test]
-    fn capture_folds_setup_construction_inputs_into_the_operation_surface() {
-        let root = output_dir("setup-folding");
-        let _ = std::fs::remove_dir_all(&root);
-        let requests = vec![
-            CaptureRequest {
-                component: "fixture.setup".to_string(),
-                out: root.join("fixture.setup"),
-                excluded_operations: BTreeSet::new(),
-            },
-            CaptureRequest {
-                component: "fixture.shared_setup".to_string(),
-                out: root.join("fixture.shared_setup"),
-                excluded_operations: BTreeSet::new(),
-            },
-        ];
-
-        let reports = capture_many(rust_binding().to_str().unwrap(), "", &requests).expect("batched capture");
-        assert_eq!(reports.len(), requests.len());
-        for request in &requests {
-            let linked = validate_linked(&request.out.join(TRACE_FILE), &request.out.join(REGISTRY_FILE), &[]);
-            assert!(
-                linked.valid,
-                "{} must link against its own registry: {:#?}",
-                request.component, linked.issues
-            );
-            let bundle = validate_bundle(&request.out);
-            assert!(bundle.valid, "{} bundle validation failed: {:#?}", request.component, bundle.issues);
-        }
-
-        let setup = read_trace(&root.join("fixture.setup"));
-        assert_eq!(
-            operation_inputs(&setup, "increment"),
-            vec![("initial".to_string(), serde_json::json!({ "intValue": "4" }))],
-            "the receiver setup's construction input is the operation's black-box input"
-        );
-        assert!(
-            operation_inputs(&setup, "observe_count")
-                .iter()
-                .all(|(name, value)| name == "count" && *value == serde_json::json!({ "intValue": "5" })),
-            "an operation without setups keeps recording its own inputs"
-        );
-
-        let shared = read_trace(&root.join("fixture.shared_setup"));
-        for operation in ["combine", "combine_three"] {
-            assert!(
-                operation_inputs(&shared, operation).is_empty(),
-                "parameters a registered setup constructs are not operation inputs"
-            );
-        }
-
-        let _ = std::fs::remove_dir_all(root);
-    }
-
     #[test]
     fn capture_errors_are_actionable() {
-        let ambiguous = capture(rust_binding().to_str().unwrap(), "", "", output_dir("ambiguous").to_str().unwrap());
-        assert!(matches!(
-            ambiguous,
-            CaptureOutcome::Error { reason } if reason.contains("multiple components present") && reason.contains("--component")
-        ));
-
-        let csharp_binding = repo_root().join("test").join("bindings").join("csharp.yaml");
-        let unsupported = capture(
-            csharp_binding.to_str().unwrap(),
-            "",
-            "fixture.stateless_add",
-            output_dir("unsupported").to_str().unwrap(),
+        assert_eq!(
+            capture_many(focused_rust_binding().to_str().unwrap(), "", &[]).unwrap_err(),
+            "capture requires at least one requested component"
         );
+        let registry = registry_with_async_setup(false);
+        let ambiguous = select_component(&registry, "").unwrap_err();
+        assert!(ambiguous.contains("multiple components present") && ambiguous.contains("--component"));
+        let unknown = select_component(&registry, "fixture.absent").unwrap_err();
+        assert!(unknown.contains("component 'fixture.absent' not found"));
+
+        let unsupported = discover_capture_target(focused_csharp_binding().to_str().unwrap(), "").unwrap_err();
+        assert!(unsupported.contains("only Rust targets") && unsupported.contains("csharp"));
         assert!(matches!(
-            unsupported,
-            CaptureOutcome::Error { reason } if reason.contains("only Rust targets") && reason.contains("csharp")
-        ));
-        assert!(matches!(
-            capture(rust_binding().to_str().unwrap(), "", "fixture.stateless_add", ""),
+            capture(focused_rust_binding().to_str().unwrap(), "", "fixture.cli.replay", ""),
             CaptureOutcome::Error { reason } if reason.contains("non-empty output directory")
         ));
     }
@@ -947,135 +977,6 @@ mod tests {
         );
     }
 
-    /// The screen runs before the capture build, so no component in the
-    /// checked-in Rust corpus that the goldens capture may declare one.
-    #[test]
-    fn the_rust_fixture_corpus_declares_no_async_setup() {
-        let discovered = discover_capture_target(rust_binding().to_str().unwrap(), "").expect("fixture discovery");
-        let requests = discovered
-            .registry
-            .present_components()
-            .into_iter()
-            .map(|component| CaptureRequest {
-                component,
-                out: PathBuf::from("unused"),
-                excluded_operations: BTreeSet::new(),
-            })
-            .collect::<Vec<_>>();
-        reject_async_setup_capture(&discovered.registry, &requests).expect("no fixture component declares an async setup");
-    }
-
-    #[test]
-    fn capture_errors_when_no_passing_test_invokes_component() {
-        let out = output_dir("no-scenarios");
-        let _ = std::fs::remove_dir_all(&out);
-        let outcome = capture(
-            rust_binding().to_str().unwrap(),
-            "",
-            "fixture.async_smol_timer",
-            out.to_str().unwrap(),
-        );
-        assert!(matches!(
-            outcome,
-            CaptureOutcome::Error { reason } if reason.contains("no passing tests captured operations")
-        ));
-        assert!(!out.exists());
-    }
-
-    #[test]
-    fn capture_many_matches_single_component_bundles() {
-        let batch_root = output_dir("batch");
-        let single_dir = output_dir("batch-single");
-        let _ = std::fs::remove_dir_all(&batch_root);
-        let _ = std::fs::remove_dir_all(&single_dir);
-        let requests = vec![
-            CaptureRequest {
-                component: "fixture.stateless_add".to_string(),
-                out: batch_root.join("fixture.stateless_add"),
-                excluded_operations: BTreeSet::new(),
-            },
-            CaptureRequest {
-                component: "fixture.multi_case".to_string(),
-                out: batch_root.join("fixture.multi_case"),
-                excluded_operations: BTreeSet::new(),
-            },
-        ];
-
-        let reports = capture_many(rust_binding().to_str().unwrap(), "", &requests).expect("batched capture");
-        assert_eq!(
-            reports.iter().map(|report| report.component_id.as_str()).collect::<Vec<_>>(),
-            vec!["fixture.stateless_add", "fixture.multi_case"]
-        );
-        assert_eq!(reports[1].scenarios, 2, "multi_case has two capturable tests");
-
-        let single = capture(
-            rust_binding().to_str().unwrap(),
-            "",
-            "fixture.stateless_add",
-            single_dir.to_str().unwrap(),
-        );
-        assert!(matches!(single, CaptureOutcome::Complete { .. }), "single capture failed: {single}");
-        for filename in [REGISTRY_FILE, TRACE_FILE, MANIFEST_FILE] {
-            assert_eq!(
-                std::fs::read(requests[0].out.join(filename)).unwrap(),
-                std::fs::read(single_dir.join(filename)).unwrap(),
-                "{filename} must be byte-identical between batched and single capture"
-            );
-        }
-        for request in &requests {
-            let validation = validate_bundle(&request.out);
-            assert!(
-                validation.valid,
-                "batched bundle for '{}' failed validation: {:#?}",
-                request.component, validation.issues
-            );
-        }
-
-        let unknown = capture_many(
-            rust_binding().to_str().unwrap(),
-            "",
-            &[CaptureRequest {
-                component: "fixture.absent".to_string(),
-                out: batch_root.join("absent"),
-                excluded_operations: BTreeSet::new(),
-            }],
-        );
-        assert!(
-            unknown.unwrap_err().contains("component 'fixture.absent' not found"),
-            "unknown batched components must be reported"
-        );
-
-        let _ = std::fs::remove_dir_all(batch_root);
-        let _ = std::fs::remove_dir_all(single_dir);
-    }
-
-    /// The golden harness must fail on ANY failing fixture test, even when a
-    /// sibling test already covers the same component. `specgate capture`
-    /// keeps its historical behavior of capturing the tests that pass.
-    #[test]
-    fn strict_capture_rejects_every_failed_scenario() {
-        let executed = ExecutedTests {
-            captures: Vec::new(),
-            failures: vec![
-                FailedTest {
-                    scenario_name: "stateful::counter_overflows".to_string(),
-                    summary: "exit code 101; stdout: assertion `left == right` failed".to_string(),
-                },
-                FailedTest {
-                    scenario_name: "strings::round_trips".to_string(),
-                    summary: "exit code 101; stderr: panicked at round trip".to_string(),
-                },
-            ],
-        };
-
-        let error = reject_failed_test_batch(&executed).unwrap_err();
-        assert!(error.starts_with("2 fixture test(s) failed under capture; every enumerated test must pass:"));
-        assert!(error.contains("stateful::counter_overflows: exit code 101; stdout: assertion `left == right` failed"));
-        assert!(error.contains("strings::round_trips: exit code 101; stderr: panicked at round trip"));
-
-        assert_eq!(reject_failed_test_batch(&ExecutedTests::default()), Ok(()));
-    }
-
     #[test]
     fn failure_summaries_carry_the_exit_status_and_both_stream_tails() {
         let summary = failure_summary(Some(101), b"running 1 test\ntest add ... FAILED\n", b"  \nstack backtrace: 1\n");
@@ -1089,6 +990,14 @@ mod tests {
         let truncated = failure_summary(Some(1), long.as_bytes(), b"");
         assert!(truncated.ends_with("..."), "long output is truncated: {truncated}");
         assert!(truncated.chars().count() < 1_300);
+    }
+
+    fn request_at(component: &str, out: PathBuf) -> CaptureRequest {
+        CaptureRequest {
+            component: component.to_string(),
+            out,
+            excluded_operations: BTreeSet::new(),
+        }
     }
 
     fn directory_file_names(path: &Path) -> Vec<&str> {
