@@ -1,0 +1,13 @@
+[package]
+name = "specgate-ctsc-negative-fixtures"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[features]
+compile-error = []
+
+[dependencies]
+specgate = { path = "../../../../rust/crates/specgate" }
+
+[workspace]

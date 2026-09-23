@@ -1,0 +1,1 @@
+{"case":"negative/unresolved-type","category":"unresolved-type","component":"fixture.unresolved_type","detail":{"message":"referenced type 'Gadget' has no registered component owner"},"format":"specgate.ctsc-golden-error","formatVersion":"0.1.0","outcome":"failure","phase":"discover"}

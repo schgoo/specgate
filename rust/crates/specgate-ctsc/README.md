@@ -11,8 +11,9 @@ Native captures are encoded directly from real annotated operation
 boundaries, preserving nested parentage, typed inputs/results, observations,
 empty/error/fault completion, logical timestamps, and deterministic IDs.
 Registry encoding consumes normalized discovery metadata while retaining
-setup/dependency/outcome information. Observation declarations and
-comparison profiles remain future work.
+setup/dependency/outcome information. The crate also provides native CTSC
+Registry, Trace Core, Linked, capture-bundle validation, and deterministic
+`ctsc.strict/0.1.0` differential comparison.
 
 
 ---

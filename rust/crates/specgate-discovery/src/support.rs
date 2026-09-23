@@ -1072,12 +1072,37 @@ mod tests {
         fn drop(&mut self) {
             self.shutdown.store(true, Ordering::Relaxed);
             if let Some(thread) = self.thread.take() {
-                thread.join().unwrap();
+                let result = thread.join();
+                if !std::thread::panicking() {
+                    result.unwrap();
+                }
             }
         }
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn sparse_registry_waits_for_request_bytes_after_accepting_a_connection() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let address = listener.local_addr().unwrap();
+        let mut client = TcpStream::connect(address).unwrap();
+        let (stream, _) = listener.accept().unwrap();
+        let server = std::thread::spawn(move || serve_registry_request(stream, address, "{}", &[]));
+
+        std::thread::sleep(Duration::from_millis(50));
+        client
+            .write_all(b"GET /config.json HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            .unwrap();
+        let mut response = String::new();
+        client.read_to_string(&mut response).unwrap();
+        server.join().unwrap();
+
+        assert!(response.starts_with("HTTP/1.1 200 OK"));
+    }
+
     fn serve_registry_request(mut stream: TcpStream, address: SocketAddr, index_entry: &str, archive: &[u8]) {
+        stream.set_nonblocking(false).unwrap();
         stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
         let mut request = [0_u8; 8192];
         let length = stream.read(&mut request).unwrap();

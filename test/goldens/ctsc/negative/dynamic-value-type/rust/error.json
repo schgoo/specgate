@@ -1,0 +1,1 @@
+{"case":"negative/dynamic-value-type","category":"dynamic-value-type","component":"fixture.value","detail":{"message":"operation 'fixture.value::echo' output type 'value' is the dynamic runtime value; CTSC registries require declared semantic types"},"format":"specgate.ctsc-golden-error","formatVersion":"0.1.0","outcome":"failure","phase":"discover"}

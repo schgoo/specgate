@@ -15,6 +15,8 @@ just deny
 just readme-check
 just ctsc-validate
 just ctsc-smoke
+just ctsc-goldens-check
+just ctsc-goldens-update
 just package-smoke
 just dotnet-build
 just dotnet-test
@@ -54,12 +56,47 @@ specgate replay <capture> <candidate-binding> ...
 Async operations remain discoverable, but native capture rejects them before
 polling because capture state is thread-local and cannot safely cross `.await`.
 
+## Golden matrix
+
+`test/goldens/ctsc/matrix.json` is hand-authored configuration covering every
+annotated fixture source: component rows, negative discovery/build rows, and
+replacement rows that point removed spec features at their CTSC-native tests.
+Every other file under `test/goldens/ctsc` is generated product output.
+
+- Never hand-edit a generated golden. Run `just ctsc-goldens-update` and review
+  the artifact diff.
+- `just ctsc-goldens-check` runs inside `just check`. It regenerates into
+  repository-local scratch, validates with the native CTSC validators, checks
+  cross-language parity, replays the rows marked replayable, and byte-compares
+  against the checked-in goldens.
+- Adding a fixture component requires a matrix row; adding an annotated source
+  without a row fails the gate. The harness also compares the components each
+  compiled target declares against the matrix rows, so an extra component in an
+  already-covered file fails too.
+- A `parity` exception must declare every allowed Rust-vs-C# difference exactly
+  (`parity.allowedDifferences`: JSON Pointer plus each language's value); the
+  observed recursive diff must equal the declared set.
+- Golden capture is strict: any failing enumerated fixture test fails the batch.
+  Every discovered operation must also appear in a captured trace, including
+  nested calls, unless `captureExclusions` names that exact operation with a
+  stable code and reason. `specgate capture` keeps its historical "capture what
+  passes" behavior.
+- A replay row marked `unsupported` must declare `expectCategory`; only that
+  stable planner limitation is accepted, never an unrelated replay failure.
+- Every compiler error in a build-negative row must have primary spans
+  exclusively in the row's intentional sources. Unspanned or unrelated errors
+  fail the gate even when the intended diagnostic is also present.
+
 ## Conventions
 
 - Every annotated Rust crate declares `spec_component!("dotted.name")`.
 - Public operations use `#[spec_operation("snake_case_name")]`.
 - Setup selection is keyed by exact component + operation and must reject
-  ambiguity.
+  ambiguity. Running one setup declaration twice in a capture is accepted only
+  when both runs record value-identical inputs.
+- Capture records the registry's folded surface: `#[spec_setup]` construction
+  inputs become the operation's inputs, and setup-filled parameters are omitted.
+- Every captured bundle must pass trace, linked, and bundle validation.
 - Structured values implement `ToNativeValue`, normally via
   `#[derive(SpecEvent)]`.
 - C# annotations are metadata only; preserve raw declaring type, method,

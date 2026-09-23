@@ -1,14 +1,17 @@
 //! `specgate` CLI binary entry point.
 
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use specgate_cli::{capture, discover, replay};
+use specgate_ctsc::comparison::compare;
+use specgate_ctsc::validation::{validate_bundle, validate_linked, validate_registry, validate_trace};
 
 fn print_usage() {
     eprintln!(
         "usage: specgate <command> [options] <args>\n\
          \n\
-         commands:\n  discover <binding.yaml> --component <id> --registry-id <id> --registry-version <version> -o|--out <registry.ctsc.json> [--target <name>]\n  capture <binding.yaml> --out <dir> [--target <name>] [--component <id>]\n  replay <capture-dir> <candidate-binding.yaml> --out <candidate.otlp.json> [--target <name>]"
+         commands:\n  discover <binding.yaml> --component <id> --registry-id <id> --registry-version <version> -o|--out <registry.ctsc.json> [--target <name>]\n  capture <binding.yaml> --out <dir> [--target <name>] [--component <id>]\n  replay <capture-dir> <candidate-binding.yaml> --out <candidate.otlp.json> [--target <name>]\n  validate registry <registry.json> [--import <registry.json>]...\n  validate trace <trace.otlp.json|trace.otlp.jsonl>\n  validate linked <trace> <root-registry> [--import <registry.json>]...\n  validate bundle <capture-dir>\n  compare <reference-trace> <candidate-trace> [--registry <root-registry>] [--import <registry.json>]..."
     );
 }
 
@@ -22,6 +25,8 @@ fn main() -> ExitCode {
         "discover" => cmd_discover(&args[1..]),
         "capture" => cmd_capture(&args[1..]),
         "replay" => cmd_replay(&args[1..]),
+        "validate" => cmd_validate(&args[1..]),
+        "compare" => cmd_compare(&args[1..]),
         "-h" | "--help" => {
             print_usage();
             ExitCode::SUCCESS
@@ -34,6 +39,89 @@ fn main() -> ExitCode {
     }
 }
 
+fn cmd_validate(args: &[String]) -> ExitCode {
+    let Some(kind) = args.first() else {
+        return argument_error("validate requires registry, trace, linked, or bundle");
+    };
+    let (positional, imports) = match parse_paths_and_imports(&args[1..]) {
+        Ok(parsed) => parsed,
+        Err(error) => return argument_error(&error),
+    };
+    let report = match kind.as_str() {
+        "registry" if positional.len() == 1 => validate_registry(&positional[0], &imports),
+        "trace" if positional.len() == 1 && imports.is_empty() => validate_trace(&positional[0]),
+        "linked" if positional.len() == 2 => validate_linked(&positional[0], &positional[1], &imports),
+        "bundle" if positional.len() == 1 && imports.is_empty() => validate_bundle(&positional[0]),
+        "registry" => return argument_error("validate registry requires <registry.json> [--import <registry.json>]..."),
+        "trace" => return argument_error("validate trace requires <trace.otlp.json|trace.otlp.jsonl>"),
+        "linked" => {
+            return argument_error("validate linked requires <trace> <root-registry> [--import <registry.json>]...");
+        }
+        "bundle" => return argument_error("validate bundle requires <capture-dir>"),
+        _ => return argument_error("validate requires registry, trace, linked, or bundle"),
+    };
+    print!("{}", specgate_cli::validation::format_report(&report));
+    if report.valid { ExitCode::SUCCESS } else { ExitCode::from(1) }
+}
+
+fn parse_paths_and_imports(args: &[String]) -> Result<(Vec<PathBuf>, Vec<PathBuf>), String> {
+    let mut positional = Vec::new();
+    let mut imports = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        if args[index] == "--import" {
+            let value = args.get(index + 1).ok_or_else(|| "--import needs an argument".to_string())?;
+            imports.push(PathBuf::from(value));
+            index += 2;
+        } else if args[index].starts_with('-') {
+            return Err(format!("unexpected argument '{}'", args[index]));
+        } else {
+            positional.push(PathBuf::from(&args[index]));
+            index += 1;
+        }
+    }
+    Ok((positional, imports))
+}
+
+fn cmd_compare(args: &[String]) -> ExitCode {
+    let mut positional = Vec::new();
+    let mut registry = None;
+    let mut imports = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            flag @ ("--registry" | "--import") => {
+                let Some(value) = args.get(index + 1) else {
+                    return argument_error(&format!("{flag} needs an argument"));
+                };
+                if flag == "--registry" {
+                    if registry.replace(PathBuf::from(value)).is_some() {
+                        return argument_error("--registry may be supplied only once");
+                    }
+                } else {
+                    imports.push(PathBuf::from(value));
+                }
+                index += 2;
+            }
+            value if !value.starts_with('-') => {
+                positional.push(PathBuf::from(value));
+                index += 1;
+            }
+            value => return argument_error(&format!("unexpected argument '{value}'")),
+        }
+    }
+    if positional.len() != 2 {
+        return argument_error(
+            "compare requires <reference-trace> <candidate-trace> [--registry <root-registry>] [--import <registry.json>]...",
+        );
+    }
+    if registry.is_none() && !imports.is_empty() {
+        return argument_error("--import requires --registry");
+    }
+    let report = compare(&positional[0], &positional[1], registry.as_deref(), &imports);
+    print!("{}", specgate_cli::comparison::format_report(&report));
+    if report.equivalent { ExitCode::SUCCESS } else { ExitCode::from(1) }
+}
 #[derive(Debug, PartialEq, Eq)]
 struct ReplayArgs {
     capture_dir: String,

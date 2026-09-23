@@ -130,20 +130,8 @@ pub fn discover_target(binding_path: &str, target_name: Option<&str>, component:
 ///
 /// Returns build, reflection, registry, normalization, or setup errors.
 pub fn discover_resolved_target(target: crate::binding::ResolvedTarget, component: &str) -> Result<TargetDiscovery, String> {
-    let (raw_registry_json, cargo_context) = match target.language.as_str() {
-        "rust" => {
-            let context = crate::support::candidate_cargo_context(&target.target.package_root)?;
-            (run_discovery_with_context(&context)?, Some(context))
-        }
-        "csharp" => {
-            if component.is_empty() {
-                return Err("C# discovery requires a non-empty component".to_string());
-            }
-            (crate::csharp_discovery::run_csharp_discovery(&target.target, component)?, None)
-        }
-        other => return Err(format!("no discovery metadata emitted by {other} target")),
-    };
-    let registry = Registry::parse(&raw_registry_json)?;
+    let requested: Vec<&str> = if component.is_empty() { Vec::new() } else { vec![component] };
+    let mut many = discover_many_resolved_target(target, &requested)?;
     let schema = if component.is_empty() {
         DiscoveredSchema {
             component: String::new(),
@@ -153,14 +141,147 @@ pub fn discover_resolved_target(target: crate::binding::ResolvedTarget, componen
             types: Vec::new(),
         }
     } else {
-        normalize_registry(&registry, &target.language, component)?
+        many.components
+            .remove(component)
+            .ok_or_else(|| format!("discovery returned no metadata for component '{component}'"))?
+            .schema?
     };
+    let raw_registry_json = many
+        .raw_registry_json
+        .into_iter()
+        .next()
+        .ok_or_else(|| "discovery produced no registry document".to_string())?;
+    let registry = many
+        .registries
+        .into_iter()
+        .next()
+        .ok_or_else(|| "discovery produced no parsed registry".to_string())?;
     Ok(TargetDiscovery {
-        target,
-        cargo_context,
+        target: many.target,
+        cargo_context: many.cargo_context,
         raw_registry_json,
         registry,
         schema,
+    })
+}
+
+/// Raw registry selection and normalized schema for one requested component.
+#[derive(Debug, Clone)]
+pub struct ComponentDiscovery {
+    /// Index of this component's document in [`ManyTargetDiscovery::registries`].
+    pub registry_index: usize,
+    /// Normalized schema, or this component's exact normalization failure.
+    pub schema: Result<DiscoveredSchema, String>,
+}
+
+/// Raw and normalized metadata for many components of one binding target.
+///
+/// Rust targets link and self-report once, so every component shares registry
+/// index `0`. C# targets build and reflect once, emitting one raw document per
+/// component. Either way, the expensive toolchain work happens a single time.
+#[derive(Debug, Clone)]
+pub struct ManyTargetDiscovery {
+    pub target: crate::binding::ResolvedTarget,
+    pub cargo_context: Option<crate::support::CandidateCargoContext>,
+    /// Raw registry documents in emission order.
+    pub raw_registry_json: Vec<String>,
+    /// Parsed registries aligned with `raw_registry_json`.
+    pub registries: Vec<Registry>,
+    /// Requested components, sorted and deduplicated.
+    pub components: BTreeMap<String, ComponentDiscovery>,
+    /// Every component the compiled target declares an operation for, sorted
+    /// and deduplicated, independent of what this run requested. Callers that
+    /// must account for the whole target compare their expected coverage
+    /// against this rather than against the requested subset.
+    pub present_components: Vec<String>,
+}
+
+impl ManyTargetDiscovery {
+    /// The parsed registry backing `component`.
+    #[must_use]
+    pub fn registry(&self, component: &str) -> Option<&Registry> {
+        self.components
+            .get(component)
+            .and_then(|discovered| self.registries.get(discovered.registry_index))
+    }
+
+    /// The raw registry document backing `component`.
+    #[must_use]
+    pub fn raw_registry_json(&self, component: &str) -> Option<&str> {
+        self.components
+            .get(component)
+            .and_then(|discovered| self.raw_registry_json.get(discovered.registry_index))
+            .map(String::as_str)
+    }
+
+    /// The normalized schema result for `component`.
+    #[must_use]
+    pub fn schema(&self, component: &str) -> Option<&Result<DiscoveredSchema, String>> {
+        self.components.get(component).map(|discovered| &discovered.schema)
+    }
+}
+
+/// Discover raw and normalized metadata for many components of one target.
+///
+/// # Errors
+///
+/// Returns binding, target, build, reflection, or registry parse errors. A
+/// component whose metadata cannot be normalized is reported in its own
+/// [`ComponentDiscovery::schema`] rather than failing the whole batch.
+pub fn discover_many_target(binding_path: &str, target_name: Option<&str>, components: &[&str]) -> Result<ManyTargetDiscovery, String> {
+    let target = crate::binding::resolve_binding_target(binding_path, target_name)?;
+    discover_many_resolved_target(target, components)
+}
+
+/// Discover raw and normalized metadata for many components of a resolved
+/// target, paying the build/reflection cost once.
+///
+/// # Errors
+///
+/// Returns build, reflection, or registry parse errors.
+pub fn discover_many_resolved_target(target: crate::binding::ResolvedTarget, components: &[&str]) -> Result<ManyTargetDiscovery, String> {
+    let mut requested = components.iter().copied().filter(|name| !name.is_empty()).collect::<Vec<_>>();
+    requested.sort_unstable();
+    requested.dedup();
+    let (raw_registry_json, cargo_context, shared_document, reported_components) = match target.language.as_str() {
+        "rust" => {
+            let context = crate::support::candidate_cargo_context(&target.target.package_root)?;
+            (vec![run_discovery_with_context(&context)?], Some(context), true, None)
+        }
+        "csharp" => {
+            if requested.is_empty() {
+                return Err("C# discovery requires a non-empty component".to_string());
+            }
+            let discovered = crate::csharp_discovery::run_csharp_discovery_many(&target.target, &requested)?;
+            (discovered.documents, None, false, Some(discovered.present_components))
+        }
+        other => return Err(format!("no discovery metadata emitted by {other} target")),
+    };
+    let registries = raw_registry_json
+        .iter()
+        .map(|json| Registry::parse(json))
+        .collect::<Result<Vec<_>, String>>()?;
+    // A shared Rust document already describes the whole linked target; a C#
+    // run reflects one document per request, so its inventory comes from the
+    // same single reflection pass instead.
+    let present_components =
+        reported_components.unwrap_or_else(|| registries.first().map(Registry::present_components).unwrap_or_default());
+    let mut discovered = BTreeMap::new();
+    for (position, component) in requested.iter().enumerate() {
+        let registry_index = if shared_document { 0 } else { position };
+        let registry = registries
+            .get(registry_index)
+            .ok_or_else(|| format!("discovery emitted no registry document for component '{component}'"))?;
+        let schema = normalize_registry(registry, &target.language, component);
+        discovered.insert((*component).to_string(), ComponentDiscovery { registry_index, schema });
+    }
+    Ok(ManyTargetDiscovery {
+        target,
+        cargo_context,
+        raw_registry_json,
+        registries,
+        components: discovered,
+        present_components,
     })
 }
 
@@ -186,13 +307,122 @@ pub fn discover_target_schema(binding_path: &str, target_name: Option<&str>, com
 ///
 /// # Errors
 ///
-/// Returns setup ambiguity or malformed semantic metadata errors.
+/// Returns semantic identity, visibility, setup, or malformed metadata errors.
 pub fn normalize_registry(registry: &Registry, language: &str, component: &str) -> Result<DiscoveredSchema, String> {
-    if language == "csharp" {
-        build_schema_prenormalized(registry, component)
+    validate_component_surface(registry, component)?;
+    let schema = if language == "csharp" {
+        build_schema_prenormalized(registry, component)?
     } else {
-        build_schema(registry, component)
+        build_schema(registry, component)?
+    };
+    reject_dynamic_value_types(&schema)?;
+    Ok(schema)
+}
+
+/// Reject component metadata that cannot describe a well-formed CTSC surface.
+///
+/// Discovery is the first place where a component's semantic identity is
+/// known, so operation identity, visibility, and setup ownership are enforced
+/// here rather than surfacing as confusing downstream encoding failures.
+fn validate_component_surface(registry: &Registry, component: &str) -> Result<(), String> {
+    let operations = registry.operations_for(component);
+    let mut declarations: BTreeMap<&str, usize> = BTreeMap::new();
+    for operation in &operations {
+        *declarations.entry(operation.name.as_str()).or_insert(0) += 1;
     }
+    if let Some((name, count)) = declarations.iter().find(|(_name, count)| **count > 1) {
+        return Err(format!(
+            "operation '{component}::{name}' is declared {count} times; operation identity must be unique within a component"
+        ));
+    }
+    if let Some(operation) = operations.iter().find(|operation| !operation.is_public) {
+        return Err(format!(
+            "operation '{component}::{}' is declared on private function '{}'; discovery exposes only public operations",
+            operation.name, operation.fn_name
+        ));
+    }
+    let declared = operations.iter().map(|operation| operation.name.as_str()).collect::<BTreeSet<_>>();
+    let mut orphans = registry
+        .ops
+        .iter()
+        .filter(|candidate| candidate.is_setup && candidate.component == component && !declared.contains(candidate.name.as_str()))
+        .collect::<Vec<_>>();
+    orphans.sort_by(|left, right| left.name.cmp(&right.name).then_with(|| left.fn_name.cmp(&right.fn_name)));
+    if let Some(orphan) = orphans.first() {
+        return Err(format!(
+            "setup '{}' for '{component}::{}' has no operation to construct; annotate the operation or remove the setup",
+            orphan.fn_name, orphan.name
+        ));
+    }
+    Ok(())
+}
+
+/// Reject a normalized surface that leaks the dynamic runtime value type.
+///
+/// A CTSC registry describes declared semantic types; the runtime's universal
+/// `Value` has no registry encoding, so discovery rejects it with the exact
+/// operation or type that introduced it.
+fn reject_dynamic_value_types(schema: &DiscoveredSchema) -> Result<(), String> {
+    let component = &schema.component;
+    for operation in &schema.operations {
+        for input in &operation.inputs {
+            reject_dynamic_value(
+                &input.ty,
+                &format!("operation '{component}::{}' input '{}'", operation.name, input.name),
+            )?;
+        }
+        reject_dynamic_value(&operation.output, &format!("operation '{component}::{}' output", operation.name))?;
+        for error in &operation.errors {
+            reject_dynamic_value(
+                &error.ty,
+                &format!("operation '{component}::{}' error '{}'", operation.name, error.name),
+            )?;
+        }
+        for setup in &operation.setups {
+            for input in &setup.inputs {
+                reject_dynamic_value(
+                    &input.ty,
+                    &format!("setup for '{component}::{}' input '{}'", operation.name, input.name),
+                )?;
+            }
+        }
+    }
+    for declared in schema
+        .types
+        .iter()
+        .chain(schema.dependency_types.iter().flat_map(|owner| owner.types.iter()))
+    {
+        for field in &declared.fields {
+            reject_dynamic_value(&field.ty, &format!("type '{}' field '{}'", declared.name, field.name))?;
+        }
+        for variant in &declared.variants {
+            for field in &variant.fields {
+                reject_dynamic_value(
+                    &field.ty,
+                    &format!("type '{}' variant '{}' field '{}'", declared.name, variant.name, field.name),
+                )?;
+            }
+            for (position, element) in variant.tuple.iter().flatten().enumerate() {
+                reject_dynamic_value(
+                    element,
+                    &format!("type '{}' variant '{}' element {position}", declared.name, variant.name),
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn reject_dynamic_value(type_ref: &str, location: &str) -> Result<(), String> {
+    let mentions_dynamic_value = type_ref
+        .split(|character: char| !(character.is_alphanumeric() || character == '_'))
+        .any(|token| token == "value");
+    if mentions_dynamic_value {
+        return Err(format!(
+            "{location} type '{type_ref}' is the dynamic runtime value; CTSC registries require declared semantic types"
+        ));
+    }
+    Ok(())
 }
 
 /// Build the canonical `DiscoveredSchema` for `comp` from a parsed registry:
@@ -1343,6 +1573,13 @@ fn fold_operation(op: &OpInfo, registry: &Registry) -> Result<FoldedOperation, S
         });
     }
 
+    if op.is_method && receiver_setup.is_none() {
+        return Err(format!(
+            "operation '{}::{}' is a method with no receiver setup; annotate a #[spec_setup(\"{}\")] producer for its receiver",
+            op.component, op.name, op.name
+        ));
+    }
+
     let mut inputs = Vec::new();
     if let Some(setup) = receiver_setup {
         inputs.extend(setup.params.iter().cloned());
@@ -1421,6 +1658,73 @@ mod tests {
             ],"types":[]}"#,
         );
         assert!(raw_inputs(&registry.ops[0], &registry).unwrap_err().contains("ambiguously matches"));
+    }
+
+    #[test]
+    fn semantic_surface_rejects_duplicate_private_and_orphan_declarations() {
+        let duplicate = registry(
+            r#"{"operations":[
+                {"name":"render","module_path":"fixture","fn_name":"render_one","is_setup":false,"is_async":false,"is_method":false,"is_public":true,"return_type":"String","fills":"","params":[],"component":"fixture.duplicate"},
+                {"name":"render","module_path":"fixture","fn_name":"render_two","is_setup":false,"is_async":false,"is_method":false,"is_public":true,"return_type":"String","fills":"","params":[],"component":"fixture.duplicate"}
+            ],"types":[]}"#,
+        );
+        assert_eq!(
+            normalize_registry(&duplicate, "rust", "fixture.duplicate").unwrap_err(),
+            "operation 'fixture.duplicate::render' is declared 2 times; operation identity must be unique within a component"
+        );
+
+        let private = registry(
+            r#"{"operations":[
+                {"name":"secret","module_path":"fixture","fn_name":"secret","is_setup":false,"is_async":false,"is_method":false,"is_public":false,"return_type":"i32","fills":"","params":[],"component":"fixture.private"}
+            ],"types":[]}"#,
+        );
+        assert_eq!(
+            normalize_registry(&private, "rust", "fixture.private").unwrap_err(),
+            "operation 'fixture.private::secret' is declared on private function 'secret'; discovery exposes only public operations"
+        );
+
+        let orphan = registry(
+            r#"{"operations":[
+                {"name":"increment","module_path":"fixture","fn_name":"make_counter","is_setup":true,"is_async":false,"is_method":false,"is_public":true,"return_type":"Counter","fills":"","params":[],"component":"fixture.orphan"}
+            ],"types":[{"name":"Counter","module_path":"fixture","kind":"struct","component":"fixture.orphan","fields":[["count","i32"]],"variants":[]}]}"#,
+        );
+        assert_eq!(
+            normalize_registry(&orphan, "rust", "fixture.orphan").unwrap_err(),
+            "setup 'make_counter' for 'fixture.orphan::increment' has no operation to construct; annotate the operation or remove the setup"
+        );
+    }
+
+    #[test]
+    fn semantic_surface_rejects_unconstructible_methods_and_dynamic_values() {
+        let method = registry(
+            r#"{"operations":[
+                {"name":"increment","module_path":"fixture","fn_name":"increment","is_setup":false,"is_async":false,"is_method":true,"is_public":true,"return_type":"()","fills":"","params":[],"component":"fixture.method"}
+            ],"types":[{"name":"Counter","module_path":"fixture","kind":"struct","component":"fixture.method","fields":[["count","i32"]],"variants":[]}]}"#,
+        );
+        assert_eq!(
+            normalize_registry(&method, "rust", "fixture.method").unwrap_err(),
+            "operation 'fixture.method::increment' is a method with no receiver setup; annotate a #[spec_setup(\"increment\")] producer for its receiver"
+        );
+
+        let dynamic = registry(
+            r#"{"operations":[
+                {"name":"echo","module_path":"fixture","fn_name":"echo","is_setup":false,"is_async":false,"is_method":false,"is_public":true,"return_type":"Value","fills":"","params":[["input","i32"]],"component":"fixture.value"}
+            ],"types":[]}"#,
+        );
+        assert_eq!(
+            normalize_registry(&dynamic, "rust", "fixture.value").unwrap_err(),
+            "operation 'fixture.value::echo' output type 'value' is the dynamic runtime value; CTSC registries require declared semantic types"
+        );
+
+        let dynamic_field = registry(
+            r#"{"operations":[
+                {"name":"snapshot","module_path":"fixture","fn_name":"snapshot","is_setup":false,"is_async":false,"is_method":false,"is_public":true,"return_type":"Record","fills":"","params":[],"component":"fixture.value"}
+            ],"types":[{"name":"Record","module_path":"fixture","kind":"struct","component":"fixture.value","fields":[["history","Vec<Value>"]],"variants":[]}]}"#,
+        );
+        assert_eq!(
+            normalize_registry(&dynamic_field, "rust", "fixture.value").unwrap_err(),
+            "type 'Record' field 'history' type 'List<value>' is the dynamic runtime value; CTSC registries require declared semantic types"
+        );
     }
 
     #[test]

@@ -6,26 +6,9 @@ $firstCapture = Join-Path $scratch 'capture-a'
 $secondCapture = Join-Path $scratch 'capture-b'
 $firstReplay = Join-Path $scratch 'candidate-a.otlp.json'
 $secondReplay = Join-Path $scratch 'candidate-b.otlp.json'
+$changedReplay = Join-Path $scratch 'candidate-changed.otlp.json'
 $binding = Join-Path $root 'test/bindings/rust.yaml'
 $manifest = Join-Path $root 'rust/Cargo.toml'
-$validator = Join-Path $root 'docs/ctsc/validate.py'
-
-function Invoke-Python {
-    param([string[]]$Arguments)
-
-    if (Get-Command python -ErrorAction SilentlyContinue) {
-        & python @Arguments
-    }
-    elseif (Get-Command py -ErrorAction SilentlyContinue) {
-        & py -3 @Arguments
-    }
-    else {
-        throw 'Python 3 is required for CTSC validation.'
-    }
-    if ($LASTEXITCODE -ne 0) {
-        throw "Python validation failed: $($Arguments -join ' ')"
-    }
-}
 
 function Invoke-SpecGate {
     param([string[]]$Arguments)
@@ -60,11 +43,13 @@ try {
 
     $registry = Join-Path $firstCapture 'registry.ctsc.json'
     $reference = Join-Path $firstCapture 'reference.otlp.json'
-    Invoke-Python @($validator, 'registry', $registry)
-    Invoke-Python @($validator, 'trace', $reference)
-    Invoke-Python @($validator, 'linked', $reference, $registry)
-    Invoke-Python @($validator, 'trace', $firstReplay)
-    Invoke-Python @($validator, 'linked', $firstReplay, $registry)
+    Invoke-SpecGate @('validate', 'registry', $registry)
+    Invoke-SpecGate @('validate', 'trace', $reference)
+    Invoke-SpecGate @('validate', 'linked', $reference, $registry)
+    Invoke-SpecGate @('validate', 'bundle', $firstCapture)
+    Invoke-SpecGate @('validate', 'trace', $firstReplay)
+    Invoke-SpecGate @('validate', 'linked', $firstReplay, $registry)
+    Invoke-SpecGate @('compare', $reference, $firstReplay, '--registry', $registry)
 
     $referenceJson = Get-Content $reference -Raw | ConvertFrom-Json
     $candidateJson = Get-Content $firstReplay -Raw | ConvertFrom-Json
@@ -77,7 +62,28 @@ try {
         throw 'Candidate replay did not emit add(2,3) -> 5.'
     }
 
-    Write-Output 'Deterministic capture/replay smoke passed.'
+    $changed = Get-Content $firstReplay -Raw | ConvertFrom-Json
+    $operation = $changed.resourceSpans[0].scopeSpans[0].spans |
+        Where-Object name -eq 'conformance.operation' |
+        Select-Object -First 1
+    $result = $operation.events |
+        Where-Object name -eq 'conformance.result' |
+        Select-Object -First 1
+    $value = $result.attributes |
+        Where-Object key -eq 'conformance.result.value' |
+        Select-Object -First 1
+    $value.value.intValue = '6'
+    $changed | ConvertTo-Json -Depth 100 -Compress | Set-Content -NoNewline $changedReplay
+
+    $mismatch = & cargo run --manifest-path $manifest -p specgate-cli --quiet -- compare $reference $changedReplay --registry $registry
+    if ($LASTEXITCODE -ne 1) {
+        throw "Expected changed result comparison to exit 1, got $LASTEXITCODE."
+    }
+    if (($mismatch -join "`n") -notmatch 'mismatch scenario\[') {
+        throw 'Changed result comparison did not report a semantic mismatch path.'
+    }
+
+    Write-Output 'Deterministic native capture/replay/validate/compare smoke passed.'
 }
 finally {
     Remove-Item -Recurse -Force $scratch -ErrorAction SilentlyContinue

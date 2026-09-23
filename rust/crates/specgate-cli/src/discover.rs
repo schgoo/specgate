@@ -118,167 +118,97 @@ mod tests {
             .join(format!("specgate-cli-{label}-{}.json", std::process::id()))
     }
 
-    fn discover_component(binding: &Path, output: &Path, component: &str, registry_id: &str) -> DiscoverOutcome {
-        discover(
-            binding.to_str().expect("utf-8 binding path"),
-            "",
-            component,
-            registry_id,
-            "1.0.0",
-            output.to_str().expect("utf-8 output path"),
-        )
-    }
-
-    fn rust_binding() -> PathBuf {
-        repo_root().join("test").join("bindings").join("rust.yaml")
-    }
-
-    fn csharp_binding() -> PathBuf {
-        repo_root().join("test").join("bindings").join("csharp.yaml")
-    }
-
-    fn assert_complete<'a>(outcome: &'a DiscoverOutcome, language: &str) -> &'a DiscoverReport {
-        let DiscoverOutcome::Complete { report } = outcome else {
-            panic!("{language} discovery failed: {outcome}");
-        };
-        report
-    }
-
-    fn assert_registry_parity(component: &str, registry_id: &str, label: &str) {
-        let rust_output = output_path(&format!("{label}-parity-rust"));
-        let csharp_output = output_path(&format!("{label}-parity-csharp"));
-        let rust = discover_component(&rust_binding(), &rust_output, component, registry_id);
-        let csharp = discover_component(&csharp_binding(), &csharp_output, component, registry_id);
-
-        assert_complete(&rust, "Rust");
-        assert_complete(&csharp, "C#");
-        assert_eq!(
-            std::fs::read(&rust_output).expect("read Rust registry"),
-            std::fs::read(&csharp_output).expect("read C# registry"),
-            "Rust and C# registry JSON must be byte-identical"
-        );
-        let _ = std::fs::remove_file(rust_output);
-        let _ = std::fs::remove_file(csharp_output);
+    fn focused_binding(language: &str) -> PathBuf {
+        repo_root()
+            .join("rust")
+            .join("crates")
+            .join("specgate-cli")
+            .join("tests")
+            .join("fixtures")
+            .join(format!("{language}.binding.yaml"))
     }
 
     #[test]
-    fn discover_rust_stateless_registry() {
-        let output = output_path("discover-rust");
-        let outcome = discover_component(
-            &rust_binding(),
-            &output,
-            "fixture.stateless_add",
-            "urn:ctsc:registry:fixture.stateless-add:1",
+    fn focused_discovery_batches_each_language_and_preserves_parity() {
+        use specgate_discovery::discovery::discover_many_target;
+
+        let components = ["fixture.cli.multiple", "fixture.cli.replay", "fixture.cli.setup"];
+        let rust = discover_many_target(focused_binding("rust").to_str().unwrap(), None, &components).expect("batched Rust discovery");
+        assert_eq!(rust.raw_registry_json.len(), 1, "Rust link-time discovery self-reports once");
+        assert_eq!(rust.registries.len(), 1);
+        for component in components {
+            let discovered = rust
+                .components
+                .get(component)
+                .unwrap_or_else(|| panic!("missing Rust metadata for {component}"));
+            assert_eq!(discovered.registry_index, 0, "every Rust component shares one document");
+            assert!(discovered.schema.is_ok(), "{component} normalization failed");
+        }
+        assert!(rust.registry("fixture.cli.replay").is_some());
+        assert!(rust.raw_registry_json("fixture.cli.setup").is_some());
+
+        let replay = rust.schema("fixture.cli.replay").unwrap().as_ref().unwrap();
+        assert_eq!(replay.operations.len(), 2);
+        assert!(replay.types.is_empty());
+        let setup = rust.schema("fixture.cli.setup").unwrap().as_ref().unwrap();
+        assert_eq!(setup.operations.len(), 1);
+        assert_eq!(setup.types.len(), 1);
+        assert_eq!(setup.operations[0].name, "increment");
+        assert_eq!(setup.operations[0].inputs.len(), 1);
+        assert_eq!(setup.operations[0].inputs[0].name, "initial");
+        let multiple = rust.schema("fixture.cli.multiple").unwrap().as_ref().unwrap();
+        assert_eq!(
+            multiple
+                .operations
+                .iter()
+                .map(|operation| operation.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["unexercised", "used"]
         );
 
-        let DiscoverOutcome::Complete { report } = outcome else {
-            panic!("Rust discovery failed: {outcome}");
-        };
-        assert_eq!(report.component_id, "fixture.stateless_add");
-        assert_eq!(report.operations, 1);
-        assert_eq!(report.types, 0);
-        let json = std::fs::read_to_string(&output).expect("read registry output");
-        let document = serde_json::from_str::<serde_json::Value>(&json).unwrap();
+        let csharp = discover_many_target(focused_binding("csharp").to_str().unwrap(), None, &components).expect("batched C# discovery");
+        assert_eq!(
+            csharp.raw_registry_json.len(),
+            components.len(),
+            "C# reflection emits one document per component"
+        );
+        for (position, component) in components.iter().enumerate() {
+            let discovered = csharp
+                .components
+                .get(*component)
+                .unwrap_or_else(|| panic!("missing C# metadata for {component}"));
+            assert_eq!(discovered.registry_index, position, "C# documents stay aligned with request order");
+            let csharp_schema = discovered.schema.as_ref().expect("C# schema");
+            let rust_schema = rust.schema(component).expect("Rust schema").as_ref().expect("Rust schema");
+            assert_eq!(
+                csharp_schema, rust_schema,
+                "batched C# discovery must normalize to the Rust canonical for {component}"
+            );
+        }
+
+        // Rich structured/sum-type discovery remains exhaustively covered by
+        // the complete 69-row CTSC golden matrix. This fixture isolates CLI
+        // batching, setup folding, source operation identity, and C# parity.
+        let schema_json = serde_json::to_string(replay).unwrap();
+        let first = encode_schema_registry_result(
+            "urn:ctsc:registry:fixture.cli.replay".to_string(),
+            "1.0.0".to_string(),
+            &schema_json,
+        )
+        .unwrap()
+        .registry_json;
+        let second = encode_schema_registry_result(
+            "urn:ctsc:registry:fixture.cli.replay".to_string(),
+            "1.0.0".to_string(),
+            &schema_json,
+        )
+        .unwrap()
+        .registry_json;
+        assert_eq!(first, second);
+        assert!(!first.contains('\n'), "registry JSON must be compact");
+        let document: serde_json::Value = serde_json::from_str(&first).unwrap();
         assert_eq!(document["format"], "ctsc.registry");
         assert_eq!(document["formatVersion"], "0.2.0");
-        assert!(!json.contains('\n'), "registry JSON must be compact");
-        let _ = std::fs::remove_file(output);
-    }
-
-    #[test]
-    fn discover_csharp_stateless_registry() {
-        assert_registry_parity("fixture.stateless_add", "urn:ctsc:registry:fixture.stateless-add:1", "stateless");
-    }
-
-    #[test]
-    fn discover_rust_complex_registry() {
-        let output = output_path("discover-complex-rust");
-        let outcome = discover_component(&rust_binding(), &output, "fixture.rich", "urn:ctsc:registry:fixture.rich:1");
-        let report = assert_complete(&outcome, "Rust");
-        assert_eq!(report.operations, 1);
-        assert_eq!(report.types, 3);
-
-        let document: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(&output).expect("read complex registry")).expect("valid registry JSON");
-        let component = &document["components"][0];
-        assert_eq!(component["types"][0]["name"], "Address");
-        assert_eq!(component["types"][2]["name"], "Shape");
-        assert_eq!(
-            component["operations"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|operation| operation["name"] == "describe")
-                .unwrap()["outcomes"]["result"],
-            serde_json::json!({
-                "kind": "primitive",
-                "name": "string"
-            })
-        );
-        assert_eq!(component["operations"][0]["outcomes"]["empty"], true);
-        let _ = std::fs::remove_file(output);
-    }
-
-    #[test]
-    fn discover_csharp_complex_registry() {
-        assert_registry_parity("fixture.rich", "urn:ctsc:registry:fixture.rich:1", "complex");
-    }
-
-    #[test]
-    fn discover_rust_setup_folded_registry() {
-        let output = output_path("discover-setup-rust");
-        let outcome = discover_component(&rust_binding(), &output, "fixture.setup", "urn:ctsc:registry:fixture.setup:1");
-        let report = assert_complete(&outcome, "Rust");
-        assert_eq!(report.operations, 1);
-        assert_eq!(report.types, 1);
-
-        let document: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(&output).expect("read setup registry")).expect("valid registry JSON");
-        assert_eq!(
-            document["components"][0]["operations"][0]["inputs"],
-            serde_json::json!([
-                {"name": "initial", "type": {"kind": "primitive", "name": "i32"}}
-            ]),
-            "setup construction input must be folded without receiver/Counter inputs"
-        );
-        let _ = std::fs::remove_file(output);
-    }
-
-    #[test]
-    fn discover_csharp_setup_folded_registry() {
-        assert_registry_parity("fixture.setup", "urn:ctsc:registry:fixture.setup:1", "setup");
-    }
-
-    #[test]
-    fn discover_csharp_unscoped_setup_and_fallible_unit_parity() {
-        assert_registry_parity(
-            "fixture.fallible_unit",
-            "urn:ctsc:registry:fixture.fallible-unit:1",
-            "fallible-unit",
-        );
-
-        let discovered =
-            specgate_discovery::discovery::discover_target(csharp_binding().to_str().unwrap(), None, "fixture.fallible_unit").unwrap();
-        let setup = discovered.registry.setups_for("fixture.fallible_unit", "advance");
-        assert_eq!(setup.len(), 1, "unscoped C# setup metadata must be retained");
-        let void = discovered
-            .schema
-            .operations
-            .iter()
-            .find(|operation| operation.name == "fallible_void")
-            .unwrap();
-        assert!(void.output.is_empty());
-        assert!(!void.is_async);
-        assert_eq!(void.errors[0].ty, "string");
-        let task = discovered
-            .schema
-            .operations
-            .iter()
-            .find(|operation| operation.name == "fallible_task")
-            .unwrap();
-        assert!(task.output.is_empty());
-        assert!(task.is_async);
-        assert_eq!(task.errors[0].ty, "string");
     }
 
     #[test]
