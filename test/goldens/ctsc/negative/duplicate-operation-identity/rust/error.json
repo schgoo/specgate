@@ -1,0 +1,1 @@
+{"case":"negative/duplicate-operation-identity","category":"duplicate-operation-identity","component":"fixture.duplicate_identity","detail":{"message":"operation 'fixture.duplicate_identity::render' is declared 2 times; operation identity must be unique within a component"},"format":"specgate.ctsc-golden-error","formatVersion":"0.1.0","outcome":"failure","phase":"discover"}

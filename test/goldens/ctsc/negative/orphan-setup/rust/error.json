@@ -1,0 +1,1 @@
+{"case":"negative/orphan-setup","category":"orphan-setup","component":"fixture.missing_operation","detail":{"message":"setup 'make_counter' for 'fixture.missing_operation::increment' has no operation to construct; annotate the operation or remove the setup"},"format":"specgate.ctsc-golden-error","formatVersion":"0.1.0","outcome":"failure","phase":"discover"}

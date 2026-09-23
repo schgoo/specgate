@@ -1,0 +1,1 @@
+{"case":"negative/private-operation","category":"private-operation","component":"fixture.private_operation","detail":{"message":"operation 'fixture.private_operation::secret' is declared on private function 'secret'; discovery exposes only public operations"},"format":"specgate.ctsc-golden-error","formatVersion":"0.1.0","outcome":"failure","phase":"discover"}

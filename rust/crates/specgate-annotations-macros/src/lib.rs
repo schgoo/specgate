@@ -1,9 +1,12 @@
 //! Native CTSC annotation macros for `SpecGate`.
 //!
-//! Operations create real capture boundaries, setups and types register raw
-//! link-time metadata, `SpecEvent` projects structured values through
-//! `ToNativeValue`, and `spec_trace!` records native observations. Async
-//! operations retain metadata but reject native capture before polling.
+//! Operations create real capture boundaries; setups register link-time
+//! metadata and record the construction inputs the registry folds into the
+//! operation they build; types register raw link-time metadata; `SpecEvent`
+//! projects structured values through `ToNativeValue`; and `spec_trace!`
+//! records native observations. Async operations retain metadata but reject
+//! native capture before polling, and an async setup records no construction
+//! inputs at all, so capture rejects a component that declares one.
 
 use proc_macro::TokenStream;
 use proc_macro_crate::{FoundCrate, crate_name};
@@ -114,6 +117,15 @@ fn is_mutable_reference(ty: &Type) -> bool {
 }
 
 fn parameters(function: &mut ItemFn) -> Vec<(Ident, Type, String)> {
+    collect_parameters(function, true)
+}
+
+/// Read every typed parameter's identifier, type, and language-neutral name.
+///
+/// `strip` removes the `#[spec_input]` markers once nothing else needs them.
+/// Stacked `#[spec_setup]` annotations expand one attribute at a time, so every
+/// expansion but the last must leave the markers in place for the next one.
+fn collect_parameters(function: &mut ItemFn, strip: bool) -> Vec<(Ident, Type, String)> {
     let mut result = Vec::new();
     for input in &mut function.sig.inputs {
         let FnArg::Typed(parameter) = input else {
@@ -130,7 +142,7 @@ fn parameters(function: &mut ItemFn) -> Vec<(Ident, Type, String)> {
             if let Ok(name) = attribute.parse_args::<LitStr>() {
                 semantic_name = name.value();
             }
-            false
+            !strip
         });
         result.push((pattern.ident.clone(), (*parameter.ty).clone(), semantic_name));
     }
@@ -360,6 +372,11 @@ pub fn spec_operation(attribute: TokenStream, item: TokenStream) -> TokenStream 
 }
 
 /// Register a deterministic setup producer without modifying its behavior.
+///
+/// An async producer is registered but deliberately left uninstrumented:
+/// capture state is thread-local and cannot follow a future across executor
+/// threads. `specgate capture` therefore rejects any component that declares
+/// an async setup, leaving it discovery-only.
 #[proc_macro_attribute]
 pub fn spec_setup(attribute: TokenStream, item: TokenStream) -> TokenStream {
     let SetupArg {
@@ -368,15 +385,35 @@ pub fn spec_setup(attribute: TokenStream, item: TokenStream) -> TokenStream {
         component: owner,
     } = parse_macro_input!(attribute as SetupArg);
     let mut function = parse_macro_input!(item as ItemFn);
-    let params = parameters(&mut function);
+    let stacked = function.attrs.iter().any(|attribute| attribute.path().is_ident("spec_setup"));
+    let params = collect_parameters(&mut function, !stacked);
     let rt = runtime();
     let component = component(owner.as_deref());
     let function_name = function.sig.ident.to_string();
     let fills = fills.unwrap_or_default();
+    let is_async = function.sig.asyncness.is_some();
+    if !is_async {
+        let recorded = params
+            .iter()
+            .filter(|(_ident, ty, _name)| !is_mutable_reference(ty))
+            .map(|(ident, _ty, semantic_name)| quote!((#semantic_name.to_string(), #rt::ToNativeValue::to_native_value(&#ident))))
+            .collect::<Vec<_>>();
+        let body = function.block.clone();
+        *function.block = parse_quote!({
+            let __sg_setup_inputs = #rt::defer_setup_inputs(
+                #component,
+                #operation,
+                ::core::module_path!(),
+                #function_name,
+                #fills,
+                || ::std::vec![#(#recorded),*],
+            );
+            #body
+        });
+    }
     let suffix = sanitize_identifier(&format!("{function_name}_{operation}_{fills}"));
     let const_name = Ident::new(&format!("_SPECGATE_SETUP_{suffix}"), function.sig.ident.span());
     let static_name = Ident::new(&format!("_SPECGATE_SETUP_META_{suffix}"), function.sig.ident.span());
-    let is_async = function.sig.asyncness.is_some();
     let is_public = matches!(function.vis, syn::Visibility::Public(_));
     let parameter_metadata = params.iter().map(|(_ident, ty, name)| {
         let ty = quote!(#ty).to_string();

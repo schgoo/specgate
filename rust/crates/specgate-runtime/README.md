@@ -14,6 +14,13 @@ Isolated test processes can activate native capture through
 each completed top-level operation atomically refreshes a stable JSON
 sidecar containing the full scenario.
 
+Captured inputs are the registry’s black-box surface, not the raw call:
+`#[spec_setup]` producers record their construction inputs, and the
+operation they build adopts those inputs in place of the parameters the
+setup fills. Attribution is by setup declaration, so running one declaration
+twice in a capture is accepted only when both runs record value-identical
+inputs; differing repeats are rejected rather than misattributed.
+
 Companion to the `specgate-annotations-macros` proc-macro crate: the macros expand
 into calls into this runtime, so user code never references it directly.
 

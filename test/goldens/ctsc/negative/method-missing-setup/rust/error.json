@@ -1,0 +1,1 @@
+{"case":"negative/method-missing-setup","category":"method-missing-setup","component":"fixture.missing_setup","detail":{"message":"operation 'fixture.missing_setup::increment' is a method with no receiver setup; annotate a #[spec_setup(\"increment\")] producer for its receiver"},"format":"specgate.ctsc-golden-error","formatVersion":"0.1.0","outcome":"failure","phase":"discover"}

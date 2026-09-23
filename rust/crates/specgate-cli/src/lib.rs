@@ -28,6 +28,9 @@ pub mod discover;
 pub mod replay;
 pub mod validation;
 
+#[cfg(test)]
+mod goldens;
+
 pub use capture::{CaptureOutcome, CaptureReport, capture};
 pub use discover::{DiscoverOutcome, DiscoverReport, discover};
 pub use replay::{ReplayInvocationPlan, ReplayOutcome, ReplayReport, replay};

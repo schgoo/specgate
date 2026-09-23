@@ -1,0 +1,1 @@
+{"format":"ctsc.registry","formatVersion":"0.2.0","registryId":"urn:ctsc:registry:fixture.keyword_collision","version":"0.1.0","components":[{"id":"fixture.keyword_collision","operations":[{"name":"run","inputs":[{"name":"input","type":{"kind":"primitive","name":"string"}}],"observations":[],"outcomes":{"result":{"kind":"primitive","name":"string"}}}],"types":[]}]}

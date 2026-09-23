@@ -1,0 +1,3003 @@
+{
+  "format": "specgate.ctsc-golden-matrix",
+  "formatVersion": "0.1.0",
+  "artifactRoot": "test/goldens/ctsc",
+  "bindings": {
+    "csharp": "test/bindings/csharp.yaml",
+    "rust": "test/bindings/rust.yaml",
+    "rust-negative": "test/rust/negative-fixtures/specgate-ctsc-negative-fixtures.binding.yaml",
+    "rust-umbrella": "test/bindings/rust-umbrella.yaml"
+  },
+  "sources": {
+    "roots": [
+      "test/csharp/SpecGate.CtscFixtures",
+      "test/rust/crates/specgate-ctsc-fixtures/src",
+      "test/rust/crates/specgate-facade-umbrella/src",
+      "test/rust/negative-fixtures/specgate-ctsc-negative-fixtures/src"
+    ],
+    "exclusions": [
+      {
+        "rule": "no-spec-annotation",
+        "description": "Module aggregators and other sources that carry no SpecGate annotation declare no implementation semantics, so they are out of scope by rule and are not listed individually.",
+        "paths": []
+      },
+      {
+        "rule": "declares-no-operation",
+        "description": "Sources that carry SpecGate annotations but declare no operation contribute no component surface of their own. Each is listed explicitly so adding an operation to one of them fails the gate until it gains a row.",
+        "paths": [
+          "test/rust/crates/specgate-ctsc-fixtures/src/lib.rs"
+        ]
+      }
+    ]
+  },
+  "rows": [
+    {
+      "id": "component/comp.app",
+      "classification": "implementation-component",
+      "sourceGroup": "registry",
+      "component": "comp.app",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/registry/component.rs",
+        "test/csharp/SpecGate.CtscFixtures/Registry/Components/ComponentOwnership.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "exception",
+        "reason": "C# discovery has no representation for the Rust cross-component type-ownership dependency on comp.core.",
+        "allowedDifferences": [
+          {
+            "path": "/components",
+            "rust": {
+              "kind": "arrayLength",
+              "length": 2
+            },
+            "csharp": {
+              "kind": "arrayLength",
+              "length": 1
+            }
+          },
+          {
+            "path": "/components/0/dependencies",
+            "rust": {
+              "kind": "value",
+              "value": [
+                {
+                  "componentId": "comp.core"
+                }
+              ]
+            },
+            "csharp": {
+              "kind": "missing"
+            }
+          },
+          {
+            "path": "/components/0/operations/0/outcomes/result/componentId",
+            "rust": {
+              "kind": "value",
+              "value": "comp.core"
+            },
+            "csharp": {
+              "kind": "missing"
+            }
+          },
+          {
+            "path": "/components/0/types",
+            "rust": {
+              "kind": "arrayLength",
+              "length": 0
+            },
+            "csharp": {
+              "kind": "arrayLength",
+              "length": 1
+            }
+          }
+        ]
+      },
+      "replay": {
+        "mode": "unsupported",
+        "expectCategory": "structured-value",
+        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/comp.core",
+      "classification": "implementation-component",
+      "sourceGroup": "registry",
+      "component": "comp.core",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/registry/component.rs",
+        "test/csharp/SpecGate.CtscFixtures/Registry/Components/ComponentOwnership.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "unsupported",
+        "expectCategory": "structured-value",
+        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.async_fetch",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/async",
+      "component": "fixture.async_fetch",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/async/async_fetch.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/Async/AsyncFetch.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "not-applicable",
+        "reason": "Discovery-only components produce no capture bundle, so there is nothing to replay."
+      },
+      "limitations": [
+        {
+          "code": "async-capture-unsupported",
+          "detail": "The component declares an async operation. Native capture state is thread-local and cannot follow a future across executor threads, so this row is discovery-only until capture context becomes task-safe."
+        }
+      ]
+    },
+    {
+      "id": "component/fixture.async_smol_timer",
+      "classification": "implementation-component",
+      "sourceGroup": "registry",
+      "component": "fixture.async_smol_timer",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/registry/async_metadata.rs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "rust-only",
+        "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
+      },
+      "replay": {
+        "mode": "not-applicable",
+        "reason": "Discovery-only components produce no capture bundle, so there is nothing to replay."
+      },
+      "limitations": [
+        {
+          "code": "async-capture-unsupported",
+          "detail": "The component declares an async operation. Native capture state is thread-local and cannot follow a future across executor threads, so this row is discovery-only until capture context becomes task-safe."
+        }
+      ]
+    },
+    {
+      "id": "component/fixture.async_tokio_timer",
+      "classification": "implementation-component",
+      "sourceGroup": "registry",
+      "component": "fixture.async_tokio_timer",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/registry/async_metadata.rs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "rust-only",
+        "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
+      },
+      "replay": {
+        "mode": "not-applicable",
+        "reason": "Discovery-only components produce no capture bundle, so there is nothing to replay."
+      },
+      "limitations": [
+        {
+          "code": "async-capture-unsupported",
+          "detail": "The component declares an async operation. Native capture state is thread-local and cannot follow a future across executor threads, so this row is discovery-only until capture context becomes task-safe."
+        }
+      ]
+    },
+    {
+      "id": "component/fixture.catch_all",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/sum_types",
+      "component": "fixture.catch_all",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/sum_types/catch_all.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/SumTypes/DeclaredErrors.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "verified"
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.checked_divide",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/sum_types",
+      "component": "fixture.checked_divide",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/sum_types/checked_divide.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/SumTypes/DeclaredErrors.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "link-only",
+        "reason": "The candidate links, but the reference scenario ends in an unwinding fault. The generated replay runner has no fault boundary, so linkage is verified and execution is not attempted."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.checkpoint_inline",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/basic",
+      "component": "fixture.checkpoint_inline",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/basic/checkpoint_inline.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/Basic/CheckpointInline.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "verified"
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.complex_inputs",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/complex_inputs",
+      "component": "fixture.complex_inputs",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/complex_inputs/complex_inputs.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/ComplexInputs/ComplexInputs.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "unsupported",
+        "expectCategory": "structured-value",
+        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.cross_dep",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/dependencies",
+      "component": "fixture.cross_dep",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/dependencies/external_dep.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/Dependencies/ExternalDependency.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "verified"
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.default_input",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/basic",
+      "component": "fixture.default_input",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/basic/default_input.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/Structured/DefaultInput.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "unsupported",
+        "expectCategory": "structured-value",
+        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.divergence_witness",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/witness",
+      "component": "fixture.divergence_witness",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/witness/divergence_witness.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/Witness/DivergenceWitness.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "unsupported",
+        "expectCategory": "structured-value",
+        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.enum_event",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/sum_types",
+      "component": "fixture.enum_event",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/sum_types/enum_event.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/SumTypes/EnumEvent.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "exception",
+        "reason": "C# discovery has no tuple-variant representation for the Rust Tag(String) variant.",
+        "allowedDifferences": [
+          {
+            "path": "/components/0/types/0/variants/2/payload/fields",
+            "rust": {
+              "kind": "missing"
+            },
+            "csharp": {
+              "kind": "value",
+              "value": [
+                {
+                  "name": "value",
+                  "type": {
+                    "kind": "primitive",
+                    "name": "string"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "path": "/components/0/types/0/variants/2/payload/items",
+            "rust": {
+              "kind": "value",
+              "value": [
+                {
+                  "kind": "primitive",
+                  "name": "string"
+                }
+              ]
+            },
+            "csharp": {
+              "kind": "missing"
+            }
+          },
+          {
+            "path": "/components/0/types/0/variants/2/payload/kind",
+            "rust": {
+              "kind": "value",
+              "value": "tuple"
+            },
+            "csharp": {
+              "kind": "value",
+              "value": "record"
+            }
+          }
+        ]
+      },
+      "replay": {
+        "mode": "unsupported",
+        "expectCategory": "structured-value",
+        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.extract",
+      "classification": "implementation-component",
+      "sourceGroup": "registry",
+      "component": "fixture.extract",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/registry/extract.rs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "rust-only",
+        "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
+      },
+      "replay": {
+        "mode": "not-applicable",
+        "reason": "Discovery-only components produce no capture bundle, so there is nothing to replay."
+      },
+      "limitations": [
+        {
+          "code": "async-capture-unsupported",
+          "detail": "The component declares an async operation. Native capture state is thread-local and cannot follow a future across executor threads, so this row is discovery-only until capture context becomes task-safe."
+        }
+      ]
+    },
+    {
+      "id": "component/fixture.facade_umbrella",
+      "classification": "implementation-component",
+      "sourceGroup": "facade-umbrella",
+      "component": "fixture.facade_umbrella",
+      "sources": [
+        "test/rust/crates/specgate-facade-umbrella/src/lib.rs"
+      ],
+      "rust": {
+        "binding": "rust-umbrella",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "rust-only",
+        "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
+      },
+      "replay": {
+        "mode": "verified"
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.fallible_unit",
+      "classification": "implementation-component",
+      "sourceGroup": "registry/focused",
+      "component": "fixture.fallible_unit",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/registry/focused/fallible_unit.rs",
+        "test/csharp/SpecGate.CtscFixtures/Registry/Focused/FallibleUnit/FallibleUnit.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "not-applicable",
+        "reason": "Discovery-only components produce no capture bundle, so there is nothing to replay."
+      },
+      "limitations": [
+        {
+          "code": "async-capture-unsupported",
+          "detail": "The component declares an async operation. Native capture state is thread-local and cannot follow a future across executor threads, so this row is discovery-only until capture context becomes task-safe."
+        }
+      ]
+    },
+    {
+      "id": "component/fixture.faults",
+      "classification": "implementation-component",
+      "sourceGroup": "registry/focused",
+      "component": "fixture.faults",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/registry/focused/faults.rs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "rust-only",
+        "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
+      },
+      "replay": {
+        "mode": "link-only",
+        "reason": "The candidate links, but the reference scenario ends in an unwinding fault. The generated replay runner has no fault boundary, so linkage is verified and execution is not attempted."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.keyword_collision",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/basic",
+      "component": "fixture.keyword_collision",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/basic/keyword_collision.rs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "rust-only",
+        "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
+      },
+      "replay": {
+        "mode": "verified"
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.mock_field",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/dependencies",
+      "component": "fixture.mock_field",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/dependencies/fake_dependencies.rs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "rust-only",
+        "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
+      },
+      "replay": {
+        "mode": "verified"
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.mock_multi_response",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/dependencies",
+      "component": "fixture.mock_multi_response",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/dependencies/fake_dependencies.rs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "rust-only",
+        "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
+      },
+      "replay": {
+        "mode": "verified"
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.mock_not_found",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/dependencies",
+      "component": "fixture.mock_not_found",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/dependencies/fake_dependencies.rs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "rust-only",
+        "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
+      },
+      "replay": {
+        "mode": "verified"
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.multi_case",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/basic",
+      "component": "fixture.multi_case",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/basic/multi_case.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/Basic/StatelessAdd.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "verified"
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.multi_field_capture",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/stateful",
+      "component": "fixture.multi_field_capture",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/stateful/multi_field_capture.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/Stateful/MultiFieldCapture/MultiFieldCapture.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "unsupported",
+        "expectCategory": "structured-value",
+        "reason": "Replay supports only lossless primitive and unit values. This component's captured observation operation carries a structured account value, so replay decoding rejects it."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.multi_file",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/multi_file",
+      "component": "fixture.multi_file",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/multi_file/farewell.rs",
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/multi_file/greet.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/MultiFile/Farewell.cs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/MultiFile/Greet.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "verified"
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.multi_mutation",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/stateful",
+      "component": "fixture.multi_mutation",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/stateful/multi_mutation.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/Stateful/MultiMutation/MultiMutation.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "unsupported",
+        "expectCategory": "method-operation",
+        "reason": "Replay links only public synchronous free functions. This component's operations are setup-backed receivers, and replay does not construct setups."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.multi_setup",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/stateful",
+      "component": "fixture.multi_setup",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/stateful/multi_setup.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/Stateful/MultiSetup/MultiSetup.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "unsupported",
+        "expectCategory": "structured-value",
+        "reason": "Replay supports only lossless primitive and unit values. This component's captured observation operation carries a structured account value, so replay decoding rejects it."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.multi_step",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/stateful",
+      "component": "fixture.multi_step",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/stateful/multi_step.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/Stateful/MultiStep/MultiStep.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "unsupported",
+        "expectCategory": "method-operation",
+        "reason": "Replay links only public synchronous free functions. This component's operations are setup-backed receivers, and replay does not construct setups."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.multi_toplevel",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/basic",
+      "component": "fixture.multi_toplevel",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/basic/multi_toplevel_a.rs",
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/basic/multi_toplevel_b.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/Basic/MultiOperation.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "verified"
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.named_inputs",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/basic",
+      "component": "fixture.named_inputs",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/basic/named_inputs.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/Basic/NamedInputs.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "unsupported",
+        "expectCategory": "method-operation",
+        "reason": "Replay links only public synchronous free functions. This component's operations are setup-backed receivers, and replay does not construct setups."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.nested_operations",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/stateful",
+      "component": "fixture.nested_operations",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/stateful/nested_operations.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/Stateful/NestedOperations/NestedOperations.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "unsupported",
+        "expectCategory": "method-operation",
+        "reason": "Replay links only public synchronous free functions. This component's operations are setup-backed receivers, and replay does not construct setups."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.nested_path",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/basic",
+      "component": "fixture.nested_path",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/basic/nested_path.rs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "rust-only",
+        "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
+      },
+      "replay": {
+        "mode": "verified"
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.nested_structured",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/structured",
+      "component": "fixture.nested_structured",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/structured/nested_structured.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/Structured/StructuredCollections.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "unsupported",
+        "expectCategory": "structured-value",
+        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.operators",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/structured",
+      "component": "fixture.operators",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/structured/operators.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/Structured/Operators.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "unsupported",
+        "expectCategory": "structured-value",
+        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.option_none",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/sum_types",
+      "component": "fixture.option_none",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/sum_types/option_none.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/SumTypes/OptionResult.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "unsupported",
+        "expectCategory": "structured-value",
+        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.option_some",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/sum_types",
+      "component": "fixture.option_some",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/sum_types/option_some.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/SumTypes/OptionResult.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "unsupported",
+        "expectCategory": "structured-value",
+        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.order_pricing_translation",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/translation",
+      "component": "fixture.order_pricing_translation",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/translation/order_pricing/order_pricing.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/Translation/OrderPricing/OrderPricing.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "unsupported",
+        "expectCategory": "structured-value",
+        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.property_add",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/basic",
+      "component": "fixture.property_add",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/basic/property_add.rs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "rust-only",
+        "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
+      },
+      "replay": {
+        "mode": "verified"
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.readonly_operation",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/stateful",
+      "component": "fixture.readonly_operation",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/stateful/readonly_operation.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/Stateful/ReadonlyOperation/ReadonlyOperation.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "unsupported",
+        "expectCategory": "method-operation",
+        "reason": "Replay links only public synchronous free functions. This component's operations are setup-backed receivers, and replay does not construct setups."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.result_err",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/sum_types",
+      "component": "fixture.result_err",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/sum_types/result_err.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/SumTypes/OptionResult.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "verified"
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.result_ok",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/sum_types",
+      "component": "fixture.result_ok",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/sum_types/result_ok.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/SumTypes/OptionResult.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "verified"
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.rich",
+      "classification": "implementation-component",
+      "sourceGroup": "registry/focused",
+      "component": "fixture.rich",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/registry/focused/rich.rs",
+        "test/csharp/SpecGate.CtscFixtures/Registry/Focused/Rich/Rich.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "unsupported",
+        "expectCategory": "structured-value",
+        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.scalar_operators",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/structured",
+      "component": "fixture.scalar_operators",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/structured/scalar_operators.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/Structured/ScalarOperators.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "unsupported",
+        "expectCategory": "structured-value",
+        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.scalar_types",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/structured",
+      "component": "fixture.scalar_types",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/structured/scalar_types.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/Structured/ScalarTypes.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "exception",
+        "reason": "C# discovery represents tuple-like scalar variants as named value fields.",
+        "allowedDifferences": [
+          {
+            "path": "/components/0/types/0/variants/0/payload/fields",
+            "rust": {
+              "kind": "missing"
+            },
+            "csharp": {
+              "kind": "value",
+              "value": [
+                {
+                  "name": "value",
+                  "type": {
+                    "kind": "primitive",
+                    "name": "i64"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "path": "/components/0/types/0/variants/0/payload/items",
+            "rust": {
+              "kind": "value",
+              "value": [
+                {
+                  "kind": "primitive",
+                  "name": "i64"
+                }
+              ]
+            },
+            "csharp": {
+              "kind": "missing"
+            }
+          },
+          {
+            "path": "/components/0/types/0/variants/0/payload/kind",
+            "rust": {
+              "kind": "value",
+              "value": "tuple"
+            },
+            "csharp": {
+              "kind": "value",
+              "value": "record"
+            }
+          },
+          {
+            "path": "/components/0/types/0/variants/1/payload/fields",
+            "rust": {
+              "kind": "missing"
+            },
+            "csharp": {
+              "kind": "value",
+              "value": [
+                {
+                  "name": "value",
+                  "type": {
+                    "kind": "primitive",
+                    "name": "bool"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "path": "/components/0/types/0/variants/1/payload/items",
+            "rust": {
+              "kind": "value",
+              "value": [
+                {
+                  "kind": "primitive",
+                  "name": "bool"
+                }
+              ]
+            },
+            "csharp": {
+              "kind": "missing"
+            }
+          },
+          {
+            "path": "/components/0/types/0/variants/1/payload/kind",
+            "rust": {
+              "kind": "value",
+              "value": "tuple"
+            },
+            "csharp": {
+              "kind": "value",
+              "value": "record"
+            }
+          }
+        ]
+      },
+      "replay": {
+        "mode": "unsupported",
+        "expectCategory": "structured-value",
+        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.setup",
+      "classification": "implementation-component",
+      "sourceGroup": "registry/focused",
+      "component": "fixture.setup",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/registry/focused/setup.rs",
+        "test/csharp/SpecGate.CtscFixtures/Registry/Focused/Setup/Setup.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "unsupported",
+        "expectCategory": "method-operation",
+        "reason": "Replay links only public synchronous free functions. This component's operations are setup-backed receivers, and replay does not construct setups."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.setup_with_params",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/stateful",
+      "component": "fixture.setup_with_params",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/stateful/setup_with_params.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/Stateful/SetupWithParams/SetupWithParams.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "unsupported",
+        "expectCategory": "method-operation",
+        "reason": "Replay links only public synchronous free functions. This component's operations are setup-backed receivers, and replay does not construct setups."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.shared_setup",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/stateful",
+      "component": "fixture.shared_setup",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/stateful/shared_setup.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/Stateful/SharedSetup/SharedSetup.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "unsupported",
+        "expectCategory": "setup-backed-operation",
+        "reason": "Replay links only public synchronous free functions. This component's operations are setup-backed receivers, and replay does not construct setups."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.stateless_add",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/basic",
+      "component": "fixture.stateless_add",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/basic/stateless_add.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/Basic/StatelessAdd.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "verified"
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.statemachine_counter",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/stateful",
+      "component": "fixture.statemachine_counter",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/stateful/statemachine_counter.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/Stateful/StatemachineCounter/StatemachineCounter.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "unsupported",
+        "expectCategory": "structured-value",
+        "reason": "Replay supports only lossless primitive and unit values. This component's captured observation operation carries a structured counter value, so replay decoding rejects it."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.strings",
+      "classification": "implementation-component",
+      "sourceGroup": "registry/focused",
+      "component": "fixture.strings",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/registry/focused/fallible_unit.rs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "rust-only",
+        "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
+      },
+      "replay": {
+        "mode": "verified"
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.structured_map",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/structured",
+      "component": "fixture.structured_map",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/structured/structured_map.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/Structured/StructuredCollections.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "unsupported",
+        "expectCategory": "structured-value",
+        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.structured_output",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/structured",
+      "component": "fixture.structured_output",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/structured/structured_output.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/Structured/StructuredOutput.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "unsupported",
+        "expectCategory": "structured-value",
+        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.structured_set",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/structured",
+      "component": "fixture.structured_set",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/structured/structured_set.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/Structured/StructuredCollections.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "unsupported",
+        "expectCategory": "structured-value",
+        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.tuple_values",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/structured",
+      "component": "fixture.tuple_values",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/structured/tuple_values.rs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "rust-only",
+        "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
+      },
+      "replay": {
+        "mode": "unsupported",
+        "expectCategory": "structured-value",
+        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.type_exact",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/structured",
+      "component": "fixture.type_exact",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/structured/type_exact.rs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "rust-only",
+        "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
+      },
+      "replay": {
+        "mode": "unsupported",
+        "expectCategory": "structured-value",
+        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.unrecoverable",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/sum_types",
+      "component": "fixture.unrecoverable",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/sum_types/unrecoverable.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/SumTypes/DeclaredErrors.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "link-only",
+        "reason": "The candidate links, but the reference scenario ends in an unwinding fault. The generated replay runner has no fault boundary, so linkage is verified and execution is not attempted."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.void_operation",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/stateful",
+      "component": "fixture.void_operation",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/stateful/void_operation.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/Stateful/VoidOperation/VoidOperation.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "unsupported",
+        "expectCategory": "method-operation",
+        "reason": "Replay links only public synchronous free functions. This component's operations are setup-backed receivers, and replay does not construct setups."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "negative/duplicate-operation-identity",
+      "classification": "negative-fixture",
+      "sourceGroup": "negative/discovery",
+      "component": "fixture.duplicate_identity",
+      "sources": [
+        "test/rust/negative-fixtures/specgate-ctsc-negative-fixtures/src/lib.rs"
+      ],
+      "rust": {
+        "binding": "rust-negative",
+        "phases": [
+          "discover"
+        ],
+        "expect": "failure",
+        "artifacts": [
+          "error.json"
+        ],
+        "expectCategory": "duplicate-operation-identity"
+      },
+      "parity": {
+        "mode": "not-applicable",
+        "reason": "Negative cases assert that one language's discovery rejects the fixture; there is no second surface to compare."
+      },
+      "replay": {
+        "mode": "not-applicable",
+        "reason": "Rejected components never produce a capture bundle to replay."
+      },
+      "limitations": [
+        {
+          "code": "normalized-error-only",
+          "detail": "Only the normalized phase, category, component, and product message are recorded. Two functions claim the same operation name in one component, so the component has no unique operation identity to encode."
+        }
+      ]
+    },
+    {
+      "id": "negative/orphan-setup",
+      "classification": "negative-fixture",
+      "sourceGroup": "negative/discovery",
+      "component": "fixture.missing_operation",
+      "sources": [
+        "test/rust/negative-fixtures/specgate-ctsc-negative-fixtures/src/lib.rs"
+      ],
+      "rust": {
+        "binding": "rust-negative",
+        "phases": [
+          "discover"
+        ],
+        "expect": "failure",
+        "artifacts": [
+          "error.json"
+        ],
+        "expectCategory": "orphan-setup"
+      },
+      "parity": {
+        "mode": "not-applicable",
+        "reason": "Negative cases assert that one language's discovery rejects the fixture; there is no second surface to compare."
+      },
+      "replay": {
+        "mode": "not-applicable",
+        "reason": "Rejected components never produce a capture bundle to replay."
+      },
+      "limitations": [
+        {
+          "code": "normalized-error-only",
+          "detail": "Only the normalized phase, category, component, and product message are recorded. A setup names an operation that the component never declares, so nothing can consume the constructed receiver."
+        }
+      ]
+    },
+    {
+      "id": "negative/method-missing-setup",
+      "classification": "negative-fixture",
+      "sourceGroup": "negative/discovery",
+      "component": "fixture.missing_setup",
+      "sources": [
+        "test/rust/negative-fixtures/specgate-ctsc-negative-fixtures/src/lib.rs"
+      ],
+      "rust": {
+        "binding": "rust-negative",
+        "phases": [
+          "discover"
+        ],
+        "expect": "failure",
+        "artifacts": [
+          "error.json"
+        ],
+        "expectCategory": "method-missing-setup"
+      },
+      "parity": {
+        "mode": "not-applicable",
+        "reason": "Negative cases assert that one language's discovery rejects the fixture; there is no second surface to compare."
+      },
+      "replay": {
+        "mode": "not-applicable",
+        "reason": "Rejected components never produce a capture bundle to replay."
+      },
+      "limitations": [
+        {
+          "code": "normalized-error-only",
+          "detail": "Only the normalized phase, category, component, and product message are recorded. A method operation has no receiver setup, so discovery cannot fold a constructible public input surface."
+        }
+      ]
+    },
+    {
+      "id": "negative/private-operation",
+      "classification": "negative-fixture",
+      "sourceGroup": "negative/discovery",
+      "component": "fixture.private_operation",
+      "sources": [
+        "test/rust/negative-fixtures/specgate-ctsc-negative-fixtures/src/lib.rs"
+      ],
+      "rust": {
+        "binding": "rust-negative",
+        "phases": [
+          "discover"
+        ],
+        "expect": "failure",
+        "artifacts": [
+          "error.json"
+        ],
+        "expectCategory": "private-operation"
+      },
+      "parity": {
+        "mode": "not-applicable",
+        "reason": "Negative cases assert that one language's discovery rejects the fixture; there is no second surface to compare."
+      },
+      "replay": {
+        "mode": "not-applicable",
+        "reason": "Rejected components never produce a capture bundle to replay."
+      },
+      "limitations": [
+        {
+          "code": "normalized-error-only",
+          "detail": "Only the normalized phase, category, component, and product message are recorded. The operation is declared on a private function, which is not part of the component's observable surface."
+        }
+      ]
+    },
+    {
+      "id": "negative/dynamic-value-type",
+      "classification": "negative-fixture",
+      "sourceGroup": "negative/discovery",
+      "component": "fixture.value",
+      "sources": [
+        "test/rust/negative-fixtures/specgate-ctsc-negative-fixtures/src/value_surfaces.rs"
+      ],
+      "rust": {
+        "binding": "rust-negative",
+        "phases": [
+          "discover"
+        ],
+        "expect": "failure",
+        "artifacts": [
+          "error.json"
+        ],
+        "expectCategory": "dynamic-value-type"
+      },
+      "parity": {
+        "mode": "not-applicable",
+        "reason": "Negative cases assert that one language's discovery rejects the fixture; there is no second surface to compare."
+      },
+      "replay": {
+        "mode": "not-applicable",
+        "reason": "Rejected components never produce a capture bundle to replay."
+      },
+      "limitations": [
+        {
+          "code": "normalized-error-only",
+          "detail": "Only the normalized phase, category, component, and product message are recorded. The surface uses the dynamic runtime Value, which has no declared CTSC registry type."
+        }
+      ]
+    },
+    {
+      "id": "negative/unresolved-type",
+      "classification": "negative-fixture",
+      "sourceGroup": "negative/discovery",
+      "component": "fixture.unresolved_type",
+      "sources": [
+        "test/rust/negative-fixtures/specgate-ctsc-negative-fixtures/src/unresolved_type.rs"
+      ],
+      "rust": {
+        "binding": "rust-negative",
+        "phases": [
+          "discover"
+        ],
+        "expect": "failure",
+        "artifacts": [
+          "error.json"
+        ],
+        "expectCategory": "unresolved-type"
+      },
+      "parity": {
+        "mode": "not-applicable",
+        "reason": "Negative cases assert that one language's discovery rejects the fixture; there is no second surface to compare."
+      },
+      "replay": {
+        "mode": "not-applicable",
+        "reason": "Rejected components never produce a capture bundle to replay."
+      },
+      "limitations": [
+        {
+          "code": "normalized-error-only",
+          "detail": "Only the normalized phase, category, component, and product message are recorded. The operation returns a projectable type that is never registered as a SpecEvent, so no registry type resolves it."
+        }
+      ]
+    },
+    {
+      "id": "negative/compile-error",
+      "classification": "negative-fixture",
+      "sourceGroup": "negative/build",
+      "component": "fixture.compile_error",
+      "sources": [
+        "test/rust/negative-fixtures/specgate-ctsc-negative-fixtures/src/templates/compile_error.rs.in"
+      ],
+      "rust": {
+        "binding": "rust-negative",
+        "phases": [
+          "build"
+        ],
+        "expect": "failure",
+        "artifacts": [
+          "error.json"
+        ],
+        "expectCategory": "compile-error",
+        "feature": "compile-error"
+      },
+      "parity": {
+        "mode": "not-applicable",
+        "reason": "A deliberate Rust syntax error has no cross-language analogue."
+      },
+      "replay": {
+        "mode": "not-applicable",
+        "reason": "A fixture that does not compile never produces a capture bundle."
+      },
+      "limitations": [
+        {
+          "code": "compiler-diagnostics-omitted",
+          "detail": "The golden records the intentional fixture source the compiler blamed and any diagnostic codes it carried, which is enough to prove the build failed for the declared reason. Rendered diagnostic text, spans, and paths vary by toolchain and are deliberately excluded."
+        }
+      ]
+    },
+    {
+      "id": "replacement/mock-runtime",
+      "classification": "replacement",
+      "sourceGroup": "replacement",
+      "sources": [],
+      "parity": {
+        "mode": "not-applicable",
+        "reason": "Replacement rows record where a removed spec feature now lives; they own no generated artifact."
+      },
+      "replay": {
+        "mode": "not-applicable",
+        "reason": "Replacement rows own no capture bundle."
+      },
+      "limitations": [],
+      "replacement": {
+        "feature": "spec mock runtime (mock fields, multiple responses, and not-found responses)",
+        "rationale": "Mocked collaborators were replaced by real annotated child operations. A parent operation calls a deterministic annotated dependency, and capture records the nested invocation as observed behavior instead of a scripted response.",
+        "references": [
+          {
+            "path": "test/rust/crates/specgate-ctsc-fixtures/src/conformance/dependencies/fake_dependencies.rs",
+            "test": "deterministic_child_operation_replaces_field_mock"
+          },
+          {
+            "path": "test/rust/crates/specgate-ctsc-fixtures/src/conformance/dependencies/fake_dependencies.rs",
+            "test": "deterministic_child_operation_returns_input_specific_values"
+          },
+          {
+            "path": "test/rust/crates/specgate-ctsc-fixtures/src/conformance/dependencies/fake_dependencies.rs",
+            "test": "missing_fake_response_is_a_declared_error"
+          },
+          {
+            "path": "rust/crates/specgate-ctsc/tests/replay.rs",
+            "test": "decodes_linked_top_level_stimuli_and_ignores_nested_instructions"
+          }
+        ]
+      }
+    },
+    {
+      "id": "replacement/property-cases",
+      "classification": "replacement",
+      "sourceGroup": "replacement",
+      "sources": [],
+      "parity": {
+        "mode": "not-applicable",
+        "reason": "Replacement rows record where a removed spec feature now lives; they own no generated artifact."
+      },
+      "replay": {
+        "mode": "not-applicable",
+        "reason": "Replacement rows own no capture bundle."
+      },
+      "limitations": [],
+      "replacement": {
+        "feature": "spec property cases and generated inputs",
+        "rationale": "Generated property inputs were replaced by fixed witness inputs in ordinary tests. Captures stay byte-deterministic, and the property being witnessed is stated by the test itself.",
+        "references": [
+          {
+            "path": "test/rust/crates/specgate-ctsc-fixtures/src/conformance/basic/property_add.rs",
+            "test": "fixed_inputs_witness_commutativity"
+          },
+          {
+            "path": "test/rust/crates/specgate-ctsc-fixtures/src/conformance/basic/multi_case.rs",
+            "test": "adds_negative_and_positive_values"
+          }
+        ]
+      }
+    },
+    {
+      "id": "replacement/matcher-operators",
+      "classification": "replacement",
+      "sourceGroup": "replacement",
+      "sources": [],
+      "parity": {
+        "mode": "not-applicable",
+        "reason": "Replacement rows record where a removed spec feature now lives; they own no generated artifact."
+      },
+      "replay": {
+        "mode": "not-applicable",
+        "reason": "Replacement rows own no capture bundle."
+      },
+      "limitations": [],
+      "replacement": {
+        "feature": "spec matcher operators (contains, approximately, set and map matchers)",
+        "rationale": "Matcher operators were replaced by exact structured values compared under the fixed ctsc.strict/0.1.0 policy. Sets and maps compare without wire order, and every other value compares exactly, so no per-assertion operator vocabulary is needed.",
+        "references": [
+          {
+            "path": "test/rust/crates/specgate-ctsc-fixtures/src/conformance/structured/operators.rs",
+            "test": "matcher_vehicle_is_preserved_as_plain_structured_data"
+          },
+          {
+            "path": "test/rust/crates/specgate-ctsc-fixtures/src/conformance/structured/scalar_operators.rs",
+            "test": "scalar_values_are_asserted_without_matcher_dsl"
+          },
+          {
+            "path": "test/rust/crates/specgate-ctsc-fixtures/src/conformance/structured/type_exact.rs",
+            "test": "numeric_boolean_and_numeric_string_remain_distinct"
+          },
+          {
+            "path": "rust/crates/specgate-ctsc/tests/comparison.rs",
+            "test": "linked_sets_and_maps_compare_without_wire_order"
+          },
+          {
+            "path": "rust/crates/specgate-ctsc/tests/comparison.rs",
+            "test": "strict_reports_changed_result_inputs_completion_and_event_order"
+          }
+        ]
+      }
+    },
+    {
+      "id": "replacement/target-routing",
+      "classification": "replacement",
+      "sourceGroup": "replacement",
+      "sources": [],
+      "parity": {
+        "mode": "not-applicable",
+        "reason": "Replacement rows record where a removed spec feature now lives; they own no generated artifact."
+      },
+      "replay": {
+        "mode": "not-applicable",
+        "reason": "Replacement rows own no capture bundle."
+      },
+      "limitations": [],
+      "replacement": {
+        "feature": "spec-declared target routing and per-case target selection",
+        "rationale": "Case-level target routing was replaced by strict binding resolution plus an explicit divergence witness. One binding target is resolved per invocation, and cross-target divergence is observed by comparing captured traces rather than by routing declarations.",
+        "references": [
+          {
+            "path": "rust/crates/specgate-discovery/src/binding.rs",
+            "test": "parses_all_retained_target_fields"
+          },
+          {
+            "path": "rust/crates/specgate-discovery/src/binding.rs",
+            "test": "rejects_unknown_fields"
+          },
+          {
+            "path": "test/rust/crates/specgate-ctsc-fixtures/src/conformance/witness/divergence_witness.rs",
+            "test": "rust_target_keeps_its_deliberate_engine_witness"
+          },
+          {
+            "path": "rust/crates/specgate-cli/src/replay.rs",
+            "test": "planner_rejects_semantic_and_target_shape_mismatches"
+          }
+        ]
+      }
+    },
+    {
+      "id": "replacement/coverage",
+      "classification": "replacement",
+      "sourceGroup": "replacement",
+      "sources": [],
+      "parity": {
+        "mode": "not-applicable",
+        "reason": "Replacement rows record where a removed spec feature now lives; they own no generated artifact."
+      },
+      "replay": {
+        "mode": "not-applicable",
+        "reason": "Replacement rows own no capture bundle."
+      },
+      "limitations": [],
+      "replacement": {
+        "feature": "spec coverage reports",
+        "rationale": "Coverage of the spec surface was replaced by this matrix. Every annotated fixture source must belong to a row, every discovered component must have a row, and every declared artifact must be generated, so gaps fail the gate instead of lowering a percentage.",
+        "references": [
+          {
+            "path": "rust/crates/specgate-cli/src/goldens.rs",
+            "test": "matrix_is_well_formed_and_accounts_for_every_annotated_source"
+          },
+          {
+            "path": "rust/crates/specgate-cli/src/goldens.rs",
+            "test": "ctsc_golden_matrix"
+          }
+        ]
+      }
+    },
+    {
+      "id": "replacement/provenance",
+      "classification": "replacement",
+      "sourceGroup": "replacement",
+      "sources": [],
+      "parity": {
+        "mode": "not-applicable",
+        "reason": "Replacement rows record where a removed spec feature now lives; they own no generated artifact."
+      },
+      "replay": {
+        "mode": "not-applicable",
+        "reason": "Replacement rows own no capture bundle."
+      },
+      "limitations": [],
+      "replacement": {
+        "feature": "spec run provenance and report metadata",
+        "rationale": "Report provenance was replaced by the capture manifest and its digests. Each bundle records the tool, target, registry identity, and SHA-256 digests of the registry and reference trace, and bundle validation re-verifies them.",
+        "references": [
+          {
+            "path": "rust/crates/specgate-cli/src/capture.rs",
+            "test": "capture_stateless_bundle_is_linked_and_byte_identical"
+          },
+          {
+            "path": "rust/crates/specgate-ctsc/tests/validator.rs",
+            "test": "generated_schema_registry_passes_native_ctsc_registry_validator"
+          },
+          {
+            "path": "rust/crates/specgate-ctsc/tests/review_findings.rs",
+            "test": "registry_imports_resolve_declared_candidates_by_identity_not_hint_path"
+          }
+        ]
+      }
+    }
+  ]
+}

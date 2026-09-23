@@ -1,0 +1,7 @@
+use specgate::spec_operation;
+
+#[spec_operation("broken", spec = "fixture.compile_error")]
+pub fn broken() -> i32 {
+    let value = ;
+    value
+}
