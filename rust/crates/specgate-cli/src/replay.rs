@@ -1047,6 +1047,14 @@ mod tests {
             ),
         )
         .unwrap();
+        // Keep the isolated graph exact while allowing clean hosts to fetch target-specific crates absent from their cache.
+        let mut lockfile = include_str!("../../../Cargo.lock").to_string();
+        lockfile.push_str(
+            "\n[[package]]\nname = \"configured-candidate\"\nversion = \"0.1.0\"\n\
+             dependencies = [\n \"specgate\",\n \"specgate-config-proof\",\n]\n\
+             \n[[package]]\nname = \"specgate-config-proof\"\nversion = \"0.1.0\"\n",
+        );
+        std::fs::write(candidate.join("Cargo.lock"), lockfile).unwrap();
         std::fs::write(
             candidate.join("src").join("lib.rs"),
             "#![allow(unexpected_cfgs)]\n\
@@ -1064,8 +1072,7 @@ mod tests {
             candidate.join(".cargo").join("config.toml"),
             format!(
                 "[build]\nrustflags=[\"--cfg\", \"specgate_candidate_config\"]\n\
-                 [patch.crates-io]\nspecgate-config-proof={{path=\"{}\"}}\n\
-                 [net]\noffline=true\n",
+                 [patch.crates-io]\nspecgate-config-proof={{path=\"{}\"}}\n",
                 cargo_path(&proof)
             ),
         )
