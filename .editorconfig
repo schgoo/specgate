@@ -25,9 +25,8 @@ indent_size = 2
 indent_size = 2
 
 [*.cs]
-# SpecGate's C# runtime deliberately mirrors Rust's sum types (Option<T>,
-# Result<T, E>) cross-language so traces stay byte-identical. Several C#-naming
-# analyzers fight that intentional design; disable them for the mirror to hold.
+# SpecGate's C# annotation surface mirrors Rust's semantic Option<T> and
+# Result<T, E> metadata. Several naming analyzers fight that intentional shape.
 # CA1716: Option/Result collide with reserved keywords (that is the point).
 dotnet_diagnostic.CA1716.severity = none
 # CA1715: generic parameter E mirrors Rust's Result<T, E>.

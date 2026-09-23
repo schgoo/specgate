@@ -2,7 +2,7 @@
 name = "specgate-cli"
 edition.workspace = true
 version.workspace = true
-description = "CLI tool for SpecGate spec validation and test execution"
+description = "CLI for SpecGate CTSC discovery, capture, and replay"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
@@ -19,14 +19,15 @@ name = "specgate"
 path = "src/main.rs"
 
 [dependencies]
-regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_yaml = { workspace = true }
 sha2 = { workspace = true }
 specgate = { workspace = true }
 specgate-ctsc = { workspace = true }
-specgate-harness = { workspace = true }
+specgate-discovery = { workspace = true }
+
+[dev-dependencies]
+toml = { workspace = true }
 
 [lints]
 workspace = true

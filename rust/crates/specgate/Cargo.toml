@@ -2,28 +2,21 @@
 name = "specgate"
 version.workspace = true
 edition.workspace = true
-description = "Deterministic spec-based verification for LLM-implemented code"
+description = "Native CTSC capture annotations for deterministic differential testing"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 readme = "README.md"
-keywords = ["specgate", "testing", "verification", "spec", "tdd"]
+keywords = ["specgate", "testing", "verification", "ctsc", "tracing"]
 categories = ["development-tools::testing"]
 rust-version.workspace = true
 
 [features]
 default = []
-harness = ["dep:specgate-harness"]
-trace = ["specgate-annotations/specgate-trace"]
 
 [dependencies]
-specgate-annotations = { workspace = true, public = true }
-specgate-harness = { workspace = true, optional = true }
-
-# Enable the `harness` feature in this crate's own tests so the self-host
-# integration test can call the public `specgate::run_spec` API.
-[dev-dependencies]
-specgate = { path = ".", features = ["harness"] }
+specgate-annotations-macros = { workspace = true }
+specgate-runtime = { workspace = true }
 
 [lints]
 workspace = true

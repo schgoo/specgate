@@ -1,0 +1,24 @@
+[package]
+name = "specgate-discovery"
+version.workspace = true
+edition.workspace = true
+description = "Native metadata and target discovery for SpecGate CTSC workflows"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+toml = { workspace = true }
+
+[dev-dependencies]
+sha2 = { workspace = true }
+
+[lints]
+workspace = true

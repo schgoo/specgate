@@ -1,8 +1,0 @@
-language: rust
-targets:
-  check:
-    package_root: ..
-    command: exit 0
-  check_fail:
-    package_root: ..
-    command: exit 1

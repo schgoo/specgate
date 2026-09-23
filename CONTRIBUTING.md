@@ -1,60 +1,35 @@
 # Contributing to SpecGate
 
-Thank you for your interest in contributing to SpecGate!
+## Setup
 
-## Getting Started
+1. Install the pinned Rust toolchain from `rust/rust-toolchain.toml`.
+2. Install `just`, `cargo-deny`, and `cargo-doc2readme`.
+3. Install Python dependencies from `docs/ctsc/requirements.txt`.
+4. Install the .NET 10 SDK.
 
-1. Fork the repository
-2. Clone your fork: `git clone https://github.com/<you>/specgate.git`
-3. Set up the Rust toolchain: `cd rust && rustup show` (uses `rust-toolchain.toml`)
-4. Build: `cargo build --workspace`
-5. Test: `cargo test --workspace`
+## CTSC-first development
 
-## Development Workflow
+Behavior changes must update or add focused registry, native trace, capture, or
+replay tests. Capture behavior at real operation boundaries through ordinary
+tests; do not introduce a parallel assertion language or flat trace sink.
 
-### Before submitting a PR
+Use `binding-schema.json` for Rust/C# target bindings. The active CLI commands
+are `discover`, `capture`, and `replay`.
 
-Run all checks:
+## Gate
 
-```bash
-cd rust
-cargo build --workspace --all-targets
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
-cargo fmt -- --check
-cargo deny check all
+Run from the repository root:
+
+```powershell
+just check
 ```
 
-### Spec-first development
+The gate covers Rust build/tests/clippy/fmt/licenses, generated crate READMEs,
+the CTSC Python corpus and linked validators, a deterministic capture-to-replay
+smoke, and the retained C# build/tests/format/analyzers.
 
-SpecGate follows a spec-first workflow:
+Run `just package-smoke` for release changes; it packages all six retained crates,
+installs the packaged CLI, and exercises registry-dependency
+discover/capture/replay.
 
-1. Write or update a `.spec.yaml` file
-2. Validate: `cargo run -p specgate-cli -- validate <spec-dir>`
-3. Implement the spec (annotate code with `#[spec_operation]`, etc.)
-4. Verify: `cargo run -p specgate-cli -- run <spec-file>`
-
-See `.github/skills/implement-spec.md` for the full implementation workflow.
-
-### Code style
-
-- Run `cargo fmt` before committing
-- All clippy warnings must be resolved
-- Follow the [Microsoft Rust Guidelines](https://microsoft.github.io/rust-guidelines/) for resilience
-
-### Commit messages
-
-Use [Conventional Commits](https://www.conventionalcommits.org/):
-
-- `feat:` — new feature
-- `fix:` — bug fix
-- `chore:` — maintenance
-- `docs:` — documentation
-- `refactor:` — code restructuring
-- `spec:` — spec file changes
-- `schema:` — schema changes
-
-## License
-
-By contributing, you agree that your contributions will be licensed under the
-MIT OR Apache-2.0 license (see [LICENSE-MIT](LICENSE-MIT) and [LICENSE-APACHE](LICENSE-APACHE)).
+Use Conventional Commits and keep changes scoped.

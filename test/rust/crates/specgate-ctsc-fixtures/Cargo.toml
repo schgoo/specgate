@@ -1,0 +1,8 @@
+[package]
+name = "specgate-ctsc-fixtures"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+specgate = { path = "../../../../rust/crates/specgate" }

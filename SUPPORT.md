@@ -8,6 +8,7 @@
 ## Documentation
 
 - [README](README.md) — overview and quick start
-- [docs/knowledge/](docs/knowledge/) — detailed reference
+- [CTSC documentation](docs/ctsc/README.md) — artifact contracts and validator
+- [Migration status](docs/specgate-ctsc-migration.md) — retained capabilities and limitations
 - [CHANGELOG](CHANGELOG.md) — release history
 - [CONTRIBUTING](CONTRIBUTING.md) — development guide
