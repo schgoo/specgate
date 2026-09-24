@@ -14,7 +14,19 @@ replay tests. Capture behavior at real operation boundaries through ordinary
 tests; do not introduce a parallel assertion language or flat trace sink.
 
 Use `binding-schema.json` for Rust/C# target bindings. The active CLI commands
-are `discover`, `capture`, and `replay`.
+are `discover`, `capture`, `replay`, `validate`, and `compare`.
+
+## Planning and agent workflow
+
+Start with `AGENTS.md` and `docs/README.md`. Use the observe → plan → act →
+verify loop in `docs/agentic-loop.md`: define one bounded vertical slice with
+explicit responsibility boundaries, implement it through the existing CTSC
+mechanisms, then independently inspect the diff and validation evidence.
+
+Normative CTSC shapes and validation, public CLI shape, capture/replay identity
+and stimulus semantics, comparison policy semantics, runtime package identity,
+and golden-matrix declaration meaning require an explicit human owner. Record
+ratified architectural decisions under `docs/decisions/`.
 
 ## Golden matrix
 
