@@ -1,5 +1,12 @@
 # Copilot Instructions — SpecGate
 
+## Start here
+
+Read `AGENTS.md`, `docs/README.md`, `docs/digests/llm.md`, and the relevant CTSC
+contract before planning or changing behavior. Use the observe → plan → act →
+verify workflow in `docs/agentic-loop.md`. Do not silently resolve a
+human-owned decision listed in `AGENTS.md`.
+
 ## Gate
 
 **Always run `just check` from the repository root before committing.**
@@ -31,12 +38,14 @@ ordinary tests. Do not add a separate behavioral assertion format or flat trace
 compatibility path.
 
 `binding-schema.json` is the CTSC target-binding format. Paths are relative to
-the binding file. The CLI currently exposes only:
+the binding file. The active CLI surface is:
 
 ```text
 specgate discover <binding> ...
 specgate capture <binding> ...
 specgate replay <capture> <candidate-binding> ...
+specgate validate <registry|trace|linked|bundle> ...
+specgate compare <reference-trace> <candidate-trace> ...
 ```
 
 ## Architecture

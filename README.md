@@ -70,6 +70,9 @@ renamed dependencies.
 - `test/goldens/ctsc` — the golden matrix and its generated artifacts.
 - `docs/ctsc` — committed CTSC contracts, validator, and corpus.
 
+See the [documentation index](docs/README.md) for contracts, implementation
+status, decision records, digests, and the agent delivery workflow.
+
 ## Golden matrix
 
 `test/goldens/ctsc/matrix.json` is hand-authored configuration: it accounts for
