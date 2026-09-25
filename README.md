@@ -22,6 +22,10 @@ specgate capture test\bindings\rust.yaml `
   --component fixture.stateless_add `
   --out capture
 
+specgate capture test\bindings\rust.yaml `
+  --profile docs\capture-profile.example.yaml `
+  --out profile-capture
+
 specgate replay capture test\bindings\rust.yaml `
   --out candidate.otlp.json
 
@@ -38,6 +42,18 @@ traces and local or explicit registry imports. `compare` applies the fixed
 `ctsc.strict/0.1.0` policy and reports stable semantic mismatch paths.
 Capture bundles contain
 `registry.ctsc.json`, `reference.otlp.json`, and `manifest.json`.
+Capture profiles conform to [`capture-profile-schema.json`](capture-profile-schema.json):
+v1 selects a non-empty list of exact `{component, operation}` identities.
+Profiles are resolved against compiled metadata before native tests are built
+or run, may span components, and are mutually exclusive with `--component`.
+`--component` keeps the component's top-level subtrees verbatim, including any
+nested foreign operations, while `--profile` keeps only selected spans and
+promotes each to its nearest retained selected ancestor. A profile that lists an
+identity no passing test invoked is rejected by name; the implicitly expanded
+`--component` selection stays lenient about unexercised operations.
+Capture-manifest 0.2 records the sorted effective exact selection; validators
+and replay continue to read legacy 0.1 component manifests. Replay currently
+rejects profile bundles whose selection spans multiple components.
 Async operations and async setups are discoverable but rejected by native
 capture until capture context can propagate safely across executor threads.
 

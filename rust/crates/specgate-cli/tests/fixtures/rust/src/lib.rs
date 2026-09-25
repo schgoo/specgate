@@ -48,6 +48,30 @@ pub fn never_called(value: i32) -> i32 {
     value
 }
 
+#[spec_operation("root", spec = "fixture.cli.profile_root")]
+pub fn profile_root(value: i32) -> i32 {
+    profile_bridge(value + 1)
+}
+
+#[spec_operation("bridge", spec = "fixture.cli.profile_bridge")]
+pub fn profile_bridge(value: i32) -> i32 {
+    profile_leaf(value + 1)
+}
+
+#[spec_operation("leaf", spec = "fixture.cli.profile_leaf")]
+pub fn profile_leaf(value: i32) -> i32 {
+    value + 1
+}
+
+/// A second top-level component that shares `leaf` as a nested callee.
+///
+/// Component capture of `fixture.cli.profile_root` must drop this whole
+/// subtree, including its nested `leaf`, while leaving the root subtree intact.
+#[spec_operation("sibling", spec = "fixture.cli.profile_sibling")]
+pub fn profile_sibling(value: i32) -> i32 {
+    profile_leaf(value + 10)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -72,6 +96,17 @@ mod tests {
     #[test]
     fn captures_only_the_exercised_operation() {
         assert_eq!(used(4), 5);
+    }
+
+    #[test]
+    fn captures_profile_ancestry_through_an_unselected_operation() {
+        assert_eq!(profile_root(1), 4);
+    }
+
+    #[test]
+    fn captures_two_top_level_components_in_one_scenario() {
+        assert_eq!(profile_root(1), 4);
+        assert_eq!(profile_sibling(1), 12);
     }
 
     #[test]

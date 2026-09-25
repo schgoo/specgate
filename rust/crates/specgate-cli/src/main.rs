@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use specgate_cli::{capture, discover, replay};
+use specgate_cli::{capture, capture_with_profile, discover, replay};
 use specgate_ctsc::comparison::compare;
 use specgate_ctsc::validation::{validate_bundle, validate_linked, validate_registry, validate_trace};
 
@@ -11,7 +11,7 @@ fn print_usage() {
     eprintln!(
         "usage: specgate <command> [options] <args>\n\
          \n\
-         commands:\n  discover <binding.yaml> --component <id> --registry-id <id> --registry-version <version> -o|--out <registry.ctsc.json> [--target <name>]\n  capture <binding.yaml> --out <dir> [--target <name>] [--component <id>]\n  replay <capture-dir> <candidate-binding.yaml> --out <candidate.otlp.json> [--target <name>]\n  validate registry <registry.json> [--import <registry.json>]...\n  validate trace <trace.otlp.json|trace.otlp.jsonl>\n  validate linked <trace> <root-registry> [--import <registry.json>]...\n  validate bundle <capture-dir>\n  compare <reference-trace> <candidate-trace> [--registry <root-registry>] [--import <registry.json>]..."
+         commands:\n  discover <binding.yaml> --component <id> --registry-id <id> --registry-version <version> -o|--out <registry.ctsc.json> [--target <name>]\n  capture <binding.yaml> --out <dir> [--target <name>] [--component <id> | --profile <profile.yaml>]\n  replay <capture-dir> <candidate-binding.yaml> --out <candidate.otlp.json> [--target <name>]\n  validate registry <registry.json> [--import <registry.json>]...\n  validate trace <trace.otlp.json|trace.otlp.jsonl>\n  validate linked <trace> <root-registry> [--import <registry.json>]...\n  validate bundle <capture-dir>\n  compare <reference-trace> <candidate-trace> [--registry <root-registry>] [--import <registry.json>]..."
     );
 }
 
@@ -182,6 +182,7 @@ struct CaptureArgs {
     binding: String,
     target: String,
     component: String,
+    profile: String,
     out: String,
 }
 
@@ -189,15 +190,17 @@ fn parse_capture_args(args: &[String]) -> Result<CaptureArgs, String> {
     let mut binding = None;
     let mut target = String::new();
     let mut component = String::new();
+    let mut profile = String::new();
     let mut out = None;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
-            flag @ ("--target" | "--component" | "--out") => {
+            flag @ ("--target" | "--component" | "--profile" | "--out") => {
                 let value = args.get(index + 1).ok_or_else(|| format!("{flag} needs an argument"))?.clone();
                 match flag {
                     "--target" => target = value,
                     "--component" => component = value,
+                    "--profile" => profile = value,
                     "--out" => out = Some(value),
                     _ => unreachable!(),
                 }
@@ -210,10 +213,14 @@ fn parse_capture_args(args: &[String]) -> Result<CaptureArgs, String> {
             value => return Err(format!("unexpected argument '{value}'")),
         }
     }
+    if !component.is_empty() && !profile.is_empty() {
+        return Err("--profile and --component are mutually exclusive".to_string());
+    }
     Ok(CaptureArgs {
         binding: binding.ok_or_else(|| "capture requires a binding file argument".to_string())?,
         target,
         component,
+        profile,
         out: out.ok_or_else(|| "capture requires --out <dir>".to_string())?,
     })
 }
@@ -223,7 +230,11 @@ fn cmd_capture(args: &[String]) -> ExitCode {
         Ok(parsed) => parsed,
         Err(error) => return argument_error(&error),
     };
-    let outcome = capture(&parsed.binding, &parsed.target, &parsed.component, &parsed.out);
+    let outcome = if parsed.profile.is_empty() {
+        capture(&parsed.binding, &parsed.target, &parsed.component, &parsed.out)
+    } else {
+        capture_with_profile(&parsed.binding, &parsed.target, &parsed.profile, &parsed.out)
+    };
     print!("{}", capture::format_outcome(&outcome));
     match outcome {
         capture::CaptureOutcome::Complete { .. } => ExitCode::SUCCESS,
@@ -306,6 +317,7 @@ mod tests {
                 binding: "binding.yaml".to_string(),
                 target: String::new(),
                 component: "fixture.add".to_string(),
+                profile: String::new(),
                 out: "capture".to_string(),
             }
         );
@@ -329,6 +341,23 @@ mod tests {
         assert_eq!(
             parse_replay_args(&args(&["capture", "candidate.yaml"])).unwrap_err(),
             "replay requires --out <candidate.otlp.json>"
+        );
+    }
+
+    #[test]
+    fn capture_profile_and_component_are_mutually_exclusive() {
+        assert_eq!(
+            parse_capture_args(&args(&[
+                "binding.yaml",
+                "--out",
+                "capture",
+                "--component",
+                "fixture.add",
+                "--profile",
+                "profile.yaml"
+            ]))
+            .unwrap_err(),
+            "--profile and --component are mutually exclusive"
         );
     }
 }

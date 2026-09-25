@@ -1,0 +1,5 @@
+# yaml-language-server: $schema=../capture-profile-schema.json
+version: 1
+include:
+  - component: fixture.multi_toplevel
+    operation: alpha

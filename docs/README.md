@@ -10,6 +10,9 @@ This index is the starting point for humans and coding agents.
   generated artifacts, and the required gate.
 - [`../AGENTS.md`](../AGENTS.md) — agent entry point and delivery boundaries.
 - [`agentic-loop.md`](agentic-loop.md) — observe → plan → act → verify workflow.
+- [`capture-profile.example.yaml`](capture-profile.example.yaml) — capture
+  profile v1 example; the schema is
+  [`../capture-profile-schema.json`](../capture-profile-schema.json).
 
 ## Contracts and status
 
@@ -22,6 +25,9 @@ This index is the starting point for humans and coding agents.
 - [`specgate-ctsc-migration.md`](specgate-ctsc-migration.md) — implemented
   architecture, migration status, and current limitations.
 - [`decisions/`](decisions/) — human-ratified architectural decisions.
+- [`component-identity-and-replay.md`](component-identity-and-replay.md) —
+  exploratory notes on scenario identity, the replay unit, and artifact
+  granularity. Not ratified.
 
 ## Digests and references
 

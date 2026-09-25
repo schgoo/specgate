@@ -382,6 +382,7 @@ pub fn decode_replay_bundle_result(manifest_json: &[u8], registry_json: &[u8], r
     let manifest: CaptureManifestWire =
         serde_json::from_slice(manifest_json).map_err(|error| format!("malformed capture manifest JSON: {error}"))?;
     validate_capture_manifest(&manifest)?;
+    let replay_component = manifest.replay_component()?;
 
     let registry_digest = replay_sha256_digest(registry_json);
     if manifest.registry.digest != registry_digest {
@@ -423,11 +424,11 @@ pub fn decode_replay_bundle_result(manifest_json: &[u8], registry_json: &[u8], r
     if !registry
         .operations
         .iter()
-        .any(|operation| operation.component_id == manifest.component_id)
+        .any(|operation| operation.component_id == replay_component)
     {
         return Err(format!(
             "capture component '{}' is absent from registry '{}'",
-            manifest.component_id, registry.id
+            replay_component, registry.id
         ));
     }
 
@@ -436,18 +437,21 @@ pub fn decode_replay_bundle_result(manifest_json: &[u8], registry_json: &[u8], r
     let scenarios = decode_replay_scenarios(&document, &manifest, &registry)?;
 
     Ok(ReplayBundle {
-        component_id: manifest.component_id,
+        component_id: replay_component.to_string(),
         registry,
         scenarios,
     })
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CaptureManifestWire {
     format: String,
     format_version: String,
-    component_id: String,
+    #[serde(default)]
+    component_id: Option<String>,
+    #[serde(default)]
+    selection: Option<Vec<CaptureManifestSelectionWire>>,
     target: CaptureManifestTargetWire,
     tool: CaptureManifestToolWire,
     registry: CaptureManifestRegistryWire,
@@ -456,18 +460,28 @@ struct CaptureManifestWire {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CaptureManifestSelectionWire {
+    component: String,
+    operation: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct CaptureManifestTargetWire {
     name: String,
     language: String,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct CaptureManifestToolWire {
     name: String,
     version: String,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct CaptureManifestRegistryWire {
     path: String,
     id: String,
@@ -476,23 +490,57 @@ struct CaptureManifestRegistryWire {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct CaptureManifestReferenceWire {
     path: String,
     digest: String,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct CaptureManifestScenariosWire {
     count: i32,
     names: Vec<String>,
 }
 
 fn validate_capture_manifest(manifest: &CaptureManifestWire) -> Result<(), String> {
-    if manifest.format != "specgate.capture-manifest" || manifest.format_version != "0.1.0" {
+    if manifest.format != "specgate.capture-manifest" || !matches!(manifest.format_version.as_str(), "0.1.0" | "0.2.0") {
         return Err(format!(
-            "unsupported capture manifest format/version '{}/{}'; expected 'specgate.capture-manifest/0.1.0'",
+            "unsupported capture manifest format/version '{}/{}'; expected 'specgate.capture-manifest/0.1.0' or 'specgate.capture-manifest/0.2.0'",
             manifest.format, manifest.format_version
         ));
+    }
+    match manifest.format_version.as_str() {
+        "0.1.0" if manifest.component_id.is_none() || manifest.selection.is_some() => {
+            return Err("capture manifest 0.1.0 requires componentId and forbids selection".to_string());
+        }
+        "0.2.0" if manifest.component_id.is_some() || manifest.selection.is_none() => {
+            return Err("capture manifest 0.2.0 requires selection and forbids componentId".to_string());
+        }
+        _ => {}
+    }
+    if let Some(selection) = &manifest.selection {
+        if selection.is_empty() {
+            return Err("capture manifest selection must not be empty".to_string());
+        }
+        if selection
+            .iter()
+            .any(|selector| selector.component.is_empty() || selector.operation.is_empty())
+        {
+            return Err("capture manifest selection values must not be empty".to_string());
+        }
+        let sorted = selection
+            .iter()
+            .map(|selector| (selector.component.as_str(), selector.operation.as_str()))
+            .collect::<BTreeSet<_>>();
+        if sorted.len() != selection.len()
+            || !selection
+                .iter()
+                .map(|selector| (selector.component.as_str(), selector.operation.as_str()))
+                .eq(sorted)
+        {
+            return Err("capture manifest selection must be unique and sorted by component then operation".to_string());
+        }
     }
     if manifest.registry.path != "registry.ctsc.json" {
         return Err(format!(
@@ -506,7 +554,7 @@ fn validate_capture_manifest(manifest: &CaptureManifestWire) -> Result<(), Strin
             manifest.reference.path
         ));
     }
-    if manifest.component_id.is_empty()
+    if manifest.component_id.as_deref().is_some_and(str::is_empty)
         || manifest.target.name.is_empty()
         || manifest.target.language.is_empty()
         || manifest.tool.name.is_empty()
@@ -534,6 +582,23 @@ fn validate_capture_manifest(manifest: &CaptureManifestWire) -> Result<(), Strin
         return Err("capture manifest contains duplicate scenario names".to_string());
     }
     Ok(())
+}
+
+impl CaptureManifestWire {
+    fn replay_component(&self) -> Result<&str, String> {
+        if let Some(component) = self.component_id.as_deref() {
+            return Ok(component);
+        }
+        let selection = self.selection.as_ref().expect("validated 0.2 selection");
+        let components = selection
+            .iter()
+            .map(|selector| selector.component.as_str())
+            .collect::<BTreeSet<_>>();
+        if components.len() != 1 {
+            return Err("replay does not support capture profile bundles selecting operations across multiple components".to_string());
+        }
+        Ok(components.into_iter().next().expect("non-empty validated selection"))
+    }
 }
 
 fn validate_replay_digest(label: &str, digest: &str) -> Result<(), String> {
@@ -1458,6 +1523,7 @@ pub fn encode_schema_registry_result(
     for dependency in &schema.dependency_types {
         insert_component_type_names(&mut types_by_component, &dependency.component, &dependency.types)?;
     }
+
     let dependency_names = schema.dependencies.iter().cloned().collect::<BTreeSet<_>>();
     if dependency_names.len() != schema.dependencies.len() {
         return Err("normalized schema contains duplicate component dependencies".to_string());
@@ -1568,6 +1634,98 @@ pub fn encode_schema_registry_result(
         type_count,
         registry_json,
     })
+}
+
+/// Encode several normalized component schemas as one deterministic registry.
+///
+/// Components contributed as dependency type closures are merged with their
+/// full selected schema when both are present.
+///
+/// # Errors
+///
+/// Returns the same errors as [`encode_schema_registry_result`], or an error
+/// when repeated component declarations disagree.
+pub fn encode_schema_registries_result(
+    registry_id: String,
+    registry_version: String,
+    schema_json: &[String],
+) -> Result<CtscRegistryEncoding, String> {
+    if schema_json.is_empty() {
+        return Err("cannot encode a registry without normalized schemas".to_string());
+    }
+    let mut components = BTreeMap::<String, RegistryComponent>::new();
+    for schema in schema_json {
+        let encoded = encode_schema_registry_result(registry_id.clone(), registry_version.clone(), schema)?;
+        let document: RegistryDocumentWire =
+            serde_json::from_str(&encoded.registry_json).map_err(|error| format!("failed to merge encoded registry JSON: {error}"))?;
+        for component in document.components {
+            if let Some(existing) = components.get_mut(&component.id) {
+                merge_registry_component(existing, component)?;
+            } else {
+                components.insert(component.id.clone(), component);
+            }
+        }
+    }
+    let operation_count = components.values().try_fold(0_usize, |count, component| {
+        count
+            .checked_add(component.operations.len())
+            .ok_or_else(|| "operation count overflow".to_string())
+    })?;
+    let type_count = components.values().try_fold(0_usize, |count, component| {
+        count
+            .checked_add(component.types.len())
+            .ok_or_else(|| "type count overflow".to_string())
+    })?;
+    let document = RegistryDocument {
+        format: "ctsc.registry",
+        format_version: CTSC_VERSION,
+        registry_id,
+        version: registry_version,
+        components: components.into_values().collect(),
+    };
+    Ok(CtscRegistryEncoding {
+        operation_count: i32::try_from(operation_count).map_err(|_error| "operation count exceeds i32".to_string())?,
+        type_count: i32::try_from(type_count).map_err(|_error| "type count exceeds i32".to_string())?,
+        registry_json: serde_json::to_string(&document).map_err(|error| format!("registry JSON serialization failed: {error}"))?,
+    })
+}
+
+fn merge_registry_component(existing: &mut RegistryComponent, incoming: RegistryComponent) -> Result<(), String> {
+    let dependencies = existing
+        .dependencies
+        .iter()
+        .chain(&incoming.dependencies)
+        .map(|dependency| dependency.component_id.clone())
+        .collect::<BTreeSet<_>>();
+    existing.dependencies = dependencies
+        .into_iter()
+        .map(|component_id| RegistryComponentRef { component_id })
+        .collect();
+
+    for operation in incoming.operations {
+        match existing.operations.iter().find(|candidate| candidate.name == operation.name) {
+            Some(candidate) if candidate != &operation => {
+                return Err(format!(
+                    "normalized schemas disagree on operation '{}::{}'",
+                    existing.id, operation.name
+                ));
+            }
+            Some(_) => {}
+            None => existing.operations.push(operation),
+        }
+    }
+    existing.operations.sort_by(|left, right| left.name.cmp(&right.name));
+    for ty in incoming.types {
+        match existing.types.iter().find(|candidate| candidate.name == ty.name) {
+            Some(candidate) if candidate != &ty => {
+                return Err(format!("normalized schemas disagree on type '{}::{}'", existing.id, ty.name));
+            }
+            Some(_) => {}
+            None => existing.types.push(ty),
+        }
+    }
+    existing.types.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -2052,6 +2210,12 @@ struct RegistryDocument {
     format_version: &'static str,
     registry_id: String,
     version: String,
+    components: Vec<RegistryComponent>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RegistryDocumentWire {
     components: Vec<RegistryComponent>,
 }
 

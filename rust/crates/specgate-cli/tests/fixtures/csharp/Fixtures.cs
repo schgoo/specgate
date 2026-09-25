@@ -33,3 +33,15 @@ public static class MultipleOperations
     [SpecOperation("unexercised", Spec = "fixture.cli.multiple")]
     public static int Unexercised([SpecInput("value")] int value) => value - 1;
 }
+
+public static class ProfileOperations
+{
+    [SpecOperation("root", Spec = "fixture.cli.profile_root")]
+    public static int Root([SpecInput("value")] int value) => value + 3;
+
+    [SpecOperation("bridge", Spec = "fixture.cli.profile_bridge")]
+    public static int Bridge([SpecInput("value")] int value) => value + 2;
+
+    [SpecOperation("leaf", Spec = "fixture.cli.profile_leaf")]
+    public static int Leaf([SpecInput("value")] int value) => value + 1;
+}

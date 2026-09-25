@@ -9,6 +9,11 @@ obj/
 target/
 coverage*.json
 
+# cargo-evaluate
+/rust/.evaluate/*
+/rust/evaluate-report.*
+/rust/evaluate-summary.json
+
 # Python
 __pycache__/
 *.py[cod]

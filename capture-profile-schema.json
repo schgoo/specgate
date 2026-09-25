@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://specgate.dev/schema/capture-profile-1.json",
+  "title": "SpecGate capture profile v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "include"],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "include": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["component", "operation"],
+        "properties": {
+          "component": {
+            "type": "string",
+            "minLength": 1
+          },
+          "operation": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}

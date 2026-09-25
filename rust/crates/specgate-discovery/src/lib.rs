@@ -2,7 +2,8 @@
 //!
 //! This crate owns the strict target-binding resolver, Rust link-time metadata
 //! discovery, C# compiled-assembly reflection discovery, raw invocation
-//! metadata, and deterministic semantic schema normalization. It deliberately
+//! metadata, deterministic semantic schema normalization, and the strict
+//! language-neutral capture profile parser/resolver. It deliberately
 //! has no dependency on `.spec.yaml`, cases, runners, matching, coverage, or
 //! reports. Generated runners use invocation-unique operating-system cache
 //! directories and select verified local workspace dependencies only when
@@ -12,6 +13,7 @@ mod csharp_discovery;
 
 pub mod binding;
 pub mod discovery;
+pub mod profile;
 pub mod support;
 
 use std::path::Path;

@@ -5,7 +5,8 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 const CAPTURE_FORMAT: &str = "specgate.capture-manifest";
-const CAPTURE_VERSION: &str = "0.1.0";
+const CAPTURE_VERSION_LEGACY: &str = "0.1.0";
+const CAPTURE_VERSION: &str = "0.2.0";
 
 pub(crate) fn validate(directory: &Path) -> Vec<ValidationIssue> {
     let mut issues = Vec::new();
@@ -40,12 +41,20 @@ pub(crate) fn validate(directory: &Path) -> Vec<ValidationIssue> {
 struct CaptureManifest {
     format: String,
     format_version: String,
-    component_id: String,
+    component_id: Option<String>,
+    selection: Option<Vec<ManifestSelection>>,
     target: ManifestTarget,
     tool: ManifestTool,
     registry: ManifestRegistry,
     reference: ManifestReference,
     scenarios: ManifestScenarios,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ManifestSelection {
+    component: String,
+    operation: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -101,12 +110,53 @@ fn parse_manifest(bytes: &[u8], path: &Path, issues: &mut Vec<ValidationIssue>) 
         issues,
     );
     require(
-        manifest.format_version == CAPTURE_VERSION,
+        matches!(manifest.format_version.as_str(), CAPTURE_VERSION_LEGACY | CAPTURE_VERSION),
         path,
         "$.formatVersion",
-        "formatVersion must be '0.1.0'",
+        "formatVersion must be '0.1.0' or '0.2.0'",
         issues,
     );
+    match manifest.format_version.as_str() {
+        CAPTURE_VERSION_LEGACY => {
+            require(
+                manifest.component_id.is_some() && manifest.selection.is_none(),
+                path,
+                "$",
+                "capture manifest 0.1.0 requires componentId and forbids selection",
+                issues,
+            );
+        }
+        CAPTURE_VERSION => {
+            require(
+                manifest.component_id.is_none() && manifest.selection.is_some(),
+                path,
+                "$",
+                "capture manifest 0.2.0 requires selection and forbids componentId",
+                issues,
+            );
+            if let Some(selection) = &manifest.selection {
+                require(!selection.is_empty(), path, "$.selection", "selection must not be empty", issues);
+                require(
+                    selection
+                        .iter()
+                        .all(|selector| !selector.component.is_empty() && !selector.operation.is_empty()),
+                    path,
+                    "$.selection",
+                    "selection component and operation values must not be empty",
+                    issues,
+                );
+                let sorted = selection.iter().cloned().collect::<BTreeSet<_>>().into_iter().collect::<Vec<_>>();
+                require(
+                    &sorted == selection,
+                    path,
+                    "$.selection",
+                    "selection must be unique and sorted by component then operation",
+                    issues,
+                );
+            }
+        }
+        _ => {}
+    }
     require(
         manifest.registry.path == "registry.ctsc.json",
         path,
@@ -122,7 +172,6 @@ fn parse_manifest(bytes: &[u8], path: &Path, issues: &mut Vec<ValidationIssue>) 
         issues,
     );
     for (location, value) in [
-        ("$.componentId", manifest.component_id.as_str()),
         ("$.target.name", manifest.target.name.as_str()),
         ("$.target.language", manifest.target.language.as_str()),
         ("$.tool.name", manifest.tool.name.as_str()),
@@ -131,6 +180,15 @@ fn parse_manifest(bytes: &[u8], path: &Path, issues: &mut Vec<ValidationIssue>) 
         ("$.registry.version", manifest.registry.version.as_str()),
     ] {
         require(!value.is_empty(), path, location, "identity field must not be empty", issues);
+    }
+    if let Some(component_id) = &manifest.component_id {
+        require(
+            !component_id.is_empty(),
+            path,
+            "$.componentId",
+            "identity field must not be empty",
+            issues,
+        );
     }
     require(
         is_digest(&manifest.registry.digest),
@@ -216,13 +274,37 @@ fn validate_semantics(
         "manifest registry version does not match registry document",
         issues,
     );
-    require(
-        registry.components.contains_key(&manifest.component_id),
-        path,
-        "$.componentId",
-        "manifest component is absent from registry",
-        issues,
-    );
+    if let Some(component_id) = &manifest.component_id {
+        require(
+            registry.components.contains_key(component_id),
+            path,
+            "$.componentId",
+            "manifest component is absent from registry",
+            issues,
+        );
+    }
+    // `selection` is the bundle's nominated surface, not a bound on the trace.
+    // Component capture keeps nested foreign operations verbatim, so a trace
+    // operation outside the selection is valid; CTSC Linked validation is what
+    // requires every trace operation to be declared in the registry.
+    if let Some(selection) = &manifest.selection {
+        for (index, selector) in selection.iter().enumerate() {
+            let declared = registry.components.get(&selector.component).is_some_and(|component| {
+                component
+                    .component
+                    .operations
+                    .iter()
+                    .any(|operation| operation.name == selector.operation)
+            });
+            require(
+                declared,
+                path,
+                &format!("$.selection[{index}]"),
+                "selected operation is absent from registry",
+                issues,
+            );
+        }
+    }
     let runs = trace.spans.iter().filter(|span| span.name == "conformance.run").collect::<Vec<_>>();
     require(
         runs.len() == 1,

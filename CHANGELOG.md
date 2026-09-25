@@ -4,6 +4,9 @@
 
 ### Changed
 
+- Added strict language-neutral capture profile v1 exact operation selection,
+  multi-component Rust capture filtering, and capture-manifest 0.2 with legacy
+  0.1 read compatibility.
 - Replaced the legacy verification stack with CTSC-native discovery, capture,
   and replay.
 - Added the focused `specgate-discovery` crate and one strict target-binding

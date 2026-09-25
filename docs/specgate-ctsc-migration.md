@@ -33,6 +33,35 @@ reference target
   deterministic IDs, and strict differential comparison.
 - `specgate-cli`: `discover`, `capture`, `replay`, `validate`, and `compare`.
 
+Capture accepts either the compatible single-component shorthand or a strict
+capture profile v1 containing exact component/operation selectors. Profile
+resolution uses compiled language-neutral discovery identities before native
+test build/run. The two modes filter deliberately differently.
+
+`--component <id>` filters *top-level* operations only. Each captured scenario
+contributes the subtrees rooted at its top-level operations of that component,
+kept verbatim: nested calls into foreign components stay in the trace with their
+original parents, and nothing is ever reparented. A foreign top-level operation
+is dropped together with its whole subtree, and a scenario with no top-level
+operation of the component contributes nothing. Because nested foreign
+operations survive, the bundle registry declares every component and operation
+actually present in the exported trace, in addition to the component's declared
+surface.
+
+`--profile` retains only exactly-selected operation spans and reparents each
+retained span to its nearest retained selected ancestor, else to the scenario
+span. Promotion is intended there: the profile nominates the seam. Because a
+profile's `include` is user-authored, capture also rejects a profile whose
+explicitly listed identity produced no operation span at all, naming every such
+`component::operation` sorted by component then operation. The `--component`
+shorthand is exempt: its selection expands implicitly to the whole component, so
+an unexercised operation stays accepted.
+
+Capture-manifest 0.2 records the sorted exact selection, and 0.1 component
+manifests remain readable. The manifest selection is the bundle's nominated
+surface rather than a bound on the trace, so bundle validation accepts the
+nested non-selected operations that component capture keeps.
+
 Rust and C# registry output is byte-identical for the stateless, rich-type, and
 setup-folding fixtures. Raw language-specific invocation metadata remains
 separate from the language-neutral CTSC registry.
@@ -141,6 +170,8 @@ the Rust and C# registries still differ in exactly the declared ways.
   unsupported or ambiguous, as permitted by the policy.
 - Replay validates nested operations as observed behavior but invokes only
   top-level reference operations.
+- Replay rejects capture-profile bundles whose exact selection spans multiple
+  components; the bundle remains fully registry/trace/link/bundle valid.
 - `spec_trace!` observations are captured but never declared, because discovery
   has no link-time observation metadata. A component that emits an observation
   cannot produce a linkable reference bundle, so CTSC-native fixtures express

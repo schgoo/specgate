@@ -30,6 +30,27 @@ fn decodes_linked_top_level_stimuli_and_ignores_nested_instructions() {
     assert_eq!(operation.operation_name, "outer");
     assert_eq!(operation.inputs[0].name, "value");
     assert_eq!(operation.inputs[0].value, ReplayValue::I32(2));
+
+    let mut profile_manifest: serde_json::Value = serde_json::from_slice(&manifest).unwrap();
+    profile_manifest["formatVersion"] = json!("0.2.0");
+    profile_manifest.as_object_mut().unwrap().remove("componentId");
+    profile_manifest["selection"] = json!([
+        {"component":"fixture.replay","operation":"inner"},
+        {"component":"fixture.replay","operation":"outer"}
+    ]);
+    let decoded_profile =
+        decode_replay_bundle_result(&serde_json::to_vec(&profile_manifest).unwrap(), &registry, trace.as_bytes()).unwrap();
+    assert_eq!(decoded_profile.component_id, "fixture.replay");
+
+    profile_manifest["selection"] = json!([
+        {"component":"fixture.other","operation":"other"},
+        {"component":"fixture.replay","operation":"outer"}
+    ]);
+    assert!(
+        decode_replay_bundle_result(&serde_json::to_vec(&profile_manifest).unwrap(), &registry, trace.as_bytes())
+            .unwrap_err()
+            .contains("does not support capture profile bundles selecting operations across multiple components")
+    );
 }
 
 #[test]
@@ -143,6 +164,45 @@ fn rejects_digest_linkage_empty_scenario_and_structured_values() {
         "bundle validation must not inherit replay's structured-input restriction: {:#?}",
         report.issues
     );
+}
+
+/// `selection` names the bundle's nominated surface, not a bound on the trace:
+/// component capture keeps nested non-selected operations verbatim, so bundle
+/// validation must accept a trace operation outside the manifest selection.
+#[test]
+fn bundle_validation_accepts_trace_operations_outside_the_selection() {
+    let registry = make_registry(
+        r#"{"component":"fixture.replay","operations":[
+            {"name":"outer","is_async":false,"inputs":[{"name":"value","ty":"i32"}],"output":"i32"},
+            {"name":"inner","is_async":false,"inputs":[{"name":"value","ty":"i32"}],"output":"i32"}
+        ],"types":[]}"#,
+    );
+    let capture = native_capture(true);
+    let trace = reference_trace(&capture, &registry);
+    let mut manifest: serde_json::Value = serde_json::from_slice(&make_manifest(&registry, trace.as_bytes(), &["scenario"])).unwrap();
+    manifest["formatVersion"] = json!("0.2.0");
+    manifest.as_object_mut().unwrap().remove("componentId");
+    manifest["selection"] = json!([{"component":"fixture.replay","operation":"outer"}]);
+
+    let bundle_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("rust root")
+        .join("target")
+        .join(format!("selection-bundle-{}", std::process::id()));
+    std::fs::create_dir_all(&bundle_dir).unwrap();
+    std::fs::write(bundle_dir.join("manifest.json"), serde_json::to_vec(&manifest).unwrap()).unwrap();
+    std::fs::write(bundle_dir.join("registry.ctsc.json"), &registry).unwrap();
+    std::fs::write(bundle_dir.join("reference.otlp.json"), trace.as_bytes()).unwrap();
+    let report = validate_bundle(&bundle_dir);
+
+    manifest["selection"] = json!([{"component":"fixture.replay","operation":"absent"}]);
+    std::fs::write(bundle_dir.join("manifest.json"), serde_json::to_vec(&manifest).unwrap()).unwrap();
+    let undeclared = validate_bundle(&bundle_dir);
+    std::fs::remove_dir_all(&bundle_dir).unwrap();
+
+    assert!(report.valid, "nested non-selected operations must stay valid: {:#?}", report.issues);
+    assert!(!undeclared.valid, "a selected operation absent from the registry is still rejected");
 }
 
 #[test]

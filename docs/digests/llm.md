@@ -14,6 +14,20 @@ The active CLI surface is `discover`, `capture`, `replay`, `validate`, and
 `compare`. Rust and C# support discovery; capture and replay currently support
 Rust.
 
+Capture profile v1 is a strict YAML list of exact component/operation
+identities. The shared discovery resolver provides language-neutral preflight;
+Rust capture may export a multi-component selection. Component capture and
+profile capture filter differently on purpose: `--component` keeps the
+component's top-level subtrees verbatim, including nested foreign operations and
+their original parents, while `--profile` keeps only selected spans and promotes
+each to its nearest retained selected ancestor. A profile's `include` is
+user-authored, so capture rejects one whose listed identity produced no span,
+naming each dead selector; `--component` is exempt because its selection is
+implicitly expanded. Capture-manifest 0.2 records the
+sorted exact selection, while 0.1 component manifests remain readable; the
+selection is not a bound on the trace. Multi-component profile bundles validate
+but are not replayable yet.
+
 ## Ownership boundaries
 
 - `specgate-runtime` owns native capture, semantic values, and link-time
@@ -48,7 +62,8 @@ Rust.
 - Async operations remain discoverable, but native capture rejects them before
   polling while capture state is thread-local.
 - Observation declarations and configurable comparison profiles are not
-  implemented.
+  implemented. Capture profiles select exported operation identities only and
+  do not define comparison policy.
 
 ## Golden matrix
 
