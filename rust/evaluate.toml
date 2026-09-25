@@ -1,0 +1,10 @@
+# cargo-evaluate configuration for the SpecGate workspace.
+#
+# `just evaluate` runs the deterministic and semantic lint packs. It is not yet
+# part of `just check`, because the current workspace baseline still reports
+# findings. Scope any genuinely-necessary exception as narrowly as possible —
+# prefer an in-source `#[cfg_attr(false, allow(evaluate::<rule>))]` marker on the
+# specific item over a workspace-wide entry here, and always record why.
+
+[config]
+disabled = []
