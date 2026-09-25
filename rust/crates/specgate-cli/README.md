@@ -20,7 +20,9 @@ specgate compare <reference-trace> <candidate-trace> [--registry <root-registry>
 
 `discover` exports a deterministic CTSC registry from Rust link-time or C#
 compiled-assembly metadata. `capture` runs ordinary Rust tests in isolation
-and records passing native scenarios. `replay` verifies a capture bundle,
+and records the selected component’s top-level operation subtrees from
+passing native scenarios, keeping nested calls into other annotated
+components verbatim. `replay` verifies a capture bundle,
 statically links its top-level semantic inputs to a Rust candidate, and
 emits an independent deterministic CTSC trace. `validate` provides native
 CTSC 0.2 Registry, Trace Core, Linked, and capture-bundle validation.

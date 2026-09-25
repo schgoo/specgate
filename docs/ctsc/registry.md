@@ -53,6 +53,20 @@ A component is identified by `id` and contains:
 
 Component IDs MUST be unique across a resolved registry set.
 
+### 3.1 Component order
+
+A document's `components` array MUST be ordered by ascending component `id`,
+compared as a sequence of Unicode code points. No component holds a privileged
+position: a document's root, selected, or requested component is ordered by its
+id like any other.
+
+Component order carries no semantics. The rule exists so that an emitted
+document is a deterministic function of the component set it contains.
+Independent producers of the same logical registry — for example a metadata
+discovery pass and a behavior capture that writes the same registry file — then
+emit byte-identical documents, and the document digest identifies content
+rather than producer.
+
 ## 4. Operations
 
 An operation contains:

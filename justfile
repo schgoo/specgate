@@ -26,6 +26,13 @@ format:
 deny:
     cd rust && cargo deny check licenses
 
+# Deterministic + semantic lint packs. Rule exceptions belong in
+# rust/evaluate.toml with a justification, never silenced ad hoc. Not yet wired
+# into `check`, because the current workspace baseline still reports findings.
+# Run cargo-evaluate over the product workspace.
+evaluate:
+    cd rust && cargo evaluate
+
 readme:
     cd rust && cargo doc2readme -p specgate-runtime --lib --template crates/README.j2 --out crates/specgate-runtime/README.md
     cd rust && cargo doc2readme -p specgate-annotations-macros --lib --template crates/README.j2 --out crates/specgate-annotations-macros/README.md

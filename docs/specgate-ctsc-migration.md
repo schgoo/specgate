@@ -60,6 +60,30 @@ folded input name is reported rather than guessed. Ordinary runs are unchanged:
 nothing is projected or recorded unless a capture session is active or
 requested.
 
+## Component capture scope
+
+`specgate capture --component <id>` anchors the export on the selected
+component's *top-level* operations — those whose parent is the scenario span.
+Each such span contributes its transitive subtree verbatim: nested calls into
+other annotated components stay in the trace with their original parentage, and
+no span is ever reparented or promoted. A top-level operation of another
+component is dropped together with its whole subtree, and a scenario with no
+top-level operation of the selected component contributes nothing.
+
+Because a filtered trace can therefore contain operations of several
+components, the bundle's registry is the union of every component present in
+the filtered trace, encoded under the selected component's
+`urn:ctsc:registry:<component>` id. Nested foreign operations stay declared, so
+the bundle continues to satisfy trace, linked, and bundle validation.
+
+A single-component capture emits the same registry bytes as `discover` for that
+component, because both encoders share the one component-ordering rule in
+[`ctsc/registry.md`](ctsc/registry.md) §3.1. That ordering rule is itself a
+change: a component whose dependency ids sort before its own now emits a
+different component order, and therefore a different registry digest, than
+earlier releases that placed the selected component first. The fixture corpus
+contains no such component, so no golden artifact changed.
+
 ## Golden matrix
 
 `test/goldens/ctsc/matrix.json` is the reviewable configuration that accounts

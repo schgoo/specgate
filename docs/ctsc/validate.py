@@ -193,6 +193,27 @@ def unique_names(
         seen.add(name)
 
 
+def ascending_component_order(components: Any, validator: Validator) -> None:
+    """Registry 0.2 section 3.1: components are ordered by ascending id.
+
+    Python compares ``str`` by Unicode code point, which is exactly the
+    comparison the contract specifies.
+    """
+    if not isinstance(components, list):
+        return
+    ids = [
+        component.get("id")
+        for component in components
+        if isinstance(component, dict) and isinstance(component.get("id"), str)
+    ]
+    for previous, current in zip(ids, ids[1:]):
+        if previous > current:
+            validator.error(
+                "$.components", f"component id {current!r} is out of ascending id order"
+            )
+            return
+
+
 def validate_registry_semantics(
     document: dict[str, Any],
     validator: Validator,
@@ -203,6 +224,7 @@ def validate_registry_semantics(
     unique_names(imports, "$.imports", validator, "registryId")
     components = document.get("components", [])
     unique_names(components, "$.components", validator, "id")
+    ascending_component_order(components, validator)
 
     local_components = {component.get("id"): component for component in components}
     for component_index, component in enumerate(components):

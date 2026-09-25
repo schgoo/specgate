@@ -1510,8 +1510,6 @@ pub fn encode_schema_registry_result(
     let mut types = schema.types.iter().map(|ty| ty.to_ctsc(&context)).collect::<Result<Vec<_>, _>>()?;
     types.sort_by(|left, right| left.name.cmp(&right.name));
 
-    let operation_count = i32::try_from(operations.len()).map_err(|_error| "operation count exceeds i32".to_string())?;
-    let mut type_count = types.len();
     let mut components = vec![RegistryComponent {
         id: schema.component.clone(),
         dependencies: schema
@@ -1538,9 +1536,6 @@ pub fn encode_schema_registry_result(
             .map(|ty| ty.to_ctsc(&dependency_context))
             .collect::<Result<Vec<_>, _>>()?;
         dependency_types.sort_by(|left, right| left.name.cmp(&right.name));
-        type_count = type_count
-            .checked_add(dependency_types.len())
-            .ok_or_else(|| "type count overflow".to_string())?;
         components.push(RegistryComponent {
             id: dependency.component.clone(),
             dependencies: dependency
@@ -1553,7 +1548,66 @@ pub fn encode_schema_registry_result(
             types: dependency_types,
         });
     }
-    let type_count = i32::try_from(type_count).map_err(|_error| "type count exceeds i32".to_string())?;
+    encode_registry_document(registry_id, registry_version, components)
+}
+
+/// Encode several normalized component schemas as one deterministic registry.
+///
+/// Components contributed as dependency type closures are merged with their
+/// full selected schema when both are present. Output is byte-identical to
+/// [`encode_schema_registry_result`] for a single schema.
+///
+/// # Errors
+///
+/// Returns the same errors as [`encode_schema_registry_result`], or an error
+/// when repeated component declarations disagree.
+pub fn encode_schema_registries_result(
+    registry_id: String,
+    registry_version: String,
+    schema_json: &[String],
+) -> Result<CtscRegistryEncoding, String> {
+    if schema_json.is_empty() {
+        return Err("cannot encode a registry without normalized schemas".to_string());
+    }
+    let mut components = BTreeMap::<String, RegistryComponent>::new();
+    for schema in schema_json {
+        let encoded = encode_schema_registry_result(registry_id.clone(), registry_version.clone(), schema)?;
+        let document: RegistryDocumentWire =
+            serde_json::from_str(&encoded.registry_json).map_err(|error| format!("failed to merge encoded registry JSON: {error}"))?;
+        for component in document.components {
+            if let Some(existing) = components.get_mut(&component.id) {
+                merge_registry_component(existing, component)?;
+            } else {
+                components.insert(component.id.clone(), component);
+            }
+        }
+    }
+    encode_registry_document(registry_id, registry_version, components.into_values().collect())
+}
+
+/// Serialize registry components as one deterministic CTSC registry document.
+///
+/// This is the single ordering rule for every registry this crate emits:
+/// components are sorted by ascending component id, with no privileged
+/// position for any selected or root component. `discover` and `capture`
+/// therefore emit byte-identical documents for the same logical component set,
+/// which matters because both write to the same `registry.ctsc.json` path.
+fn encode_registry_document(
+    registry_id: String,
+    registry_version: String,
+    mut components: Vec<RegistryComponent>,
+) -> Result<CtscRegistryEncoding, String> {
+    components.sort_by(|left, right| left.id.cmp(&right.id));
+    let operation_count = components.iter().try_fold(0_usize, |count, component| {
+        count
+            .checked_add(component.operations.len())
+            .ok_or_else(|| "operation count overflow".to_string())
+    })?;
+    let type_count = components.iter().try_fold(0_usize, |count, component| {
+        count
+            .checked_add(component.types.len())
+            .ok_or_else(|| "type count overflow".to_string())
+    })?;
     let document = RegistryDocument {
         format: "ctsc.registry",
         format_version: CTSC_VERSION,
@@ -1561,13 +1615,49 @@ pub fn encode_schema_registry_result(
         version: registry_version,
         components,
     };
-    let registry_json = serde_json::to_string(&document).map_err(|error| format!("registry JSON serialization failed: {error}"))?;
-
     Ok(CtscRegistryEncoding {
-        operation_count,
-        type_count,
-        registry_json,
+        operation_count: i32::try_from(operation_count).map_err(|_error| "operation count exceeds i32".to_string())?,
+        type_count: i32::try_from(type_count).map_err(|_error| "type count exceeds i32".to_string())?,
+        registry_json: serde_json::to_string(&document).map_err(|error| format!("registry JSON serialization failed: {error}"))?,
     })
+}
+
+fn merge_registry_component(existing: &mut RegistryComponent, incoming: RegistryComponent) -> Result<(), String> {
+    let dependencies = existing
+        .dependencies
+        .iter()
+        .chain(&incoming.dependencies)
+        .map(|dependency| dependency.component_id.clone())
+        .collect::<BTreeSet<_>>();
+    existing.dependencies = dependencies
+        .into_iter()
+        .map(|component_id| RegistryComponentRef { component_id })
+        .collect();
+
+    for operation in incoming.operations {
+        match existing.operations.iter().find(|candidate| candidate.name == operation.name) {
+            Some(candidate) if candidate != &operation => {
+                return Err(format!(
+                    "normalized schemas disagree on operation '{}::{}'",
+                    existing.id, operation.name
+                ));
+            }
+            Some(_) => {}
+            None => existing.operations.push(operation),
+        }
+    }
+    existing.operations.sort_by(|left, right| left.name.cmp(&right.name));
+    for ty in incoming.types {
+        match existing.types.iter().find(|candidate| candidate.name == ty.name) {
+            Some(candidate) if candidate != &ty => {
+                return Err(format!("normalized schemas disagree on type '{}::{}'", existing.id, ty.name));
+            }
+            Some(_) => {}
+            None => existing.types.push(ty),
+        }
+    }
+    existing.types.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -2055,6 +2145,12 @@ struct RegistryDocument {
     components: Vec<RegistryComponent>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RegistryDocumentWire {
+    components: Vec<RegistryComponent>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct RegistryComponent {
     id: String,
@@ -2267,4 +2363,241 @@ struct ArrayValue {
 struct KeyValueList {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     values: Vec<KeyValue>,
+}
+
+#[cfg(test)]
+mod tests {
+    //! Unit coverage for the private registry-document ordering and merge
+    //! rules. The fixture corpus cannot distinguish alphabetical ordering from
+    //! a selected-component-first rule, because every multi-component fixture
+    //! registry happens to name a selected component that already sorts first.
+    //! These synthetic schemas pin the rule instead.
+
+    use super::*;
+
+    /// One component whose only dependency sorts strictly before it.
+    fn dependency_sorts_first_schema() -> String {
+        serde_json::json!({
+            "component": "zeta.app",
+            "dependencies": ["alpha.core"],
+            "dependency_types": [{
+                "component": "alpha.core",
+                "types": [{"name": "Widget", "kind": "struct", "fields": [{"name": "id", "ty": "i32"}]}]
+            }],
+            "operations": [{
+                "name": "run",
+                "is_async": false,
+                "inputs": [{"name": "value", "ty": "i32"}],
+                "output": "alpha.core::Widget"
+            }],
+            "types": []
+        })
+        .to_string()
+    }
+
+    fn component_ids(registry_json: &str) -> Vec<String> {
+        let document: serde_json::Value = serde_json::from_str(registry_json).expect("registry JSON");
+        document["components"]
+            .as_array()
+            .expect("components array")
+            .iter()
+            .map(|component| component["id"].as_str().expect("component id").to_string())
+            .collect()
+    }
+
+    fn component(json: serde_json::Value) -> RegistryComponent {
+        serde_json::from_value(json).expect("registry component")
+    }
+
+    fn operation(name: &str, output: &str) -> serde_json::Value {
+        serde_json::json!({
+            "name": name,
+            "inputs": [],
+            "observations": [],
+            "outcomes": {"result": {"kind": "primitive", "name": output}}
+        })
+    }
+
+    fn named_type(name: &str, field: &str) -> serde_json::Value {
+        serde_json::json!({
+            "name": name,
+            "kind": "record",
+            "fields": [{"name": field, "type": {"kind": "primitive", "name": "i32"}}]
+        })
+    }
+
+    /// Components are ordered by id alone. The selected component gets no
+    /// privileged first position, so a dependency that sorts before it leads.
+    #[test]
+    fn registry_components_are_ordered_alphabetically_by_id() {
+        let encoded = encode_schema_registry_result(
+            "urn:ctsc:registry:zeta.app".to_string(),
+            "0.1.0".to_string(),
+            &dependency_sorts_first_schema(),
+        )
+        .expect("schema encodes");
+        assert_eq!(component_ids(&encoded.registry_json), vec!["alpha.core", "zeta.app"]);
+        assert_eq!(encoded.operation_count, 1);
+        assert_eq!(encoded.type_count, 1);
+    }
+
+    /// `discover` encodes one schema and `capture` encodes a set, but both
+    /// write the same `registry.ctsc.json`. One ordering rule governs both, so
+    /// the same logical component set must serialize to the same bytes.
+    #[test]
+    fn single_and_multi_schema_encoders_agree_byte_for_byte() {
+        let schema = dependency_sorts_first_schema();
+        let single =
+            encode_schema_registry_result("urn:ctsc:registry:zeta.app".to_string(), "0.1.0".to_string(), &schema).expect("single encode");
+        let many = encode_schema_registries_result(
+            "urn:ctsc:registry:zeta.app".to_string(),
+            "0.1.0".to_string(),
+            std::slice::from_ref(&schema),
+        )
+        .expect("multi encode");
+        assert_eq!(single.registry_json.as_bytes(), many.registry_json.as_bytes());
+        assert_eq!(single.operation_count, many.operation_count);
+        assert_eq!(single.type_count, many.type_count);
+
+        // Repeating a schema merges it into itself and must stay identical.
+        let repeated = encode_schema_registries_result(
+            "urn:ctsc:registry:zeta.app".to_string(),
+            "0.1.0".to_string(),
+            &[schema.clone(), schema],
+        )
+        .expect("repeated encode");
+        assert_eq!(repeated.registry_json.as_bytes(), single.registry_json.as_bytes());
+        assert_eq!(repeated.operation_count, single.operation_count);
+        assert_eq!(repeated.type_count, single.type_count);
+    }
+
+    /// The one shape where the merged document counts exceed every individual
+    /// schema's: `alpha.core` contributes its own operations from its full
+    /// schema *and* appears again as `zeta.app`'s dependency type closure.
+    /// Merging must union the two views rather than let either replace the
+    /// other, so the counts cover both components' whole surface.
+    #[test]
+    fn merged_counts_cover_a_component_present_as_both_schema_and_dependency() {
+        let core = serde_json::json!({
+            "component": "alpha.core",
+            "operations": [{
+                "name": "build",
+                "is_async": false,
+                "inputs": [{"name": "id", "ty": "i32"}],
+                "output": "alpha.core::Widget"
+            }],
+            "types": [{"name": "Widget", "kind": "struct", "fields": [{"name": "id", "ty": "i32"}]}]
+        })
+        .to_string();
+        let app = dependency_sorts_first_schema();
+
+        let merged = encode_schema_registries_result(
+            "urn:ctsc:registry:zeta.app".to_string(),
+            "0.1.0".to_string(),
+            &[app.clone(), core.clone()],
+        )
+        .expect("merged encode");
+
+        // `zeta.app::run` plus `alpha.core::build`; the dependency closure view
+        // of `alpha.core` carries no operations and must not erase them.
+        assert_eq!(merged.operation_count, 2);
+        // `alpha.core::Widget` counted exactly once despite both views
+        // declaring it.
+        assert_eq!(merged.type_count, 1);
+        assert_eq!(component_ids(&merged.registry_json), vec!["alpha.core", "zeta.app"]);
+
+        // Both counts strictly exceed what either schema yields alone, which is
+        // what the single-schema byte-equivalence test cannot reach.
+        let app_only =
+            encode_schema_registry_result("urn:ctsc:registry:zeta.app".to_string(), "0.1.0".to_string(), &app).expect("app encode");
+        assert_eq!((app_only.operation_count, app_only.type_count), (1, 1));
+        let core_only =
+            encode_schema_registry_result("urn:ctsc:registry:alpha.core".to_string(), "0.1.0".to_string(), &core).expect("core encode");
+        assert_eq!((core_only.operation_count, core_only.type_count), (1, 1));
+        assert!(merged.operation_count > app_only.operation_count && merged.operation_count > core_only.operation_count);
+
+        // Schema order must not change the document.
+        let reversed = encode_schema_registries_result("urn:ctsc:registry:zeta.app".to_string(), "0.1.0".to_string(), &[core, app])
+            .expect("reversed encode");
+        assert_eq!(reversed.registry_json.as_bytes(), merged.registry_json.as_bytes());
+    }
+
+    /// Repeated declarations of one component contribute the union of their
+    /// dependencies, operations, and types, each kept in sorted order.
+    #[test]
+    fn merge_registry_component_unions_declarations_deterministically() {
+        let mut existing = component(serde_json::json!({
+            "id": "zeta.app",
+            "dependencies": [{"componentId": "beta.core"}],
+            "operations": [operation("run", "i32")],
+            "types": [named_type("Widget", "id")]
+        }));
+        let incoming = component(serde_json::json!({
+            "id": "zeta.app",
+            "dependencies": [{"componentId": "alpha.core"}, {"componentId": "beta.core"}],
+            "operations": [operation("advance", "i32"), operation("run", "i32")],
+            "types": [named_type("Gadget", "id"), named_type("Widget", "id")]
+        }));
+        merge_registry_component(&mut existing, incoming).expect("compatible declarations merge");
+
+        assert_eq!(
+            existing
+                .dependencies
+                .iter()
+                .map(|dependency| dependency.component_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["alpha.core", "beta.core"],
+            "dependencies are unioned and sorted"
+        );
+        assert_eq!(
+            existing.operations.iter().map(|op| op.name.as_str()).collect::<Vec<_>>(),
+            vec!["advance", "run"]
+        );
+        assert_eq!(
+            existing.types.iter().map(|ty| ty.name.as_str()).collect::<Vec<_>>(),
+            vec!["Gadget", "Widget"]
+        );
+
+        // Merging the same content again is a fixpoint: no duplicates, no
+        // reordering, so declaration order cannot leak into the document.
+        let again = existing.clone();
+        let mut fixpoint = existing.clone();
+        merge_registry_component(&mut fixpoint, again).expect("idempotent merge");
+        assert_eq!(fixpoint, existing);
+    }
+
+    /// Two declarations of the same operation or type name that disagree are
+    /// reported rather than silently resolved to one of them.
+    #[test]
+    fn merge_registry_component_rejects_disagreeing_declarations() {
+        let base = component(serde_json::json!({
+            "id": "zeta.app",
+            "operations": [operation("run", "i32")],
+            "types": [named_type("Widget", "id")]
+        }));
+
+        let mut operations = base.clone();
+        let error = merge_registry_component(
+            &mut operations,
+            component(serde_json::json!({
+                "id": "zeta.app",
+                "operations": [operation("run", "i64")],
+                "types": []
+            })),
+        )
+        .expect_err("a divergent operation must be reported");
+        assert_eq!(error, "normalized schemas disagree on operation 'zeta.app::run'");
+
+        let mut types = base;
+        let error = merge_registry_component(
+            &mut types,
+            component(serde_json::json!({
+                "id": "zeta.app",
+                "operations": [],
+                "types": [named_type("Widget", "label")]
+            })),
+        )
+        .expect_err("a divergent type must be reported");
+        assert_eq!(error, "normalized schemas disagree on type 'zeta.app::Widget'");
+    }
 }

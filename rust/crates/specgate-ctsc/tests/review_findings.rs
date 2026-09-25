@@ -652,3 +652,63 @@ fn registry_json_schema_shape_and_extension_rules_are_enforced() {
     }
     std::fs::remove_dir_all(scratch).expect("remove scratch");
 }
+
+/// Registry 0.2 §3.1 makes ascending component id order a document-level
+/// MUST. It is enforced exactly like the neighbouring component-id uniqueness
+/// MUST, so an unsorted hand-written or third-party document is rejected
+/// rather than silently accepted.
+#[test]
+fn registry_validation_rejects_unsorted_component_order() {
+    let scratch = scratch("component-order");
+    let component = |id: &str| {
+        json!({
+            "id": id,
+            "operations": [{
+                "name": "run",
+                "inputs": [],
+                "observations": [],
+                "outcomes": {"result": {"kind": "primitive", "name": "i32"}}
+            }],
+            "types": []
+        })
+    };
+    let document = |ids: [&str; 2]| {
+        json!({
+            "format": "ctsc.registry",
+            "formatVersion": "0.2.0",
+            "registryId": "urn:ctsc:registry:zeta.app",
+            "version": "0.1.0",
+            "components": [component(ids[0]), component(ids[1])]
+        })
+    };
+
+    let sorted_path = scratch.join("sorted.registry.json");
+    write_json(&sorted_path, &document(["alpha.core", "zeta.app"]));
+    let sorted = validate_registry(&sorted_path, &[]);
+    assert!(sorted.valid, "a sorted document must stay valid: {:#?}", sorted.issues);
+
+    let unsorted_path = scratch.join("unsorted.registry.json");
+    write_json(&unsorted_path, &document(["zeta.app", "alpha.core"]));
+    let unsorted = validate_registry(&unsorted_path, &[]);
+    let ordering = unsorted
+        .issues
+        .iter()
+        .filter(|issue| issue.message.contains("ascending id order"))
+        .collect::<Vec<_>>();
+    std::fs::remove_dir_all(scratch).expect("remove scratch");
+
+    assert!(!unsorted.valid);
+    assert_eq!(ordering.len(), 1, "exactly one ordering issue is reported: {:#?}", unsorted.issues);
+    assert_eq!(ordering[0].message, "component id 'alpha.core' is out of ascending id order");
+    assert!(
+        ordering[0].location.ends_with("$.components"),
+        "the ordering issue is reported at the components array: {}",
+        ordering[0].location
+    );
+    assert_eq!(
+        unsorted.issues.len(),
+        1,
+        "component order alone must not trigger unrelated issues: {:#?}",
+        unsorted.issues
+    );
+}
