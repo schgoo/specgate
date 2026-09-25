@@ -34,7 +34,18 @@ Rust.
   validator, or comparator tests. Do not add a separate behavioral assertion
   format or flat trace compatibility path.
 - Capture observes real annotated operation boundaries through ordinary tests.
+- `specgate capture --component <id>` selects a scenario's *top-level*
+  operations of that component and exports each of those subtrees verbatim.
+  Nested calls into other annotated components keep their original parentage,
+  nothing is ever reparented or promoted, and a scenario with no top-level
+  operation of the component contributes nothing. The exported registry is the
+  union of every component present in the filtered trace, so nested foreign
+  operations stay declared and the bundle still links.
 - Every captured bundle passes trace, linked, and bundle validation.
+- A registry document orders its `components` array by ascending component id.
+  No component is privileged by being the selected or root one. Single-schema
+  and multi-schema encoding share this one rule, so `discover` and `capture`
+  emit byte-identical bytes for the same component set.
 - Setup selection is exact by component and operation; ambiguity is rejected.
   Setup construction inputs are folded into the operation input surface, and
   setup-filled parameters are omitted.

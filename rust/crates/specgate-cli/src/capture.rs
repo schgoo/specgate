@@ -5,7 +5,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use specgate::__rt::{NativeCapture, NativeCaptureConfig, NativeCaptureEnvironmentConfig};
 use specgate::{SpecEvent, spec_operation};
-use specgate_ctsc::{encode_native_captures_otlp_result, encode_schema_registry_result};
+use specgate_ctsc::{encode_native_captures_otlp_result, encode_schema_registries_result};
 use specgate_discovery::binding::resolve_binding_target;
 use specgate_discovery::discovery::{Registry, TargetDiscovery, cargo_bin, discover_resolved_target, normalize_registry};
 use std::collections::BTreeSet;
@@ -281,15 +281,7 @@ fn encode_component_bundle(
 ) -> Result<EncodedBundle, String> {
     let resolved = &discovered.target;
     let selected = request.component.as_str();
-    let schema = normalize_registry(&discovered.registry, &resolved.language, selected)?;
-    let schema_json =
-        serde_json::to_string(&schema).map_err(|error| format!("failed to serialize normalized discovery schema: {error}"))?;
-    let registry_id = format!("urn:ctsc:registry:{selected}");
-    let registry_encoding = encode_schema_registry_result(registry_id.clone(), REGISTRY_VERSION.to_string(), &schema_json)?;
-    let registry_bytes = registry_encoding.registry_json.into_bytes();
-    let registry_digest = sha256_digest(&registry_bytes);
-
-    let captures = select_component_scenarios(&executed.captures, selected)?;
+    let captures = filter_component_scenarios(&executed.captures, selected);
     if captures.is_empty() {
         let failures = if executed.failures.is_empty() {
             String::new()
@@ -308,6 +300,27 @@ fn encode_component_bundle(
             "no passing tests captured operations for component '{selected}'; add a handwritten test that invokes the component{failures}"
         ));
     }
+
+    // Component capture keeps nested calls into other annotated components
+    // verbatim, so the exported registry must declare every component the
+    // filtered trace actually contains or CTSC Linked validation rejects those
+    // nested spans. The selected component always contributes its full
+    // normalized surface, so a single-component capture is unchanged.
+    let mut components = BTreeSet::from([selected]);
+    for capture in &captures {
+        for operation in &capture.operations {
+            components.insert(operation.component_id.as_str());
+        }
+    }
+    let mut schemas = Vec::with_capacity(components.len());
+    for component in &components {
+        let schema = normalize_registry(&discovered.registry, &resolved.language, component)?;
+        schemas.push(serde_json::to_string(&schema).map_err(|error| format!("failed to serialize normalized discovery schema: {error}"))?);
+    }
+    let registry_id = format!("urn:ctsc:registry:{selected}");
+    let registry_encoding = encode_schema_registries_result(registry_id.clone(), REGISTRY_VERSION.to_string(), &schemas)?;
+    let registry_bytes = registry_encoding.registry_json.into_bytes();
+    let registry_digest = sha256_digest(&registry_bytes);
 
     let operation_count = captures.iter().try_fold(0_usize, |count, capture| {
         count
@@ -373,28 +386,49 @@ fn encode_component_bundle(
     })
 }
 
-/// Select the scenarios that belong to `selected`.
+/// Select the scenarios that belong to `component`, by *top-level* operation
+/// only.
 ///
-/// A scenario that touches no selected operation belongs to another component
-/// and is not this component's reference behavior. A scenario that mixes this
-/// component with a foreign one cannot be linked against a single root
-/// registry, so it is reported rather than silently dropped.
-fn select_component_scenarios(scenarios: &[NativeCapture], selected: &str) -> Result<Vec<NativeCapture>, String> {
+/// Each scenario contributes the subtrees rooted at its top-level operations of
+/// `component`, verbatim: nested operations from other annotated components
+/// stay in the trace with their original `parent_span_id`. A foreign top-level
+/// operation and its whole subtree are dropped, and a scenario with no
+/// top-level operation of `component` contributes nothing.
+fn filter_component_scenarios(scenarios: &[NativeCapture], component: &str) -> Vec<NativeCapture> {
     let mut captures = Vec::new();
     for capture in scenarios {
-        if !capture.operations.iter().any(|operation| operation.component_id == selected) {
+        let mut retained = capture
+            .operations
+            .iter()
+            .filter(|operation| operation.parent_span_id == capture.scenario.span_id && operation.component_id == component)
+            .map(|operation| operation.span_id.clone())
+            .collect::<BTreeSet<_>>();
+        if retained.is_empty() {
             continue;
         }
-        if let Some(foreign) = capture.operations.iter().find(|operation| operation.component_id != selected) {
-            return Err(format!(
-                "captured scenario '{}' invokes foreign component '{}' operation '{}'; capture cannot link it against root registry '{}'",
-                capture.scenario_name, foreign.component_id, foreign.operation_name, selected
-            ));
+        // Capture pushes each operation at its begin boundary, so a parent
+        // always precedes its children here. The fixpoint loop costs nothing
+        // on that input and keeps the closure correct without depending on
+        // that recording order.
+        loop {
+            let grown = capture
+                .operations
+                .iter()
+                .filter(|operation| !retained.contains(&operation.span_id) && retained.contains(&operation.parent_span_id))
+                .map(|operation| operation.span_id.clone())
+                .collect::<Vec<_>>();
+            if grown.is_empty() {
+                break;
+            }
+            retained.extend(grown);
         }
-        captures.push(capture.clone());
+        let mut filtered = capture.clone();
+        filtered.operations.retain(|operation| retained.contains(&operation.span_id));
+        captures.push(filtered);
     }
-    Ok(captures)
+    captures
 }
+
 fn select_component(registry: &Registry, component: &str) -> Result<String, String> {
     let components = registry.present_components();
     if component.is_empty() {
@@ -849,6 +883,95 @@ mod tests {
         assert_eq!(operation_spans(&multiple_trace, "used").len(), 1);
         assert!(operation_spans(&multiple_trace, "unexercised").is_empty());
 
+        // Component mode filters TOP-LEVEL operations only. The selected
+        // component's top-level subtrees are exported verbatim — nested foreign
+        // operations keep their original parents — and a foreign top-level
+        // operation is dropped together with its whole subtree.
+        let component_root = request_at("fixture.cli.nested_root", root.join("component-root"));
+        let root_reports = write_capture_bundles(&discovered, std::slice::from_ref(&component_root), &executed, false)
+            .expect("component capture over a multi-component call chain");
+        assert_eq!(root_reports[0].component_id, "fixture.cli.nested_root");
+        let root_trace = read_trace(&component_root.out);
+        let root_spans = operation_spans(&root_trace, "root");
+        let bridge_spans = operation_spans(&root_trace, "bridge");
+        let leaf_spans = operation_spans(&root_trace, "leaf");
+        assert_eq!(root_spans.len(), 2, "both passing scenarios invoke root at top level");
+        assert_eq!(bridge_spans.len(), 2, "nested foreign operations are kept verbatim");
+        assert_eq!(leaf_spans.len(), 2, "only the leaf reached through root survives");
+        assert!(
+            operation_spans(&root_trace, "sibling").is_empty(),
+            "a foreign top-level operation and its subtree are dropped"
+        );
+        let retained_root_ids = span_ids(&root_spans);
+        let retained_bridge_ids = span_ids(&bridge_spans);
+        let scenario_ids = scenario_span_ids(&root_trace);
+        assert!(
+            root_spans.iter().all(|span| scenario_ids.contains(&&span["parentSpanId"])),
+            "a retained top-level span keeps the scenario as its parent"
+        );
+        assert!(
+            bridge_spans.iter().all(|span| retained_root_ids.contains(&&span["parentSpanId"])),
+            "component mode never reparents a nested span"
+        );
+        assert!(
+            leaf_spans.iter().all(|span| retained_bridge_ids.contains(&&span["parentSpanId"])),
+            "component mode never reparents a nested span"
+        );
+        let root_registry: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(component_root.out.join(REGISTRY_FILE)).unwrap()).unwrap();
+        assert_eq!(root_registry["registryId"], "urn:ctsc:registry:fixture.cli.nested_root");
+        assert_eq!(
+            root_registry["components"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|component| {
+                    (
+                        component["id"].as_str().unwrap(),
+                        component["operations"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .map(|operation| operation["name"].as_str().unwrap())
+                            .collect::<Vec<_>>(),
+                    )
+                })
+                .collect::<Vec<_>>(),
+            vec![
+                ("fixture.cli.nested_bridge", vec!["bridge"]),
+                ("fixture.cli.nested_leaf", vec!["leaf"]),
+                ("fixture.cli.nested_root", vec!["root"]),
+            ],
+            "the registry must declare every component and operation present in the exported trace"
+        );
+        let linked = validate_linked(&component_root.out.join(TRACE_FILE), &component_root.out.join(REGISTRY_FILE), &[]);
+        assert!(linked.valid, "component linked validation failed: {:#?}", linked.issues);
+        let bundle = validate_bundle(&component_root.out);
+        assert!(bundle.valid, "component bundle validation failed: {:#?}", bundle.issues);
+
+        let component_sibling = request_at("fixture.cli.nested_sibling", root.join("component-sibling"));
+        write_capture_bundles(&discovered, std::slice::from_ref(&component_sibling), &executed, false)
+            .expect("the sibling's own top-level subtree is capturable");
+        let sibling_trace = read_trace(&component_sibling.out);
+        assert!(operation_spans(&sibling_trace, "root").is_empty());
+        assert!(operation_spans(&sibling_trace, "bridge").is_empty());
+        let sibling_spans = operation_spans(&sibling_trace, "sibling");
+        let sibling_leaf = operation_spans(&sibling_trace, "leaf");
+        assert_eq!(sibling_spans.len(), 1);
+        assert_eq!(sibling_leaf.len(), 1);
+        assert_eq!(sibling_leaf[0]["parentSpanId"], sibling_spans[0]["spanId"]);
+
+        // `leaf` is only ever reached as a nested callee, so no scenario has a
+        // top-level `leaf` operation and the component contributes nothing.
+        let component_leaf = request_at("fixture.cli.nested_leaf", root.join("component-leaf"));
+        let leaf_error = write_capture_bundles(&discovered, std::slice::from_ref(&component_leaf), &executed, false)
+            .expect_err("a component that is never top-level contributes no scenario");
+        assert!(
+            leaf_error.contains("no passing tests captured operations for component 'fixture.cli.nested_leaf'"),
+            "{leaf_error}"
+        );
+        assert!(!component_leaf.out.exists());
+
         let unused = request_at("fixture.cli.unused", root.join("unused"));
         let no_match = write_capture_bundles(&discovered, std::slice::from_ref(&unused), &executed, false)
             .expect_err("an unexercised component must be rejected");
@@ -879,6 +1002,20 @@ mod tests {
             .expect("captured spans")
             .iter()
             .filter(|span| attribute(span, "conformance.operation.name").and_then(|value| value["stringValue"].as_str()) == Some(operation))
+            .collect()
+    }
+
+    fn span_ids<'a>(spans: &[&'a serde_json::Value]) -> Vec<&'a serde_json::Value> {
+        spans.iter().map(|span| &span["spanId"]).collect()
+    }
+
+    fn scenario_span_ids(trace: &serde_json::Value) -> Vec<&serde_json::Value> {
+        trace["resourceSpans"][0]["scopeSpans"][0]["spans"]
+            .as_array()
+            .expect("captured spans")
+            .iter()
+            .filter(|span| span["name"] == "conformance.scenario")
+            .map(|span| &span["spanId"])
             .collect()
     }
 
@@ -933,6 +1070,76 @@ mod tests {
             ],"types":[]}}"#
         );
         Registry::parse(&json).expect("synthetic registry parses")
+    }
+
+    /// Component mode exports top-level subtrees verbatim: a foreign top-level
+    /// operation is dropped whole, and no retained span is ever reparented.
+    #[test]
+    fn component_filtering_is_top_level_only_and_never_reparents() {
+        let capture = synthetic_capture();
+        let selected = filter_component_scenarios(std::slice::from_ref(&capture), "fixture.root");
+        assert_eq!(
+            selected[0]
+                .operations
+                .iter()
+                .map(|operation| (operation.operation_name.as_str(), operation.parent_span_id.as_str()))
+                .collect::<Vec<_>>(),
+            vec![("root", "scenario"), ("nested", "root-span")]
+        );
+        assert!(
+            filter_component_scenarios(std::slice::from_ref(&capture), "fixture.nested").is_empty(),
+            "a component that is never top-level contributes nothing"
+        );
+        let foreign = filter_component_scenarios(std::slice::from_ref(&capture), "fixture.other");
+        assert_eq!(
+            foreign[0]
+                .operations
+                .iter()
+                .map(|operation| operation.operation_name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["other"]
+        );
+    }
+
+    /// One scenario with two top-level operations from different components,
+    /// the first of which has a nested foreign callee.
+    fn synthetic_capture() -> NativeCapture {
+        let boundary = |span_id: &str, parent: Option<&str>| {
+            serde_json::json!({
+                "span_id": span_id,
+                "parent_span_id": parent,
+                "start_time_unix_nano": 0,
+                "end_time_unix_nano": 1,
+                "status": "ok",
+            })
+        };
+        let operation = |order: u64, name: &str, component: &str, span_id: &str, parent: &str| {
+            serde_json::json!({
+                "order": order,
+                "component_id": component,
+                "operation_name": name,
+                "span_id": span_id,
+                "parent_span_id": parent,
+                "start_time_unix_nano": 0,
+                "end_time_unix_nano": 1,
+                "status": "ok",
+                "inputs": {},
+                "observations": [],
+                "completion": { "kind": "empty", "order": 0, "time_unix_nano": 1 },
+            })
+        };
+        serde_json::from_value(serde_json::json!({
+            "trace_id": "11111111111111111111111111111111",
+            "scenario_name": "tests::mixed",
+            "run": boundary("run", None),
+            "scenario": boundary("scenario", Some("run")),
+            "operations": [
+                operation(0, "root", "fixture.root", "root-span", "scenario"),
+                operation(1, "nested", "fixture.nested", "nested-span", "root-span"),
+                operation(2, "other", "fixture.other", "other-span", "scenario"),
+            ],
+        }))
+        .expect("synthetic capture deserializes")
     }
 
     fn request(component: &str) -> CaptureRequest {

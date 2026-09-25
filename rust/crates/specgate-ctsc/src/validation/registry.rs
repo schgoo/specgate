@@ -322,6 +322,22 @@ fn validate_shape(document: &RegistryDocument, path: &Path, issues: &mut Vec<Val
         "id",
         issues,
     );
+    // Registry 0.2 §3.1 orders components by ascending id, compared as a
+    // sequence of Unicode code points. Rust `str` comparison is byte-wise over
+    // UTF-8, and UTF-8 byte order is identical to code-point order, so this is
+    // exactly the comparison the contract specifies.
+    if let Some(out_of_order) = document
+        .components
+        .windows(2)
+        .find(|pair| pair[0].id > pair[1].id)
+        .map(|pair| pair[1].id.as_str())
+    {
+        issue(
+            &mut *issues,
+            located(path, "$.components"),
+            format!("component id '{out_of_order}' is out of ascending id order"),
+        );
+    }
     for (component_index, component) in document.components.iter().enumerate() {
         let location = format!("$.components[{component_index}]");
         require(
