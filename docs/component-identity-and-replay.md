@@ -162,6 +162,83 @@ The open question is whether SpecGate's unit of observation stops at the process
 boundary by definition, or whether distributed capture is a later capability
 that the current artifacts should leave room for.
 
+## Open question 6 - declared external identity
+
+A component ID is a free-form declared string
+(`rust/crates/specgate-annotations-macros/src/lib.rs:670`), unique across a
+resolved registry set (`docs/ctsc/registry.md:54`), and deliberately
+version-free so that a reference and a candidate pair on it.
+
+Nothing relates that string to whatever another system calls the same unit of
+software: a service entry in an authorization policy, a node in a service
+graph, a package coordinate, a deployment identity. An external consumer of
+SpecGate artifacts must therefore recover the correspondence heuristically, by
+name similarity or by matching operation surfaces against routes. Heuristic
+correlation is measurable but never exact, and it fails silently in both
+directions.
+
+Declaration is the alternative: a component states the identities it is known
+by elsewhere, and correlation becomes a lookup. This adds no correlation logic
+to SpecGate; it carries assertions their owners already hold. Section 3 already
+admits optional namespaced extensions on a component, and section 11 requires
+extensions to use a namespace outside `conformance.*`, so the format may
+accommodate this without a shape change.
+
+Two properties would have to hold. External identifiers must be inert metadata
+rather than identity: if they participate in operation linking, the exact
+component match that makes a comparison valid by construction weakens into
+fuzzy matching. And they must not reintroduce package organization into
+artifacts, which this note states should be preserved. A deployment or policy
+identity is not a package name, but the line is thin.
+
+Declared identity is viable at scale. Substrate's OMAP authorization policies
+are authored by humans through a portal and rendered by a tool rather than
+derived from code, so the authoritative dimension of at least one large service
+graph is already a declaration of intent rather than an inference.
+
+The open question is whether components should carry declared external
+identifiers, and if so whether those identifiers are inert metadata or a
+resolution mechanism.
+
+## Open question 7 - boundary contracts versus in-process differential
+
+Question 5 asks whether distributed capture is a later capability. This
+question is prior to it: whether a SpecGate artifact describes one component's
+behavior, or an interaction between two components.
+
+Today it describes behavior. A capture drives operations in one process and
+records what happened inside it, and replay re-invokes those operations in
+process. Nested cross-component calls are retained verbatim with parentage
+intact, but they are observed detail within a single execution rather than a
+contract between two independently deliverable units.
+
+The alternative model records the interaction at a boundary and replays each
+side independently against the recorded counterpart: the callee against
+recorded requests, the caller against recorded responses. Consumer-driven
+contract testing is the established prior art. Question 5 identifies this as
+necessary for service-to-service replay, but it is not only about distribution.
+It also changes what an in-process bundle means, because a nested foreign
+operation is exactly such a boundary.
+
+The models differ in what a reported difference means. A whole-component
+differential reports that observable behavior changed. A boundary contract
+reports that a specific promise between two named parties was broken, which is
+the form an external service graph can attach to an edge. Edge existence is
+already available from ordinary distributed tracing; a typed, value-level
+contract on the edge is not.
+
+An adjacent stance follows from this framing. Deriving component and operation
+identity from unmodified source, by crawling routes, clients, and call sites
+the way a service-graph builder does, would make a boundary a matter of
+inference. An annotation is what marks a boundary as carrying a promise its
+owner intends to keep, which is an editorial judgement rather than a fact
+recoverable from code. Recording that reasoning here avoids relitigating it per
+feature.
+
+The open question is whether a boundary contract is a second artifact kind
+alongside the component bundle, a reinterpretation of the existing one, or out
+of scope.
+
 ## Constraints any answer must respect
 
 - A trace is bound to one root registry through required resource attributes
@@ -188,3 +265,5 @@ stimulus are both useful, and a profile spanning components can capture and
 validate but cannot replay.
 
 Profiles should not be revived until questions 1 through 5 are resolved.
+Questions 6 and 7 are broader model questions, not prerequisites for that
+work.
