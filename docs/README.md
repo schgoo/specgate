@@ -21,6 +21,8 @@ This index is the starting point for humans and coding agents.
   CTSC Strict.
 - [`specgate-ctsc-migration.md`](specgate-ctsc-migration.md) — implemented
   architecture, migration status, and current limitations.
+- [`roadmap.md`](roadmap.md) — tiered plan to MVP, V2, and V3, and the open
+  questions gating each tier.
 - [`decisions/`](decisions/) — human-ratified architectural decisions.
 - [`component-identity-and-replay.md`](component-identity-and-replay.md) —
   exploratory notes on scenario identity, the replay unit, and artifact
