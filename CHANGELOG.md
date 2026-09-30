@@ -13,6 +13,11 @@
   operation subtrees verbatim, keeping nested foreign operations with their
   original parentage, and emits a registry that is the union of every component
   present in the filtered trace.
+- `finish_native_capture` now closes every still-outstanding operation with the
+  core target fault `incomplete_capture` (observer `target`) on that operation's
+  own span, innermost first, and persists the sidecar before returning the
+  error that names the outstanding chain. Trace §7.5 required the fault; no
+  emission site existed.
 - Replaced the legacy verification stack with CTSC-native discovery, capture,
   and replay.
 - Added the focused `specgate-discovery` crate and one strict target-binding

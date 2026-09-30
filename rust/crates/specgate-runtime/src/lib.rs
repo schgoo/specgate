@@ -1217,7 +1217,45 @@ pub fn reject_async_native_capture(component_id: &str, operation_name: &str) -> 
     }
 }
 
+/// Close every still-outstanding operation with an `incomplete_capture` fault.
+///
+/// Trace §7.5 requires the fault on the unfinished operation span itself, so
+/// every level is closed innermost first and each one carries its own fault.
+/// Closing all of them — not just the innermost — is what lets the recording
+/// still encode as well-formed spans with an end time and a status.
+///
+/// Returns the outstanding chain, outermost first, for the caller's error.
+fn close_outstanding_native_operations(state: &mut NativeCaptureState) -> Result<String, String> {
+    let chain = state
+        .active_operations
+        .iter()
+        .map(|index| state.operations[*index].operation_name.as_str())
+        .collect::<Vec<_>>()
+        .join(" -> ");
+    while let Some(operation_index) = state.active_operations.last().copied() {
+        let operation_name = state.operations[operation_index].operation_name.clone();
+        let completion = NativeCompletion::Fault {
+            order: state.order()?,
+            time_unix_nano: state.tick()?,
+            fault_type: "incomplete_capture".to_string(),
+            message: format!("native operation '{operation_name}' was still outstanding when the capture ended"),
+            observer: "target".to_string(),
+        };
+        let end_time_unix_nano = state.tick()?;
+        let operation = &mut state.operations[operation_index];
+        operation.completion = Some(completion);
+        operation.end_time_unix_nano = Some(end_time_unix_nano);
+        operation.status = Some(NativeStatus::Error);
+        state.active_operations.pop();
+    }
+    Ok(chain)
+}
+
 /// Finish and take the active native capture.
+///
+/// An operation still outstanding at this point is closed with an
+/// `incomplete_capture` target fault and the recording is persisted, so the
+/// artifact says which operation never finished; the call still fails.
 ///
 /// # Errors
 ///
@@ -1226,23 +1264,29 @@ pub fn reject_async_native_capture(component_id: &str, operation_name: &str) -> 
 pub fn finish_native_capture() -> Result<NativeCapture, String> {
     NATIVE_CAPTURE.with(|slot| {
         let mut slot = slot.borrow_mut();
-        let Some(state) = slot.take() else {
+        let Some(mut state) = slot.take() else {
             return Err("no native capture session is active".to_string());
         };
-        if !state.active_operations.is_empty() {
-            let names = state
-                .active_operations
-                .iter()
-                .map(|index| state.operations[*index].operation_name.as_str())
-                .collect::<Vec<_>>()
-                .join(" -> ");
-            *slot = Some(state);
-            return Err(format!("native capture has nested/unclosed operation scopes: {names}"));
-        }
+        // An outstanding operation is a contract violation the recording still
+        // has to describe: emit the fault, persist what was observed, and then
+        // fail the run anyway.
+        let outstanding = if state.active_operations.is_empty() {
+            None
+        } else {
+            Some(close_outstanding_native_operations(&mut state)?)
+        };
         // The session is gone for good from here on, so its recorded setup
-        // construction inputs must not reach the next one. Restored sessions
-        // above keep theirs.
+        // construction inputs must not reach the next one.
         PENDING_SETUP_INPUTS.with(|pending| pending.borrow_mut().clear());
+        if let Some(chain) = outstanding {
+            let message = format!("native capture has nested/unclosed operation scopes: {chain}");
+            if let Some(path) = state.sidecar_path.clone()
+                && let Err(error) = build_native_capture(&state).and_then(|capture| persist_capture_atomically(&path, &capture))
+            {
+                return Err(format!("{message}; the incomplete capture could not be persisted: {error}"));
+            }
+            return Err(message);
+        }
         if let Some(error) = state.terminal_error {
             return Err(error);
         }
@@ -1925,6 +1969,96 @@ mod tests {
         assert!(matches!(capture.operations[1].completion, Some(NativeCompletion::Error { .. })));
         assert!(matches!(capture.operations[2].completion, Some(NativeCompletion::Fault { .. })));
         assert_eq!(capture.run.status, NativeStatus::Error);
+    }
+
+    /// Leave one operation outstanding by skipping its `Drop`, the way a leaked
+    /// `OperationScope` does. `ManuallyDrop` is the sanctioned form of the leak.
+    fn leak_scope(scope: OperationScope) {
+        let _outstanding = std::mem::ManuallyDrop::new(scope);
+    }
+
+    /// Read the sidecar a failed `finish_native_capture` left behind.
+    fn read_sidecar(path: &Path) -> NativeCapture {
+        serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+    }
+
+    fn assert_incomplete_capture_fault(operation: &NativeOperationSpan) {
+        let Some(NativeCompletion::Fault {
+            fault_type,
+            message,
+            observer,
+            ..
+        }) = &operation.completion
+        else {
+            panic!("expected an incomplete_capture fault, got {:?}", operation.completion);
+        };
+        assert_eq!(fault_type, "incomplete_capture");
+        assert_eq!(observer, "target");
+        assert!(
+            message.contains(&operation.operation_name),
+            "the fault must name its own operation: {message}"
+        );
+        assert_eq!(operation.status, NativeStatus::Error);
+    }
+
+    #[test]
+    fn an_outstanding_operation_is_faulted_persisted_and_still_fails_the_run() {
+        let scratch = tempfile::tempdir().unwrap();
+        let sidecar = scratch.path().join("capture.json");
+        start_native_capture_with_sidecar(native_config(&[]), Some(sidecar.clone())).unwrap();
+        leak_scope(begin_native_operation("fixture.native", "leaked").unwrap());
+
+        let error = finish_native_capture().unwrap_err();
+        assert_eq!(error, "native capture has nested/unclosed operation scopes: leaked");
+
+        let capture = read_sidecar(&sidecar);
+        assert_eq!(capture.operations.len(), 1);
+        assert_incomplete_capture_fault(&capture.operations[0]);
+        assert!(capture.operations[0].end_time_unix_nano > capture.operations[0].start_time_unix_nano);
+        assert_eq!(capture.run.status, NativeStatus::Error);
+    }
+
+    #[test]
+    fn nested_outstanding_operations_are_all_closed_with_their_own_fault() {
+        let scratch = tempfile::tempdir().unwrap();
+        let sidecar = scratch.path().join("capture.json");
+        start_native_capture_with_sidecar(native_config(&[]), Some(sidecar.clone())).unwrap();
+        leak_scope(begin_native_operation("fixture.native", "outer").unwrap());
+        leak_scope(begin_native_operation("fixture.native", "inner").unwrap());
+
+        let error = finish_native_capture().unwrap_err();
+        assert_eq!(
+            error, "native capture has nested/unclosed operation scopes: outer -> inner",
+            "the error still names the outstanding chain, outermost first"
+        );
+
+        let capture = read_sidecar(&sidecar);
+        assert_eq!(capture.operations.len(), 2);
+        for operation in &capture.operations {
+            assert_incomplete_capture_fault(operation);
+        }
+        assert_eq!(capture.operations[1].parent_span_id, capture.operations[0].span_id);
+        assert!(
+            capture.operations[1].end_time_unix_nano < capture.operations[0].end_time_unix_nano,
+            "the innermost operation must close first"
+        );
+    }
+
+    #[test]
+    fn a_faulted_incomplete_session_is_taken_rather_than_left_behind() {
+        start_native_capture(native_config(&[])).unwrap();
+        leak_scope(begin_native_operation("fixture.native", "leaked").unwrap());
+        assert_eq!(
+            finish_native_capture().unwrap_err(),
+            "native capture has nested/unclosed operation scopes: leaked"
+        );
+        assert_eq!(
+            finish_native_capture().unwrap_err(),
+            "no native capture session is active",
+            "a finalized session must not stay in the slot"
+        );
+        start_native_capture(native_config(&[])).unwrap();
+        finish_native_capture().unwrap();
     }
 
     #[test]
