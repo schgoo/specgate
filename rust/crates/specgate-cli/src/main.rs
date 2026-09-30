@@ -7,6 +7,11 @@ use specgate_cli::{capture, discover, replay};
 use specgate_ctsc::comparison::compare;
 use specgate_ctsc::validation::{validate_bundle, validate_linked, validate_registry, validate_trace};
 
+// Conventional process failure for a valid command whose operation failed.
+const EXIT_FAILURE: u8 = 1;
+// Conventional CLI usage error, distinct for shell automation.
+const EXIT_USAGE: u8 = 2;
+
 fn print_usage() {
     eprintln!(
         "usage: specgate <command> [options] <args>\n\
@@ -19,7 +24,7 @@ fn main() -> ExitCode {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     if args.is_empty() {
         print_usage();
-        return ExitCode::from(2);
+        return ExitCode::from(EXIT_USAGE);
     }
     match args[0].as_str() {
         "discover" => cmd_discover(&args[1..]),
@@ -34,7 +39,7 @@ fn main() -> ExitCode {
         command => {
             eprintln!("error: unknown command '{command}'");
             print_usage();
-            ExitCode::from(2)
+            ExitCode::from(EXIT_USAGE)
         }
     }
 }
@@ -43,7 +48,7 @@ fn cmd_validate(args: &[String]) -> ExitCode {
     let Some(kind) = args.first() else {
         return argument_error("validate requires registry, trace, linked, or bundle");
     };
-    let (positional, imports) = match parse_paths_and_imports(&args[1..]) {
+    let (positional, imports) = match parse_inputs(&args[1..]) {
         Ok(parsed) => parsed,
         Err(error) => return argument_error(&error),
     };
@@ -61,12 +66,16 @@ fn cmd_validate(args: &[String]) -> ExitCode {
         _ => return argument_error("validate requires registry, trace, linked, or bundle"),
     };
     print!("{}", specgate_cli::validation::format_report(&report));
-    if report.valid { ExitCode::SUCCESS } else { ExitCode::from(1) }
+    if report.valid {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(EXIT_FAILURE)
+    }
 }
 
-fn parse_paths_and_imports(args: &[String]) -> Result<(Vec<PathBuf>, Vec<PathBuf>), String> {
-    let mut positional = Vec::new();
-    let mut imports = Vec::new();
+fn parse_inputs(args: &[String]) -> Result<(Vec<PathBuf>, Vec<PathBuf>), String> {
+    let mut positional = Vec::with_capacity(args.len());
+    let mut imports = Vec::with_capacity(args.len());
     let mut index = 0;
     while index < args.len() {
         if args[index] == "--import" {
@@ -84,9 +93,9 @@ fn parse_paths_and_imports(args: &[String]) -> Result<(Vec<PathBuf>, Vec<PathBuf
 }
 
 fn cmd_compare(args: &[String]) -> ExitCode {
-    let mut positional = Vec::new();
+    let mut positional = Vec::with_capacity(args.len());
     let mut registry = None;
-    let mut imports = Vec::new();
+    let mut imports = Vec::with_capacity(args.len() / 2);
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
@@ -120,7 +129,11 @@ fn cmd_compare(args: &[String]) -> ExitCode {
     }
     let report = compare(&positional[0], &positional[1], registry.as_deref(), &imports);
     print!("{}", specgate_cli::comparison::format_report(&report));
-    if report.equivalent { ExitCode::SUCCESS } else { ExitCode::from(1) }
+    if report.equivalent {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(EXIT_FAILURE)
+    }
 }
 #[derive(Debug, PartialEq, Eq)]
 struct ReplayArgs {
@@ -131,7 +144,7 @@ struct ReplayArgs {
 }
 
 fn parse_replay_args(args: &[String]) -> Result<ReplayArgs, String> {
-    let mut positional = Vec::new();
+    let mut positional = Vec::with_capacity(args.len());
     let mut target = String::new();
     let mut out = None;
     let mut index = 0;
@@ -173,7 +186,7 @@ fn cmd_replay(args: &[String]) -> ExitCode {
     print!("{}", replay::format_outcome(&outcome));
     match outcome {
         replay::ReplayOutcome::Complete { .. } => ExitCode::SUCCESS,
-        replay::ReplayOutcome::Error { .. } => ExitCode::from(1),
+        replay::ReplayOutcome::Error { .. } => ExitCode::from(EXIT_FAILURE),
     }
 }
 
@@ -199,7 +212,7 @@ fn parse_capture_args(args: &[String]) -> Result<CaptureArgs, String> {
                     "--target" => target = value,
                     "--component" => component = value,
                     "--out" => out = Some(value),
-                    _ => unreachable!(),
+                    _ => unreachable!("capture parser matched a flag outside its declared flag set"),
                 }
                 index += 2;
             }
@@ -227,7 +240,7 @@ fn cmd_capture(args: &[String]) -> ExitCode {
     print!("{}", capture::format_outcome(&outcome));
     match outcome {
         capture::CaptureOutcome::Complete { .. } => ExitCode::SUCCESS,
-        capture::CaptureOutcome::Error { .. } => ExitCode::from(1),
+        capture::CaptureOutcome::Error { .. } => ExitCode::from(EXIT_FAILURE),
     }
 }
 
@@ -251,7 +264,7 @@ fn cmd_discover(args: &[String]) -> ExitCode {
                     "--registry-id" => registry_id = Some(value),
                     "--registry-version" => registry_version = Some(value),
                     "-o" | "--out" => out = Some(value),
-                    _ => unreachable!(),
+                    _ => unreachable!("discover parser matched a flag outside its declared flag set"),
                 }
                 index += 2;
             }
@@ -281,13 +294,13 @@ fn cmd_discover(args: &[String]) -> ExitCode {
     print!("{}", discover::format_outcome(&outcome));
     match outcome {
         discover::DiscoverOutcome::Complete { .. } => ExitCode::SUCCESS,
-        discover::DiscoverOutcome::Error { .. } => ExitCode::from(1),
+        discover::DiscoverOutcome::Error { .. } => ExitCode::from(EXIT_FAILURE),
     }
 }
 
 fn argument_error(error: &str) -> ExitCode {
     eprintln!("error: {error}");
-    ExitCode::from(2)
+    ExitCode::from(EXIT_USAGE)
 }
 
 #[cfg(test)]

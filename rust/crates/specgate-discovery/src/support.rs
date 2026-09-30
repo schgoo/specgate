@@ -5,6 +5,13 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+// Generated helper packages are private and unpublished; these values only
+// select the manifest schema and language edition used by their source.
+const GENERATED_PACKAGE_VERSION: &str = "0.0.0";
+const GENERATED_PACKAGE_EDITION: &str = "2024";
+// Cargo metadata format 1 is the stable shape deserialized below.
+const CARGO_METADATA_FORMAT_VERSION: &str = "1";
+
 /// Invocation cache directory removed automatically when dropped.
 #[derive(Debug)]
 pub struct InvocationCache {
@@ -28,6 +35,7 @@ impl InvocationCache {
     }
 
     #[must_use]
+    /// Return the cache directory path.
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -48,19 +56,27 @@ impl Drop for InvocationCache {
 /// Exact Cargo source for the runtime package used by a candidate.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CargoPackageSource {
+    /// Cargo package name.
     pub package: String,
+    /// Exact package version.
     pub version: String,
+    /// Local package path, when path-sourced.
     pub path: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Registry name, when registry-sourced.
     pub registry: Option<String>,
 }
 
 /// Candidate package identity plus its exact resolved runtime source.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CandidateCargoContext {
+    /// Candidate package name.
     pub package: String,
+    /// Candidate package version.
     pub version: String,
+    /// Candidate package root.
     pub path: PathBuf,
+    /// Exact runtime source resolved in the candidate graph.
     pub runtime: CargoPackageSource,
 }
 
@@ -73,13 +89,18 @@ enum RuntimeOverride {
 /// One dependency in a generated Cargo manifest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManifestDependency {
+    /// Cargo package name.
     pub package: String,
+    /// Optional exact version requirement.
     pub version: Option<String>,
+    /// Optional local source path.
     pub path: Option<PathBuf>,
+    /// Optional registry name.
     pub registry: Option<String>,
 }
 
 impl ManifestDependency {
+    /// Build a generated dependency from an exact resolved package source.
     #[must_use]
     pub fn from_source(source: &CargoPackageSource) -> Self {
         Self {
@@ -90,6 +111,7 @@ impl ManifestDependency {
         }
     }
 
+    /// Build an exact local generated dependency.
     #[must_use]
     pub fn local(package: impl Into<String>, version: impl Into<String>, path: PathBuf) -> Self {
         Self {
@@ -104,7 +126,9 @@ impl ManifestDependency {
 /// Generated Cargo files for an isolated runner.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunnerCargo {
+    /// Generated `Cargo.toml` contents.
     pub manifest: String,
+    /// Optional generated Cargo configuration.
     pub config: Option<String>,
 }
 
@@ -198,8 +222,8 @@ pub fn runner_cargo(package_name: &str, dependencies: BTreeMap<String, ManifestD
     let mut manifest = toml::to_string(&GeneratedManifest {
         package: GeneratedPackage {
             name: package_name,
-            version: "0.0.0",
-            edition: "2024",
+            version: GENERATED_PACKAGE_VERSION,
+            edition: GENERATED_PACKAGE_EDITION,
             publish: false,
         },
         dependencies,
@@ -288,7 +312,7 @@ fn cargo_metadata(manifest: &Path, package_root: &Path) -> Result<CargoMetadata,
     let output = Command::new(cargo_bin())
         .arg("metadata")
         .arg("--format-version")
-        .arg("1")
+        .arg(CARGO_METADATA_FORMAT_VERSION)
         .arg("--manifest-path")
         .arg(manifest)
         .current_dir(package_root)
@@ -465,9 +489,14 @@ fn is_crates_io_registry(source: &str) -> bool {
 }
 
 fn registry_alias(source: &str) -> String {
-    let hash = source.as_bytes().iter().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
-        (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
-    });
+    // FNV-1a keeps aliases deterministic across processes and platforms.
+    // Changing these constants invalidates generated registry aliases.
+    const FNV1A_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+    const FNV1A_PRIME: u64 = 0x0000_0100_0000_01b3;
+    let hash = source
+        .as_bytes()
+        .iter()
+        .fold(FNV1A_OFFSET_BASIS, |hash, byte| (hash ^ u64::from(*byte)).wrapping_mul(FNV1A_PRIME));
     format!("specgate-source-{hash:016x}")
 }
 

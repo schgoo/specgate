@@ -18,9 +18,17 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+// Debug is intentionally used for fixture discovery. The dotnet artifacts
+// layout lowercases the same configuration name in its output directory.
+const BUILD_CONFIGURATION: &str = "Debug";
+const BUILD_CONFIGURATION_DIR: &str = "debug";
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static CSHARP_DISCOVERY_ID: AtomicU64 = AtomicU64::new(0);
+// Preserve enough compiler context for actionable diagnostics without
+// allowing verbose MSBuild output to dominate one discovery error.
+const BUILD_DIAGNOSTIC_LINE_LIMIT: usize = 40;
 
 pub(crate) struct CSharpBuildOutput {
     pub(crate) fixture_dll: PathBuf,
@@ -54,7 +62,7 @@ pub(crate) fn build_real_csharp_project(
         .ok_or("could not read fixture .csproj file name")?
         .to_string();
     let csproj_text = std::fs::read_to_string(&csproj).map_err(|e| format!("failed to read fixture .csproj: {e}"))?;
-    let assembly_name = crate::extract_csproj_xml_tag(&csproj_text, "AssemblyName").unwrap_or_else(|| project_name.clone());
+    let assembly_name = crate::extract_tag(&csproj_text, "AssemblyName").unwrap_or_else(|| project_name.clone());
 
     let artifacts_dir = scratch.join("artifacts");
     let mut build = Command::new("dotnet");
@@ -62,7 +70,7 @@ pub(crate) fn build_real_csharp_project(
         .arg("build")
         .arg(&csproj)
         .arg("-c")
-        .arg("Debug")
+        .arg(BUILD_CONFIGURATION)
         .arg("--artifacts-path")
         .arg(&artifacts_dir)
         .current_dir(scratch);
@@ -75,11 +83,11 @@ pub(crate) fn build_real_csharp_project(
         let combined = format!("{stderr}\n{stdout}");
         return Err(format!(
             "C# {context} fixture build failed:\n{}",
-            combined.lines().take(40).collect::<Vec<_>>().join("\n")
+            combined.lines().take(BUILD_DIAGNOSTIC_LINE_LIMIT).collect::<Vec<_>>().join("\n")
         ));
     }
 
-    let fixture_out = artifacts_dir.join("bin").join(&project_name).join("debug");
+    let fixture_out = artifacts_dir.join("bin").join(&project_name).join(BUILD_CONFIGURATION_DIR);
     let fixture_dll = fixture_out.join(format!("{assembly_name}.dll"));
     if !fixture_dll.exists() {
         return Err(format!("C# {context} build produced no assembly at {}", fixture_dll.display()));
@@ -106,7 +114,7 @@ pub(crate) fn build_real_csharp_project(
 /// Returns an error string when the scaffold, `dotnet` build/run, or output
 /// read fails.
 pub(crate) fn run_csharp_discovery_many(target: &crate::binding::Target, components: &[&str]) -> Result<CSharpDiscoveryOutput, String> {
-    let settings = crate::resolve_csharp_runner_settings(target);
+    let settings = crate::resolve_runner(target);
     let sanitized_label: String = components
         .first()
         .copied()
@@ -145,7 +153,7 @@ pub(crate) fn run_csharp_discovery_many_in(
     if components.is_empty() {
         return Err("C# discovery requires at least one component".to_string());
     }
-    let settings = crate::resolve_csharp_runner_settings(target);
+    let settings = crate::resolve_runner(target);
 
     // 1. Build the fixture's REAL project into a per-run isolated artifacts tree,
     //    then reflect over the resulting assembly. This is what lets discovery
@@ -165,7 +173,7 @@ pub(crate) fn run_csharp_discovery_many_in(
     let runner_csproj = csharp_runner_project(&settings, &fixture_out);
     std::fs::write(scratch.join("Runner.csproj"), runner_csproj).map_err(|e| format!("failed to write C# discovery Runner.csproj: {e}"))?;
 
-    let program = generate_csharp_discovery_program(components);
+    let program = render_program(components);
     std::fs::write(scratch.join("Program.cs"), program).map_err(|e| format!("failed to write C# discovery Program.cs: {e}"))?;
 
     let out_dir = scratch.join("discovery");
@@ -189,7 +197,7 @@ pub(crate) fn run_csharp_discovery_many_in(
         let combined = format!("{stderr}\n{stdout}");
         return Err(format!(
             "C# discovery runner failed:\n{}",
-            combined.lines().take(40).collect::<Vec<_>>().join("\n")
+            combined.lines().take(BUILD_DIAGNOSTIC_LINE_LIMIT).collect::<Vec<_>>().join("\n")
         ));
     }
 
@@ -222,7 +230,7 @@ fn csharp_runner_project(settings: &crate::CSharpRunnerSettings, fixture_out: &P
         .as_ref()
         .map(|value| format!("    <LangVersion>{}</LangVersion>\n", crate::escape_xml_text(value)))
         .unwrap_or_default();
-    let output = crate::escape_xml_text(&crate::path_to_forward_slash(fixture_out));
+    let output = crate::escape_xml_text(&crate::slash_path(fixture_out));
     format!(
         "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    \
          <OutputType>Exe</OutputType>\n    <TargetFramework>{framework}</TargetFramework>\n    \
@@ -263,7 +271,7 @@ fn strip_verbatim_prefix(p: &Path) -> PathBuf {
 /// Render the discovery `Program.cs`: top-level statements that reflect over the
 /// compiled assembly once and emit one raw registry JSON document per requested
 /// component.
-fn generate_csharp_discovery_program(components: &[&str]) -> String {
+fn render_program(components: &[&str]) -> String {
     let literals = components
         .iter()
         .map(|component| crate::csharp_string_literal(component))
@@ -665,7 +673,7 @@ mod tests {
     /// the operation.
     #[test]
     fn unscoped_setups_are_admitted_only_by_the_selected_operation_names() {
-        let program = generate_csharp_discovery_program(&["fixture.one", "fixture.two"]);
+        let program = render_program(&["fixture.one", "fixture.two"]);
         assert!(
             program.contains("else if (!selectedOperationNames.Contains(setup.Name)) continue;"),
             "an unscoped setup must be admitted only when this component declares its operation"
@@ -687,7 +695,7 @@ mod tests {
     /// rejected by name.
     #[test]
     fn method_reflection_covers_non_public_declarations_without_inherited_members() {
-        let program = generate_csharp_discovery_program(&["fixture.one"]);
+        let program = render_program(&["fixture.one"]);
         let method_flags =
             "BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly";
         assert_eq!(
@@ -714,7 +722,7 @@ mod tests {
     /// nothing extra and lets callers detect components no request named.
     #[test]
     fn the_discovery_program_reports_the_whole_compiled_component_inventory() {
-        let program = generate_csharp_discovery_program(&["fixture.one"]);
+        let program = render_program(&["fixture.one"]);
         assert!(program.contains("GetCustomAttributes<SpecOperationAttribute>()"));
         assert!(
             program.contains("File.WriteAllText(Path.Combine(outputDirectory, \"components.json\"), JsonSerializer.Serialize(inventory));"),

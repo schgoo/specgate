@@ -17,11 +17,12 @@ struct RegistryFile {
     document: RegistryDocument,
 }
 
-pub(crate) fn load_registry_set(root: &Path, explicit_imports: &[PathBuf]) -> Loaded<RegistrySet> {
+pub(crate) fn load_set(root: &Path, explicit_imports: &[PathBuf]) -> Loaded<RegistrySet> {
     let mut issues = Vec::new();
-    let root = canonical_or_original(root);
-    let mut inputs = vec![root.clone()];
-    inputs.extend(explicit_imports.iter().map(|path| canonical_or_original(path)));
+    let root = canonicalize(root);
+    let mut inputs = Vec::with_capacity(explicit_imports.len().saturating_add(1));
+    inputs.push(root.clone());
+    inputs.extend(explicit_imports.iter().map(|path| canonicalize(path)));
     let mut explicit_seen = BTreeSet::new();
     for path in &inputs {
         if !explicit_seen.insert(path.clone()) {
@@ -35,7 +36,7 @@ pub(crate) fn load_registry_set(root: &Path, explicit_imports: &[PathBuf]) -> Lo
         if files_by_path.contains_key(&path) {
             continue;
         }
-        if let Some(file) = load_registry_file(&path, true, &mut issues) {
+        if let Some(file) = load_file(&path, true, &mut issues) {
             insert_candidate(file, &mut files_by_path, &mut paths_by_id, &mut issues);
         }
     }
@@ -50,14 +51,18 @@ pub(crate) fn load_registry_set(root: &Path, explicit_imports: &[PathBuf]) -> Lo
     while cursor < pending.len() {
         let path = pending[cursor].clone();
         cursor += 1;
-        let document = files_by_path[&path].document.clone();
+        let document = files_by_path
+            .get(&path)
+            .expect("pending registry path must have a loaded file")
+            .document
+            .clone();
         for (index, import) in document.imports.iter().enumerate() {
             let location = format!("$.imports[{index}]");
-            let used = registry_import_is_used(&document, &import.registry_id);
+            let used = document_uses(&document, &import.registry_id);
             if let Some(uri) = import.uri.as_deref() {
-                match resolve_file_uri(&path, uri) {
+                match resolve_uri(&path, uri) {
                     Ok(Some(candidate_path)) if !files_by_path.contains_key(&candidate_path) => {
-                        if let Some(file) = load_registry_file(&candidate_path, false, &mut issues) {
+                        if let Some(file) = load_file(&candidate_path, false, &mut issues) {
                             insert_candidate(file, &mut files_by_path, &mut paths_by_id, &mut issues);
                         }
                     }
@@ -84,7 +89,9 @@ pub(crate) fn load_registry_set(root: &Path, explicit_imports: &[PathBuf]) -> Lo
                 );
                 continue;
             }
-            let candidate = &files_by_path[candidate_path];
+            let candidate = files_by_path
+                .get(candidate_path)
+                .expect("registry ID index must reference a loaded file");
             let version_matches = candidate.document.version == import.version;
             let digest_matches = candidate.digest == import.digest;
             require(
@@ -110,18 +117,18 @@ pub(crate) fn load_registry_set(root: &Path, explicit_imports: &[PathBuf]) -> Lo
     let documents = selected_paths
         .iter()
         .map(|path| {
-            let file = &files_by_path[path];
+            let file = files_by_path.get(path).expect("selected registry path must have a loaded file");
             (file.document.registry_id.clone(), file.document.clone())
         })
         .collect::<BTreeMap<_, _>>();
     let document_paths = selected_paths
         .iter()
         .map(|path| {
-            let file = &files_by_path[path];
+            let file = files_by_path.get(path).expect("selected registry path must have a loaded file");
             (file.document.registry_id.clone(), file.path.clone())
         })
         .collect::<BTreeMap<_, _>>();
-    validate_import_cycles(&documents, &document_paths, &mut issues);
+    validate_cycles(&documents, &document_paths, &mut issues);
     validate_semantics(&documents, &document_paths, &mut issues);
 
     let mut components = BTreeMap::new();
@@ -145,7 +152,7 @@ pub(crate) fn load_registry_set(root: &Path, explicit_imports: &[PathBuf]) -> Lo
             }
         }
     }
-    let root_file = &files_by_path[&root];
+    let root_file = files_by_path.get(&root).expect("validated root registry must have a loaded file");
     Loaded {
         value: Some(RegistrySet {
             root_id: root_file.document.registry_id.clone(),
@@ -157,7 +164,7 @@ pub(crate) fn load_registry_set(root: &Path, explicit_imports: &[PathBuf]) -> Lo
     }
 }
 
-fn load_registry_file(path: &Path, report_read_error: bool, issues: &mut Vec<ValidationIssue>) -> Option<RegistryFile> {
+fn load_file(path: &Path, report_read_error: bool, issues: &mut Vec<ValidationIssue>) -> Option<RegistryFile> {
     let bytes = if report_read_error {
         read_bytes(path, issues)?
     } else {
@@ -204,11 +211,7 @@ fn insert_candidate(
     files_by_path.insert(file.path.clone(), file);
 }
 
-fn validate_import_cycles(
-    documents: &BTreeMap<String, RegistryDocument>,
-    paths: &BTreeMap<String, PathBuf>,
-    issues: &mut Vec<ValidationIssue>,
-) {
+fn validate_cycles(documents: &BTreeMap<String, RegistryDocument>, paths: &BTreeMap<String, PathBuf>, issues: &mut Vec<ValidationIssue>) {
     fn visit<'a>(
         registry_id: &'a str,
         documents: &'a BTreeMap<String, RegistryDocument>,
@@ -225,7 +228,10 @@ fn validate_import_cycles(
             cycle.push(registry_id);
             issue(
                 issues,
-                located(&paths[registry_id], "$.imports"),
+                located(
+                    paths.get(registry_id).expect("registry document must have a source path"),
+                    "$.imports",
+                ),
                 format!("registry import cycle: {}", cycle.join(" -> ")),
             );
             return;
@@ -243,8 +249,10 @@ fn validate_import_cycles(
     }
 
     let mut visited = BTreeSet::new();
+    let mut visiting = Vec::with_capacity(documents.len());
     for registry_id in documents.keys() {
-        visit(registry_id, documents, &mut Vec::new(), &mut visited, paths, issues);
+        visiting.clear();
+        visit(registry_id, documents, &mut visiting, &mut visited, paths, issues);
     }
 }
 
@@ -260,7 +268,7 @@ fn validate_shape(document: &RegistryDocument, path: &Path, issues: &mut Vec<Val
         document.format_version == CTSC_VERSION,
         path,
         "$.formatVersion",
-        "formatVersion must be '0.2.0'",
+        &format!("formatVersion must be '{CTSC_VERSION}'"),
         issues,
     );
     require(
@@ -390,7 +398,7 @@ fn validate_shape(document: &RegistryDocument, path: &Path, issues: &mut Vec<Val
             validate_operation(operation, path, &format!("{location}.operations[{operation_index}]"), issues);
         }
         for (type_index, named_type) in component.types.iter().enumerate() {
-            validate_named_type(named_type, path, &format!("{location}.types[{type_index}]"), issues);
+            validate_named(named_type, path, &format!("{location}.types[{type_index}]"), issues);
         }
     }
 }
@@ -423,7 +431,7 @@ fn validate_operation(operation: &RegistryOperation, path: &Path, location: &str
                 "name must not be empty",
                 issues,
             );
-            validate_type_shape(&value.value_type, path, &format!("{location}.{label}[{index}].type"), issues);
+            validate_type(&value.value_type, path, &format!("{location}.{label}[{index}].type"), issues);
         }
     }
     unique(
@@ -448,7 +456,7 @@ fn validate_operation(operation: &RegistryOperation, path: &Path, location: &str
                 "result type must not be primitive unit",
             );
         }
-        validate_type_shape(result, path, &format!("{location}.outcomes.result"), issues);
+        validate_type(result, path, &format!("{location}.outcomes.result"), issues);
     }
     for (index, error) in operation.outcomes.errors.iter().enumerate() {
         require(
@@ -459,12 +467,12 @@ fn validate_operation(operation: &RegistryOperation, path: &Path, location: &str
             issues,
         );
         if let Some(value_type) = &error.value_type {
-            validate_type_shape(value_type, path, &format!("{location}.outcomes.errors[{index}].type"), issues);
+            validate_type(value_type, path, &format!("{location}.outcomes.errors[{index}].type"), issues);
         }
     }
 }
 
-fn validate_named_type(named_type: &NamedType, path: &Path, location: &str, issues: &mut Vec<ValidationIssue>) {
+fn validate_named(named_type: &NamedType, path: &Path, location: &str, issues: &mut Vec<ValidationIssue>) {
     require(
         !named_type.name().is_empty(),
         path,
@@ -475,7 +483,7 @@ fn validate_named_type(named_type: &NamedType, path: &Path, location: &str, issu
     match named_type {
         NamedType::Record { fields, extensions, .. } => {
             validate_extensions(extensions, path, &format!("{location}.extensions"), issues);
-            validate_named_values(fields, path, &format!("{location}.fields"), issues);
+            validate_values(fields, path, &format!("{location}.fields"), issues);
         }
         NamedType::TaggedUnion { variants, extensions, .. } => {
             validate_extensions(extensions, path, &format!("{location}.extensions"), issues);
@@ -491,7 +499,7 @@ fn validate_named_type(named_type: &NamedType, path: &Path, location: &str, issu
     }
 }
 
-fn validate_named_values(values: &[super::model::NamedValue], path: &Path, location: &str, issues: &mut Vec<ValidationIssue>) {
+fn validate_values(values: &[super::model::NamedValue], path: &Path, location: &str, issues: &mut Vec<ValidationIssue>) {
     unique(values.iter().map(|item| item.name.as_str()), path, location, "name", issues);
     for (index, value) in values.iter().enumerate() {
         require(
@@ -501,7 +509,7 @@ fn validate_named_values(values: &[super::model::NamedValue], path: &Path, locat
             "name must not be empty",
             issues,
         );
-        validate_type_shape(&value.value_type, path, &format!("{location}[{index}].type"), issues);
+        validate_type(&value.value_type, path, &format!("{location}[{index}].type"), issues);
     }
 }
 
@@ -516,12 +524,12 @@ fn validate_variants(variants: &[super::model::Variant], path: &Path, location: 
             issues,
         );
         if let Some(payload) = &variant.payload {
-            validate_type_shape(payload, path, &format!("{location}[{index}].payload"), issues);
+            validate_type(payload, path, &format!("{location}[{index}].payload"), issues);
         }
     }
 }
 
-fn validate_type_shape(value_type: &TypeRef, path: &Path, location: &str, issues: &mut Vec<ValidationIssue>) {
+fn validate_type(value_type: &TypeRef, path: &Path, location: &str, issues: &mut Vec<ValidationIssue>) {
     match value_type {
         TypeRef::Primitive { name } => {
             const PRIMITIVES: [&str; 10] = ["unit", "string", "bool", "i32", "i64", "u32", "u64", "f32", "f64", "bytes"];
@@ -568,19 +576,19 @@ fn validate_type_shape(value_type: &TypeRef, path: &Path, location: &str, issues
             }
         }
         TypeRef::List { items } | TypeRef::Set { items } => {
-            validate_type_shape(items, path, &format!("{location}.items"), issues);
+            validate_type(items, path, &format!("{location}.items"), issues);
         }
         TypeRef::Map { keys, values } => {
-            validate_type_shape(keys, path, &format!("{location}.keys"), issues);
-            validate_type_shape(values, path, &format!("{location}.values"), issues);
+            validate_type(keys, path, &format!("{location}.keys"), issues);
+            validate_type(values, path, &format!("{location}.values"), issues);
         }
         TypeRef::Tuple { items } => {
             for (index, item) in items.iter().enumerate() {
-                validate_type_shape(item, path, &format!("{location}.items[{index}]"), issues);
+                validate_type(item, path, &format!("{location}.items[{index}]"), issues);
             }
         }
-        TypeRef::Record { fields } => validate_named_values(fields, path, &format!("{location}.fields"), issues),
-        TypeRef::Optional { value } => validate_type_shape(value, path, &format!("{location}.value"), issues),
+        TypeRef::Record { fields } => validate_values(fields, path, &format!("{location}.fields"), issues),
+        TypeRef::Optional { value } => validate_type(value, path, &format!("{location}.value"), issues),
         TypeRef::TaggedUnion { variants } => {
             require(
                 !variants.is_empty(),
@@ -594,7 +602,7 @@ fn validate_type_shape(value_type: &TypeRef, path: &Path, location: &str, issues
     }
 }
 
-fn registry_import_is_used(document: &RegistryDocument, registry_id: &str) -> bool {
+fn document_uses(document: &RegistryDocument, registry_id: &str) -> bool {
     document.components.iter().any(|component| {
         component
             .dependencies
@@ -605,40 +613,40 @@ fn registry_import_is_used(document: &RegistryDocument, registry_id: &str) -> bo
                     .inputs
                     .iter()
                     .chain(&operation.observations)
-                    .any(|value| type_uses_registry(&value.value_type, registry_id))
+                    .any(|value| type_uses(&value.value_type, registry_id))
                     || operation
                         .outcomes
                         .result
                         .as_ref()
-                        .is_some_and(|value| type_uses_registry(value, registry_id))
+                        .is_some_and(|value| type_uses(value, registry_id))
                     || operation
                         .outcomes
                         .errors
                         .iter()
                         .filter_map(|error| error.value_type.as_ref())
-                        .any(|value| type_uses_registry(value, registry_id))
+                        .any(|value| type_uses(value, registry_id))
             })
             || component
                 .types
                 .iter()
-                .any(|named_type| type_uses_registry(&named_type.as_type(), registry_id))
+                .any(|named_type| type_uses(&named_type.as_type(), registry_id))
     })
 }
 
-fn type_uses_registry(value_type: &TypeRef, registry_id: &str) -> bool {
+fn type_uses(value_type: &TypeRef, registry_id: &str) -> bool {
     match value_type {
         TypeRef::Named {
             registry_id: referenced, ..
         } => referenced.as_deref() == Some(registry_id),
-        TypeRef::List { items } | TypeRef::Set { items } => type_uses_registry(items, registry_id),
-        TypeRef::Map { keys, values } => type_uses_registry(keys, registry_id) || type_uses_registry(values, registry_id),
-        TypeRef::Tuple { items } => items.iter().any(|item| type_uses_registry(item, registry_id)),
-        TypeRef::Record { fields } => fields.iter().any(|field| type_uses_registry(&field.value_type, registry_id)),
-        TypeRef::Optional { value } => type_uses_registry(value, registry_id),
+        TypeRef::List { items } | TypeRef::Set { items } => type_uses(items, registry_id),
+        TypeRef::Map { keys, values } => type_uses(keys, registry_id) || type_uses(values, registry_id),
+        TypeRef::Tuple { items } => items.iter().any(|item| type_uses(item, registry_id)),
+        TypeRef::Record { fields } => fields.iter().any(|field| type_uses(&field.value_type, registry_id)),
+        TypeRef::Optional { value } => type_uses(value, registry_id),
         TypeRef::TaggedUnion { variants } => variants
             .iter()
             .filter_map(|variant| variant.payload.as_ref())
-            .any(|payload| type_uses_registry(payload, registry_id)),
+            .any(|payload| type_uses(payload, registry_id)),
         TypeRef::Primitive { .. } => false,
     }
 }
@@ -656,7 +664,10 @@ fn validate_semantics(
             {
                 issue(
                     issues,
-                    located(&paths[registry_id], "$.components"),
+                    located(
+                        paths.get(registry_id).expect("registry document must have a source path"),
+                        "$.components",
+                    ),
                     format!(
                         "component ID '{}' exists in both '{}' and '{}'",
                         component.id, existing, registry_id
@@ -680,7 +691,7 @@ fn validate_semantics(
                 if target_registry != registry_id {
                     require(
                         document.imports.iter().any(|import| import.registry_id == target_registry),
-                        &paths[registry_id],
+                        paths.get(registry_id).expect("registry document must have a source path"),
                         &location,
                         &format!("unknown imported registry '{target_registry}'"),
                         issues,
@@ -690,7 +701,7 @@ fn validate_semantics(
                     documents
                         .get(target_registry)
                         .is_some_and(|target| target.components.iter().any(|item| item.id == dependency.component_id)),
-                    &paths[registry_id],
+                    paths.get(registry_id).expect("registry document must have a source path"),
                     &location,
                     &format!(
                         "unknown dependency component '{}' in registry '{target_registry}'",
@@ -708,7 +719,7 @@ fn validate_semantics(
                         component,
                         &local_components,
                         documents,
-                        &paths[registry_id],
+                        paths.get(registry_id).expect("registry document must have a source path"),
                         &format!("{operation_location}.inputs[{index}].type"),
                         issues,
                     );
@@ -720,7 +731,7 @@ fn validate_semantics(
                         component,
                         &local_components,
                         documents,
-                        &paths[registry_id],
+                        paths.get(registry_id).expect("registry document must have a source path"),
                         &format!("{operation_location}.observations[{index}].type"),
                         issues,
                     );
@@ -732,7 +743,7 @@ fn validate_semantics(
                         component,
                         &local_components,
                         documents,
-                        &paths[registry_id],
+                        paths.get(registry_id).expect("registry document must have a source path"),
                         &format!("{operation_location}.outcomes.result"),
                         issues,
                     );
@@ -745,7 +756,7 @@ fn validate_semantics(
                             component,
                             &local_components,
                             documents,
-                            &paths[registry_id],
+                            paths.get(registry_id).expect("registry document must have a source path"),
                             &format!("{operation_location}.outcomes.errors[{index}].type"),
                             issues,
                         );
@@ -759,7 +770,7 @@ fn validate_semantics(
                     component,
                     &local_components,
                     documents,
-                    &paths[registry_id],
+                    paths.get(registry_id).expect("registry document must have a source path"),
                     &format!("{base}.types[{index}]"),
                     issues,
                 );
@@ -768,7 +779,10 @@ fn validate_semantics(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "recursive type resolution requires registry, component, path, and diagnostics context"
+)]
 fn resolve_type(
     value_type: &TypeRef,
     current_registry: &str,
@@ -932,7 +946,7 @@ fn resolve_type(
     }
 }
 
-fn resolve_file_uri(base: &Path, uri: &str) -> Result<Option<PathBuf>, String> {
+fn resolve_uri(base: &Path, uri: &str) -> Result<Option<PathBuf>, String> {
     let Some(raw) = uri.strip_prefix("file:") else {
         return Ok(None);
     };
@@ -971,10 +985,10 @@ fn resolve_file_uri(base: &Path, uri: &str) -> Result<Option<PathBuf>, String> {
     } else {
         base.parent().unwrap_or_else(|| Path::new(".")).join(candidate)
     };
-    Ok(Some(canonical_or_original(&candidate)))
+    Ok(Some(canonicalize(&candidate)))
 }
 
-fn canonical_or_original(path: &Path) -> PathBuf {
+fn canonicalize(path: &Path) -> PathBuf {
     path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 

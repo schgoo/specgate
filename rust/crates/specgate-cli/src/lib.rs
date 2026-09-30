@@ -24,10 +24,15 @@
 
 specgate::spec_component!("specgate.cli");
 
+/// Native reference capture.
 pub mod capture;
+/// CTSC Strict report formatting.
 pub mod comparison;
+/// Binding discovery and registry export.
 pub mod discover;
+/// Candidate replay.
 pub mod replay;
+/// CTSC validation report formatting.
 pub mod validation;
 
 #[cfg(test)]

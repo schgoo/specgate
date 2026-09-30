@@ -17,6 +17,7 @@ static DISCOVERY_ID: AtomicU64 = AtomicU64::new(0);
 /// One black-box operation input, with any setup construction params folded in.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DiscoveredInput {
+    /// Semantic input name.
     pub name: String,
     /// Normalized spec type, e.g. `"i32"`, `"List<i32>"`, `"Option<i32>"`.
     pub ty: String,
@@ -25,8 +26,11 @@ pub struct DiscoveredInput {
 /// One operation on the component's normalized surface.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DiscoveredOperation {
+    /// Semantic operation name.
     pub name: String,
+    /// Whether the implementation operation is asynchronous.
     pub is_async: bool,
+    /// Folded semantic inputs.
     pub inputs: Vec<DiscoveredInput>,
     /// Normalized semantic return type; empty when the operation returns unit.
     pub output: String,
@@ -41,22 +45,29 @@ pub struct DiscoveredOperation {
 /// One declared operation error channel.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DiscoveredError {
+    /// Declared error name.
     pub name: String,
+    /// Normalized error payload type, empty for unit errors.
     pub ty: String,
 }
 
 /// One deterministic setup producer associated with an operation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DiscoveredSetup {
+    /// Operation parameter filled by this setup.
     pub fills: String,
+    /// Setup construction inputs.
     pub inputs: Vec<DiscoveredInput>,
+    /// Setup output type.
     pub output: String,
 }
 
 /// One named field (struct field or enum-variant field).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DiscoveredField {
+    /// Semantic field name.
     pub name: String,
+    /// Normalized field type.
     pub ty: String,
 }
 
@@ -64,9 +75,12 @@ pub struct DiscoveredField {
 /// `tuple`; unit variants populate neither.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DiscoveredVariant {
+    /// Semantic variant name.
     pub name: String,
+    /// Named payload fields.
     pub fields: Vec<DiscoveredField>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Ordered tuple payload types.
     pub tuple: Option<Vec<String>>,
 }
 
@@ -74,19 +88,28 @@ pub struct DiscoveredVariant {
 /// `"enum"`; structs populate `fields`, enums populate `variants`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DiscoveredType {
+    /// Semantic type name.
     pub name: String,
+    /// Type kind: `struct` or `enum`.
     pub kind: String,
+    /// Struct fields.
     pub fields: Vec<DiscoveredField>,
+    /// Enum variants.
     pub variants: Vec<DiscoveredVariant>,
 }
 
 /// A component's normalized, folded schema.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DiscoveredSchema {
+    /// Component identifier.
     pub component: String,
+    /// Direct component dependencies.
     pub dependencies: Vec<String>,
+    /// Referenced dependency type declarations.
     pub dependency_types: Vec<DiscoveredDependencyTypes>,
+    /// Normalized operation declarations.
     pub operations: Vec<DiscoveredOperation>,
+    /// Component-owned named types.
     pub types: Vec<DiscoveredType>,
 }
 
@@ -94,18 +117,26 @@ pub struct DiscoveredSchema {
 /// component-qualified references in a standalone registry export.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DiscoveredDependencyTypes {
+    /// Dependency component identifier.
     pub component: String,
+    /// Dependency's direct dependencies.
     pub dependencies: Vec<String>,
+    /// Referenced types owned by the dependency.
     pub types: Vec<DiscoveredType>,
 }
 
 /// Raw and normalized metadata for one selected binding target.
 #[derive(Debug, Clone)]
 pub struct TargetDiscovery {
+    /// Resolved binding target.
     pub target: crate::binding::ResolvedTarget,
+    /// Candidate Cargo identity for Rust targets.
     pub cargo_context: Option<crate::support::CandidateCargoContext>,
+    /// Raw registry JSON emitted by the target.
     pub raw_registry_json: String,
+    /// Parsed raw registry.
     pub registry: Registry,
+    /// Normalized selected component schema.
     pub schema: DiscoveredSchema,
 }
 
@@ -181,7 +212,9 @@ pub struct ComponentDiscovery {
 /// component. Either way, the expensive toolchain work happens a single time.
 #[derive(Debug, Clone)]
 pub struct ManyTargetDiscovery {
+    /// Resolved binding target.
     pub target: crate::binding::ResolvedTarget,
+    /// Candidate Cargo identity for Rust targets.
     pub cargo_context: Option<crate::support::CandidateCargoContext>,
     /// Raw registry documents in emission order.
     pub raw_registry_json: Vec<String>,
@@ -993,6 +1026,7 @@ fn discovery_cargo(context: &crate::support::CandidateCargoContext) -> Result<cr
     crate::support::runner_cargo("specgate-discovery-runner", dependencies)
 }
 
+/// Return the Cargo executable selected by the current environment.
 #[must_use]
 pub fn cargo_bin() -> String {
     std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string())
@@ -1002,19 +1036,34 @@ pub fn cargo_bin() -> String {
 // Registry model (parsed from discovery JSON)
 // ---------------------------------------------------------------------------
 
-#[allow(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "raw discovery preserves independent annotation and reflection flags"
+)]
 #[derive(Debug, Clone)]
+/// Raw operation metadata emitted by native discovery.
 pub struct OpInfo {
+    /// Semantic operation or setup name.
     pub name: String,
+    /// Native module path.
     pub module_path: String,
+    /// Native function or method name.
     pub fn_name: String,
+    /// Whether this declaration is a setup producer.
     pub is_setup: bool,
+    /// Whether this declaration is asynchronous.
     pub is_async: bool,
+    /// Whether this declaration is a method.
     pub is_method: bool,
+    /// Whether this declaration is public.
     pub is_public: bool,
+    /// Raw native return type.
     pub return_type: String,
+    /// Setup-filled operation parameter.
     pub fills: String,
+    /// Raw parameter names and types.
     pub params: Vec<(String, String)>,
+    /// Owning component identifier.
     pub component: String,
     /// C# declaring type, preserved exactly for future candidate replay.
     pub cs_class: Option<String>,
@@ -1034,24 +1083,37 @@ pub struct OpInfo {
 }
 
 #[derive(Debug, Clone)]
+/// Raw enum-variant metadata emitted by native discovery.
 pub struct VariantInfo {
+    /// Variant name.
     pub name: String,
+    /// Named payload fields.
     pub fields: Vec<(String, String)>,
+    /// Ordered tuple payload types.
     pub tuple: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
+/// Raw structured-type metadata emitted by native discovery.
 pub struct TypeInfo {
+    /// Type name.
     pub name: String,
+    /// Type kind.
     pub kind: String,
+    /// Struct fields.
     pub fields: Vec<(String, String)>,
+    /// Enum variants.
     pub variants: Vec<VariantInfo>,
+    /// Owning component identifier.
     pub component: String,
 }
 
 #[derive(Debug, Clone)]
+/// Raw component registry assembled from native discovery metadata.
 pub struct Registry {
+    /// Raw operation and setup declarations.
     pub ops: Vec<OpInfo>,
+    /// Raw named-type declarations.
     pub types: Vec<TypeInfo>,
 }
 
@@ -1213,8 +1275,11 @@ fn optional_str_field(v: &serde_json::Value, key: &str) -> Option<String> {
 /// `map`/`set` object.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SpecType {
+    /// A scalar primitive or named type reference.
     Scalar(String),
+    /// A map with independently typed keys and values.
     Map { keys: Box<SpecType>, values: Box<SpecType> },
+    /// A set whose elements share one type.
     Set { items: Box<SpecType> },
 }
 
@@ -1234,8 +1299,11 @@ impl SpecType {
 /// Parsed Rust type AST for semantic normalization.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RustType {
+    /// A named type with zero or more generic arguments.
     Named { name: String, args: Vec<RustType> },
+    /// A shared or mutable reference to another type.
     Ref(Box<RustType>),
+    /// A dynamically sized slice type.
     Slice(Box<RustType>),
 }
 
@@ -1372,8 +1440,8 @@ fn parse_rust_type(s: &str) -> Option<RustType> {
 }
 
 fn tokenize_type(s: &str) -> Vec<String> {
-    let mut tokens = Vec::new();
-    let mut cur = String::new();
+    let mut tokens = Vec::with_capacity(s.len());
+    let mut cur = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
             '<' | '>' | ',' | '&' | '[' | ']' | '(' | ')' => {
@@ -1519,7 +1587,7 @@ fn fold_operation(op: &OpInfo, registry: &Registry) -> Result<FoldedOperation, S
     let setups = registry.setups_for(&op.component, &op.name);
     let mut param_injection: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
     let mut receiver_setup: Option<&OpInfo> = None;
-    let mut folded_setups = Vec::new();
+    let mut folded_setups = Vec::with_capacity(setups.len());
 
     for setup in setups {
         let target = if setup.fills.is_empty() {
@@ -1580,7 +1648,12 @@ fn fold_operation(op: &OpInfo, registry: &Registry) -> Result<FoldedOperation, S
         ));
     }
 
-    let mut inputs = Vec::new();
+    let input_capacity = receiver_setup.as_ref().map_or(0, |setup| setup.params.len())
+        + op.params
+            .iter()
+            .map(|(name, _ty)| param_injection.get(name).map_or(1, Vec::len))
+            .sum::<usize>();
+    let mut inputs = Vec::with_capacity(input_capacity);
     if let Some(setup) = receiver_setup {
         inputs.extend(setup.params.iter().cloned());
     }

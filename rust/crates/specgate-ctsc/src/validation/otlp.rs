@@ -1,8 +1,19 @@
-#![allow(dead_code)]
+#![expect(
+    dead_code,
+    reason = "strict protobuf-shape deserialization validates fields not otherwise inspected"
+)]
 
 use base64::Engine as _;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
+use std::fmt::Write as _;
+
+// An i128 has at most 39 decimal digits (including the magnitude of MIN).
+const MAX_I128_DECIMAL_DIGITS: usize = 39;
+
+fn path_capacity(path: &str, suffix: &str) -> usize {
+    path.len() + suffix.len() + usize::MAX.ilog10() as usize + 1
+}
 
 #[derive(Debug, Clone, Copy)]
 pub(super) enum ParsedDouble {
@@ -64,22 +75,20 @@ pub(super) fn normalize_hex(value: &str) -> Option<String> {
 
 fn parse_integer(value: &Value) -> Option<i128> {
     match value {
-        Value::Number(number) => parse_integer_text(&number.to_string()),
-        Value::String(value) => parse_integer_text(value),
+        Value::Number(number) => parse_int_text(&number.to_string()),
+        Value::String(value) => parse_int_text(value),
         _ => None,
     }
 }
 
-fn parse_integer_text(value: &str) -> Option<i128> {
+fn parse_int_text(value: &str) -> Option<i128> {
     if let Ok(value) = value.parse::<i128>() {
         return Some(value);
     }
-    let (mantissa, exponent) = value.split_once(['e', 'E']).map_or((value, 0_i32), |(mantissa, exponent)| {
-        (mantissa, exponent.parse::<i32>().unwrap_or(i32::MAX))
-    });
-    if exponent == i32::MAX {
-        return None;
-    }
+    let (mantissa, exponent) = match value.split_once(['e', 'E']) {
+        Some((mantissa, exponent)) => (mantissa, exponent.parse::<i32>().ok()?),
+        None => (value, 0_i32),
+    };
     let (negative, mantissa) = mantissa.strip_prefix('-').map_or((false, mantissa), |value| (true, value));
     let (whole, fraction) = mantissa.split_once('.').map_or((mantissa, ""), |parts| parts);
     if whole.is_empty()
@@ -93,7 +102,7 @@ fn parse_integer_text(value: &str) -> Option<i128> {
     let shift = exponent.checked_sub(i32::try_from(fraction.len()).ok()?)?;
     if shift >= 0 {
         let shift = usize::try_from(shift).ok()?;
-        if digits.len().checked_add(shift)? > 39 {
+        if digits.len().checked_add(shift)? > MAX_I128_DECIMAL_DIGITS {
             return None;
         }
         digits.extend(std::iter::repeat_n('0', shift));
@@ -118,8 +127,11 @@ struct TracesData {
 
 impl TracesData {
     fn validate(&self, path: &str) -> Result<(), String> {
+        let mut child_path = String::with_capacity(path_capacity(path, ".resourceSpans[]"));
         for (index, resource) in self.resource_spans.as_deref().unwrap_or_default().iter().enumerate() {
-            resource.validate(&format!("{path}.resourceSpans[{index}]"))?;
+            child_path.clear();
+            write!(child_path, "{path}.resourceSpans[{index}]").expect("writing to a String cannot fail");
+            resource.validate(&child_path)?;
         }
         Ok(())
     }
@@ -139,10 +151,15 @@ struct ResourceSpans {
 impl ResourceSpans {
     fn validate(&self, path: &str) -> Result<(), String> {
         if let Some(resource) = &self.resource {
-            resource.validate(&format!("{path}.resource"))?;
+            let mut resource_path = String::with_capacity(path.len() + ".resource".len());
+            write!(resource_path, "{path}.resource").expect("writing to a String cannot fail");
+            resource.validate(&resource_path)?;
         }
+        let mut child_path = String::with_capacity(path_capacity(path, ".scopeSpans[]"));
         for (index, scope) in self.scope_spans.as_deref().unwrap_or_default().iter().enumerate() {
-            scope.validate(&format!("{path}.scopeSpans[{index}]"))?;
+            child_path.clear();
+            write!(child_path, "{path}.scopeSpans[{index}]").expect("writing to a String cannot fail");
+            scope.validate(&child_path)?;
         }
         Ok(())
     }
@@ -179,10 +196,15 @@ struct ScopeSpans {
 impl ScopeSpans {
     fn validate(&self, path: &str) -> Result<(), String> {
         if let Some(scope) = &self.scope {
-            scope.validate(&format!("{path}.scope"))?;
+            let mut scope_path = String::with_capacity(path.len() + ".scope".len());
+            write!(scope_path, "{path}.scope").expect("writing to a String cannot fail");
+            scope.validate(&scope_path)?;
         }
+        let mut child_path = String::with_capacity(path_capacity(path, ".spans[]"));
         for (index, span) in self.spans.as_deref().unwrap_or_default().iter().enumerate() {
-            span.validate(&format!("{path}.spans[{index}]"))?;
+            child_path.clear();
+            write!(child_path, "{path}.spans[{index}]").expect("writing to a String cannot fail");
+            span.validate(&child_path)?;
         }
         Ok(())
     }
@@ -209,7 +231,7 @@ impl InstrumentationScope {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[allow(clippy::struct_field_names)]
+#[expect(clippy::struct_field_names, reason = "field names intentionally mirror the OTLP protobuf schema")]
 struct Span {
     #[serde(default, alias = "trace_id")]
     trace_id: Option<HexBytes>,
@@ -248,11 +270,18 @@ struct Span {
 impl Span {
     fn validate(&self, path: &str) -> Result<(), String> {
         validate_attributes(self.attributes.as_deref(), &format!("{path}.attributes"))?;
+        let mut child_path = String::with_capacity(path_capacity(path, ".events[].attributes"));
         for (index, event) in self.events.as_deref().unwrap_or_default().iter().enumerate() {
-            event.validate(&format!("{path}.events[{index}]"))?;
+            child_path.clear();
+            write!(child_path, "{path}.events[{index}]").expect("writing to a String cannot fail");
+            child_path.push_str(".attributes");
+            validate_attributes(event.attributes.as_deref(), &child_path)?;
         }
         for (index, link) in self.links.as_deref().unwrap_or_default().iter().enumerate() {
-            link.validate(&format!("{path}.links[{index}]"))?;
+            child_path.clear();
+            write!(child_path, "{path}.links[{index}]").expect("writing to a String cannot fail");
+            child_path.push_str(".attributes");
+            validate_attributes(link.attributes.as_deref(), &child_path)?;
         }
         Ok(())
     }
@@ -271,12 +300,6 @@ struct Event {
     dropped_attributes_count: Option<ProtoU32>,
 }
 
-impl Event {
-    fn validate(&self, path: &str) -> Result<(), String> {
-        validate_attributes(self.attributes.as_deref(), &format!("{path}.attributes"))
-    }
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Link {
@@ -292,12 +315,6 @@ struct Link {
     dropped_attributes_count: Option<ProtoU32>,
     #[serde(default)]
     flags: Option<ProtoU32>,
-}
-
-impl Link {
-    fn validate(&self, path: &str) -> Result<(), String> {
-        validate_attributes(self.attributes.as_deref(), &format!("{path}.attributes"))
-    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -326,7 +343,7 @@ struct EntityRef {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct KeyValue {
     #[serde(default)]
-    key: Option<String>,
+    key: Option<Box<str>>,
     #[serde(default)]
     value: Option<AnyValue>,
     #[serde(default, alias = "key_strindex")]
@@ -373,8 +390,11 @@ impl AnyValue {
             return Err(format!("{path}: protobuf oneof AnyValue contains multiple value fields"));
         }
         if let Some(array) = &self.array_value {
+            let mut child_path = String::with_capacity(path_capacity(path, ".arrayValue.values[]"));
             for (index, value) in array.values.as_deref().unwrap_or_default().iter().enumerate() {
-                value.validate(&format!("{path}.arrayValue.values[{index}]"))?;
+                child_path.clear();
+                write!(child_path, "{path}.arrayValue.values[{index}]").expect("writing to a String cannot fail");
+                value.validate(&child_path)?;
             }
         }
         if let Some(list) = &self.kvlist_value {
@@ -399,9 +419,12 @@ struct KeyValueList {
 }
 
 fn validate_attributes(attributes: Option<&[KeyValue]>, path: &str) -> Result<(), String> {
+    let mut value_path = String::with_capacity(path_capacity(path, "[].value"));
     for (index, attribute) in attributes.unwrap_or_default().iter().enumerate() {
         if let Some(value) = &attribute.value {
-            value.validate(&format!("{path}[{index}].value"))?;
+            value_path.clear();
+            write!(value_path, "{path}[{index}].value").expect("writing to a String cannot fail");
+            value.validate(&value_path)?;
         }
     }
     Ok(())
@@ -484,7 +507,7 @@ impl<'de> Deserialize<'de> for ProtoF64 {
 }
 
 #[derive(Debug)]
-struct ProtoBytes(Vec<u8>);
+struct ProtoBytes(Box<[u8]>);
 
 impl<'de> Deserialize<'de> for ProtoBytes {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -493,13 +516,14 @@ impl<'de> Deserialize<'de> for ProtoBytes {
     {
         let value = String::deserialize(deserializer)?;
         decode_base64(&value)
+            .map(Vec::into_boxed_slice)
             .map(Self)
             .ok_or_else(|| serde::de::Error::custom("expected standard or URL-safe base64 with optional padding"))
     }
 }
 
 #[derive(Debug)]
-struct HexBytes(Vec<u8>);
+struct HexBytes(Box<[u8]>);
 
 impl<'de> Deserialize<'de> for HexBytes {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -508,7 +532,7 @@ impl<'de> Deserialize<'de> for HexBytes {
     {
         let value = String::deserialize(deserializer)?;
         let normalized = normalize_hex(&value).ok_or_else(|| serde::de::Error::custom("expected an even-length hexadecimal string"))?;
-        let bytes = normalized
+        let bytes: Vec<u8> = normalized
             .as_bytes()
             .chunks_exact(2)
             .map(|pair| {
@@ -516,7 +540,7 @@ impl<'de> Deserialize<'de> for HexBytes {
                 u8::from_str_radix(pair, 16).expect("validated hexadecimal")
             })
             .collect();
-        Ok(Self(bytes))
+        Ok(Self(bytes.into_boxed_slice()))
     }
 }
 

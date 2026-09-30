@@ -15,7 +15,7 @@ semantic inputs. Async operations remain discoverable but are not natively
 captured until capture context becomes task-safe.
 
 ```rust
-use specgate::*;
+use specgate::{spec_component, spec_operation};
 
 spec_component!("example.math");
 

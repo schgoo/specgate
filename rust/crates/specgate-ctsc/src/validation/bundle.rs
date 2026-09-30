@@ -1,10 +1,14 @@
 use super::model::{AnyValue, RegistrySet, TraceDocument};
-use super::{ValidationIssue, is_digest, issue, load_registry_set, load_trace, located, read_bytes, sha256_digest, validate_linked_model};
+use super::{ValidationIssue, check_linked, is_digest, issue, load_set, load_trace, located, read_bytes, sha256_digest};
 use serde::Deserialize;
 use std::collections::BTreeSet;
 use std::path::Path;
 
+/// Capture-manifest media type defined by `SpecGate`'s bundle contract.
+/// Changing it requires a coordinated reader/writer compatibility revision.
 const CAPTURE_FORMAT: &str = "specgate.capture-manifest";
+/// Current capture-manifest schema version from the bundle contract.
+/// It is independent of the CTSC registry/trace version.
 const CAPTURE_VERSION: &str = "0.1.0";
 
 pub(crate) fn validate(directory: &Path) -> Vec<ValidationIssue> {
@@ -18,7 +22,7 @@ pub(crate) fn validate(directory: &Path) -> Vec<ValidationIssue> {
     let manifest = manifest_bytes
         .as_deref()
         .and_then(|bytes| parse_manifest(bytes, &manifest_path, &mut issues));
-    let registry = load_registry_set(&registry_path, &[]);
+    let registry = load_set(&registry_path, &[]);
     let trace = load_trace(&trace_path);
     issues.extend(registry.issues);
     issues.extend(trace.issues);
@@ -29,7 +33,7 @@ pub(crate) fn validate(directory: &Path) -> Vec<ValidationIssue> {
     if issues.is_empty()
         && let (Some(manifest), Some(registry), Some(trace)) = (manifest.as_ref(), registry.value.as_ref(), trace.value.as_ref())
     {
-        validate_linked_model(trace, registry, &mut issues);
+        check_linked(trace, registry, &mut issues);
         validate_semantics(manifest, registry, trace, &manifest_path, &mut issues);
     }
     issues

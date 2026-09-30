@@ -8,8 +8,10 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Runtime {
+    /// Smol executor.
     #[default]
     Smol,
+    /// Tokio executor.
     Tokio,
 }
 
@@ -17,7 +19,9 @@ pub enum Runtime {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TargetOutputs {
+    /// Optional output file declaration.
     pub file: Option<String>,
+    /// Optional structured standard-output format.
     pub stdout: Option<OutputFormat>,
 }
 
@@ -25,7 +29,9 @@ pub struct TargetOutputs {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum OutputFormat {
+    /// JSON output.
     Json,
+    /// YAML output.
     Yaml,
 }
 
@@ -44,18 +50,26 @@ struct TargetFile {
 /// One resolved implementation target.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Target {
+    /// Absolute package root.
     pub package_root: PathBuf,
+    /// Selected async runtime.
     pub runtime: Runtime,
+    /// Optional target framework.
     pub framework: Option<String>,
+    /// Optional target command.
     pub command: Option<String>,
+    /// Optional structured output declaration.
     pub outputs: Option<TargetOutputs>,
 }
 
 /// A parsed binding with every path resolved relative to the binding file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Binding {
+    /// Absolute binding-file path.
     pub path: PathBuf,
+    /// Implementation language.
     pub language: String,
+    /// Named resolved targets.
     pub targets: BTreeMap<String, Target>,
 }
 
@@ -69,9 +83,13 @@ struct BindingFile {
 /// A selected binding target.
 #[derive(Debug, Clone)]
 pub struct ResolvedTarget {
+    /// Absolute source binding path.
     pub binding_path: PathBuf,
+    /// Selected target name.
     pub name: String,
+    /// Implementation language.
     pub language: String,
+    /// Selected target configuration.
     pub target: Target,
 }
 
@@ -80,7 +98,8 @@ impl Binding {
     ///
     /// # Errors
     ///
-    /// Returns an actionable error for an unknown target.
+    /// Returns an actionable error for an unknown target or when the binding
+    /// has no target that can be selected.
     pub fn resolve_target(&self, requested: Option<&str>) -> Result<ResolvedTarget, String> {
         let (name, target) = match requested.filter(|name| !name.is_empty()) {
             Some(name) => self.targets.get_key_value(name).ok_or_else(|| {

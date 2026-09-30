@@ -3,6 +3,12 @@
 use specgate_ctsc::comparison::ComparisonReport;
 use std::fmt::Write as _;
 
+/// Format a CTSC Strict report for command-line output.
+///
+/// # Examples
+///
+/// Construct a [`ComparisonReport`] and pass it to this function to obtain the
+/// same stable text emitted by the `compare` command.
 #[must_use]
 pub fn format_report(report: &ComparisonReport) -> String {
     let mut output = String::new();

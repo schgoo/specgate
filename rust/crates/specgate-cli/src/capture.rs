@@ -16,22 +16,52 @@ use std::sync::atomic::{AtomicU64, Ordering};
 const REGISTRY_FILE: &str = "registry.ctsc.json";
 const TRACE_FILE: &str = "reference.otlp.json";
 const MANIFEST_FILE: &str = "manifest.json";
+// Capture readers use this discriminator to select the manifest schema;
+// changing it requires a coordinated reader migration.
+const MANIFEST_FORMAT: &str = "specgate.capture-manifest";
+// Capture readers validate this schema version before interpreting any bundle
+// paths or digests; changing it requires a coordinated reader migration.
+const MANIFEST_FORMAT_VERSION: &str = "0.1.0";
+// Registry artifacts produced by capture use this externally validated schema
+// version; changing it requires coordinated CTSC readers and golden updates.
 const REGISTRY_VERSION: &str = "0.1.0";
+// Valid, nonzero hexadecimal IDs make isolated captures deterministic. They
+// are rebased by the CTSC encoder before becoming bundle identifiers.
+const ISOLATED_TRACE_ID: &str = "11111111111111111111111111111111";
+const ISOLATED_RUN_SPAN_ID: &str = "1111111111111101";
+const ISOLATED_SCENARIO_SPAN_ID: &str = "1111111111111102";
+const ISOLATED_START_TIME: i64 = 0;
+const ISOLATED_CLOCK_STEP: i64 = 1;
+// Keep enough trailing output to include a typical panic and backtrace header
+// while bounding one failed test's contribution to CLI diagnostics.
+const OUTPUT_TAIL_LINES: usize = 12;
+// Bound captured text independently of line count because compiler and panic
+// messages can contain unusually long source or path lines.
+const OUTPUT_MAX_CHARS: usize = 1_200;
+// Fixed-width indices keep sidecar filenames lexically ordered in execution
+// order; changing the width changes only scratch filenames, not artifacts.
+const SIDECAR_INDEX_WIDTH: usize = 8;
 static CAPTURE_SCRATCH_ID: AtomicU64 = AtomicU64::new(0);
 
 /// Summary of a capture run.
 #[derive(Debug, Clone, PartialEq, Eq, SpecEvent)]
 pub struct CaptureReport {
+    /// Captured component identifier.
     #[spec_event]
     pub component_id: String,
+    /// Number of captured test scenarios.
     #[spec_event]
     pub scenarios: i32,
+    /// Number of operation spans across captured scenarios.
     #[spec_event]
     pub operations: i32,
+    /// Written CTSC registry path.
     #[spec_event]
     pub registry_path: String,
+    /// Written OTLP reference trace path.
     #[spec_event]
     pub trace_path: String,
+    /// Written capture manifest path.
     #[spec_event]
     pub manifest_path: String,
 }
@@ -39,7 +69,9 @@ pub struct CaptureReport {
 /// Outcome of `capture`.
 #[derive(Debug, Clone, PartialEq, Eq, SpecEvent)]
 pub enum CaptureOutcome {
+    /// Capture completed and wrote a bundle.
     Complete { report: CaptureReport },
+    /// Capture failed before producing a complete bundle.
     Error { reason: String },
 }
 
@@ -132,13 +164,14 @@ fn capture_result(binding: &str, target: &str, component: &str, out: &str) -> Re
     if out.is_empty() {
         return Err("capture requires a non-empty output directory".to_string());
     }
-    let discovered = discover_capture_target(binding, target)?;
+    let discovered = discover_target(binding, target)?;
     let selected = select_component(&discovered.registry, component)?;
     let mut reports = capture_discovered(
         &discovered,
         &[CaptureRequest {
             component: selected,
             out: PathBuf::from(out),
+            #[cfg(test)]
             excluded_operations: BTreeSet::new(),
         }],
     )?;
@@ -152,6 +185,7 @@ pub(crate) struct CaptureRequest {
     pub(crate) out: PathBuf,
     /// Golden-only operation exclusions. Product capture always leaves this
     /// empty; the golden matrix validates every declared exclusion separately.
+    #[cfg(test)]
     pub(crate) excluded_operations: BTreeSet<String>,
 }
 
@@ -169,7 +203,7 @@ pub(crate) fn capture_many(binding: &str, target: &str, requests: &[CaptureReque
     if requests.is_empty() {
         return Err("capture requires at least one requested component".to_string());
     }
-    let discovered = discover_capture_target(binding, target)?;
+    let discovered = discover_target(binding, target)?;
     let present = discovered.registry.present_components();
     for request in requests {
         if !present.iter().any(|candidate| candidate == &request.component) {
@@ -183,7 +217,7 @@ pub(crate) fn capture_many(binding: &str, target: &str, requests: &[CaptureReque
     capture_discovered(&discovered, requests)
 }
 
-pub(crate) fn discover_capture_target(binding: &str, target: &str) -> Result<TargetDiscovery, String> {
+pub(crate) fn discover_target(binding: &str, target: &str) -> Result<TargetDiscovery, String> {
     let target_name = if target.is_empty() { None } else { Some(target) };
     let resolved = resolve_binding_target(binding, target_name)?;
     if resolved.language != "rust" {
@@ -207,7 +241,7 @@ pub(crate) fn discover_capture_target(binding: &str, target: &str) -> Result<Tar
 /// This is `specgate capture`'s behavior: a failing test contributes no
 /// scenario, and a component left with no scenario at all still errors.
 pub(crate) fn capture_discovered(discovered: &TargetDiscovery, requests: &[CaptureRequest]) -> Result<Vec<CaptureReport>, String> {
-    capture_discovered_with(discovered, requests, false)
+    discovered_with(discovered, requests, false)
 }
 
 /// Capture many components, failing on any failing enumerated fixture test.
@@ -217,41 +251,41 @@ pub(crate) fn capture_discovered(discovered: &TargetDiscovery, requests: &[Captu
 /// to be the corpus's real behavior, so a red test must not be hidden by a
 /// sibling test that happens to cover the same component.
 #[cfg(test)]
-pub(crate) fn capture_discovered_strict(discovered: &TargetDiscovery, requests: &[CaptureRequest]) -> Result<Vec<CaptureReport>, String> {
-    capture_discovered_with(discovered, requests, true)
+pub(crate) fn capture_strict(discovered: &TargetDiscovery, requests: &[CaptureRequest]) -> Result<Vec<CaptureReport>, String> {
+    discovered_with(discovered, requests, true)
 }
 
-fn capture_discovered_with(
+fn discovered_with(
     discovered: &TargetDiscovery,
     requests: &[CaptureRequest],
     reject_failed_tests: bool,
 ) -> Result<Vec<CaptureReport>, String> {
-    let executed = execute_capture_tests(discovered, requests)?;
-    write_capture_bundles(discovered, requests, &executed, reject_failed_tests)
+    let executed = execute_tests(discovered, requests)?;
+    write_bundles(discovered, requests, &executed, reject_failed_tests)
 }
 
-fn execute_capture_tests(discovered: &TargetDiscovery, requests: &[CaptureRequest]) -> Result<ExecutedTests, String> {
+fn execute_tests(discovered: &TargetDiscovery, requests: &[CaptureRequest]) -> Result<ExecutedTests, String> {
     let resolved = &discovered.target;
-    reject_async_setup_capture(&discovered.registry, requests)?;
-    let scratch = capture_scratch_dir(&resolved.target.package_root)?;
-    let test_binaries = build_test_binaries(&resolved.target.package_root, scratch.as_ref())?;
+    reject_async_setup(&discovered.registry, requests)?;
+    let scratch = scratch_dir(&resolved.target.package_root)?;
+    let test_binaries = build_binaries(&resolved.target.package_root, scratch.as_ref())?;
     let tests = enumerate_tests(&test_binaries)?;
-    run_passing_tests(&tests, scratch.as_ref())
+    run_tests(&tests, scratch.as_ref())
 }
 
-fn write_capture_bundles(
+fn write_bundles(
     discovered: &TargetDiscovery,
     requests: &[CaptureRequest],
     executed: &ExecutedTests,
     reject_failed_tests: bool,
 ) -> Result<Vec<CaptureReport>, String> {
     if reject_failed_tests {
-        reject_failed_test_batch(executed)?;
+        reject_failures(executed)?;
     }
 
     let mut encoded = Vec::with_capacity(requests.len());
     for request in requests {
-        encoded.push(encode_component_bundle(discovered, request, executed)?);
+        encoded.push(encode_bundle(discovered, request, executed)?);
     }
 
     let mut reports = Vec::with_capacity(encoded.len());
@@ -274,14 +308,10 @@ struct EncodedBundle {
     report: CaptureReport,
 }
 
-fn encode_component_bundle(
-    discovered: &TargetDiscovery,
-    request: &CaptureRequest,
-    executed: &ExecutedTests,
-) -> Result<EncodedBundle, String> {
+fn encode_bundle(discovered: &TargetDiscovery, request: &CaptureRequest, executed: &ExecutedTests) -> Result<EncodedBundle, String> {
     let resolved = &discovered.target;
     let selected = request.component.as_str();
-    let captures = filter_component_scenarios(&executed.captures, selected);
+    let captures = filter_scenarios(&executed.captures, selected);
     if captures.is_empty() {
         let failures = if executed.failures.is_empty() {
             String::new()
@@ -341,8 +371,8 @@ fn encode_component_bundle(
     let scenario_count = i32::try_from(captures.len()).map_err(|_error| "captured scenario count exceeds i32".to_string())?;
     let operations = i32::try_from(operation_count).map_err(|_error| "captured operation count exceeds i32".to_string())?;
     let manifest = CaptureManifest {
-        format: "specgate.capture-manifest",
-        format_version: "0.1.0",
+        format: MANIFEST_FORMAT,
+        format_version: MANIFEST_FORMAT_VERSION,
         component_id: selected.to_string(),
         target: ManifestTarget {
             name: resolved.name.clone(),
@@ -379,9 +409,9 @@ fn encode_component_bundle(
             component_id: selected.to_string(),
             scenarios: scenario_count,
             operations,
-            registry_path: report_artifact_path(&out, REGISTRY_FILE),
-            trace_path: report_artifact_path(&out, TRACE_FILE),
-            manifest_path: report_artifact_path(&out, MANIFEST_FILE),
+            registry_path: artifact_path(&out, REGISTRY_FILE),
+            trace_path: artifact_path(&out, TRACE_FILE),
+            manifest_path: artifact_path(&out, MANIFEST_FILE),
         },
     })
 }
@@ -394,7 +424,7 @@ fn encode_component_bundle(
 /// stay in the trace with their original `parent_span_id`. A foreign top-level
 /// operation and its whole subtree are dropped, and a scenario with no
 /// top-level operation of `component` contributes nothing.
-fn filter_component_scenarios(scenarios: &[NativeCapture], component: &str) -> Vec<NativeCapture> {
+fn filter_scenarios(scenarios: &[NativeCapture], component: &str) -> Vec<NativeCapture> {
     let mut captures = Vec::new();
     for capture in scenarios {
         let mut retained = capture
@@ -410,17 +440,20 @@ fn filter_component_scenarios(scenarios: &[NativeCapture], component: &str) -> V
         // always precedes its children here. The fixpoint loop costs nothing
         // on that input and keeps the closure correct without depending on
         // that recording order.
+        let mut grown = Vec::with_capacity(capture.operations.len().saturating_sub(retained.len()));
         loop {
-            let grown = capture
-                .operations
-                .iter()
-                .filter(|operation| !retained.contains(&operation.span_id) && retained.contains(&operation.parent_span_id))
-                .map(|operation| operation.span_id.clone())
-                .collect::<Vec<_>>();
+            grown.clear();
+            grown.extend(
+                capture
+                    .operations
+                    .iter()
+                    .filter(|operation| !retained.contains(&operation.span_id) && retained.contains(&operation.parent_span_id))
+                    .map(|operation| operation.span_id.clone()),
+            );
             if grown.is_empty() {
                 break;
             }
-            retained.extend(grown);
+            retained.extend(grown.drain(..));
         }
         let mut filtered = capture.clone();
         filtered.operations.retain(|operation| retained.contains(&operation.span_id));
@@ -461,14 +494,14 @@ fn select_component(registry: &Registry, component: &str) -> Result<String, Stri
 /// the component's public input surface. The whole component is rejected here
 /// instead — before any test binary is built, run, or encoded — so the failure
 /// names the setup rather than surfacing as a missing input much later.
-fn reject_async_setup_capture(registry: &Registry, requests: &[CaptureRequest]) -> Result<(), String> {
+fn reject_async_setup(registry: &Registry, requests: &[CaptureRequest]) -> Result<(), String> {
     for request in requests {
         let component = request.component.as_str();
         let mut asynchronous = registry
             .ops
             .iter()
             .filter(|candidate| candidate.is_setup && candidate.is_async && candidate.component == component)
-            .filter(|candidate| !request.excluded_operations.contains(&candidate.name))
+            .filter(|candidate| !is_excluded(request, &candidate.name))
             .collect::<Vec<_>>();
         asynchronous.sort_by(|left, right| left.name.cmp(&right.name).then_with(|| left.fn_name.cmp(&right.fn_name)));
         if let Some(setup) = asynchronous.first() {
@@ -481,7 +514,17 @@ fn reject_async_setup_capture(registry: &Registry, requests: &[CaptureRequest]) 
     Ok(())
 }
 
-fn capture_scratch_dir(package_root: &Path) -> Result<specgate_discovery::support::InvocationCache, String> {
+#[cfg(test)]
+fn is_excluded(request: &CaptureRequest, operation: &str) -> bool {
+    request.excluded_operations.contains(operation)
+}
+
+#[cfg(not(test))]
+fn is_excluded(_request: &CaptureRequest, _operation: &str) -> bool {
+    false
+}
+
+fn scratch_dir(package_root: &Path) -> Result<specgate_discovery::support::InvocationCache, String> {
     let package_name = package_root
         .file_name()
         .and_then(|name| name.to_str())
@@ -490,7 +533,7 @@ fn capture_scratch_dir(package_root: &Path) -> Result<specgate_discovery::suppor
     specgate_discovery::support::InvocationCache::create("capture", package_name, invocation)
 }
 
-fn build_test_binaries(package_root: &Path, scratch: &Path) -> Result<Vec<TestBinary>, String> {
+fn build_binaries(package_root: &Path, scratch: &Path) -> Result<Vec<TestBinary>, String> {
     let mut command = Command::new(cargo_bin());
     command.arg("test").arg("--no-run").arg("--quiet").arg("--message-format=json");
     command.current_dir(package_root);
@@ -588,6 +631,7 @@ fn enumerate_tests(binaries: &[TestBinary]) -> Result<Vec<IsolatedTest>, String>
         }
     }
     tests.sort_by(|left, right| left.scenario_name.cmp(&right.scenario_name));
+    tests.shrink_to_fit();
     Ok(tests)
 }
 
@@ -608,7 +652,7 @@ struct FailedTest {
 }
 
 /// Reject a capture batch in which any enumerated test failed.
-fn reject_failed_test_batch(executed: &ExecutedTests) -> Result<(), String> {
+fn reject_failures(executed: &ExecutedTests) -> Result<(), String> {
     if executed.failures.is_empty() {
         return Ok(());
     }
@@ -634,15 +678,15 @@ fn failure_summary(exit_code: Option<i32>, stdout: &[u8], stderr: &[u8]) -> Stri
             .map(str::trim)
             .filter(|line| !line.is_empty())
             .rev()
-            .take(12)
+            .take(OUTPUT_TAIL_LINES)
             .collect::<Vec<_>>();
         tail.reverse();
         if tail.is_empty() {
             continue;
         }
         let mut joined = tail.join(" | ");
-        if joined.chars().count() > 1_200 {
-            joined = joined.chars().take(1_200).collect::<String>() + "...";
+        if joined.chars().count() > OUTPUT_MAX_CHARS {
+            joined = joined.chars().take(OUTPUT_MAX_CHARS).collect::<String>() + "...";
         }
         parts.push(format!("{label}: {joined}"));
     }
@@ -654,24 +698,24 @@ fn failure_summary(exit_code: Option<i32>, stdout: &[u8], stderr: &[u8]) -> Stri
 ///
 /// Tests are component-agnostic here: one execution pass serves every requested
 /// component, and scenario selection happens afterwards.
-fn run_passing_tests(tests: &[IsolatedTest], scratch: &Path) -> Result<ExecutedTests, String> {
+fn run_tests(tests: &[IsolatedTest], scratch: &Path) -> Result<ExecutedTests, String> {
     let sidecars = scratch.join("sidecars");
     std::fs::create_dir_all(&sidecars)
         .map_err(|error| format!("failed to create capture sidecar directory {}: {error}", sidecars.display()))?;
-    let mut captures = Vec::new();
-    let mut failures = Vec::new();
+    let mut captures = Vec::with_capacity(tests.len());
+    let mut failures = Vec::with_capacity(tests.len());
     for (index, test) in tests.iter().enumerate() {
-        let sidecar = sidecars.join(format!("{index:08}.json"));
+        let sidecar = sidecars.join(format!("{index:0SIDECAR_INDEX_WIDTH$}.json"));
         let _ = std::fs::remove_file(&sidecar);
         let environment = NativeCaptureEnvironmentConfig {
             capture: NativeCaptureConfig {
                 scenario_name: test.scenario_name.clone(),
-                trace_id: "11111111111111111111111111111111".to_string(),
-                run_span_id: "1111111111111101".to_string(),
-                scenario_span_id: "1111111111111102".to_string(),
+                trace_id: ISOLATED_TRACE_ID.to_string(),
+                run_span_id: ISOLATED_RUN_SPAN_ID.to_string(),
+                scenario_span_id: ISOLATED_SCENARIO_SPAN_ID.to_string(),
                 operation_span_ids: Vec::new(),
-                start_time_unix_nano: 0,
-                clock_step_unix_nano: 1,
+                start_time_unix_nano: ISOLATED_START_TIME,
+                clock_step_unix_nano: ISOLATED_CLOCK_STEP,
             },
             sidecar_path: sidecar.clone(),
         };
@@ -705,6 +749,8 @@ fn run_passing_tests(tests: &[IsolatedTest], scratch: &Path) -> Result<ExecutedT
         }
         captures.push(capture);
     }
+    captures.shrink_to_fit();
+    failures.shrink_to_fit();
     Ok(ExecutedTests { captures, failures })
 }
 fn write_artifact(path: &Path, bytes: &[u8]) -> Result<(), String> {
@@ -715,7 +761,7 @@ fn sha256_digest(bytes: &[u8]) -> String {
     format!("sha256:{:x}", Sha256::digest(bytes))
 }
 
-fn report_artifact_path(out: &str, filename: &str) -> String {
+fn artifact_path(out: &str, filename: &str) -> String {
     let separator = if out.contains('\\') && !out.contains('/') {
         '\\'
     } else if out.contains('/') {
@@ -784,12 +830,12 @@ mod tests {
             request_at("fixture.cli.setup", root.join("setup")),
             request_at("fixture.cli.multiple", root.join("multiple")),
         ];
-        let discovered = discover_capture_target(focused_rust_binding().to_str().unwrap(), "").expect("focused fixture discovery");
-        let executed = execute_capture_tests(&discovered, &requests).expect("focused fixture execution");
+        let discovered = discover_target(focused_rust_binding().to_str().unwrap(), "").expect("focused fixture discovery");
+        let executed = execute_tests(&discovered, &requests).expect("focused fixture execution");
         assert_eq!(executed.failures.len(), 1);
         assert_eq!(executed.failures[0].scenario_name, "tests::deliberately_fails_for_strict_capture");
 
-        let reports = write_capture_bundles(&discovered, &requests, &executed, false).expect("batched capture encoding");
+        let reports = write_bundles(&discovered, &requests, &executed, false).expect("batched capture encoding");
         assert_eq!(reports.len(), requests.len());
         assert_eq!(
             reports[0],
@@ -845,7 +891,7 @@ mod tests {
         // this shared execution phase. Compare both encodings without rebuilding
         // or rerunning the real fixture toolchain.
         let single = request_at("fixture.cli.replay", root.join("single-replay"));
-        write_capture_bundles(&discovered, std::slice::from_ref(&single), &executed, false).expect("single capture encoding");
+        write_bundles(&discovered, std::slice::from_ref(&single), &executed, false).expect("single capture encoding");
         for filename in [REGISTRY_FILE, TRACE_FILE, MANIFEST_FILE] {
             assert_eq!(
                 std::fs::read(batch_dir.join(filename)).unwrap(),
@@ -888,7 +934,7 @@ mod tests {
         // operations keep their original parents — and a foreign top-level
         // operation is dropped together with its whole subtree.
         let component_root = request_at("fixture.cli.nested_root", root.join("component-root"));
-        let root_reports = write_capture_bundles(&discovered, std::slice::from_ref(&component_root), &executed, false)
+        let root_reports = write_bundles(&discovered, std::slice::from_ref(&component_root), &executed, false)
             .expect("component capture over a multi-component call chain");
         assert_eq!(root_reports[0].component_id, "fixture.cli.nested_root");
         let root_trace = read_trace(&component_root.out);
@@ -950,7 +996,7 @@ mod tests {
         assert!(bundle.valid, "component bundle validation failed: {:#?}", bundle.issues);
 
         let component_sibling = request_at("fixture.cli.nested_sibling", root.join("component-sibling"));
-        write_capture_bundles(&discovered, std::slice::from_ref(&component_sibling), &executed, false)
+        write_bundles(&discovered, std::slice::from_ref(&component_sibling), &executed, false)
             .expect("the sibling's own top-level subtree is capturable");
         let sibling_trace = read_trace(&component_sibling.out);
         assert!(operation_spans(&sibling_trace, "root").is_empty());
@@ -964,7 +1010,7 @@ mod tests {
         // `leaf` is only ever reached as a nested callee, so no scenario has a
         // top-level `leaf` operation and the component contributes nothing.
         let component_leaf = request_at("fixture.cli.nested_leaf", root.join("component-leaf"));
-        let leaf_error = write_capture_bundles(&discovered, std::slice::from_ref(&component_leaf), &executed, false)
+        let leaf_error = write_bundles(&discovered, std::slice::from_ref(&component_leaf), &executed, false)
             .expect_err("a component that is never top-level contributes no scenario");
         assert!(
             leaf_error.contains("no passing tests captured operations for component 'fixture.cli.nested_leaf'"),
@@ -973,13 +1019,13 @@ mod tests {
         assert!(!component_leaf.out.exists());
 
         let unused = request_at("fixture.cli.unused", root.join("unused"));
-        let no_match = write_capture_bundles(&discovered, std::slice::from_ref(&unused), &executed, false)
+        let no_match = write_bundles(&discovered, std::slice::from_ref(&unused), &executed, false)
             .expect_err("an unexercised component must be rejected");
         assert!(no_match.contains("no passing tests captured operations for component 'fixture.cli.unused'"));
         assert!(!unused.out.exists());
 
         let strict = request_at("fixture.cli.replay", root.join("strict"));
-        let strict_error = write_capture_bundles(&discovered, std::slice::from_ref(&strict), &executed, true)
+        let strict_error = write_bundles(&discovered, std::slice::from_ref(&strict), &executed, true)
             .expect_err("strict capture must reject the focused failing scenario");
         assert!(strict_error.starts_with("1 fixture test(s) failed under capture"));
         assert!(strict_error.contains("tests::deliberately_fails_for_strict_capture"));
@@ -1049,7 +1095,7 @@ mod tests {
         let unknown = select_component(&registry, "fixture.absent").unwrap_err();
         assert!(unknown.contains("component 'fixture.absent' not found"));
 
-        let unsupported = discover_capture_target(focused_csharp_binding().to_str().unwrap(), "").unwrap_err();
+        let unsupported = discover_target(focused_csharp_binding().to_str().unwrap(), "").unwrap_err();
         assert!(unsupported.contains("only Rust targets") && unsupported.contains("csharp"));
         assert!(matches!(
             capture(focused_rust_binding().to_str().unwrap(), "", "fixture.cli.replay", ""),
@@ -1077,7 +1123,7 @@ mod tests {
     #[test]
     fn component_filtering_is_top_level_only_and_never_reparents() {
         let capture = synthetic_capture();
-        let selected = filter_component_scenarios(std::slice::from_ref(&capture), "fixture.root");
+        let selected = filter_scenarios(std::slice::from_ref(&capture), "fixture.root");
         assert_eq!(
             selected[0]
                 .operations
@@ -1087,10 +1133,10 @@ mod tests {
             vec![("root", "scenario"), ("nested", "root-span")]
         );
         assert!(
-            filter_component_scenarios(std::slice::from_ref(&capture), "fixture.nested").is_empty(),
+            filter_scenarios(std::slice::from_ref(&capture), "fixture.nested").is_empty(),
             "a component that is never top-level contributes nothing"
         );
-        let foreign = filter_component_scenarios(std::slice::from_ref(&capture), "fixture.other");
+        let foreign = filter_scenarios(std::slice::from_ref(&capture), "fixture.other");
         assert_eq!(
             foreign[0]
                 .operations
@@ -1156,30 +1202,29 @@ mod tests {
     #[test]
     fn capture_rejects_a_component_whose_setup_is_async() {
         let registry = registry_with_async_setup(true);
-        let reason =
-            reject_async_setup_capture(&registry, &[request("fixture.async_setup")]).expect_err("an async setup is not capturable");
+        let reason = reject_async_setup(&registry, &[request("fixture.async_setup")]).expect_err("an async setup is not capturable");
         assert!(reason.contains("component 'fixture.async_setup'"), "{reason}");
         assert!(reason.contains("async setup 'make'"), "{reason}");
         assert!(reason.contains("'fixture.async_setup::advance'"), "{reason}");
         assert!(reason.contains("discovery-only"), "{reason}");
 
         assert!(
-            reject_async_setup_capture(&registry, &[request("fixture.sync_setup")]).is_ok(),
+            reject_async_setup(&registry, &[request("fixture.sync_setup")]).is_ok(),
             "a synchronous setup on an identically named operation stays capturable"
         );
         assert!(
-            reject_async_setup_capture(&registry_with_async_setup(false), &[request("fixture.async_setup")]).is_ok(),
+            reject_async_setup(&registry_with_async_setup(false), &[request("fixture.async_setup")]).is_ok(),
             "the rejection is driven by setup metadata, not by the component name"
         );
 
-        let batched = reject_async_setup_capture(&registry, &[request("fixture.sync_setup"), request("fixture.async_setup")])
+        let batched = reject_async_setup(&registry, &[request("fixture.sync_setup"), request("fixture.async_setup")])
             .expect_err("every requested component is screened, not just the first");
         assert!(batched.contains("component 'fixture.async_setup'"), "{batched}");
 
         let mut excluded = request("fixture.async_setup");
         excluded.excluded_operations.insert("advance".to_string());
         assert!(
-            reject_async_setup_capture(&registry, &[excluded]).is_ok(),
+            reject_async_setup(&registry, &[excluded]).is_ok(),
             "the golden harness may explicitly exclude the affected operation"
         );
     }

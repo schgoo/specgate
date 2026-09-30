@@ -3,15 +3,40 @@ use super::model::{
 };
 use super::{ValidationIssue, issue};
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 
-pub(crate) fn validate_linked_model(trace: &TraceDocument, registry: &RegistrySet, issues: &mut Vec<ValidationIssue>) {
+// CTSC Trace Core names. Changing these requires coordinated producer and
+// validator updates because they are serialized interoperability keys.
+const OPERATION_SPAN_NAME: &str = "conformance.operation";
+const COMPONENT_ID_ATTRIBUTE: &str = "conformance.component.id";
+const OPERATION_NAME_ATTRIBUTE: &str = "conformance.operation.name";
+const OPERATION_INPUTS_ATTRIBUTE: &str = "conformance.operation.inputs";
+const REGISTRY_ID_ATTRIBUTE: &str = "conformance.registry.id";
+const REGISTRY_VERSION_ATTRIBUTE: &str = "conformance.registry.version";
+const REGISTRY_DIGEST_ATTRIBUTE: &str = "conformance.registry.digest";
+const OBSERVATION_EVENT: &str = "conformance.observation";
+const OBSERVATION_NAME_ATTRIBUTE: &str = "conformance.observation.name";
+const OBSERVATION_VALUE_ATTRIBUTE: &str = "conformance.observation.value";
+const FAULT_EVENT: &str = "conformance.fault";
+const RESULT_EVENT: &str = "conformance.result";
+const RESULT_VALUE_ATTRIBUTE: &str = "conformance.result.value";
+const EMPTY_EVENT: &str = "conformance.empty";
+const ERROR_EVENT: &str = "conformance.error";
+const ERROR_NAME_ATTRIBUTE: &str = "conformance.error.name";
+const ERROR_VALUE_ATTRIBUTE: &str = "conformance.error.value";
+
+fn index_capacity(location: &str, suffix: &str) -> usize {
+    location.len() + suffix.len() + usize::MAX.ilog10() as usize + 1
+}
+
+pub(crate) fn check_linked(trace: &TraceDocument, registry: &RegistrySet, issues: &mut Vec<ValidationIssue>) {
     for span in &trace.spans {
-        validate_resource_linkage(span, registry, issues);
-        if span.name != "conformance.operation" {
+        validate_linkage(span, registry, issues);
+        if span.name != OPERATION_SPAN_NAME {
             continue;
         }
-        let component_id = span.attributes.get("conformance.component.id").and_then(AnyValue::as_string);
-        let operation_name = span.attributes.get("conformance.operation.name").and_then(AnyValue::as_string);
+        let component_id = span.attributes.get(COMPONENT_ID_ATTRIBUTE).and_then(AnyValue::as_string);
+        let operation_name = span.attributes.get(OPERATION_NAME_ATTRIBUTE).and_then(AnyValue::as_string);
         let (Some(component_id), Some(operation_name)) = (component_id, operation_name) else {
             continue;
         };
@@ -45,11 +70,11 @@ pub(crate) fn find_operation<'a>(
     Some((component, operation))
 }
 
-fn validate_resource_linkage(span: &TraceSpan, registry: &RegistrySet, issues: &mut Vec<ValidationIssue>) {
+fn validate_linkage(span: &TraceSpan, registry: &RegistrySet, issues: &mut Vec<ValidationIssue>) {
     for (key, expected) in [
-        ("conformance.registry.id", registry.root_id.as_str()),
-        ("conformance.registry.version", registry.root_version.as_str()),
-        ("conformance.registry.digest", registry.root_digest.as_str()),
+        (REGISTRY_ID_ATTRIBUTE, registry.root_id.as_str()),
+        (REGISTRY_VERSION_ATTRIBUTE, registry.root_version.as_str()),
+        (REGISTRY_DIGEST_ATTRIBUTE, registry.root_digest.as_str()),
     ] {
         match span.resource_attributes.get(key).and_then(AnyValue::as_string) {
             Some(actual) if actual == expected => {}
@@ -66,22 +91,19 @@ fn validate_operation(
     registry: &RegistrySet,
     issues: &mut Vec<ValidationIssue>,
 ) {
-    if let Some(inputs) = span.attributes.get("conformance.operation.inputs").and_then(AnyValue::as_kvlist) {
+    if let Some(inputs) = span.attributes.get(OPERATION_INPUTS_ATTRIBUTE).and_then(AnyValue::as_kvlist) {
         let declared = operation
             .inputs
             .iter()
             .map(|input| (input.name.as_str(), &input.value_type))
             .collect::<BTreeMap<_, _>>();
         if inputs.keys().map(String::as_str).collect::<BTreeSet<_>>() == declared.keys().copied().collect() {
+            let max_name_len = declared.keys().map(|name| name.len()).max().unwrap_or_default();
+            let mut location = String::with_capacity(span.location.len() + ".inputs.".len() + max_name_len);
             for (name, value_type) in declared {
-                validate_typed_value(
-                    &inputs[name],
-                    value_type,
-                    component,
-                    registry,
-                    &format!("{}.inputs.{name}", span.location),
-                    issues,
-                );
+                location.clear();
+                write!(location, "{}.inputs.{name}", span.location).expect("writing to a String cannot fail");
+                validate_typed_value(&inputs[name], value_type, component, registry, &location, issues);
             }
         } else {
             model_issue(
@@ -97,62 +119,63 @@ fn validate_operation(
         .iter()
         .map(|observation| (observation.name.as_str(), &observation.value_type))
         .collect::<BTreeMap<_, _>>();
+    let mut event_location = String::with_capacity(span.location.len() + ".events[].value".len() + usize::MAX.ilog10() as usize + 1);
     for (event_index, event) in span.events.iter().enumerate() {
-        if event.name != "conformance.observation" {
+        if event.name != OBSERVATION_EVENT {
             continue;
         }
-        let location = format!("{}.events[{event_index}]", span.location);
-        let name = event.attributes.get("conformance.observation.name").and_then(AnyValue::as_string);
+        event_location.clear();
+        write!(event_location, "{}.events[{event_index}]", span.location).expect("writing to a String cannot fail");
+        let name = event.attributes.get(OBSERVATION_NAME_ATTRIBUTE).and_then(AnyValue::as_string);
         let Some(name) = name else {
             continue;
         };
         let Some(value_type) = observations.get(name) else {
-            model_issue(issues, &location, format!("observation '{name}' is not declared"));
+            model_issue(issues, &event_location, format!("observation '{name}' is not declared"));
             continue;
         };
-        if let Some(value) = event.attributes.get("conformance.observation.value") {
-            validate_typed_value(value, value_type, component, registry, &format!("{location}.value"), issues);
+        if let Some(value) = event.attributes.get(OBSERVATION_VALUE_ATTRIBUTE) {
+            event_location.push_str(".value");
+            validate_typed_value(value, value_type, component, registry, &event_location, issues);
         }
     }
 
-    if span.events.iter().any(|event| event.name == "conformance.fault") {
+    if span.events.iter().any(|event| event.name == FAULT_EVENT) {
         return;
     }
-    let terminal = span.events.iter().find(|event| {
-        matches!(
-            event.name.as_str(),
-            "conformance.result" | "conformance.empty" | "conformance.error"
-        )
-    });
+    let terminal = span
+        .events
+        .iter()
+        .find(|event| matches!(event.name.as_str(), RESULT_EVENT | EMPTY_EVENT | ERROR_EVENT));
     match terminal.map(|event| event.name.as_str()) {
         None => {
             if operation.outcomes.result.is_some() || operation.outcomes.empty {
                 model_issue(issues, &span.location, "unit completion not permitted by registry outcomes");
             }
         }
-        Some("conformance.result") => {
+        Some(RESULT_EVENT) => {
             let Some(value_type) = operation.outcomes.result.as_ref() else {
                 model_issue(issues, &span.location, "result outcome not declared");
                 return;
             };
-            if let Some(value) = terminal.and_then(|event| event.attributes.get("conformance.result.value")) {
+            if let Some(value) = terminal.and_then(|event| event.attributes.get(RESULT_VALUE_ATTRIBUTE)) {
                 validate_typed_value(value, value_type, component, registry, &format!("{}.result", span.location), issues);
             }
         }
-        Some("conformance.empty") => {
+        Some(EMPTY_EVENT) => {
             if !operation.outcomes.empty {
                 model_issue(issues, &span.location, "empty outcome not declared");
             }
         }
-        Some("conformance.error") => {
+        Some(ERROR_EVENT) => {
             let event = terminal.expect("terminal event exists");
-            let name = event.attributes.get("conformance.error.name").and_then(AnyValue::as_string);
+            let name = event.attributes.get(ERROR_NAME_ATTRIBUTE).and_then(AnyValue::as_string);
             let declaration = name.and_then(|name| operation.outcomes.errors.iter().find(|error| error.name == name));
             let Some(declaration) = declaration else {
                 model_issue(issues, &span.location, format!("error outcome {name:?} not declared"));
                 return;
             };
-            match (declaration.value_type.as_ref(), event.attributes.get("conformance.error.value")) {
+            match (declaration.value_type.as_ref(), event.attributes.get(ERROR_VALUE_ATTRIBUTE)) {
                 (Some(value_type), Some(value)) => {
                     validate_typed_value(value, value_type, component, registry, &format!("{}.error", span.location), issues);
                 }
@@ -218,13 +241,16 @@ fn validate_typed_value(
                 return;
             };
             let before = issues.len();
+            let mut item_location = String::with_capacity(index_capacity(location, "[]"));
             for (index, value) in values.iter().enumerate() {
-                validate_typed_value(value, items, component, registry, &format!("{location}[{index}]"), issues);
+                item_location.clear();
+                write!(item_location, "{location}[{index}]").expect("writing to a String cannot fail");
+                validate_typed_value(value, items, component, registry, &item_location, issues);
             }
             if kind == "set" && issues.len() == before {
                 let canonical = values
                     .iter()
-                    .filter_map(|value| canonical_typed_value(value, items, component, registry))
+                    .filter_map(|value| canonical_value(value, items, component, registry))
                     .collect::<Vec<_>>();
                 if canonical.iter().collect::<BTreeSet<_>>().len() != canonical.len() {
                     model_issue(issues, location, "set contains duplicate elements");
@@ -237,8 +263,12 @@ fn validate_typed_value(
                     model_issue(issues, location, "string-keyed map must use kvlistValue");
                     return;
                 };
+                let max_key_len = entries.keys().map(String::len).max().unwrap_or_default();
+                let mut value_location = String::with_capacity(location.len() + ".".len() + max_key_len);
                 for (key, value) in entries {
-                    validate_typed_value(value, values, component, registry, &format!("{location}.{key}"), issues);
+                    value_location.clear();
+                    write!(value_location, "{location}.{key}").expect("writing to a String cannot fail");
+                    validate_typed_value(value, values, component, registry, &value_location, issues);
                 }
             } else {
                 let AnyValue::Array(entries) = value else {
@@ -246,8 +276,10 @@ fn validate_typed_value(
                     return;
                 };
                 let mut seen = BTreeSet::new();
+                let mut entry_location = String::with_capacity(index_capacity(location, "[].value"));
                 for (index, entry) in entries.iter().enumerate() {
-                    let entry_location = format!("{location}[{index}]");
+                    entry_location.clear();
+                    write!(entry_location, "{location}[{index}]").expect("writing to a String cannot fail");
                     let AnyValue::KvList(entry) = entry else {
                         model_issue(issues, &entry_location, "map entry must contain key and value");
                         continue;
@@ -256,16 +288,13 @@ fn validate_typed_value(
                         model_issue(issues, &entry_location, "map entry must contain key and value");
                         continue;
                     }
-                    validate_typed_value(&entry["key"], keys, component, registry, &format!("{entry_location}.key"), issues);
-                    validate_typed_value(
-                        &entry["value"],
-                        values,
-                        component,
-                        registry,
-                        &format!("{entry_location}.value"),
-                        issues,
-                    );
-                    if let Some(key) = canonical_typed_value(&entry["key"], keys, component, registry)
+                    let entry_base_len = entry_location.len();
+                    entry_location.push_str(".key");
+                    validate_typed_value(&entry["key"], keys, component, registry, &entry_location, issues);
+                    entry_location.truncate(entry_base_len);
+                    entry_location.push_str(".value");
+                    validate_typed_value(&entry["value"], values, component, registry, &entry_location, issues);
+                    if let Some(key) = canonical_value(&entry["key"], keys, component, registry)
                         && !seen.insert(key)
                     {
                         model_issue(issues, location, "map contains duplicate keys");
@@ -282,8 +311,11 @@ fn validate_typed_value(
                 model_issue(issues, location, "tuple arity does not match registry type");
                 return;
             }
+            let mut item_location = String::with_capacity(index_capacity(location, "[]"));
             for (index, (value, value_type)) in values.iter().zip(items).enumerate() {
-                validate_typed_value(value, value_type, component, registry, &format!("{location}[{index}]"), issues);
+                item_location.clear();
+                write!(item_location, "{location}[{index}]").expect("writing to a String cannot fail");
+                validate_typed_value(value, value_type, component, registry, &item_location, issues);
             }
         }
         TypeRef::Record { fields } => {
@@ -296,13 +328,17 @@ fn validate_typed_value(
                 model_issue(issues, location, "record fields do not match registry type");
                 return;
             }
+            let max_name_len = fields.iter().map(|field| field.name.len()).max().unwrap_or_default();
+            let mut field_location = String::with_capacity(location.len() + ".".len() + max_name_len);
             for field in fields {
+                field_location.clear();
+                write!(field_location, "{location}.{}", field.name).expect("writing to a String cannot fail");
                 validate_typed_value(
                     &entries[&field.name],
                     &field.value_type,
                     component,
                     registry,
-                    &format!("{location}.{}", field.name),
+                    &field_location,
                     issues,
                 );
             }
@@ -394,7 +430,10 @@ fn validate_primitive(value: &AnyValue, primitive: &str, location: &str, issues:
         }
         ("f32", AnyValue::Double(F64Value::Finite(bits))) => {
             let number = f64::from_bits(*bits);
-            #[allow(clippy::cast_possible_truncation)]
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "f32 validation deliberately narrows and checks exact round-trip"
+            )]
             let narrowed = number as f32;
             if f64::from(narrowed).to_bits() != number.to_bits() {
                 model_issue(issues, location, "value is not exactly representable as f32");
@@ -404,7 +443,7 @@ fn validate_primitive(value: &AnyValue, primitive: &str, location: &str, issues:
     }
 }
 
-pub(crate) fn canonical_typed_value(
+pub(crate) fn canonical_value(
     value: &AnyValue,
     value_type: &TypeRef,
     component: &ResolvedComponent,
@@ -423,7 +462,7 @@ pub(crate) fn canonical_typed_value(
                 return None;
             }
             let definition = target.component.types.iter().find(|item| item.name() == name)?;
-            canonical_typed_value(value, &definition.as_type(), target, registry)
+            canonical_value(value, &definition.as_type(), target, registry)
         }
         TypeRef::List { items } => {
             let AnyValue::Array(values) = value else {
@@ -431,7 +470,7 @@ pub(crate) fn canonical_typed_value(
             };
             values
                 .iter()
-                .map(|value| canonical_typed_value(value, items, component, registry))
+                .map(|value| canonical_value(value, items, component, registry))
                 .collect::<Option<Vec<_>>>()
                 .map(CanonicalValue::List)
         }
@@ -441,7 +480,7 @@ pub(crate) fn canonical_typed_value(
             };
             values
                 .iter()
-                .map(|value| canonical_typed_value(value, items, component, registry))
+                .map(|value| canonical_value(value, items, component, registry))
                 .collect::<Option<BTreeSet<_>>>()
                 .map(CanonicalValue::Set)
         }
@@ -453,7 +492,7 @@ pub(crate) fn canonical_typed_value(
                 entries
                     .iter()
                     .map(|(key, value)| {
-                        canonical_typed_value(value, values, component, registry).map(|value| (CanonicalValue::String(key.clone()), value))
+                        canonical_value(value, values, component, registry).map(|value| (CanonicalValue::String(key.clone()), value))
                     })
                     .collect::<Option<BTreeMap<_, _>>>()
                     .map(CanonicalValue::Map)
@@ -468,8 +507,8 @@ pub(crate) fn canonical_typed_value(
                             return None;
                         };
                         Some((
-                            canonical_typed_value(entry.get("key")?, keys, component, registry)?,
-                            canonical_typed_value(entry.get("value")?, values, component, registry)?,
+                            canonical_value(entry.get("key")?, keys, component, registry)?,
+                            canonical_value(entry.get("value")?, values, component, registry)?,
                         ))
                     })
                     .collect::<Option<BTreeMap<_, _>>>()
@@ -486,7 +525,7 @@ pub(crate) fn canonical_typed_value(
             values
                 .iter()
                 .zip(items)
-                .map(|(value, value_type)| canonical_typed_value(value, value_type, component, registry))
+                .map(|(value, value_type)| canonical_value(value, value_type, component, registry))
                 .collect::<Option<Vec<_>>>()
                 .map(CanonicalValue::Tuple)
         }
@@ -497,7 +536,7 @@ pub(crate) fn canonical_typed_value(
             fields
                 .iter()
                 .map(|field| {
-                    canonical_typed_value(entries.get(&field.name)?, &field.value_type, component, registry)
+                    canonical_value(entries.get(&field.name)?, &field.value_type, component, registry)
                         .map(|value| (field.name.clone(), value))
                 })
                 .collect::<Option<BTreeMap<_, _>>>()
@@ -511,7 +550,7 @@ pub(crate) fn canonical_typed_value(
             let value = if name == "None" {
                 canonical_primitive(payload, "unit")?
             } else if name == "Some" {
-                canonical_typed_value(payload, inner, component, registry)?
+                canonical_value(payload, inner, component, registry)?
             } else {
                 return None;
             };
@@ -524,7 +563,7 @@ pub(crate) fn canonical_typed_value(
             let (name, payload) = entries.first_key_value()?;
             let variant = variants.iter().find(|variant| variant.name == *name)?;
             let value = match &variant.payload {
-                Some(value_type) => canonical_typed_value(payload, value_type, component, registry)?,
+                Some(value_type) => canonical_value(payload, value_type, component, registry)?,
                 None => canonical_primitive(payload, "unit")?,
             };
             Some(CanonicalValue::Variant(name.clone(), Box::new(value)))

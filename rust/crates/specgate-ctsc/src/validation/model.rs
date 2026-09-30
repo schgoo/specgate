@@ -3,6 +3,8 @@ use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
+// These identifiers are defined by the CTSC 0.2 Registry and Trace Core
+// contracts. Producers and validators must update them together.
 pub(crate) const CTSC_VERSION: &str = "0.2.0";
 pub(crate) const CTSC_SPANS: [&str; 4] = [
     "conformance.run",
@@ -26,7 +28,10 @@ where
     T::deserialize(deserializer).map(Some)
 }
 
-#[allow(dead_code)]
+#[expect(
+    dead_code,
+    reason = "strict deserialization validates optional registry fields not otherwise inspected"
+)]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct RegistryDocument {
@@ -53,7 +58,10 @@ pub(crate) struct RegistryImport {
     pub(crate) uri: Option<String>,
 }
 
-#[allow(dead_code)]
+#[expect(
+    dead_code,
+    reason = "strict deserialization validates optional component fields not otherwise inspected"
+)]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct RegistryComponent {
@@ -76,7 +84,10 @@ pub(crate) struct ComponentRef {
     pub(crate) registry_id: Option<String>,
 }
 
-#[allow(dead_code)]
+#[expect(
+    dead_code,
+    reason = "strict deserialization validates optional operation fields not otherwise inspected"
+)]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RegistryOperation {
@@ -90,7 +101,6 @@ pub(crate) struct RegistryOperation {
     pub(crate) extensions: BTreeMap<String, Value>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct NamedValue {
@@ -112,7 +122,10 @@ pub(crate) struct RegistryOutcomes {
     pub(crate) errors: Vec<ErrorOutcome>,
 }
 
-#[allow(dead_code)]
+#[expect(
+    dead_code,
+    reason = "strict deserialization validates optional error descriptions not otherwise inspected"
+)]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ErrorOutcome {
@@ -123,7 +136,7 @@ pub(crate) struct ErrorOutcome {
     description: Option<String>,
 }
 
-#[allow(dead_code)]
+#[expect(dead_code, reason = "strict deserialization validates optional type descriptions and extensions")]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum NamedType {
@@ -162,7 +175,6 @@ impl NamedType {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Variant {
