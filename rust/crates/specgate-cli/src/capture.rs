@@ -736,7 +736,7 @@ pub fn format_outcome(outcome: &CaptureOutcome) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use specgate_ctsc::validation::{validate_bundle, validate_linked};
+    use specgate_ctsc::validation::{validate_bundle, validate_linked, validate_trace};
 
     fn repo_root() -> PathBuf {
         std::env::current_dir()
@@ -1035,6 +1035,68 @@ mod tests {
 
     fn read_trace(bundle: &Path) -> serde_json::Value {
         serde_json::from_slice(&std::fs::read(bundle.join(TRACE_FILE)).expect("captured trace")).expect("valid OTLP JSON")
+    }
+
+    fn event_attribute<'a>(event: &'a serde_json::Value, key: &str) -> &'a str {
+        attribute(event, key)
+            .and_then(|value| value["stringValue"].as_str())
+            .unwrap_or_else(|| panic!("event attribute '{key}' is missing: {event}"))
+    }
+
+    /// Captures an operation abandoned by process exit, end to end.
+    ///
+    /// This is issue #55 over the real `specgate capture` chain. `capture` has
+    /// no end-of-test signal, so an operation still open when the test process
+    /// ends used to leave no sidecar at all: the test passed, the operation
+    /// vanished, and the run reported success. The fixture's `abort` operation
+    /// calls [`std::process::exit`] with `0` from inside its own scope, so no
+    /// destructor runs and capture sees an ordinary passing test. Only the
+    /// provisional snapshot written once the operation's inputs are recorded
+    /// can preserve it.
+    #[test]
+    fn an_operation_abandoned_by_process_exit_is_captured_with_an_incomplete_capture_fault() {
+        let root = output_dir("aborted");
+        let _ = std::fs::remove_dir_all(&root);
+        let request = request_at("fixture.cli.aborted", root.join("aborted"));
+        let discovered = discover_capture_target(focused_rust_binding().to_str().unwrap(), "").expect("focused fixture discovery");
+        let executed = execute_capture_tests(&discovered, std::slice::from_ref(&request)).expect("focused fixture execution");
+        assert!(
+            !executed
+                .failures
+                .iter()
+                .any(|failure| failure.scenario_name == "tests::deliberately_exits_inside_an_open_operation"),
+            "the abandoning scenario must look like a passing test; that is what let the operation vanish"
+        );
+
+        write_capture_bundles(&discovered, std::slice::from_ref(&request), &executed, false)
+            .expect("an abandoned operation must still produce a bundle");
+
+        let trace = read_trace(&request.out);
+        let spans = operation_spans(&trace, "abort");
+        assert_eq!(spans.len(), 1, "the abandoned operation must survive into the bundle");
+        assert_eq!(spans[0]["status"]["code"], 2, "an unfinished operation span is ERROR");
+        let events = spans[0]["events"].as_array().expect("operation span events");
+        let faults = events
+            .iter()
+            .filter(|event| event["name"] == "conformance.fault")
+            .collect::<Vec<_>>();
+        assert_eq!(faults.len(), 1, "trace §7.5 puts the fault on the unfinished operation span itself");
+        assert_eq!(event_attribute(faults[0], "conformance.fault.type"), "incomplete_capture");
+        assert_eq!(event_attribute(faults[0], "conformance.fault.observer"), "target");
+
+        for report in [
+            validate_trace(&request.out.join(TRACE_FILE)),
+            validate_linked(&request.out.join(TRACE_FILE), &request.out.join(REGISTRY_FILE), &[]),
+            validate_bundle(&request.out),
+        ] {
+            assert!(
+                report.valid,
+                "{} validation failed for an incomplete capture: {:#?}",
+                report.level, report.issues
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

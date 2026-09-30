@@ -60,6 +60,29 @@ folded input name is reported rather than guessed. Ordinary runs are unchanged:
 nothing is projected or recorded unless a capture session is active or
 requested.
 
+## Provisional capture sidecars
+
+`specgate capture` runs ordinary tests and never signals "the test ended", so
+the runtime cannot know when a recording is final. The per-test sidecar is
+therefore a *provisional snapshot*: it is rewritten once each operation's
+declared inputs are recorded and again at every operation close, and it is only
+valid as of the last completed write. The last write before the test process
+exits is the authoritative recording.
+
+The snapshot is taken after input recording rather than at operation start
+because the registry declares each operation's inputs: a span captured before
+`record_input` has run carries an empty input surface and fails linked
+validation against its own registry.
+
+While operations are still outstanding, the snapshot is projected from a clone
+of the session on which every outstanding operation is closed with an
+`incomplete_capture` target fault, so the file always encodes well-formed spans
+and a leaked operation scope leaves a linkable bundle instead of vanishing. The
+clone's logical clock and event order advances are discarded, so a completed
+recording is byte-identical to one that never snapshotted. Nothing reads the
+sidecar while the process runs, so transient mid-operation inaccuracy is
+expected.
+
 ## Component capture scope
 
 `specgate capture --component <id>` anchors the export on the selected

@@ -408,6 +408,12 @@ pub struct NativeCaptureConfig {
 /// The CLI serializes this value into `SPECGATE_NATIVE_CAPTURE`; the first
 /// annotated synchronous operation in the isolated test process starts the
 /// session lazily and persists snapshots to `sidecar_path`.
+///
+/// [`sidecar_path`](Self::sidecar_path) holds a provisional snapshot: it is
+/// rewritten after each operation's inputs are recorded and again at every
+/// operation close, and is valid as of the last completed write. Operations
+/// still open at a write are projected into it with an `incomplete_capture`
+/// fault.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NativeCaptureEnvironmentConfig {
     pub capture: NativeCaptureConfig,
@@ -496,7 +502,7 @@ pub struct NativeCapture {
     pub operations: Vec<NativeOperationSpan>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct PendingNativeOperation {
     order: u64,
     span_id: String,
@@ -529,7 +535,11 @@ struct PendingSetupKey {
     fills: String,
 }
 
-#[derive(Debug)]
+/// Mutable state backing the active native capture session.
+///
+/// Cloning is used only to project a provisional sidecar snapshot; the clone's
+/// clock and order advances are discarded rather than applied to the session.
+#[derive(Debug, Clone)]
 struct NativeCaptureState {
     config: NativeCaptureConfig,
     sidecar_path: Option<PathBuf>,
@@ -607,6 +617,31 @@ impl OperationScope {
             }
             Ok(())
         })
+    }
+
+    /// Records a provisional snapshot of the capture session.
+    ///
+    /// `#[spec_operation]` emits this call after recording the operation's
+    /// declared inputs and before running its body. Callers must uphold that
+    /// ordering: the snapshot's inputs are compared against the inputs the
+    /// registry declares for the operation, so a snapshot taken before
+    /// [`record_input`](Self::record_input) has run carries an empty input
+    /// surface and fails linked validation.
+    ///
+    /// Does nothing on an inactive scope or when the session has no sidecar.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the provisional snapshot cannot be persisted.
+    pub fn inputs_recorded(&mut self) -> Result<(), String> {
+        if self.operation_index.is_none() {
+            return Ok(());
+        }
+        let has_sidecar = with_native_state_mut(|state| Ok(state.sidecar_path.is_some()))?;
+        if has_sidecar {
+            persist_active_native_capture()?;
+        }
+        Ok(())
     }
 
     /// Complete this operation with a typed semantic result.
@@ -713,7 +748,7 @@ impl OperationScope {
             operation.end_time_unix_nano = Some(end_time_unix_nano);
             operation.status = Some(status);
             state.active_operations.pop();
-            Ok(state.active_operations.is_empty() && state.sidecar_path.is_some())
+            Ok(state.sidecar_path.is_some())
         })?;
         self.closed = true;
         if should_persist {
@@ -764,7 +799,7 @@ impl Drop for OperationScope {
                 operation.end_time_unix_nano = Some(end_time_unix_nano);
                 operation.status = Some(NativeStatus::Error);
                 state.active_operations.pop();
-                Ok(state.active_operations.is_empty() && state.sidecar_path.is_some())
+                Ok(state.sidecar_path.is_some())
             } else {
                 let message = format!(
                     "native operation '{}' scope closed without completion",
@@ -1339,6 +1374,14 @@ fn next_operation_span_id(state: &NativeCaptureState) -> Result<String, String> 
     }
 }
 
+/// Rewrites the sidecar from the current session state.
+///
+/// With an empty operation stack the recording is complete and is persisted
+/// from live state. With operations still open the snapshot is projected from a
+/// clone on which [`close_outstanding_native_operations`] has been run, so the
+/// open operations appear with an `incomplete_capture` fault. The projection
+/// must stay on a clone: its clock and order advances are discarded, leaving
+/// the live session's sequence unchanged.
 fn persist_active_native_capture() -> Result<(), String> {
     let (path, capture) = NATIVE_CAPTURE.with(|slot| {
         let slot = slot.borrow();
@@ -1349,15 +1392,22 @@ fn persist_active_native_capture() -> Result<(), String> {
             .sidecar_path
             .clone()
             .ok_or_else(|| "native capture has no sidecar path".to_string())?;
-        Ok::<(PathBuf, NativeCapture), String>((path, build_native_capture(state)?))
+        let capture = if state.active_operations.is_empty() {
+            build_native_capture(state)?
+        } else {
+            let mut provisional = state.clone();
+            close_outstanding_native_operations(&mut provisional)?;
+            build_native_capture(&provisional)?
+        };
+        Ok::<(PathBuf, NativeCapture), String>((path, capture))
     })?;
     persist_capture_atomically(&path, &capture)
 }
 
 /// How many times a sidecar replacement is retried before it is reported.
 ///
-/// One scenario rewrites its sidecar after every top-level operation, so the
-/// same destination is replaced many times in a few milliseconds. On Windows a
+/// One scenario rewrites its sidecar at every operation boundary, so the same
+/// destination is replaced many times in a few milliseconds. On Windows a
 /// replacement transiently fails with "access is denied" whenever another
 /// process — a virus scanner, a search indexer — still holds the file it just
 /// saw appear. Retrying is not papering over a race in the capture itself: the
@@ -2042,6 +2092,88 @@ mod tests {
             capture.operations[1].end_time_unix_nano < capture.operations[0].end_time_unix_nano,
             "the innermost operation must close first"
         );
+    }
+
+    /// A sole operation leaked without completing is still described by the
+    /// sidecar, with its inputs and an `incomplete_capture` fault.
+    #[test]
+    fn a_leaked_sole_operation_leaves_a_faulted_provisional_sidecar() {
+        let scratch = tempfile::tempdir().unwrap();
+        let sidecar = scratch.path().join("capture.json");
+        start_native_capture_with_sidecar(native_config(&[]), Some(sidecar.clone())).unwrap();
+        let mut leaked = begin_native_operation("fixture.native", "leaked").unwrap();
+        leaked.record_input("value", Value::Integer(2)).unwrap();
+        // Mirrors the prologue `#[spec_operation]` generates: snapshot after inputs.
+        leaked.inputs_recorded().unwrap();
+        leak_scope(leaked);
+
+        let capture = read_sidecar(&sidecar);
+        assert_eq!(capture.operations.len(), 1);
+        assert_eq!(capture.operations[0].operation_name, "leaked");
+        assert_eq!(
+            capture.operations[0].inputs["value"],
+            Value::Integer(2),
+            "the snapshot must carry the declared inputs, or the bundle cannot link"
+        );
+        assert_incomplete_capture_fault(&capture.operations[0]);
+        assert_eq!(capture.run.status, NativeStatus::Error);
+    }
+
+    #[test]
+    fn a_leaked_outer_operation_keeps_its_completed_inner_operation() {
+        let scratch = tempfile::tempdir().unwrap();
+        let sidecar = scratch.path().join("capture.json");
+        start_native_capture_with_sidecar(native_config(&[]), Some(sidecar.clone())).unwrap();
+        let mut outer = begin_native_operation("fixture.native", "outer").unwrap();
+        outer.inputs_recorded().unwrap();
+        let mut inner = begin_native_operation("fixture.native", "inner").unwrap();
+        inner.inputs_recorded().unwrap();
+        inner.complete_result(Value::Integer(6)).unwrap();
+        leak_scope(outer);
+
+        let capture = read_sidecar(&sidecar);
+        assert_eq!(capture.operations.len(), 2);
+        assert_incomplete_capture_fault(&capture.operations[0]);
+        assert!(matches!(
+            capture.operations[1].completion,
+            Some(NativeCompletion::Result {
+                value: Value::Integer(6),
+                ..
+            })
+        ));
+        assert_eq!(capture.operations[1].parent_span_id, capture.operations[0].span_id);
+    }
+
+    /// A recording whose operations all complete is identical to what
+    /// [`finish_native_capture`] builds, unaffected by the snapshots taken
+    /// along the way.
+    #[test]
+    fn provisional_snapshots_do_not_perturb_a_completed_recording() {
+        let scratch = tempfile::tempdir().unwrap();
+        let sidecar = scratch.path().join("capture.json");
+        start_native_capture_with_sidecar(native_config(&["1111111111111103"]), Some(sidecar.clone())).unwrap();
+        let mut outer = begin_native_operation("fixture.native", "outer").unwrap();
+        outer.inputs_recorded().unwrap();
+        emit_event("checkpoint", &BTreeMap::from([("count".to_string(), 2_i32)]));
+        let mut inner = begin_native_operation("fixture.native", "inner").unwrap();
+        inner.inputs_recorded().unwrap();
+        inner.complete_result(Value::Integer(6)).unwrap();
+        outer.complete_result(Value::Integer(7)).unwrap();
+
+        let persisted = read_sidecar(&sidecar);
+        assert_eq!(
+            persisted,
+            finish_native_capture().unwrap(),
+            "the final sidecar must equal the recording the existing path builds"
+        );
+    }
+
+    /// [`OperationScope::inputs_recorded`] succeeds and does nothing on an
+    /// inactive scope, which has no session behind it.
+    #[test]
+    fn the_snapshot_hook_is_a_no_op_on_an_inactive_scope() {
+        let mut inactive = OperationScope::inactive();
+        inactive.inputs_recorded().expect("an inactive scope has no session to snapshot");
     }
 
     #[test]
