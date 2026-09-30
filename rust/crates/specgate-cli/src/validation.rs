@@ -3,6 +3,12 @@
 use specgate_ctsc::validation::ValidationReport;
 use std::fmt::Write as _;
 
+/// Format a CTSC validation report for command-line output.
+///
+/// # Examples
+///
+/// Construct a [`ValidationReport`] and pass it to this function to obtain the
+/// same stable text emitted by the `validate` command.
 #[must_use]
 pub fn format_report(report: &ValidationReport) -> String {
     let mut output = String::new();

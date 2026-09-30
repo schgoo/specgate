@@ -8,7 +8,7 @@
 //! captured until capture context becomes task-safe.
 //!
 //! ```rust
-//! use specgate::*;
+//! use specgate::{spec_component, spec_operation};
 //!
 //! spec_component!("example.math");
 //!
@@ -24,7 +24,10 @@
 //! fn main() {}
 //! ```
 
-#[allow(unused_extern_crates)]
+#[expect(
+    unused_extern_crates,
+    reason = "proc-macro expansions resolve the facade crate through this self alias"
+)]
 extern crate self as specgate;
 
 pub use specgate_annotations_macros::{SpecEvent, spec_component, spec_operation, spec_setup, spec_trace};

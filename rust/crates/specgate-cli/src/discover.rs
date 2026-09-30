@@ -10,12 +10,16 @@ use specgate_ctsc::encode_schema_registry_result;
 /// Summary of a discovery run.
 #[derive(Debug, Clone, PartialEq, Eq, SpecEvent)]
 pub struct DiscoverReport {
+    /// Discovered component identifier.
     #[spec_event]
     pub component_id: String,
+    /// Number of operations in the encoded registry.
     #[spec_event]
     pub operations: i32,
+    /// Number of named types in the encoded registry.
     #[spec_event]
     pub types: i32,
+    /// Written registry path.
     #[spec_event]
     pub output_path: String,
 }
@@ -23,7 +27,9 @@ pub struct DiscoverReport {
 /// Outcome of `discover`.
 #[derive(Debug, Clone, PartialEq, Eq, SpecEvent)]
 pub enum DiscoverOutcome {
+    /// Discovery completed and wrote a registry.
     Complete { report: DiscoverReport },
+    /// Discovery failed before writing a valid registry.
     Error { reason: String },
 }
 
@@ -129,7 +135,7 @@ mod tests {
     }
 
     #[test]
-    fn focused_discovery_batches_each_language_and_preserves_parity() {
+    fn batch_parity() {
         use specgate_discovery::discovery::discover_many_target;
 
         let components = ["fixture.cli.multiple", "fixture.cli.replay", "fixture.cli.setup"];

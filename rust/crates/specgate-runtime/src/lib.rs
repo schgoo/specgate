@@ -33,17 +33,29 @@ pub use linkme;
 // ---------------------------------------------------------------------------
 
 /// Metadata about one annotated operation or setup.
-#[allow(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "link-time metadata preserves independent operation properties"
+)]
 #[derive(Debug, Clone)]
 pub struct OpMeta {
+    /// Semantic operation or setup name.
     pub name: &'static str,
+    /// Native module path.
     pub module_path: &'static str,
+    /// Native function or method name.
     pub fn_name: &'static str,
+    /// Whether this declaration is a setup producer.
     pub is_setup: bool,
+    /// Whether this declaration is asynchronous.
     pub is_async: bool,
+    /// Whether this declaration is a method.
     pub is_method: bool,
+    /// Whether this declaration is public.
     pub is_public: bool,
+    /// Raw parameter names and types.
     pub params: &'static [(&'static str, &'static str)],
+    /// Raw return type.
     pub return_type: &'static str,
     /// For setups: the operation parameter this setup fills (empty if unset).
     /// Used to disambiguate when several params share the setup's output type.
@@ -62,8 +74,11 @@ pub type FieldMeta = (&'static str, &'static str);
 /// payload. Unit variants carry neither.
 #[derive(Debug, Clone)]
 pub struct VariantMeta {
+    /// Semantic variant name.
     pub name: &'static str,
+    /// Named payload fields.
     pub fields: &'static [FieldMeta],
+    /// Ordered tuple payload types.
     pub tuple: Option<&'static [&'static str]>,
 }
 
@@ -72,19 +87,26 @@ pub struct VariantMeta {
 /// honoring `#[spec_event(name = "…")]`); enums populate `variants`.
 #[derive(Debug, Clone)]
 pub struct TypeMeta {
+    /// Semantic type name.
     pub name: &'static str,
+    /// Native module path.
     pub module_path: &'static str,
+    /// Type kind: `struct` or `enum`.
     pub kind: &'static str,
+    /// Struct fields.
     pub fields: &'static [FieldMeta],
+    /// Enum variants.
     pub variants: &'static [VariantMeta],
     /// The component that owns this type (see `OpMeta::component`).
     pub component: &'static str,
 }
 
 #[linkme::distributed_slice]
+/// Link-time inventory of annotated operations and setups.
 pub static SPECGATE_OPS: [OpMeta];
 
 #[linkme::distributed_slice]
+/// Link-time inventory of semantic types.
 pub static SPECGATE_TYPES: [TypeMeta];
 
 /// Escape a string for inclusion as a JSON string literal. Handles the control
@@ -185,6 +207,7 @@ pub fn discovery_json() -> String {
         out.push_str("]}");
     }
     out.push_str("]}");
+    out.shrink_to_fit();
     out
 }
 
@@ -196,17 +219,26 @@ pub fn discovery_json() -> String {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum Value {
+    /// UTF-8 string value.
     String(String),
+    /// Signed integer value.
     Integer(i64),
+    /// Unsigned integer value.
     Unsigned(u64),
+    /// Floating-point value.
     Float(f64),
+    /// Boolean value.
     Bool(bool),
+    /// Ordered list value.
     List(Vec<Value>),
+    /// String-keyed map value.
     Map(BTreeMap<String, Value>),
+    /// Deterministically ordered set value.
     Set(BTreeSet<Value>),
 }
 
 impl Value {
+    /// Return the stable native semantic kind name.
     #[must_use]
     pub fn type_name(&self) -> &'static str {
         match self {
@@ -223,22 +255,35 @@ impl Value {
 }
 
 fn variant_rank(v: &Value) -> u8 {
+    // These ranks define the stable cross-variant order used by semantic sets;
+    // changing them changes deterministic capture and comparison ordering.
+    const BOOL_RANK: u8 = 0;
+    const INTEGER_RANK: u8 = 1;
+    const UNSIGNED_RANK: u8 = 2;
+    const FLOAT_RANK: u8 = 3;
+    const STRING_RANK: u8 = 4;
+    const LIST_RANK: u8 = 5;
+    const SET_RANK: u8 = 6;
+    const MAP_RANK: u8 = 7;
     match v {
-        Value::Bool(_) => 0,
-        Value::Integer(_) => 1,
-        Value::Unsigned(_) => 2,
-        Value::Float(_) => 3,
-        Value::String(_) => 4,
-        Value::List(_) => 5,
-        Value::Set(_) => 6,
-        Value::Map(_) => 7,
+        Value::Bool(_) => BOOL_RANK,
+        Value::Integer(_) => INTEGER_RANK,
+        Value::Unsigned(_) => UNSIGNED_RANK,
+        Value::Float(_) => FLOAT_RANK,
+        Value::String(_) => STRING_RANK,
+        Value::List(_) => LIST_RANK,
+        Value::Set(_) => SET_RANK,
+        Value::Map(_) => MAP_RANK,
     }
 }
 
 impl PartialEq for Value {
     // i64 → f64 is intentionally lossy: comparing an integer variant against a float
     // variant uses float semantics, which cannot be made lossless for large i64 values.
-    #[allow(clippy::cast_precision_loss)]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "cross-variant integer/float equality intentionally uses float semantics"
+    )]
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Value::String(a), Value::String(b)) => a == b,
@@ -394,12 +439,19 @@ impl From<f32> for Value {
 /// Deterministic configuration for one thread-local native capture session.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NativeCaptureConfig {
+    /// Stable scenario name.
     pub scenario_name: String,
+    /// Nonzero lowercase hexadecimal trace identifier.
     pub trace_id: String,
+    /// Run span identifier.
     pub run_span_id: String,
+    /// Scenario span identifier.
     pub scenario_span_id: String,
+    /// Operation span identifiers consumed in invocation order.
     pub operation_span_ids: Vec<String>,
+    /// Initial logical timestamp in nanoseconds.
     pub start_time_unix_nano: i64,
+    /// Logical clock increment in nanoseconds.
     pub clock_step_unix_nano: i64,
 }
 
@@ -410,17 +462,24 @@ pub struct NativeCaptureConfig {
 /// session lazily and persists snapshots to `sidecar_path`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NativeCaptureEnvironmentConfig {
+    /// Native capture session configuration.
     pub capture: NativeCaptureConfig,
+    /// Snapshot sidecar destination.
     pub sidecar_path: PathBuf,
 }
 
 /// A completed run or scenario span boundary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NativeSpanBoundary {
+    /// Span identifier.
     pub span_id: String,
+    /// Optional parent span identifier.
     pub parent_span_id: Option<String>,
+    /// Start timestamp in Unix nanoseconds.
     pub start_time_unix_nano: i64,
+    /// End timestamp in Unix nanoseconds.
     pub end_time_unix_nano: i64,
+    /// Terminal span status.
     pub status: NativeStatus,
 }
 
@@ -428,16 +487,22 @@ pub struct NativeSpanBoundary {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NativeStatus {
+    /// Successful completion.
     Ok,
+    /// Error or fault completion.
     Error,
 }
 
 /// One native observation captured while an operation scope is active.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NativeObservation {
+    /// Stable event order within the capture.
     pub order: u64,
+    /// Event timestamp in Unix nanoseconds.
     pub time_unix_nano: i64,
+    /// Semantic observation name.
     pub name: String,
+    /// Semantic observation value.
     pub value: Value,
 }
 
@@ -445,27 +510,45 @@ pub struct NativeObservation {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum NativeCompletion {
+    /// Typed result completion.
     Result {
+        /// Stable event order.
         order: u64,
+        /// Completion timestamp in Unix nanoseconds.
         time_unix_nano: i64,
+        /// Semantic result value.
         value: Value,
     },
+    /// Explicit empty completion.
     Empty {
+        /// Stable event order.
         order: u64,
+        /// Completion timestamp in Unix nanoseconds.
         time_unix_nano: i64,
     },
+    /// Declared error completion.
     Error {
+        /// Stable event order.
         order: u64,
+        /// Completion timestamp in Unix nanoseconds.
         time_unix_nano: i64,
+        /// Declared error name.
         name: String,
         #[serde(skip_serializing_if = "Option::is_none")]
+        /// Optional semantic error payload.
         value: Option<Value>,
     },
+    /// Unwind fault completion.
     Fault {
+        /// Stable event order.
         order: u64,
+        /// Completion timestamp in Unix nanoseconds.
         time_unix_nano: i64,
+        /// Stable fault category.
         fault_type: String,
+        /// Native fault message.
         message: String,
+        /// Fault observer identity.
         observer: String,
     },
 }
@@ -473,26 +556,42 @@ pub enum NativeCompletion {
 /// One completed native operation span.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NativeOperationSpan {
+    /// Stable operation order.
     pub order: u64,
+    /// Operation span identifier.
     pub span_id: String,
+    /// Parent scenario or operation span identifier.
     pub parent_span_id: String,
+    /// Owning component identifier.
     pub component_id: String,
+    /// Semantic operation name.
     pub operation_name: String,
+    /// Start timestamp in Unix nanoseconds.
     pub start_time_unix_nano: i64,
+    /// End timestamp in Unix nanoseconds.
     pub end_time_unix_nano: i64,
+    /// Terminal operation status.
     pub status: NativeStatus,
+    /// Semantic inputs keyed by name.
     pub inputs: BTreeMap<String, Value>,
+    /// Ordered observations.
     pub observations: Vec<NativeObservation>,
+    /// Recorded semantic completion.
     pub completion: Option<NativeCompletion>,
 }
 
 /// Completed native evidence for one deterministic run and scenario.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NativeCapture {
+    /// Capture trace identifier.
     pub trace_id: String,
+    /// Scenario name.
     pub scenario_name: String,
+    /// Run span boundary.
     pub run: NativeSpanBoundary,
+    /// Scenario span boundary.
     pub scenario: NativeSpanBoundary,
+    /// Completed operation spans.
     pub operations: Vec<NativeOperationSpan>,
 }
 
@@ -572,6 +671,7 @@ pub struct OperationScope {
 }
 
 impl OperationScope {
+    /// Construct a no-op scope for calls made outside an active capture.
     #[must_use]
     pub const fn inactive() -> Self {
         Self {
@@ -819,6 +919,7 @@ fn start_native_capture_with_sidecar(config: NativeCaptureConfig, sidecar_path: 
         let next_time_unix_nano = scenario_start_time_unix_nano
             .checked_add(config.clock_step_unix_nano)
             .ok_or_else(|| "native capture logical clock overflow".to_string())?;
+        let operation_capacity = config.operation_span_ids.len();
         *slot = Some(NativeCaptureState {
             run_start_time_unix_nano: config.start_time_unix_nano,
             scenario_start_time_unix_nano,
@@ -827,8 +928,8 @@ fn start_native_capture_with_sidecar(config: NativeCaptureConfig, sidecar_path: 
             sidecar_path,
             next_operation_id: 0,
             next_order: 0,
-            active_operations: Vec::new(),
-            operations: Vec::new(),
+            active_operations: Vec::with_capacity(operation_capacity),
+            operations: Vec::with_capacity(operation_capacity),
             terminal_error: None,
         });
         Ok(())
@@ -897,6 +998,8 @@ pub struct DeferredSetupInputs {
 
 #[doc(hidden)]
 #[must_use]
+/// Defer setup-input evaluation until generated instrumentation determines
+/// that an active capture needs the values.
 pub fn defer_setup_inputs<F>(
     component_id: &'static str,
     operation_name: &'static str,
@@ -1112,24 +1215,23 @@ fn folded_setup_inputs(component_id: &str, operation_name: &str) -> Result<(BTre
     };
 
     let mut filled = BTreeSet::new();
-    let mut required_setups = Vec::new();
+    let mut required_setups = Vec::with_capacity(SPECGATE_OPS.len());
     let mut receiver_claimed = false;
     for setup in SPECGATE_OPS
         .iter()
         .filter(|candidate| candidate.is_setup && candidate.component == component_id && candidate.name == operation_name)
     {
         let contribution = if setup.fills.is_empty() {
-            let candidates = operation
+            let mut candidates = operation
                 .params
                 .iter()
                 .filter(|(name, declared)| {
                     !filled.contains(*name) && normalize_declared_type(declared) == normalize_declared_type(setup.return_type)
                 })
-                .map(|(name, _declared)| (*name).to_string())
-                .collect::<Vec<_>>();
-            match candidates.as_slice() {
-                [only] => Some(SetupContribution::Parameter(only.clone())),
-                [] if !receiver_claimed => {
+                .map(|(name, _declared)| *name);
+            match (candidates.next(), candidates.next()) {
+                (Some(only), None) => Some(SetupContribution::Parameter(only.to_string())),
+                (None, _) if !receiver_claimed => {
                     receiver_claimed = true;
                     Some(SetupContribution::Receiver)
                 }
@@ -1318,8 +1420,12 @@ fn persist_active_native_capture() -> Result<(), String> {
 /// process — a virus scanner, a search indexer — still holds the file it just
 /// saw appear. Retrying is not papering over a race in the capture itself: the
 /// serialized bytes are already complete and durable, and only the final rename
-/// is retried.
+/// is retried. Twelve attempts with the linear delay below wait at most 660 ms,
+/// enough to outlast short scanner locks without hiding a persistent failure.
 const SIDECAR_PERSIST_ATTEMPTS: u32 = 12;
+// A 10 ms linear base yields delays from 10 through 110 ms before the final
+// attempt, balancing scanner tolerance against capture-test latency.
+const SIDECAR_RETRY_BASE_DELAY_MILLIS: u64 = 10;
 
 fn persist_capture_atomically(path: &Path, capture: &NativeCapture) -> Result<(), String> {
     let parent = path
@@ -1341,7 +1447,9 @@ fn persist_capture_atomically(path: &Path, capture: &NativeCapture) -> Result<()
             Ok(_persisted) => return Ok(()),
             Err(rejected) if attempt < SIDECAR_PERSIST_ATTEMPTS => {
                 file = rejected.file;
-                std::thread::sleep(std::time::Duration::from_millis(u64::from(attempt) * 10));
+                std::thread::sleep(std::time::Duration::from_millis(
+                    u64::from(attempt) * SIDECAR_RETRY_BASE_DELAY_MILLIS,
+                ));
             }
             Err(rejected) => {
                 return Err(format!(
@@ -1416,22 +1524,26 @@ fn build_native_capture(state: &NativeCaptureState) -> Result<NativeCapture, Str
 }
 
 fn validate_native_capture_config(config: &NativeCaptureConfig) -> Result<(), String> {
-    validate_hex_id("trace ID", &config.trace_id, 32)?;
-    validate_hex_id("run span ID", &config.run_span_id, 16)?;
-    validate_hex_id("scenario span ID", &config.scenario_span_id, 16)?;
+    // OTLP trace and span IDs are 16 and 8 bytes, encoded as two lowercase
+    // hexadecimal characters per byte.
+    const TRACE_ID_HEX_LENGTH: usize = 32;
+    const SPAN_ID_HEX_LENGTH: usize = 16;
+    validate_hex_id("trace ID", &config.trace_id, TRACE_ID_HEX_LENGTH)?;
+    validate_hex_id("run span ID", &config.run_span_id, SPAN_ID_HEX_LENGTH)?;
+    validate_hex_id("scenario span ID", &config.scenario_span_id, SPAN_ID_HEX_LENGTH)?;
     if config.start_time_unix_nano < 0 {
         return Err("native capture start timestamp must be non-negative".to_string());
     }
     if config.clock_step_unix_nano <= 0 {
         return Err("native capture logical clock step must be positive".to_string());
     }
-    let mut span_ids = HashSet::new();
+    let mut span_ids = HashSet::with_capacity(config.operation_span_ids.len().saturating_add(2));
     span_ids.insert(config.run_span_id.as_str());
     if !span_ids.insert(config.scenario_span_id.as_str()) {
         return Err("native capture span IDs must be unique".to_string());
     }
     for (index, span_id) in config.operation_span_ids.iter().enumerate() {
-        validate_hex_id(&format!("operation span ID at index {index}"), span_id, 16)?;
+        validate_hex_id(&format!("operation span ID at index {index}"), span_id, SPAN_ID_HEX_LENGTH)?;
         if !span_ids.insert(span_id.as_str()) {
             return Err(format!("native capture operation span ID at index {index} is duplicated"));
         }
@@ -1478,6 +1590,10 @@ fn with_native_state_mut<T>(f: impl FnOnce(&mut NativeCaptureState) -> Result<T,
 }
 
 fn record_native_observation(name: &str, value: &Value) -> Result<(), String> {
+    // Completion events own these protocol-reserved names, so ordinary
+    // observations with the same names are excluded from the captured stream.
+    const RESULT_OBSERVATION: &str = "$result";
+    const FAULT_OBSERVATION: &str = "$fault";
     NATIVE_CAPTURE.with(|slot| {
         let mut slot = slot.borrow_mut();
         let Some(state) = slot.as_mut() else {
@@ -1486,7 +1602,7 @@ fn record_native_observation(name: &str, value: &Value) -> Result<(), String> {
         let Some(operation_index) = state.active_operations.last().copied() else {
             return Ok(());
         };
-        if name == "$result" || name == "$fault" {
+        if name == RESULT_OBSERVATION || name == FAULT_OBSERVATION {
             return Ok(());
         }
         let observation = NativeObservation {
@@ -1526,6 +1642,7 @@ pub trait SpecEvent: ToNativeValue {}
 
 /// Convert a value to its native CTSC semantic representation.
 pub trait ToNativeValue {
+    /// Project this value into its CTSC semantic representation.
     fn to_native_value(&self) -> Value;
 }
 

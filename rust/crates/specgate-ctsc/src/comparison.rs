@@ -2,17 +2,38 @@
 
 use crate::validation::{
     AnyValue, RegistryOperation, RegistrySet, ResolvedComponent, TraceDocument, TraceEvent, TraceSpan, TypeRef, ValidationIssue,
-    canonical_typed_value, find_operation, load_registry_set, load_trace, validate_linked_model,
+    canonical_value, check_linked, find_operation, load_set, load_trace,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt;
+use std::fmt::{self, Write as _};
 use std::path::{Path, PathBuf};
 
 /// CTSC Strict policy identifier.
 pub const STRICT_POLICY: &str = "ctsc.strict";
 /// CTSC Strict policy version.
 pub const STRICT_POLICY_VERSION: &str = "0.1.0";
+// CTSC Trace Core span and attribute names used as semantic comparison keys.
+// These must stay synchronized with the trace contract and validator.
+const RUN_SPAN: &str = "conformance.run";
+const SCENARIO_SPAN: &str = "conformance.scenario";
+const OPERATION_SPAN: &str = "conformance.operation";
+const PARALLEL_SPAN: &str = "conformance.parallel";
+const SCENARIO_NAME_ATTRIBUTE: &str = "conformance.scenario.name";
+const COMPONENT_ID_ATTRIBUTE: &str = "conformance.component.id";
+const OPERATION_NAME_ATTRIBUTE: &str = "conformance.operation.name";
+const OPERATION_INPUTS_ATTRIBUTE: &str = "conformance.operation.inputs";
+const OBSERVATION_EVENT: &str = "conformance.observation";
+const OBSERVATION_NAME_ATTRIBUTE: &str = "conformance.observation.name";
+const OBSERVATION_VALUE_ATTRIBUTE: &str = "conformance.observation.value";
+const RESULT_EVENT: &str = "conformance.result";
+const RESULT_VALUE_ATTRIBUTE: &str = "conformance.result.value";
+const ERROR_EVENT: &str = "conformance.error";
+const ERROR_NAME_ATTRIBUTE: &str = "conformance.error.name";
+const ERROR_VALUE_ATTRIBUTE: &str = "conformance.error.value";
+const FAULT_EVENT: &str = "conformance.fault";
+const FAULT_TYPE_ATTRIBUTE: &str = "conformance.fault.type";
+const FAULT_MESSAGE_ATTRIBUTE: &str = "conformance.fault.message";
 
 /// One deterministic behavioral mismatch.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -60,8 +81,10 @@ pub struct ComparisonReport {
 pub fn compare(reference: &Path, candidate: &Path, registry: Option<&Path>, imports: &[PathBuf]) -> ComparisonReport {
     let reference_trace = load_trace(reference);
     let candidate_trace = load_trace(candidate);
-    let registry_set = registry.map(|path| load_registry_set(path, imports));
-    let mut validation_failures = Vec::new();
+    let registry_set = registry.map(|path| load_set(path, imports));
+    let validation_capacity =
+        reference_trace.issues.len() + candidate_trace.issues.len() + registry_set.as_ref().map_or(0, |loaded| loaded.issues.len());
+    let mut validation_failures = Vec::with_capacity(validation_capacity);
     validation_failures.extend(prefix_issues("reference", reference_trace.issues));
     validation_failures.extend(prefix_issues("candidate", candidate_trace.issues));
     if let Some(registry_set) = &registry_set {
@@ -72,10 +95,10 @@ pub fn compare(reference: &Path, candidate: &Path, registry: Option<&Path>, impo
         && let Some(registry_set) = registry_set.as_ref().and_then(|loaded| loaded.value.as_ref())
     {
         let mut linked = Vec::new();
-        validate_linked_model(reference_trace, registry_set, &mut linked);
+        check_linked(reference_trace, registry_set, &mut linked);
         validation_failures.extend(prefix_issues("reference linked", linked));
         let mut linked = Vec::new();
-        validate_linked_model(candidate_trace, registry_set, &mut linked);
+        check_linked(candidate_trace, registry_set, &mut linked);
         validation_failures.extend(prefix_issues("candidate linked", linked));
     }
 
@@ -87,6 +110,9 @@ pub fn compare(reference: &Path, candidate: &Path, registry: Option<&Path>, impo
         let registry = registry_set.as_ref().and_then(|loaded| loaded.value.as_ref());
         compare_documents(reference_trace, candidate_trace, registry, &mut errors, &mut mismatches);
     }
+    validation_failures.shrink_to_fit();
+    errors.shrink_to_fit();
+    mismatches.shrink_to_fit();
     ComparisonReport {
         policy: STRICT_POLICY.to_string(),
         policy_version: STRICT_POLICY_VERSION.to_string(),
@@ -140,16 +166,8 @@ fn compare_documents(
     errors: &mut Vec<ComparisonError>,
     mismatches: &mut Vec<ComparisonMismatch>,
 ) {
-    let reference_runs = reference
-        .spans
-        .iter()
-        .filter(|span| span.name == "conformance.run")
-        .collect::<Vec<_>>();
-    let candidate_runs = candidate
-        .spans
-        .iter()
-        .filter(|span| span.name == "conformance.run")
-        .collect::<Vec<_>>();
+    let reference_runs = reference.spans.iter().filter(|span| span.name == RUN_SPAN).collect::<Vec<_>>();
+    let candidate_runs = candidate.spans.iter().filter(|span| span.name == RUN_SPAN).collect::<Vec<_>>();
     if reference_runs.len() != 1 {
         comparison_error(
             errors,
@@ -217,12 +235,12 @@ fn scenarios<'a>(
 ) -> BTreeMap<String, &'a TraceSpan> {
     let mut result = BTreeMap::new();
     for scenario in index.children(run) {
-        if scenario.name != "conformance.scenario" {
+        if scenario.name != SCENARIO_SPAN {
             continue;
         }
         let name = scenario
             .attributes
-            .get("conformance.scenario.name")
+            .get(SCENARIO_NAME_ATTRIBUTE)
             .and_then(AnyValue::as_string)
             .unwrap_or_default()
             .to_string();
@@ -237,7 +255,10 @@ fn scenarios<'a>(
     result
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "comparison recursion carries both trace indexes and both diagnostic sinks"
+)]
 fn compare_container(
     reference: &TraceSpan,
     candidate: &TraceSpan,
@@ -261,7 +282,10 @@ fn compare_container(
     );
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "comparison recursion carries both trace indexes and both diagnostic sinks"
+)]
 fn compare_children(
     reference: &TraceSpan,
     candidate: &TraceSpan,
@@ -272,8 +296,8 @@ fn compare_children(
     errors: &mut Vec<ComparisonError>,
     mismatches: &mut Vec<ComparisonMismatch>,
 ) {
-    if reference.name == "conformance.parallel" || candidate.name == "conformance.parallel" {
-        compare_parallel_children(
+    if reference.name == PARALLEL_SPAN || candidate.name == PARALLEL_SPAN {
+        compare_parallel(
             reference,
             candidate,
             reference_index,
@@ -292,8 +316,10 @@ fn compare_children(
         return;
     };
     let count = reference_children.len().max(candidate_children.len());
+    let mut child_path = String::with_capacity(path.len() + ".children[]".len() + usize::MAX.ilog10() as usize + 1);
     for position in 0..count {
-        let child_path = format!("{path}.children[{position}]");
+        child_path.clear();
+        write!(child_path, "{path}.children[{position}]").expect("writing to a String cannot fail");
         match (reference_children.get(position), candidate_children.get(position)) {
             (Some(reference), Some(candidate)) => compare_child(
                 reference,
@@ -362,8 +388,11 @@ fn sequential_children<'a>(
     Some(children)
 }
 
-#[allow(clippy::too_many_arguments)]
-fn compare_parallel_children(
+#[expect(
+    clippy::too_many_arguments,
+    reason = "parallel comparison carries both trace indexes and both diagnostic sinks"
+)]
+fn compare_parallel(
     reference: &TraceSpan,
     candidate: &TraceSpan,
     reference_index: &TraceIndex<'_>,
@@ -383,8 +412,10 @@ fn compare_parallel_children(
         .chain(candidate_children.keys())
         .copied()
         .collect::<BTreeSet<_>>();
+    let mut child_path = String::with_capacity(path.len() + ".parallel[]".len());
     for identity in identities {
-        let child_path = format!("{path}.parallel[{identity}]");
+        child_path.clear();
+        write!(child_path, "{path}.parallel[{identity}]").expect("writing to a String cannot fail");
         match (reference_children.get(&identity), candidate_children.get(&identity)) {
             (Some(reference), Some(candidate)) => compare_child(
                 reference,
@@ -443,15 +474,15 @@ impl fmt::Display for SpanIdentity<'_> {
 }
 
 fn span_identity(span: &TraceSpan) -> SpanIdentity<'_> {
-    if span.name == "conformance.operation" {
+    if span.name == OPERATION_SPAN {
         let component = span
             .attributes
-            .get("conformance.component.id")
+            .get(COMPONENT_ID_ATTRIBUTE)
             .and_then(AnyValue::as_string)
             .unwrap_or("<missing>");
         let operation = span
             .attributes
-            .get("conformance.operation.name")
+            .get(OPERATION_NAME_ATTRIBUTE)
             .and_then(AnyValue::as_string)
             .unwrap_or("<missing>");
         SpanIdentity::Operation {
@@ -463,7 +494,10 @@ fn span_identity(span: &TraceSpan) -> SpanIdentity<'_> {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "child comparison carries both trace indexes and both diagnostic sinks"
+)]
 fn compare_child(
     reference: &TraceSpan,
     candidate: &TraceSpan,
@@ -479,11 +513,11 @@ fn compare_child(
         return;
     }
     match reference.name.as_str() {
-        "conformance.operation" => {
+        OPERATION_SPAN => {
             let operation_path = format!(
                 "{path}.operation[{}::{}]",
-                attribute_string(reference, "conformance.component.id"),
-                attribute_string(reference, "conformance.operation.name")
+                attribute_string(reference, COMPONENT_ID_ATTRIBUTE),
+                attribute_string(reference, OPERATION_NAME_ATTRIBUTE)
             );
             compare_operation(
                 reference,
@@ -496,9 +530,9 @@ fn compare_child(
                 mismatches,
             );
         }
-        "conformance.parallel" => {
+        PARALLEL_SPAN => {
             compare_events(&reference.events, &candidate.events, None, None, registry, path, mismatches);
-            compare_parallel_children(
+            compare_parallel(
                 reference,
                 candidate,
                 reference_index,
@@ -513,7 +547,10 @@ fn compare_child(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "operation comparison carries both trace indexes and both diagnostic sinks"
+)]
 fn compare_operation(
     reference: &TraceSpan,
     candidate: &TraceSpan,
@@ -524,10 +561,10 @@ fn compare_operation(
     errors: &mut Vec<ComparisonError>,
     mismatches: &mut Vec<ComparisonMismatch>,
 ) {
-    let reference_component = attribute_string(reference, "conformance.component.id");
-    let candidate_component = attribute_string(candidate, "conformance.component.id");
-    let reference_name = attribute_string(reference, "conformance.operation.name");
-    let candidate_name = attribute_string(candidate, "conformance.operation.name");
+    let reference_component = attribute_string(reference, COMPONENT_ID_ATTRIBUTE);
+    let candidate_component = attribute_string(candidate, COMPONENT_ID_ATTRIBUTE);
+    let reference_name = attribute_string(reference, OPERATION_NAME_ATTRIBUTE);
+    let candidate_name = attribute_string(candidate, OPERATION_NAME_ATTRIBUTE);
     if reference_component != candidate_component {
         mismatch(mismatches, &format!("{path}.component"), reference_component, candidate_component);
     }
@@ -570,12 +607,12 @@ fn compare_inputs(
 ) {
     let reference_inputs = reference
         .attributes
-        .get("conformance.operation.inputs")
+        .get(OPERATION_INPUTS_ATTRIBUTE)
         .and_then(AnyValue::as_kvlist)
         .expect("validated operation inputs");
     let candidate_inputs = candidate
         .attributes
-        .get("conformance.operation.inputs")
+        .get(OPERATION_INPUTS_ATTRIBUTE)
         .and_then(AnyValue::as_kvlist)
         .expect("validated operation inputs");
     let names = reference_inputs
@@ -583,6 +620,8 @@ fn compare_inputs(
         .chain(candidate_inputs.keys())
         .cloned()
         .collect::<BTreeSet<_>>();
+    let max_name_len = names.iter().map(String::len).max().unwrap_or_default();
+    let mut input_path = String::with_capacity(path.len() + ".inputs.".len() + max_name_len);
     for name in names {
         let value_type = declaration.and_then(|(_, operation)| {
             operation
@@ -591,19 +630,20 @@ fn compare_inputs(
                 .find(|input| input.name == name)
                 .map(|input| &input.value_type)
         });
+        input_path.clear();
+        write!(input_path, "{path}.inputs.{name}").expect("writing to a String cannot fail");
         compare_value(
             reference_inputs.get(&name),
             candidate_inputs.get(&name),
             value_type,
             declaration.map(|(component, _)| component),
             registry,
-            &format!("{path}.inputs.{name}"),
+            &input_path,
             mismatches,
         );
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn compare_events(
     reference: &[TraceEvent],
     candidate: &[TraceEvent],
@@ -614,27 +654,34 @@ fn compare_events(
     mismatches: &mut Vec<ComparisonMismatch>,
 ) {
     let count = reference.len().max(candidate.len());
+    let mut event_path = String::with_capacity(path.len() + ".events[]".len() + usize::MAX.ilog10() as usize + 1);
+    let mut detail_path = String::with_capacity(event_path.capacity() + FAULT_MESSAGE_ATTRIBUTE.len() + 1);
     for position in 0..count {
-        let event_path = format!("{path}.events[{position}]");
+        event_path.clear();
+        write!(event_path, "{path}.events[{position}]").expect("writing to a String cannot fail");
         let (Some(reference), Some(candidate)) = (reference.get(position), candidate.get(position)) else {
             match (reference.get(position), candidate.get(position)) {
                 (Some(reference), None) => mismatch(mismatches, &event_path, &reference.name, "<missing>"),
                 (None, Some(candidate)) => mismatch(mismatches, &event_path, "<missing>", &candidate.name),
                 (None, None) => {}
-                (Some(_), Some(_)) => unreachable!(),
+                (Some(_), Some(_)) => unreachable!("the preceding let-else rejected the case where both events exist"),
             }
             continue;
         };
         if reference.name != candidate.name {
-            mismatch(mismatches, &format!("{event_path}.name"), &reference.name, &candidate.name);
+            detail_path.clear();
+            write!(detail_path, "{event_path}.name").expect("writing to a String cannot fail");
+            mismatch(mismatches, &detail_path, &reference.name, &candidate.name);
             continue;
         }
         match reference.name.as_str() {
-            "conformance.observation" => {
-                let reference_name = event_attribute_string(reference, "conformance.observation.name");
-                let candidate_name = event_attribute_string(candidate, "conformance.observation.name");
+            OBSERVATION_EVENT => {
+                let reference_name = event_attr_string(reference, OBSERVATION_NAME_ATTRIBUTE);
+                let candidate_name = event_attr_string(candidate, OBSERVATION_NAME_ATTRIBUTE);
                 if reference_name != candidate_name {
-                    mismatch(mismatches, &format!("{event_path}.observation"), reference_name, candidate_name);
+                    detail_path.clear();
+                    write!(detail_path, "{event_path}.observation").expect("writing to a String cannot fail");
+                    mismatch(mismatches, &detail_path, reference_name, candidate_name);
                 }
                 let value_type = (reference_name == candidate_name)
                     .then(|| {
@@ -647,30 +694,38 @@ fn compare_events(
                         })
                     })
                     .flatten();
+                detail_path.clear();
+                write!(detail_path, "{event_path}.value").expect("writing to a String cannot fail");
                 compare_value(
-                    reference.attributes.get("conformance.observation.value"),
-                    candidate.attributes.get("conformance.observation.value"),
+                    reference.attributes.get(OBSERVATION_VALUE_ATTRIBUTE),
+                    candidate.attributes.get(OBSERVATION_VALUE_ATTRIBUTE),
                     value_type,
                     declaration.map(|(component, _)| component),
                     registry,
-                    &format!("{event_path}.value"),
+                    &detail_path,
                     mismatches,
                 );
             }
-            "conformance.result" => compare_value(
-                reference.attributes.get("conformance.result.value"),
-                candidate.attributes.get("conformance.result.value"),
-                declaration.and_then(|(_, operation)| operation.outcomes.result.as_ref()),
-                declaration.map(|(component, _)| component),
-                registry,
-                &format!("{event_path}.result"),
-                mismatches,
-            ),
-            "conformance.error" => {
-                let reference_name = event_attribute_string(reference, "conformance.error.name");
-                let candidate_name = event_attribute_string(candidate, "conformance.error.name");
+            RESULT_EVENT => {
+                detail_path.clear();
+                write!(detail_path, "{event_path}.result").expect("writing to a String cannot fail");
+                compare_value(
+                    reference.attributes.get(RESULT_VALUE_ATTRIBUTE),
+                    candidate.attributes.get(RESULT_VALUE_ATTRIBUTE),
+                    declaration.and_then(|(_, operation)| operation.outcomes.result.as_ref()),
+                    declaration.map(|(component, _)| component),
+                    registry,
+                    &detail_path,
+                    mismatches,
+                );
+            }
+            ERROR_EVENT => {
+                let reference_name = event_attr_string(reference, ERROR_NAME_ATTRIBUTE);
+                let candidate_name = event_attr_string(candidate, ERROR_NAME_ATTRIBUTE);
                 if reference_name != candidate_name {
-                    mismatch(mismatches, &format!("{event_path}.error"), reference_name, candidate_name);
+                    detail_path.clear();
+                    write!(detail_path, "{event_path}.error").expect("writing to a String cannot fail");
+                    mismatch(mismatches, &detail_path, reference_name, candidate_name);
                 }
                 let value_type = (reference_name == candidate_name)
                     .then(|| {
@@ -684,25 +739,29 @@ fn compare_events(
                         })
                     })
                     .flatten();
+                detail_path.clear();
+                write!(detail_path, "{event_path}.value").expect("writing to a String cannot fail");
                 compare_value(
-                    reference.attributes.get("conformance.error.value"),
-                    candidate.attributes.get("conformance.error.value"),
+                    reference.attributes.get(ERROR_VALUE_ATTRIBUTE),
+                    candidate.attributes.get(ERROR_VALUE_ATTRIBUTE),
                     value_type,
                     declaration.map(|(component, _)| component),
                     registry,
-                    &format!("{event_path}.value"),
+                    &detail_path,
                     mismatches,
                 );
             }
-            "conformance.fault" => {
-                for key in ["conformance.fault.type", "conformance.fault.message"] {
+            FAULT_EVENT => {
+                for key in [FAULT_TYPE_ATTRIBUTE, FAULT_MESSAGE_ATTRIBUTE] {
+                    detail_path.clear();
+                    write!(detail_path, "{event_path}.{key}").expect("writing to a String cannot fail");
                     compare_value(
                         reference.attributes.get(key),
                         candidate.attributes.get(key),
                         None,
                         None,
                         None,
-                        &format!("{event_path}.{key}"),
+                        &detail_path,
                         mismatches,
                     );
                 }
@@ -712,7 +771,6 @@ fn compare_events(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn compare_value(
     reference: Option<&AnyValue>,
     candidate: Option<&AnyValue>,
@@ -725,8 +783,8 @@ fn compare_value(
     match (reference, candidate) {
         (Some(reference), Some(candidate)) => {
             if let (Some(value_type), Some(component), Some(registry)) = (value_type, component, registry) {
-                let reference = canonical_typed_value(reference, value_type, component, registry);
-                let candidate = canonical_typed_value(candidate, value_type, component, registry);
+                let reference = canonical_value(reference, value_type, component, registry);
+                let candidate = canonical_value(candidate, value_type, component, registry);
                 if reference != candidate {
                     mismatch(
                         mismatches,
@@ -749,7 +807,7 @@ fn attribute_string<'a>(span: &'a TraceSpan, key: &str) -> &'a str {
     span.attributes.get(key).and_then(AnyValue::as_string).unwrap_or("<missing>")
 }
 
-fn event_attribute_string<'a>(event: &'a TraceEvent, key: &str) -> &'a str {
+fn event_attr_string<'a>(event: &'a TraceEvent, key: &str) -> &'a str {
     event.attributes.get(key).and_then(AnyValue::as_string).unwrap_or("<missing>")
 }
 

@@ -10,8 +10,11 @@
 
 mod csharp_discovery;
 
+/// Strict target-binding parsing and resolution.
 pub mod binding;
+/// Native metadata discovery and semantic normalization.
 pub mod discovery;
+/// Generated-runner Cargo and cache support.
 pub mod support;
 
 use std::path::Path;
@@ -23,23 +26,35 @@ struct CSharpRunnerSettings {
     lang_version: Option<String>,
 }
 
-fn resolve_csharp_runner_settings(target: &binding::Target) -> CSharpRunnerSettings {
-    const DEFAULT: &str = "net10.0";
+// .NET 10 is the annotations package's supported runner baseline. Changing it
+// affects generated reflection-runner compatibility for all C# targets.
+const DEFAULT_RUNNER_FRAMEWORK: &str = "net10.0";
+// netstandard libraries are not directly executable, so reflection runs them
+// from the supported concrete runner framework instead.
+const LIBRARY_FRAMEWORK_PREFIX: &str = "netstandard";
+// Generated runners use SDK defaults when the target project omits these
+// settings; spelling them out keeps reflection code compilation deterministic.
+const DEFAULT_CSHARP_NULLABLE: &str = "enable";
+const DEFAULT_CSHARP_IMPLICIT_USINGS: &str = "enable";
+
+fn resolve_runner(target: &binding::Target) -> CSharpRunnerSettings {
     let project = read_csproj_settings(&target.package_root);
     let selected = target
         .framework
         .clone()
         .or(project.framework)
-        .unwrap_or_else(|| DEFAULT.to_string());
-    let framework = if selected.starts_with("netstandard") {
-        DEFAULT.to_string()
+        .unwrap_or_else(|| DEFAULT_RUNNER_FRAMEWORK.to_string());
+    let framework = if selected.starts_with(LIBRARY_FRAMEWORK_PREFIX) {
+        DEFAULT_RUNNER_FRAMEWORK.to_string()
     } else {
         selected
     };
     CSharpRunnerSettings {
         framework,
-        nullable: project.nullable.unwrap_or_else(|| "enable".to_string()),
-        implicit_usings: project.implicit_usings.unwrap_or_else(|| "enable".to_string()),
+        nullable: project.nullable.unwrap_or_else(|| DEFAULT_CSHARP_NULLABLE.to_string()),
+        implicit_usings: project
+            .implicit_usings
+            .unwrap_or_else(|| DEFAULT_CSHARP_IMPLICIT_USINGS.to_string()),
         lang_version: project.lang_version,
     }
 }
@@ -65,19 +80,19 @@ fn read_csproj_settings(package_root: &Path) -> CsProjectSettings {
             return CsProjectSettings::default();
         };
         return CsProjectSettings {
-            framework: extract_csproj_xml_tag(&text, "TargetFramework").or_else(|| {
-                extract_csproj_xml_tag(&text, "TargetFrameworks")
+            framework: extract_tag(&text, "TargetFramework").or_else(|| {
+                extract_tag(&text, "TargetFrameworks")
                     .and_then(|frameworks| frameworks.split(';').next().map(str::trim).map(str::to_string))
             }),
-            nullable: extract_csproj_xml_tag(&text, "Nullable"),
-            implicit_usings: extract_csproj_xml_tag(&text, "ImplicitUsings"),
-            lang_version: extract_csproj_xml_tag(&text, "LangVersion"),
+            nullable: extract_tag(&text, "Nullable"),
+            implicit_usings: extract_tag(&text, "ImplicitUsings"),
+            lang_version: extract_tag(&text, "LangVersion"),
         };
     }
     CsProjectSettings::default()
 }
 
-fn extract_csproj_xml_tag(text: &str, tag: &str) -> Option<String> {
+fn extract_tag(text: &str, tag: &str) -> Option<String> {
     let open = format!("<{tag}>");
     let close = format!("</{tag}>");
     let start = text.find(&open)? + open.len();
@@ -85,7 +100,7 @@ fn extract_csproj_xml_tag(text: &str, tag: &str) -> Option<String> {
     Some(text[start..start + end].trim().to_string())
 }
 
-fn path_to_forward_slash(path: &Path) -> String {
+fn slash_path(path: &Path) -> String {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {
@@ -96,7 +111,7 @@ fn path_to_forward_slash(path: &Path) -> String {
 }
 
 fn escape_xml_text(value: &str) -> String {
-    let mut escaped = String::new();
+    let mut escaped = String::with_capacity(value.len());
     for character in value.chars() {
         match character {
             '&' => escaped.push_str("&amp;"),

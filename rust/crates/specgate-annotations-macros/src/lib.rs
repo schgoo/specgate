@@ -15,6 +15,10 @@ use quote::quote;
 use syn::parse::{Parse, ParseStream};
 use syn::{Data, DeriveInput, Fields, FnArg, Ident, ItemFn, LitStr, Pat, ReturnType, Token, Type, parse_macro_input, parse_quote};
 
+// `Result::Err` has one unnamed Rust error channel. The annotations contract
+// maps it to this stable CTSC declared-error name.
+const RESULT_ERROR_NAME: &str = "error";
+
 struct OperationArg {
     name: String,
     component: Option<String>,
@@ -112,7 +116,7 @@ fn has_receiver(function: &ItemFn) -> bool {
     function.sig.inputs.iter().any(|input| matches!(input, FnArg::Receiver(_)))
 }
 
-fn is_mutable_reference(ty: &Type) -> bool {
+fn is_mut_ref(ty: &Type) -> bool {
     matches!(ty, Type::Reference(reference) if reference.mutability.is_some())
 }
 
@@ -126,7 +130,7 @@ fn parameters(function: &mut ItemFn) -> Vec<(Ident, Type, String)> {
 /// Stacked `#[spec_setup]` annotations expand one attribute at a time, so every
 /// expansion but the last must leave the markers in place for the next one.
 fn collect_parameters(function: &mut ItemFn, strip: bool) -> Vec<(Ident, Type, String)> {
-    let mut result = Vec::new();
+    let mut result = Vec::with_capacity(function.sig.inputs.len());
     for input in &mut function.sig.inputs {
         let FnArg::Typed(parameter) = input else {
             continue;
@@ -168,15 +172,13 @@ fn return_kind(output: &ReturnType) -> ReturnKind {
             Type::Path(path) => {
                 let segment = path.path.segments.last();
                 match segment.map(|segment| segment.ident.to_string()).as_deref() {
-                    Some("Option") if segment.is_some_and(|segment| type_argument_is_unit(segment, 0)) => ReturnKind::OptionUnit,
+                    Some("Option") if segment.is_some_and(|segment| is_unit_arg(segment, 0)) => ReturnKind::OptionUnit,
                     Some("Option") => ReturnKind::Option,
-                    Some("Result")
-                        if segment.is_some_and(|segment| type_argument_is_unit(segment, 0) && type_argument_is_unit(segment, 1)) =>
-                    {
+                    Some("Result") if segment.is_some_and(|segment| is_unit_arg(segment, 0) && is_unit_arg(segment, 1)) => {
                         ReturnKind::ResultBothUnit
                     }
-                    Some("Result") if segment.is_some_and(|segment| type_argument_is_unit(segment, 0)) => ReturnKind::ResultUnit,
-                    Some("Result") if segment.is_some_and(|segment| type_argument_is_unit(segment, 1)) => ReturnKind::ResultErrorUnit,
+                    Some("Result") if segment.is_some_and(|segment| is_unit_arg(segment, 0)) => ReturnKind::ResultUnit,
+                    Some("Result") if segment.is_some_and(|segment| is_unit_arg(segment, 1)) => ReturnKind::ResultErrorUnit,
                     Some("Result") => ReturnKind::Result,
                     _ => ReturnKind::Value,
                 }
@@ -186,7 +188,7 @@ fn return_kind(output: &ReturnType) -> ReturnKind {
     }
 }
 
-fn type_argument_is_unit(segment: &syn::PathSegment, index: usize) -> bool {
+fn is_unit_arg(segment: &syn::PathSegment, index: usize) -> bool {
     let syn::PathArguments::AngleBracketed(arguments) = &segment.arguments else {
         return false;
     };
@@ -197,6 +199,18 @@ fn type_argument_is_unit(segment: &syn::PathSegment, index: usize) -> bool {
 }
 
 /// Mark a function or method as a native CTSC operation boundary.
+///
+/// # Panics
+///
+/// Generated instrumentation panics when active capture state cannot record
+/// or complete the operation.
+///
+/// # Examples
+///
+/// ```ignore
+/// #[specgate::spec_operation("add")]
+/// pub fn add(left: i32, right: i32) -> i32 { left + right }
+/// ```
 #[proc_macro_attribute]
 pub fn spec_operation(attribute: TokenStream, item: TokenStream) -> TokenStream {
     let OperationArg { name, component: owner } = parse_macro_input!(attribute as OperationArg);
@@ -211,7 +225,7 @@ pub fn spec_operation(attribute: TokenStream, item: TokenStream) -> TokenStream 
     };
     let input_records = params
         .iter()
-        .filter(|(_ident, ty, _name)| !is_mutable_reference(ty))
+        .filter(|(_ident, ty, _name)| !is_mut_ref(ty))
         .map(|(ident, _ty, semantic_name)| {
             quote! {
                 __sg_scope
@@ -270,7 +284,7 @@ pub fn spec_operation(attribute: TokenStream, item: TokenStream) -> TokenStream 
                         .complete_result(#rt::ToNativeValue::to_native_value(value))
                         .unwrap_or_else(|error| panic!("failed to complete native result operation: {error}")),
                     ::std::result::Result::Err(error_value) => __sg_scope
-                        .complete_error("error", #rt::ToNativeValue::to_native_value(error_value))
+                        .complete_error(#RESULT_ERROR_NAME, #rt::ToNativeValue::to_native_value(error_value))
                         .unwrap_or_else(|error| panic!("failed to complete native declared error: {error}")),
                 }
                 __sg_return
@@ -284,7 +298,7 @@ pub fn spec_operation(attribute: TokenStream, item: TokenStream) -> TokenStream 
                         .complete_unit()
                         .unwrap_or_else(|error| panic!("failed to complete native unit result operation: {error}")),
                     ::std::result::Result::Err(error_value) => __sg_scope
-                        .complete_error("error", #rt::ToNativeValue::to_native_value(error_value))
+                        .complete_error(#RESULT_ERROR_NAME, #rt::ToNativeValue::to_native_value(error_value))
                         .unwrap_or_else(|error| panic!("failed to complete native declared error: {error}")),
                 }
                 __sg_return
@@ -298,7 +312,7 @@ pub fn spec_operation(attribute: TokenStream, item: TokenStream) -> TokenStream 
                         .complete_result(#rt::ToNativeValue::to_native_value(value))
                         .unwrap_or_else(|error| panic!("failed to complete native result operation: {error}")),
                     ::std::result::Result::Err(()) => __sg_scope
-                        .complete_error_unit("error")
+                        .complete_error_unit(#RESULT_ERROR_NAME)
                         .unwrap_or_else(|error| panic!("failed to complete native valueless declared error: {error}")),
                 }
                 __sg_return
@@ -312,7 +326,7 @@ pub fn spec_operation(attribute: TokenStream, item: TokenStream) -> TokenStream 
                         .complete_unit()
                         .unwrap_or_else(|error| panic!("failed to complete native unit result operation: {error}")),
                     ::std::result::Result::Err(()) => __sg_scope
-                        .complete_error_unit("error")
+                        .complete_error_unit(#RESULT_ERROR_NAME)
                         .unwrap_or_else(|error| panic!("failed to complete native valueless declared error: {error}")),
                 }
                 __sg_return
@@ -377,6 +391,18 @@ pub fn spec_operation(attribute: TokenStream, item: TokenStream) -> TokenStream 
 /// capture state is thread-local and cannot follow a future across executor
 /// threads. `specgate capture` therefore rejects any component that declares
 /// an async setup, leaving it discovery-only.
+///
+/// # Panics
+///
+/// Generated synchronous instrumentation panics when active setup inputs
+/// cannot be recorded.
+///
+/// # Examples
+///
+/// ```ignore
+/// #[specgate::spec_setup("increment")]
+/// pub fn counter(start: i32) -> Counter { Counter(start) }
+/// ```
 #[proc_macro_attribute]
 pub fn spec_setup(attribute: TokenStream, item: TokenStream) -> TokenStream {
     let SetupArg {
@@ -395,7 +421,7 @@ pub fn spec_setup(attribute: TokenStream, item: TokenStream) -> TokenStream {
     if !is_async {
         let recorded = params
             .iter()
-            .filter(|(_ident, ty, _name)| !is_mutable_reference(ty))
+            .filter(|(_ident, ty, _name)| !is_mut_ref(ty))
             .map(|(ident, _ty, semantic_name)| quote!((#semantic_name.to_string(), #rt::ToNativeValue::to_native_value(&#ident))))
             .collect::<Vec<_>>();
         let body = function.block.clone();
@@ -449,8 +475,18 @@ pub fn spec_setup(attribute: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 /// Derive native semantic projection and link-time type metadata.
+///
+/// # Examples
+///
+/// ```ignore
+/// #[derive(specgate::SpecEvent)]
+/// struct Point {
+///     #[spec_event]
+///     x: i32,
+/// }
+/// ```
 #[proc_macro_derive(SpecEvent, attributes(spec_event, spec_component))]
-pub fn derive_spec_event(input: TokenStream) -> TokenStream {
+pub fn spec_event(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let name = &input.ident;
     let rt = runtime();
@@ -505,8 +541,8 @@ pub fn derive_spec_event(input: TokenStream) -> TokenStream {
             )
         }
         Data::Enum(data) => {
-            let mut arms = Vec::new();
-            let mut variant_metadata = Vec::new();
+            let mut arms = Vec::with_capacity(data.variants.len());
+            let mut variant_metadata = Vec::with_capacity(data.variants.len());
             for (variant_index, variant) in data.variants.iter().enumerate() {
                 let variant_ident = &variant.ident;
                 let variant_name = variant_ident.to_string();
@@ -655,6 +691,17 @@ fn event_field_name(attributes: &[syn::Attribute], default: &str) -> Option<Stri
 }
 
 /// Record one native observation in the active operation.
+///
+/// # Panics
+///
+/// Generated instrumentation panics when an active capture cannot record the
+/// observation.
+///
+/// # Examples
+///
+/// ```ignore
+/// specgate::spec_trace!("checkpoint", 1_i32);
+/// ```
 #[proc_macro]
 pub fn spec_trace(input: TokenStream) -> TokenStream {
     let TraceArgs { name, value } = parse_macro_input!(input as TraceArgs);
@@ -666,6 +713,12 @@ pub fn spec_trace(input: TokenStream) -> TokenStream {
 }
 
 /// Declare the crate's default component identifier.
+///
+/// # Examples
+///
+/// ```ignore
+/// specgate::spec_component!("example.math");
+/// ```
 #[proc_macro]
 pub fn spec_component(input: TokenStream) -> TokenStream {
     let component = parse_macro_input!(input as LitStr);

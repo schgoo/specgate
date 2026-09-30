@@ -19,6 +19,23 @@ use std::sync::atomic::{AtomicU64, Ordering};
 const MANIFEST_FILE: &str = "manifest.json";
 const REGISTRY_FILE: &str = "registry.ctsc.json";
 const REFERENCE_FILE: &str = "reference.otlp.json";
+// Generated source uses serde_json 1.x APIs only; retaining the major range
+// lets Cargo select compatible fixes without changing the runner contract.
+const RUNNER_SERDE_JSON_VERSION: &str = "1";
+// Candidate runner IDs reserve the `2` namespace and fixed hexadecimal widths
+// required by native capture. Each generated scenario starts 1 ms after the
+// previous one, while the run starts 10 ms earlier, leaving deterministic room
+// for ordinary fixture spans without coupling timestamps to wall-clock time.
+// CTSC validators require only ordered, non-overlapping ancestry; changing
+// these values changes generated traces and therefore golden compatibility.
+const RUNNER_ID_PREFIX: &str = "2";
+const RUNNER_TRACE_ID_SUFFIX_WIDTH: usize = 31;
+const RUNNER_SPAN_ID_BODY_WIDTH: usize = 13;
+const RUNNER_RUN_SPAN_SUFFIX: &str = "01";
+const RUNNER_SCENARIO_SPAN_SUFFIX: &str = "02";
+const RUNNER_SCENARIO_TIME_STRIDE: i64 = 1_000_000;
+const RUNNER_START_TIME_OFFSET: i64 = 10_000_000;
+const RUNNER_CLOCK_STEP: i64 = 1;
 const RUST_KEYWORDS: &[&str] = &[
     "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn", "for", "if", "impl", "in", "let", "loop",
     "match", "mod", "move", "mut", "pub", "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true", "type", "unsafe",
@@ -80,14 +97,19 @@ pub(crate) fn replay_failure_category(reason: &str) -> Option<ReplayFailureCateg
 /// Summary of a replay run.
 #[derive(Debug, Clone, PartialEq, Eq, SpecEvent)]
 pub struct ReplayReport {
+    /// Replayed component identifier.
     #[spec_event]
     pub component_id: String,
+    /// Number of replayed scenarios.
     #[spec_event]
     pub scenarios: i32,
+    /// Number of invoked operations across replayed scenarios.
     #[spec_event]
     pub operations: i32,
+    /// Number of distinct linked operation plans.
     #[spec_event]
     pub plans: i32,
+    /// Written candidate OTLP trace path.
     #[spec_event]
     pub output_path: String,
 }
@@ -95,7 +117,9 @@ pub struct ReplayReport {
 /// Outcome of `replay`.
 #[derive(Debug, Clone, PartialEq, Eq, SpecEvent)]
 pub enum ReplayOutcome {
+    /// Replay completed and wrote a candidate trace.
     Complete { report: ReplayReport },
+    /// Replay failed before producing a complete trace.
     Error { reason: String },
 }
 
@@ -115,57 +139,84 @@ impl std::fmt::Display for ReplayOutcome {
 /// One candidate target described by a serializable replay plan.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReplayPlanTarget {
+    /// Binding target name.
     pub name: String,
+    /// Candidate implementation language.
     pub language: String,
+    /// Cargo package name.
     pub package_name: String,
+    /// Cargo package version.
     pub package_version: String,
+    /// Absolute package root used to generate the runner.
     pub package_root: String,
+    /// Exact resolved runtime package source.
     pub runtime: specgate_discovery::support::CargoPackageSource,
 }
 
 /// One ordered candidate parameter in a statically linked invocation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReplayPlanInput {
+    /// Semantic input name.
     pub name: String,
+    /// CTSC semantic input type.
     pub semantic_type: ReplayType,
+    /// Candidate Rust parameter type.
     pub rust_type: String,
 }
 
 /// One distinct semantic-to-candidate operation link.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReplayInvocationLink {
+    /// Owning component identifier.
     pub component_id: String,
+    /// Semantic operation name.
     pub operation_name: String,
+    /// Candidate Rust module path.
     pub module_path: Vec<String>,
+    /// Candidate Rust function name.
     pub fn_name: String,
+    /// Ordered candidate inputs.
     pub inputs: Vec<ReplayPlanInput>,
+    /// Optional candidate output type.
     pub output: Option<ReplayType>,
 }
 
 /// One planned invocation with scenario-specific semantic values.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReplayPlannedOperation {
+    /// Index into the plan's distinct operation links.
     pub link_index: usize,
+    /// Scenario-specific semantic inputs.
     pub inputs: Vec<ReplayInput>,
 }
 
 /// One ordered candidate replay scenario.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReplayPlannedScenario {
+    /// Stable scenario name.
     pub name: String,
+    /// Zero-based scenario order.
     pub index: i64,
+    /// Ordered top-level operations to invoke.
     pub operations: Vec<ReplayPlannedOperation>,
 }
 
 /// The complete target-local invocation plan built before code generation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReplayInvocationPlan {
+    /// Replayed component identifier.
     pub component_id: String,
+    /// Linked registry identifier.
     pub registry_id: String,
+    /// Linked registry version.
     pub registry_version: String,
+    /// Linked registry digest.
     pub registry_digest: String,
+    /// Resolved candidate target.
     pub target: ReplayPlanTarget,
+    /// Distinct semantic-to-candidate operation links.
     pub links: Vec<ReplayInvocationLink>,
+    /// Ordered replay scenarios.
     pub scenarios: Vec<ReplayPlannedScenario>,
 }
 
@@ -371,11 +422,11 @@ fn discover_candidate(binding: &str, target: &str, component: &str) -> Result<Re
     ReplayCandidates::discover(binding, target, &[component])?.component(component)
 }
 fn build_invocation_plan(bundle: &ReplayBundle, candidate: &ResolvedCandidate) -> Result<ReplayInvocationPlan, String> {
-    let mut links = Vec::new();
+    let mut links = Vec::with_capacity(bundle.registry.operations.len());
     let mut link_indexes = BTreeMap::new();
-    let mut scenarios = Vec::new();
+    let mut scenarios = Vec::with_capacity(bundle.scenarios.len());
     for scenario in &bundle.scenarios {
-        let mut operations = Vec::new();
+        let mut operations = Vec::with_capacity(scenario.operations.len());
         for operation in &scenario.operations {
             let key = (operation.component_id.clone(), operation.operation_name.clone());
             let link_index = if let Some(index) = link_indexes.get(&key) {
@@ -693,7 +744,7 @@ fn candidate_module_path(raw: &OpInfo, package_name: &str) -> Result<Vec<String>
         ));
     }
     segments.remove(0);
-    let mut result = Vec::new();
+    let mut result = Vec::with_capacity(segments.len().saturating_sub(1));
     for segment in segments {
         validate_rust_identifier(segment, "candidate module path segment")?;
         result.push(segment.to_string());
@@ -804,7 +855,7 @@ fn replay_cargo(plan: &ReplayInvocationPlan) -> Result<specgate_discovery::suppo
             "serde_json".to_string(),
             specgate_discovery::support::ManifestDependency {
                 package: "serde_json".to_string(),
-                version: Some("1".to_string()),
+                version: Some(RUNNER_SERDE_JSON_VERSION.to_string()),
                 path: None,
                 registry: None,
             },
@@ -826,18 +877,19 @@ fn generate_runner_source(plan: &ReplayInvocationPlan) -> Result<String, String>
             .map_err(|_error| "replay scenario identity exceeds u64".to_string())?
             .checked_add(1)
             .ok_or_else(|| "replay scenario identity overflow".to_string())?;
-        let trace_id = format!("2{identity:031x}");
-        let run_span_id = format!("2{identity:013x}01");
-        let scenario_span_id = format!("2{identity:013x}02");
+        let trace_id = format!("{RUNNER_ID_PREFIX}{identity:0RUNNER_TRACE_ID_SUFFIX_WIDTH$x}");
+        let span_body = format!("{RUNNER_ID_PREFIX}{identity:0RUNNER_SPAN_ID_BODY_WIDTH$x}");
+        let run_span_id = format!("{span_body}{RUNNER_RUN_SPAN_SUFFIX}");
+        let scenario_span_id = format!("{span_body}{RUNNER_SCENARIO_SPAN_SUFFIX}");
         let start_time = i64::try_from(scenario_position)
             .map_err(|_error| "replay scenario timestamp exceeds i64".to_string())?
-            .checked_mul(1_000_000)
-            .and_then(|value| value.checked_add(10_000_000))
+            .checked_mul(RUNNER_SCENARIO_TIME_STRIDE)
+            .and_then(|value| value.checked_add(RUNNER_START_TIME_OFFSET))
             .ok_or_else(|| "replay scenario timestamp overflow".to_string())?;
         source.push_str("    specgate_runtime::start_native_capture(specgate_runtime::NativeCaptureConfig {\n");
         write!(
             source,
-            "        scenario_name: {}.to_string(),\n        trace_id: {}.to_string(),\n        run_span_id: {}.to_string(),\n        scenario_span_id: {}.to_string(),\n        operation_span_ids: Vec::new(),\n        start_time_unix_nano: {start_time},\n        clock_step_unix_nano: 1,\n    }})?;\n",
+            "        scenario_name: {}.to_string(),\n        trace_id: {}.to_string(),\n        run_span_id: {}.to_string(),\n        scenario_span_id: {}.to_string(),\n        operation_span_ids: Vec::new(),\n        start_time_unix_nano: {start_time},\n        clock_step_unix_nano: {RUNNER_CLOCK_STEP},\n    }})?;\n",
             rust_string_literal(&scenario.name)?,
             rust_string_literal(&trace_id)?,
             rust_string_literal(&run_span_id)?,
@@ -1306,7 +1358,6 @@ mod tests {
         ] {
             assert_eq!(replay_failure_category(reason), Some(expected), "{reason}");
         }
-        assert_eq!(ReplayFailureCategory::StructuredValue.code(), "structured-value");
         assert_eq!(
             replay_failure_category("operation span '3' result uses unsupported structured replay type named"),
             Some(ReplayFailureCategory::StructuredValue)

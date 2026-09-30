@@ -3,8 +3,16 @@ use super::otlp::{self, ParsedDouble};
 use super::{Loaded, ValidationIssue, issue, located, read_bytes};
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 use std::path::Path;
 
+// OTLP StatusCode's fixed protobuf value for STATUS_CODE_ERROR. Producers and
+// validators must preserve this numeric mapping for interoperable JSON.
+const OTLP_STATUS_CODE_ERROR: i64 = 2;
+// OTLP trace and span identifiers are 16 and 8 bytes respectively, encoded
+// as two lowercase hexadecimal characters per byte in the JSON mapping.
+const TRACE_ID_HEX_LENGTH: usize = 32;
+const SPAN_ID_HEX_LENGTH: usize = 16;
 const REQUIRED_RESOURCE_ATTRIBUTES: [&str; 5] = [
     "conformance.version",
     "conformance.tool.name",
@@ -55,7 +63,7 @@ const FAULT_ATTRIBUTES: [&str; 10] = [
     "conformance.fault.signal",
     "conformance.fault.timeout_ms",
 ];
-const CORE_SUPERVISOR_FAULT_TYPES: [&str; 7] = [
+const SUPERVISOR_FAULTS: [&str; 7] = [
     "launch_failure",
     "process_exit",
     "signal",
@@ -103,11 +111,14 @@ pub(crate) fn load_trace(path: &Path) -> Loaded<TraceDocument> {
                 continue;
             };
             let mut raw_spans = Vec::new();
+            let mut scope_location =
+                String::with_capacity(resource_location.len() + ".scopeSpans[]".len() + usize::MAX.ilog10() as usize + 1);
             for (scope_index, scope_value) in array_field(resource_spans, "scopeSpans", path, &resource_location, &mut issues)
                 .iter()
                 .enumerate()
             {
-                let scope_location = format!("{resource_location}.scopeSpans[{scope_index}]");
+                scope_location.clear();
+                write!(scope_location, "{resource_location}.scopeSpans[{scope_index}]").expect("writing to a String cannot fail");
                 let Some(scope) = scope_value.as_object() else {
                     issue(&mut issues, located(path, &scope_location), "scopeSpans item must be an object");
                     continue;
@@ -130,7 +141,7 @@ pub(crate) fn load_trace(path: &Path) -> Loaded<TraceDocument> {
                 if !scope_spans.is_empty() {
                     if let Some(scope_value) = json_field(scope, "scope") {
                         if let Some(instrumentation_scope) = scope_value.as_object() {
-                            validate_zero_count(
+                            validate_zero(
                                 instrumentation_scope,
                                 "droppedAttributesCount",
                                 path,
@@ -143,12 +154,7 @@ pub(crate) fn load_trace(path: &Path) -> Loaded<TraceDocument> {
                                 &format!("{scope_location}.scope"),
                                 &mut issues,
                             );
-                            reject_unknown_conformance_attributes(
-                                &attributes,
-                                &[],
-                                &located(path, &format!("{scope_location}.scope")),
-                                &mut issues,
-                            );
+                            reject_attrs(&attributes, &[], &located(path, &format!("{scope_location}.scope")), &mut issues);
                         } else if !scope_value.is_null() {
                             issue(
                                 &mut issues,
@@ -173,7 +179,7 @@ pub(crate) fn load_trace(path: &Path) -> Loaded<TraceDocument> {
                 );
             }
             if let Some(resource) = resource {
-                validate_zero_count(
+                validate_zero(
                     resource,
                     "droppedAttributesCount",
                     path,
@@ -187,14 +193,14 @@ pub(crate) fn load_trace(path: &Path) -> Loaded<TraceDocument> {
                 &format!("{resource_location}.resource"),
                 &mut issues,
             );
-            reject_unknown_conformance_attributes(
+            reject_attrs(
                 &resource_attributes,
                 &RESOURCE_ATTRIBUTES,
                 &located(path, &format!("{resource_location}.resource")),
                 &mut issues,
             );
             for key in REQUIRED_RESOURCE_ATTRIBUTES {
-                let actual = require_string_attribute(
+                let actual = require_string_attr(
                     &resource_attributes,
                     key,
                     path,
@@ -205,7 +211,7 @@ pub(crate) fn load_trace(path: &Path) -> Loaded<TraceDocument> {
                     issue(
                         &mut issues,
                         located(path, &format!("{resource_location}.resource")),
-                        "conformance.version must be '0.2.0'",
+                        format!("conformance.version must be '{CTSC_VERSION}'"),
                     );
                 }
             }
@@ -215,7 +221,7 @@ pub(crate) fn load_trace(path: &Path) -> Loaded<TraceDocument> {
                 "conformance.registry.digest",
                 "conformance.registry.uri",
             ] {
-                validate_optional_attribute_type(
+                check_attr_type(
                     &resource_attributes,
                     key,
                     AttributeType::String,
@@ -234,6 +240,7 @@ pub(crate) fn load_trace(path: &Path) -> Loaded<TraceDocument> {
         issue(&mut issues, located(path, "$"), "trace contains no CTSC spans");
     }
     validate_semantics(&spans, path, &mut issues);
+    spans.shrink_to_fit();
     Loaded {
         value: Some(TraceDocument { spans }),
         issues,
@@ -277,23 +284,25 @@ fn parse_span(
     issues: &mut Vec<ValidationIssue>,
 ) -> Option<TraceSpan> {
     for key in ["droppedAttributesCount", "droppedEventsCount", "droppedLinksCount"] {
-        validate_zero_count(value, key, path, location, issues);
+        validate_zero(value, key, path, location, issues);
     }
     let trace_id = hex_id_field(value, "traceId", path, location, issues)?;
     let span_id = hex_id_field(value, "spanId", path, location, issues)?;
-    let parent_span_id = optional_hex_id_field(value, "parentSpanId", path, location, issues).unwrap_or_default();
+    let parent_span_id = optional_hex_id(value, "parentSpanId", path, location, issues).unwrap_or_default();
     let name = string_field(value, "name", path, location, issues)?;
     let start_time = time_field(value, "startTimeUnixNano", path, location, issues);
     let end_time = time_field(value, "endTimeUnixNano", path, location, issues);
     let attributes = parse_attributes(json_field(value, "attributes"), path, location, issues);
     let mut events = Vec::new();
+    let mut event_location = String::with_capacity(location.len() + ".events[]".len() + usize::MAX.ilog10() as usize + 1);
     for (event_index, event_value) in array_field(value, "events", path, location, issues).iter().enumerate() {
-        let event_location = format!("{location}.events[{event_index}]");
+        event_location.clear();
+        write!(event_location, "{location}.events[{event_index}]").expect("writing to a String cannot fail");
         let Some(event) = event_value.as_object() else {
             issue(&mut *issues, located(path, &event_location), "event must be an object");
             continue;
         };
-        validate_zero_count(event, "droppedAttributesCount", path, &event_location, issues);
+        validate_zero(event, "droppedAttributesCount", path, &event_location, issues);
         let Some(event_name) = string_field(event, "name", path, &event_location, issues) else {
             continue;
         };
@@ -305,7 +314,8 @@ fn parse_span(
     let status_error = json_field(value, "status")
         .and_then(Value::as_object)
         .and_then(|status| json_field(status, "code"))
-        .is_some_and(|code| code.as_i64() == Some(2) || code.as_str() == Some("STATUS_CODE_ERROR"));
+        .is_some_and(|code| code.as_i64() == Some(OTLP_STATUS_CODE_ERROR) || code.as_str() == Some("STATUS_CODE_ERROR"));
+    events.shrink_to_fit();
     Some(TraceSpan {
         trace_id,
         span_id,
@@ -325,13 +335,13 @@ fn validate_semantics(spans: &[TraceSpan], path: &Path, issues: &mut Vec<Validat
     let mut by_id = BTreeMap::<(&str, &str), Vec<&TraceSpan>>::new();
     for span in spans {
         require(
-            is_hex_id(&span.trace_id, 32),
+            is_hex_id(&span.trace_id, TRACE_ID_HEX_LENGTH),
             &span.location,
             "traceId must be 32 lowercase hexadecimal characters and nonzero",
             issues,
         );
         require(
-            is_hex_id(&span.span_id, 16),
+            is_hex_id(&span.span_id, SPAN_ID_HEX_LENGTH),
             &span.location,
             "spanId must be 16 lowercase hexadecimal characters and nonzero",
             issues,
@@ -358,15 +368,15 @@ fn validate_semantics(spans: &[TraceSpan], path: &Path, issues: &mut Vec<Validat
         );
         match span.name.as_str() {
             "conformance.run" => {
-                reject_unknown_conformance_attributes(&span.attributes, &RUN_ATTRIBUTES, &span.location, issues);
+                reject_attrs(&span.attributes, &RUN_ATTRIBUTES, &span.location, issues);
                 require(
                     span.parent_span_id.is_empty(),
                     &span.location,
                     "run span must be a root span",
                     issues,
                 );
-                require_string_attribute(&span.attributes, "conformance.run.id", path, &span.location, issues);
-                validate_optional_attribute_type(
+                require_string_attr(&span.attributes, "conformance.run.id", path, &span.location, issues);
+                check_attr_type(
                     &span.attributes,
                     "conformance.run.name",
                     AttributeType::String,
@@ -375,15 +385,15 @@ fn validate_semantics(spans: &[TraceSpan], path: &Path, issues: &mut Vec<Validat
                 );
             }
             "conformance.scenario" => {
-                reject_unknown_conformance_attributes(&span.attributes, &SCENARIO_ATTRIBUTES, &span.location, issues);
+                reject_attrs(&span.attributes, &SCENARIO_ATTRIBUTES, &span.location, issues);
                 require(
                     parent_name == Some("conformance.run"),
                     &span.location,
                     "scenario parent must be a conformance.run span",
                     issues,
                 );
-                require_string_attribute(&span.attributes, "conformance.scenario.name", path, &span.location, issues);
-                validate_optional_attribute_type(
+                require_string_attr(&span.attributes, "conformance.scenario.name", path, &span.location, issues);
+                check_attr_type(
                     &span.attributes,
                     "conformance.scenario.index",
                     AttributeType::Int,
@@ -392,7 +402,7 @@ fn validate_semantics(spans: &[TraceSpan], path: &Path, issues: &mut Vec<Validat
                 );
             }
             "conformance.operation" => {
-                reject_unknown_conformance_attributes(&span.attributes, &OPERATION_ATTRIBUTES, &span.location, issues);
+                reject_attrs(&span.attributes, &OPERATION_ATTRIBUTES, &span.location, issues);
                 require(
                     matches!(
                         parent_name,
@@ -402,8 +412,8 @@ fn validate_semantics(spans: &[TraceSpan], path: &Path, issues: &mut Vec<Validat
                     "operation parent must be scenario, operation, or parallel",
                     issues,
                 );
-                require_string_attribute(&span.attributes, "conformance.component.id", path, &span.location, issues);
-                require_string_attribute(&span.attributes, "conformance.operation.name", path, &span.location, issues);
+                require_string_attr(&span.attributes, "conformance.component.id", path, &span.location, issues);
+                require_string_attr(&span.attributes, "conformance.operation.name", path, &span.location, issues);
                 require(
                     span.attributes
                         .get("conformance.operation.inputs")
@@ -414,14 +424,14 @@ fn validate_semantics(spans: &[TraceSpan], path: &Path, issues: &mut Vec<Validat
                 );
             }
             "conformance.parallel" => {
-                reject_unknown_conformance_attributes(&span.attributes, &PARALLEL_ATTRIBUTES, &span.location, issues);
+                reject_attrs(&span.attributes, &PARALLEL_ATTRIBUTES, &span.location, issues);
                 require(
                     matches!(parent_name, Some("conformance.scenario" | "conformance.operation")),
                     &span.location,
                     "parallel parent must be scenario or operation",
                     issues,
                 );
-                validate_optional_attribute_type(
+                check_attr_type(
                     &span.attributes,
                     "conformance.parallel.name",
                     AttributeType::String,
@@ -481,8 +491,8 @@ fn validate_events(span: &TraceSpan, path: &Path, issues: &mut Vec<ValidationIss
         }
         match event.name.as_str() {
             "conformance.observation" => {
-                reject_unknown_conformance_attributes(&event.attributes, &OBSERVATION_ATTRIBUTES, &location, issues);
-                require_string_attribute(&event.attributes, "conformance.observation.name", path, &location, issues);
+                reject_attrs(&event.attributes, &OBSERVATION_ATTRIBUTES, &location, issues);
+                require_string_attr(&event.attributes, "conformance.observation.name", path, &location, issues);
                 require(
                     event.attributes.contains_key("conformance.observation.value"),
                     &location,
@@ -491,7 +501,7 @@ fn validate_events(span: &TraceSpan, path: &Path, issues: &mut Vec<ValidationIss
                 );
             }
             "conformance.result" => {
-                reject_unknown_conformance_attributes(&event.attributes, &RESULT_ATTRIBUTES, &location, issues);
+                reject_attrs(&event.attributes, &RESULT_ATTRIBUTES, &location, issues);
                 result_count += 1;
                 terminated = true;
                 require(
@@ -502,18 +512,18 @@ fn validate_events(span: &TraceSpan, path: &Path, issues: &mut Vec<ValidationIss
                 );
             }
             "conformance.empty" => {
-                reject_unknown_conformance_attributes(&event.attributes, &[], &location, issues);
+                reject_attrs(&event.attributes, &[], &location, issues);
                 other_terminal_count += 1;
                 terminated = true;
             }
             "conformance.error" => {
-                reject_unknown_conformance_attributes(&event.attributes, &ERROR_ATTRIBUTES, &location, issues);
+                reject_attrs(&event.attributes, &ERROR_ATTRIBUTES, &location, issues);
                 other_terminal_count += 1;
                 terminated = true;
-                require_string_attribute(&event.attributes, "conformance.error.name", path, &location, issues);
+                require_string_attr(&event.attributes, "conformance.error.name", path, &location, issues);
             }
             "conformance.fault" => {
-                reject_unknown_conformance_attributes(&event.attributes, &FAULT_ATTRIBUTES, &location, issues);
+                reject_attrs(&event.attributes, &FAULT_ATTRIBUTES, &location, issues);
                 other_terminal_count += usize::from(span.name == "conformance.operation");
                 terminated |= span.name == "conformance.operation";
                 require(
@@ -525,8 +535,8 @@ fn validate_events(span: &TraceSpan, path: &Path, issues: &mut Vec<ValidationIss
                     "fault must belong to a run, scenario, or operation span",
                     issues,
                 );
-                let fault_type = require_string_attribute(&event.attributes, "conformance.fault.type", path, &location, issues);
-                let observer = require_string_attribute(&event.attributes, "conformance.fault.observer", path, &location, issues);
+                let fault_type = require_string_attr(&event.attributes, "conformance.fault.type", path, &location, issues);
+                let observer = require_string_attr(&event.attributes, "conformance.fault.observer", path, &location, issues);
                 if observer == Some("target") {
                     require(
                         span.name == "conformance.operation",
@@ -543,7 +553,7 @@ fn validate_events(span: &TraceSpan, path: &Path, issues: &mut Vec<ValidationIss
                     );
                     if let Some(fault_type) = fault_type {
                         require(
-                            CORE_SUPERVISOR_FAULT_TYPES.contains(&fault_type) || is_namespaced_fault_type(fault_type),
+                            SUPERVISOR_FAULTS.contains(&fault_type) || is_namespaced_fault(fault_type),
                             &location,
                             "supervisor fault type must be a defined core type or a producer-qualified dotted namespace",
                             issues,
@@ -558,10 +568,10 @@ fn validate_events(span: &TraceSpan, path: &Path, issues: &mut Vec<ValidationIss
                     "conformance.fault.operation.component_id",
                     "conformance.fault.signal",
                 ] {
-                    validate_optional_attribute_type(&event.attributes, key, AttributeType::String, &location, issues);
+                    check_attr_type(&event.attributes, key, AttributeType::String, &location, issues);
                 }
                 for key in ["conformance.fault.exit_code", "conformance.fault.timeout_ms"] {
-                    validate_optional_attribute_type(&event.attributes, key, AttributeType::Int, &location, issues);
+                    check_attr_type(&event.attributes, key, AttributeType::Int, &location, issues);
                 }
             }
             _ => {}
@@ -698,16 +708,16 @@ fn run_ancestor<'a>(span: &'a TraceSpan, by_id: &BTreeMap<(&'a str, &'a str), Ve
     }
 }
 
-fn is_namespaced_fault_type(value: &str) -> bool {
+fn is_namespaced_fault(value: &str) -> bool {
     let mut segments = value.split('.');
     let first = segments.next().unwrap_or_default();
-    let remaining = segments.collect::<Vec<_>>();
+    let mut remaining = segments.peekable();
     let valid_first = first != "conformance"
         && first.bytes().enumerate().all(|(index, byte)| {
             (index == 0 && byte.is_ascii_lowercase()) || (index > 0 && (byte.is_ascii_lowercase() || byte.is_ascii_digit()))
         });
-    let valid_remaining = !remaining.is_empty()
-        && remaining.iter().all(|segment| {
+    let valid_remaining = remaining.peek().is_some()
+        && remaining.all(|segment| {
             !segment.is_empty()
                 && segment
                     .bytes()
@@ -729,8 +739,10 @@ fn parse_attributes(value: Option<&Value>, path: &Path, location: &str, issues: 
         );
         return result;
     };
+    let mut item_location = String::with_capacity(location.len() + ".attributes[]".len() + usize::MAX.ilog10() as usize + 1);
     for (index, attribute) in attributes.iter().enumerate() {
-        let item_location = format!("{location}.attributes[{index}]");
+        item_location.clear();
+        write!(item_location, "{location}.attributes[{index}]").expect("writing to a String cannot fail");
         let Some(attribute) = attribute.as_object() else {
             issue(issues, located(path, &item_location), "attribute must be an object");
             continue;
@@ -805,12 +817,16 @@ fn parse_any_value(value: &Value, path: &Path, location: &str, issues: &mut Vec<
                 return None;
             };
             let values = optional_array(array, "values", path, location, issues)?;
-            let mut parsed = Vec::new();
+            let mut parsed = Vec::with_capacity(values.len());
+            let mut item_location = String::with_capacity(location.len() + "[]".len() + usize::MAX.ilog10() as usize + 1);
             for (index, item) in values.iter().enumerate() {
-                if let Some(item) = parse_any_value(item, path, &format!("{location}[{index}]"), issues) {
+                item_location.clear();
+                write!(item_location, "{location}[{index}]").expect("writing to a String cannot fail");
+                if let Some(item) = parse_any_value(item, path, &item_location, issues) {
                     parsed.push(item);
                 }
             }
+            parsed.shrink_to_fit();
             Some(AnyValue::Array(parsed))
         }
         "kvlistValue" => {
@@ -820,8 +836,10 @@ fn parse_any_value(value: &Value, path: &Path, location: &str, issues: &mut Vec<
             };
             let values = optional_array(kvlist, "values", path, location, issues)?;
             let mut parsed = BTreeMap::new();
+            let mut item_location = String::with_capacity(location.len() + ".".len() + usize::MAX.ilog10() as usize + 1);
             for (index, item) in values.iter().enumerate() {
-                let item_location = format!("{location}.{index}");
+                item_location.clear();
+                write!(item_location, "{location}.{index}").expect("writing to a String cannot fail");
                 let Some(item) = item.as_object() else {
                     issue(issues, located(path, &item_location), "kvlist item must be an object");
                     continue;
@@ -844,7 +862,7 @@ fn parse_any_value(value: &Value, path: &Path, location: &str, issues: &mut Vec<
             }
             Some(AnyValue::KvList(parsed))
         }
-        _ => unreachable!(),
+        _ => unreachable!("AnyValue key selection must match exactly one supported OTLP value variant"),
     }
 }
 
@@ -909,7 +927,7 @@ fn optional_array<'a>(
 
 fn json_field<'a>(object: &'a Map<String, Value>, key: &str) -> Option<&'a Value> {
     object.get(key).or_else(|| {
-        let snake_case = key.chars().fold(String::new(), |mut result, character| {
+        let snake_case = key.chars().fold(String::with_capacity(key.len()), |mut result, character| {
             if character.is_ascii_uppercase() {
                 result.push('_');
                 result.push(character.to_ascii_lowercase());
@@ -935,7 +953,7 @@ fn string_field(object: &Map<String, Value>, key: &str, path: &Path, location: &
     }
 }
 
-fn optional_string_field(
+fn optional_string(
     object: &Map<String, Value>,
     key: &str,
     path: &Path,
@@ -968,14 +986,14 @@ fn hex_id_field(object: &Map<String, Value>, key: &str, path: &Path, location: &
     })
 }
 
-fn optional_hex_id_field(
+fn optional_hex_id(
     object: &Map<String, Value>,
     key: &str,
     path: &Path,
     location: &str,
     issues: &mut Vec<ValidationIssue>,
 ) -> Option<String> {
-    let value = optional_string_field(object, key, path, location, issues)?;
+    let value = optional_string(object, key, path, location, issues)?;
     otlp::normalize_hex(&value).or_else(|| {
         issue(
             issues,
@@ -1002,7 +1020,7 @@ fn time_field(object: &Map<String, Value>, key: &str, path: &Path, location: &st
     parsed
 }
 
-fn validate_zero_count(object: &Map<String, Value>, key: &str, path: &Path, location: &str, issues: &mut Vec<ValidationIssue>) {
+fn validate_zero(object: &Map<String, Value>, key: &str, path: &Path, location: &str, issues: &mut Vec<ValidationIssue>) {
     let Some(value) = json_field(object, key).filter(|value| !value.is_null()) else {
         return;
     };
@@ -1021,12 +1039,7 @@ enum AttributeType {
     Int,
 }
 
-fn reject_unknown_conformance_attributes(
-    attributes: &BTreeMap<String, AnyValue>,
-    allowed: &[&str],
-    location: &str,
-    issues: &mut Vec<ValidationIssue>,
-) {
+fn reject_attrs(attributes: &BTreeMap<String, AnyValue>, allowed: &[&str], location: &str, issues: &mut Vec<ValidationIssue>) {
     for key in attributes.keys().filter(|key| key.starts_with("conformance.")) {
         if !allowed.contains(&key.as_str()) {
             issue(
@@ -1038,7 +1051,7 @@ fn reject_unknown_conformance_attributes(
     }
 }
 
-fn validate_optional_attribute_type(
+fn check_attr_type(
     attributes: &BTreeMap<String, AnyValue>,
     key: &str,
     expected: AttributeType,
@@ -1061,7 +1074,7 @@ fn validate_optional_attribute_type(
     }
 }
 
-fn require_string_attribute<'a>(
+fn require_string_attr<'a>(
     attributes: &'a BTreeMap<String, AnyValue>,
     key: &str,
     _path: &Path,

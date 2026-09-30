@@ -10,9 +10,9 @@ mod trace;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-pub(crate) use linked::{canonical_typed_value, find_operation, validate_linked_model};
+pub(crate) use linked::{canonical_value, check_linked, find_operation};
 pub(crate) use model::{AnyValue, RegistryOperation, RegistrySet, ResolvedComponent, TraceDocument, TraceEvent, TraceSpan, TypeRef};
-pub(crate) use registry::load_registry_set;
+pub(crate) use registry::load_set;
 pub(crate) use trace::load_trace;
 
 /// One stable validation diagnostic.
@@ -38,7 +38,8 @@ pub struct ValidationReport {
 }
 
 impl ValidationReport {
-    fn new(level: &str, artifact: &Path, issues: Vec<ValidationIssue>) -> Self {
+    fn new(level: &str, artifact: &Path, mut issues: Vec<ValidationIssue>) -> Self {
+        issues.shrink_to_fit();
         Self {
             level: level.to_string(),
             artifact: artifact.display().to_string(),
@@ -57,7 +58,7 @@ pub(crate) struct Loaded<T> {
 /// Validate a root CTSC registry and optional explicitly supplied imports.
 #[must_use]
 pub fn validate_registry(root: &Path, imports: &[PathBuf]) -> ValidationReport {
-    let result = load_registry_set(root, imports);
+    let result = load_set(root, imports);
     ValidationReport::new("registry", root, result.issues)
 }
 
@@ -71,14 +72,14 @@ pub fn validate_trace(path: &Path) -> ValidationReport {
 /// Validate a trace against its exact root registry and imports.
 #[must_use]
 pub fn validate_linked(trace: &Path, root: &Path, imports: &[PathBuf]) -> ValidationReport {
-    let registry = load_registry_set(root, imports);
+    let registry = load_set(root, imports);
     let parsed_trace = load_trace(trace);
     let mut issues = registry.issues;
     issues.extend(parsed_trace.issues);
     if issues.is_empty()
         && let (Some(registry), Some(parsed_trace)) = (registry.value.as_ref(), parsed_trace.value.as_ref())
     {
-        validate_linked_model(parsed_trace, registry, &mut issues);
+        check_linked(parsed_trace, registry, &mut issues);
     }
     ValidationReport::new("linked", trace, issues)
 }
@@ -106,9 +107,12 @@ pub(crate) fn sha256_digest(bytes: &[u8]) -> String {
 }
 
 pub(crate) fn is_digest(value: &str) -> bool {
+    // SHA-256 emits 32 bytes, represented by two lowercase hexadecimal
+    // characters per byte in CTSC digest strings.
+    const SHA256_HEX_LEN: usize = 64;
     value
         .strip_prefix("sha256:")
-        .is_some_and(|hex| hex.len() == 64 && hex.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)))
+        .is_some_and(|hex| hex.len() == SHA256_HEX_LEN && hex.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)))
 }
 
 pub(crate) fn read_bytes(path: &Path, issues: &mut Vec<ValidationIssue>) -> Option<Vec<u8>> {

@@ -16,15 +16,26 @@ use specgate_ctsc::validation::{validate_bundle, validate_linked, validate_regis
 use specgate_discovery::binding::resolve_binding_target;
 use specgate_discovery::discovery::{Registry, cargo_bin, discover_many_target, normalize_registry};
 
-use crate::capture::{CaptureRequest, capture_discovered_strict, discover_capture_target};
+use crate::capture::{CaptureRequest, capture_strict, discover_target};
 use crate::replay::{ReplayCandidates, replay_failure_category};
 
 const MATRIX_FILE: &str = "matrix.json";
 const REGISTRY_FILE: &str = "registry.ctsc.json";
+// Negative golden readers key off this format/version pair. Changing either
+// requires coordinated artifact regeneration and reader migration.
+const ERROR_FORMAT: &str = "specgate.ctsc-golden-error";
+const ERROR_FORMAT_VERSION: &str = "0.1.0";
 const TRACE_FILE: &str = "reference.otlp.json";
 const MANIFEST_FILE: &str = "manifest.json";
 const ERROR_FILE: &str = "error.json";
 const REGISTRY_VERSION: &str = "0.1.0";
+// The hand-authored matrix format gates interpretation of every generated
+// artifact; changing either value requires a coordinated harness migration.
+const MATRIX_FORMAT: &str = "specgate.ctsc-golden-matrix";
+const MATRIX_FORMAT_VERSION: &str = "0.1.0";
+// Short strings are too collision-prone to identify a machine-specific root;
+// bare drive roots such as `C:\` are deliberately ignored by this heuristic.
+const PORTABILITY_MARKER_MIN_LEN: usize = 4;
 
 const CLASS_COMPONENT: &str = "implementation-component";
 const CLASS_NEGATIVE: &str = "negative-fixture";
@@ -325,8 +336,8 @@ fn load_matrix(root: &Path) -> Matrix {
     let text = std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
     let matrix: Matrix =
         serde_json::from_str(&text).unwrap_or_else(|error| panic!("{} is not a valid golden matrix: {error}", path.display()));
-    assert_eq!(matrix.format, "specgate.ctsc-golden-matrix", "unexpected matrix format");
-    assert_eq!(matrix.format_version, "0.1.0", "unexpected matrix format version");
+    assert_eq!(matrix.format, MATRIX_FORMAT, "unexpected matrix format");
+    assert_eq!(matrix.format_version, MATRIX_FORMAT_VERSION, "unexpected matrix format version");
     assert_eq!(matrix.artifact_root, "test/goldens/ctsc", "unexpected matrix artifact root");
     matrix
 }
@@ -743,7 +754,7 @@ fn check_source_coverage(root: &Path, matrix: &Matrix) {
     );
 }
 
-fn check_replacement_references(root: &Path, matrix: &Matrix) {
+fn check_replacements(root: &Path, matrix: &Matrix) {
     let mut problems = Vec::new();
     for row in matrix.rows.iter().filter(|row| row.classification == CLASS_REPLACEMENT) {
         let replacement = row.replacement.as_ref().expect("validated replacement");
@@ -793,7 +804,7 @@ fn generate_rust_binding(root: &Path, matrix: &Matrix, out_root: &Path, binding_
     let binding = repo_path(root, &matrix.bindings[binding_key]);
     let binding = binding.to_str().expect("utf-8 binding path");
 
-    let discovered = discover_capture_target(binding, "").unwrap_or_else(|error| panic!("{binding_key}: discovery failed: {error}"));
+    let discovered = discover_target(binding, "").unwrap_or_else(|error| panic!("{binding_key}: discovery failed: {error}"));
     let present = discovered.registry.present_components();
     for row in &rows {
         let component = row.component.as_ref().expect("component row");
@@ -814,7 +825,7 @@ fn generate_rust_binding(root: &Path, matrix: &Matrix, out_root: &Path, binding_
         "{binding_key}: discovered components missing from the matrix: {}",
         unmatched.join(", ")
     );
-    assert_capture_rows_are_synchronous(binding_key, &discovered.registry, &rows);
+    assert_capture_sync(binding_key, &discovered.registry, &rows);
 
     for row in rows.iter().filter(|row| !row.captures_rust()) {
         let component = row.component.as_ref().expect("component row");
@@ -836,14 +847,13 @@ fn generate_rust_binding(root: &Path, matrix: &Matrix, out_root: &Path, binding_
     if requests.is_empty() {
         return;
     }
-    let reports =
-        capture_discovered_strict(&discovered, &requests).unwrap_or_else(|error| panic!("{binding_key}: batched capture failed: {error}"));
+    let reports = capture_strict(&discovered, &requests).unwrap_or_else(|error| panic!("{binding_key}: batched capture failed: {error}"));
     assert_eq!(
         reports.len(),
         requests.len(),
         "{binding_key}: capture returned the wrong bundle count"
     );
-    assert_capture_operation_coverage(binding_key, &discovered.registry, &rows, out_root);
+    assert_capture_complete(binding_key, &discovered.registry, &rows, out_root);
 }
 
 type OperationIdentity = (String, String);
@@ -854,7 +864,7 @@ type OperationIdentity = (String, String);
 /// Exclusions are exact semantic operation identities. They must name a real,
 /// currently unobserved operation; an unknown or newly covered exclusion is
 /// stale and fails rather than weakening the gate indefinitely.
-fn assert_capture_operation_coverage(binding_key: &str, registry: &Registry, rows: &[&Row], out_root: &Path) {
+fn assert_capture_complete(binding_key: &str, registry: &Registry, rows: &[&Row], out_root: &Path) {
     let mut problems = Vec::new();
     for row in rows.iter().filter(|row| row.captures_rust()) {
         let component = row.component.as_deref().expect("component row");
@@ -864,14 +874,14 @@ fn assert_capture_operation_coverage(binding_key: &str, registry: &Registry, row
             .filter(|operation| !operation.is_setup && operation.component == component)
             .map(|operation| (operation.component.clone(), operation.name.clone()))
             .collect::<BTreeSet<_>>();
-        let captured = captured_operation_identities(&row.rust_dir(out_root))
+        let captured = captured_ops(&row.rust_dir(out_root))
             .unwrap_or_else(|error| panic!("{}: failed to inspect captured operation coverage: {error}", row.id));
         let excluded = row
             .capture_exclusions
             .iter()
             .map(|exclusion| (component.to_string(), exclusion.operation.clone()))
             .collect::<BTreeSet<_>>();
-        problems.extend(capture_coverage_problems(&row.id, &discovered, &captured, &excluded));
+        problems.extend(coverage_problems(&row.id, &discovered, &captured, &excluded));
     }
     assert!(
         problems.is_empty(),
@@ -880,7 +890,7 @@ fn assert_capture_operation_coverage(binding_key: &str, registry: &Registry, row
     );
 }
 
-fn captured_operation_identities(bundle_dir: &Path) -> Result<BTreeSet<OperationIdentity>, String> {
+fn captured_ops(bundle_dir: &Path) -> Result<BTreeSet<OperationIdentity>, String> {
     let trace = std::fs::read(bundle_dir.join(TRACE_FILE)).map_err(|error| format!("failed to read {TRACE_FILE}: {error}"))?;
     let document: serde_json::Value = serde_json::from_slice(&trace).map_err(|error| format!("{TRACE_FILE} is not valid JSON: {error}"))?;
     let resources = document["resourceSpans"]
@@ -914,7 +924,7 @@ fn captured_operation_identities(bundle_dir: &Path) -> Result<BTreeSet<Operation
     Ok(operations)
 }
 
-fn capture_coverage_problems(
+fn coverage_problems(
     row_id: &str,
     discovered: &BTreeSet<OperationIdentity>,
     captured: &BTreeSet<OperationIdentity>,
@@ -923,11 +933,11 @@ fn capture_coverage_problems(
     let missing = discovered
         .difference(captured)
         .filter(|operation| !excluded.contains(*operation))
-        .map(render_operation_identity)
+        .map(operation_identity)
         .collect::<Vec<_>>();
-    let unexpected = captured.difference(discovered).map(render_operation_identity).collect::<Vec<_>>();
-    let unknown_exclusions = excluded.difference(discovered).map(render_operation_identity).collect::<Vec<_>>();
-    let stale_exclusions = excluded.intersection(captured).map(render_operation_identity).collect::<Vec<_>>();
+    let unexpected = captured.difference(discovered).map(operation_identity).collect::<Vec<_>>();
+    let unknown_exclusions = excluded.difference(discovered).map(operation_identity).collect::<Vec<_>>();
+    let stale_exclusions = excluded.intersection(captured).map(operation_identity).collect::<Vec<_>>();
 
     let mut problems = Vec::new();
     if !missing.is_empty() {
@@ -957,7 +967,7 @@ fn capture_coverage_problems(
     problems
 }
 
-fn render_operation_identity((component, operation): &OperationIdentity) -> String {
+fn operation_identity((component, operation): &OperationIdentity) -> String {
     format!("{component}::{operation}")
 }
 
@@ -969,7 +979,7 @@ fn render_operation_identity((component, operation): &OperationIdentity) -> Stri
 /// row that captures one without an exact exclusion would either fail opaquely
 /// or encode a bundle whose input surface is silently incomplete. The matrix
 /// is checked here, against real discovery, before capture runs.
-fn assert_capture_rows_are_synchronous(binding_key: &str, registry: &Registry, rows: &[&Row]) {
+fn assert_capture_sync(binding_key: &str, registry: &Registry, rows: &[&Row]) {
     for row in rows.iter().filter(|row| row.captures_rust()) {
         let component = row.component.as_deref().expect("component row");
         let mut asynchronous = registry
@@ -1017,7 +1027,7 @@ fn generate_csharp(root: &Path, matrix: &Matrix, out_root: &Path) {
 
     let discovered = discover_many_target(binding, None, &components)
         .unwrap_or_else(|error| panic!("{binding_key}: batched C# discovery failed: {error}"));
-    assert_inventory_matches_matrix(
+    assert_inventory(
         &binding_key,
         &components.iter().map(|component| (*component).to_string()).collect(),
         &discovered.present_components,
@@ -1037,7 +1047,7 @@ fn generate_csharp(root: &Path, matrix: &Matrix, out_root: &Path) {
 /// Fail unless the components a target actually declares are exactly the ones
 /// the matrix claims. Seeding discovery from matrix rows alone would hide a
 /// component that exists in a covered source file but has no row.
-fn assert_inventory_matches_matrix(label: &str, expected: &BTreeSet<String>, present: &[String]) {
+fn assert_inventory(label: &str, expected: &BTreeSet<String>, present: &[String]) {
     let present = present.iter().cloned().collect::<BTreeSet<_>>();
     let missing = expected.difference(&present).cloned().collect::<Vec<_>>();
     let extra = present.difference(expected).cloned().collect::<Vec<_>>();
@@ -1050,17 +1060,27 @@ fn assert_inventory_matches_matrix(label: &str, expected: &BTreeSet<String>, pre
 }
 
 fn error_category(message: &str) -> &'static str {
-    if message.contains("operation identity must be unique") {
+    // These fragments are the stable diagnostic contracts emitted by
+    // discovery. Changing their wording requires coordinated golden-category
+    // updates or affected failures become deliberately "unclassified".
+    const DUPLICATE_OPERATION: &str = "operation identity must be unique";
+    const ORPHAN_SETUP: &str = "has no operation to construct";
+    const MISSING_RECEIVER_SETUP: &str = "is a method with no receiver setup";
+    const PRIVATE_OPERATION: &str = "is declared on private function";
+    const DYNAMIC_VALUE: &str = "is the dynamic runtime value";
+    const MISSING_COMPONENT_OWNER: &str = "has no registered component owner";
+    const UNKNOWN_NAMED_TYPE: &str = "unknown named type";
+    if message.contains(DUPLICATE_OPERATION) {
         "duplicate-operation-identity"
-    } else if message.contains("has no operation to construct") {
+    } else if message.contains(ORPHAN_SETUP) {
         "orphan-setup"
-    } else if message.contains("is a method with no receiver setup") {
+    } else if message.contains(MISSING_RECEIVER_SETUP) {
         "method-missing-setup"
-    } else if message.contains("is declared on private function") {
+    } else if message.contains(PRIVATE_OPERATION) {
         "private-operation"
-    } else if message.contains("is the dynamic runtime value") {
+    } else if message.contains(DYNAMIC_VALUE) {
         "dynamic-value-type"
-    } else if message.contains("has no registered component owner") || message.contains("unknown named type") {
+    } else if message.contains(MISSING_COMPONENT_OWNER) || message.contains(UNKNOWN_NAMED_TYPE) {
         "unresolved-type"
     } else {
         "unclassified"
@@ -1069,8 +1089,8 @@ fn error_category(message: &str) -> &'static str {
 
 fn normalized_error_json(id: &str, phase: &str, category: &str, component: &str, detail: &serde_json::Value) -> Vec<u8> {
     let document = serde_json::json!({
-        "format": "specgate.ctsc-golden-error",
-        "formatVersion": "0.1.0",
+        "format": ERROR_FORMAT,
+        "formatVersion": ERROR_FORMAT_VERSION,
         "case": id,
         "phase": phase,
         "outcome": "failure",
@@ -1107,7 +1127,7 @@ fn generate_negatives(root: &Path, matrix: &Matrix, out_root: &Path, scratch: &P
         // The compile-error row is deliberately excluded: its component only
         // exists behind a Cargo feature that does not compile, so the shared
         // discovery build never links it.
-        assert_inventory_matches_matrix(
+        assert_inventory(
             &format!("{binding_key} (discovery negatives)"),
             &components.iter().map(|component| (*component).to_string()).collect(),
             &discovered.present_components,
@@ -1172,8 +1192,8 @@ fn generate_negatives(root: &Path, matrix: &Matrix, out_root: &Path, scratch: &P
             row.id
         );
         let intentional = intentional_sources(row);
-        let rejection = intentional_compile_errors(&String::from_utf8_lossy(&output.stdout), &intentional)
-            .unwrap_or_else(|error| panic!("{}: {error}", row.id));
+        let rejection =
+            compile_errors(&String::from_utf8_lossy(&output.stdout), &intentional).unwrap_or_else(|error| panic!("{}: {error}", row.id));
         let bytes = normalized_error_json(
             &row.id,
             "build",
@@ -1220,7 +1240,7 @@ struct CompilerRejection {
 /// diagnostic codes are returned: rendered diagnostics carry absolute paths,
 /// line numbers, and toolchain-specific wording, none of which belong in a
 /// checked-in golden.
-fn intentional_compile_errors(cargo_stdout: &str, intentional: &BTreeSet<String>) -> Result<CompilerRejection, String> {
+fn compile_errors(cargo_stdout: &str, intentional: &BTreeSet<String>) -> Result<CompilerRejection, String> {
     let mut sources = BTreeSet::new();
     let mut codes = BTreeSet::new();
     let mut other_sources = BTreeSet::new();
@@ -1354,7 +1374,7 @@ fn actual_artifacts(root: &Path) -> BTreeSet<String> {
     found
 }
 
-fn validate_generated_artifacts(matrix: &Matrix, out_root: &Path) {
+fn validate_artifacts(matrix: &Matrix, out_root: &Path) {
     let mut problems = Vec::new();
     for row in &matrix.rows {
         for (language, name) in [(row.rust.as_ref(), "rust"), (row.csharp.as_ref(), "csharp")] {
@@ -1482,7 +1502,7 @@ fn check_parity(matrix: &Matrix, out_root: &Path) {
 /// paths, so this checks for the concrete roots a leak could come from —
 /// the repository, the harness scratch tree, the home directory, and the
 /// system temporary directory — rather than guessing from punctuation.
-fn check_artifacts_are_portable(root: &Path, out_root: &Path, artifacts: &BTreeSet<String>) {
+fn check_portability(root: &Path, out_root: &Path, artifacts: &BTreeSet<String>) {
     let mut roots = vec![root.to_path_buf(), out_root.to_path_buf(), std::env::temp_dir()];
     for variable in [
         "SPECGATE_CTSC_GOLDENS_SCRATCH",
@@ -1498,7 +1518,7 @@ fn check_artifacts_are_portable(root: &Path, out_root: &Path, artifacts: &BTreeS
     let mut markers = BTreeSet::new();
     for candidate in roots {
         let display = candidate.to_string_lossy().to_string();
-        if display.len() < 4 {
+        if display.len() < PORTABILITY_MARKER_MIN_LEN {
             continue;
         }
         markers.insert(display.replace('\\', "/"));
@@ -1523,7 +1543,7 @@ fn check_artifacts_are_portable(root: &Path, out_root: &Path, artifacts: &BTreeS
         problems.join("\n  ")
     );
 }
-fn compare_against_checked_in(matrix: &Matrix, checked_in: &Path, generated: &Path) {
+fn compare_checked_in(matrix: &Matrix, checked_in: &Path, generated: &Path) {
     let expected = expected_artifacts(matrix);
     let stored = actual_artifacts(checked_in);
     let mut problems = Vec::new();
@@ -1657,7 +1677,7 @@ fn run(mode: Mode) {
     let matrix = load_matrix(&root);
     check_matrix_shape(&matrix);
     check_source_coverage(&root, &matrix);
-    check_replacement_references(&root, &matrix);
+    check_replacements(&root, &matrix);
 
     let checked_in = repo_path(&root, &matrix.artifact_root);
     let scratch = std::env::var_os("SPECGATE_CTSC_GOLDENS_SCRATCH")
@@ -1681,10 +1701,10 @@ fn run(mode: Mode) {
     generate_csharp(&root, &matrix, &generated);
     generate_negatives(&root, &matrix, &generated, &scratch);
 
-    validate_generated_artifacts(&matrix, &generated);
+    validate_artifacts(&matrix, &generated);
     check_parity(&matrix, &generated);
     let produced = actual_artifacts(&generated);
-    check_artifacts_are_portable(&root, &generated, &produced);
+    check_portability(&root, &generated, &produced);
 
     let expected = expected_artifacts(&matrix);
     let mut problems = Vec::new();
@@ -1703,7 +1723,7 @@ fn run(mode: Mode) {
     verify_replay(&root, &matrix, &generated, &scratch);
 
     if mode == Mode::Check {
-        compare_against_checked_in(&matrix, &checked_in, &generated);
+        compare_checked_in(&matrix, &checked_in, &generated);
     }
 
     let components = matrix.rows.iter().filter(|row| row.classification == CLASS_COMPONENT).count();
@@ -1745,7 +1765,7 @@ mod tests {
         let matrix = load_matrix(&root);
         check_matrix_shape(&matrix);
         check_source_coverage(&root, &matrix);
-        check_replacement_references(&root, &matrix);
+        check_replacements(&root, &matrix);
     }
 
     #[test]
@@ -1866,7 +1886,7 @@ mod tests {
             BTreeSet::from(["test/rust/negative-fixtures/specgate-ctsc-negative-fixtures/src/templates/compile_error.rs.in".to_string()]);
         let blamed = r#"{"reason":"compiler-message","message":{"level":"error","code":null,"spans":[{"is_primary":true,"file_name":"src\\templates/compile_error.rs.in"}]}}"#;
         assert_eq!(
-            intentional_compile_errors(blamed, &intentional).expect("the intentional source is blamed"),
+            compile_errors(blamed, &intentional).expect("the intentional source is blamed"),
             CompilerRejection {
                 sources: vec!["compile_error.rs.in".to_string()],
                 codes: Vec::new(),
@@ -1875,33 +1895,31 @@ mod tests {
 
         let coded = r#"{"reason":"compiler-message","message":{"level":"error","code":{"code":"E0425"},"spans":[{"is_primary":true,"file_name":"src/templates/compile_error.rs.in"}]}}"#;
         assert_eq!(
-            intentional_compile_errors(coded, &intentional)
-                .expect("codes are recorded when present")
-                .codes,
+            compile_errors(coded, &intentional).expect("codes are recorded when present").codes,
             vec!["E0425".to_string()]
         );
 
         let unrelated = r#"{"reason":"compiler-message","message":{"level":"error","code":null,"spans":[{"is_primary":true,"file_name":"src/lib.rs"}]}}"#;
-        let error = intentional_compile_errors(unrelated, &intentional).expect_err("an unrelated error is not this negative");
+        let error = compile_errors(unrelated, &intentional).expect_err("an unrelated error is not this negative");
         assert!(error.contains("src/lib.rs"), "{error}");
 
         let intended_and_unrelated = format!("{coded}\n{unrelated}");
-        let error = intentional_compile_errors(&intended_and_unrelated, &intentional)
-            .expect_err("one intended error may not hide an unrelated compiler error");
+        let error =
+            compile_errors(&intended_and_unrelated, &intentional).expect_err("one intended error may not hide an unrelated compiler error");
         assert!(error.contains("not exclusively attributable"), "{error}");
         assert!(error.contains("src/lib.rs"), "{error}");
 
         let unspanned = r#"{"reason":"compiler-message","message":{"level":"error","code":{"code":"E0999"},"spans":[]}}"#;
         let intended_and_unspanned = format!("{coded}\n{unspanned}");
-        let error = intentional_compile_errors(&intended_and_unspanned, &intentional)
+        let error = compile_errors(&intended_and_unspanned, &intentional)
             .expect_err("an unspanned compiler error cannot be attributed to the intentional source");
         assert!(error.contains("errors without primary spans: 1"), "{error}");
 
         let warning_only = r#"{"reason":"compiler-message","message":{"level":"warning","code":null,"spans":[{"is_primary":true,"file_name":"src/templates/compile_error.rs.in"}]}}"#;
-        let error = intentional_compile_errors(warning_only, &intentional).expect_err("a warning is not a rejection");
+        let error = compile_errors(warning_only, &intentional).expect_err("a warning is not a rejection");
         assert!(error.contains("not a compiler diagnostic"), "{error}");
         assert!(
-            intentional_compile_errors("", &intentional).is_err(),
+            compile_errors("", &intentional).is_err(),
             "a build that produced no diagnostics at all cannot be this negative"
         );
     }
@@ -1909,16 +1927,16 @@ mod tests {
     #[test]
     fn matrix_inventories_reject_missing_and_extra_components() {
         let expected = BTreeSet::from(["fixture.one".to_string(), "fixture.two".to_string()]);
-        assert_inventory_matches_matrix("label", &expected, &["fixture.one".to_string(), "fixture.two".to_string()]);
+        assert_inventory("label", &expected, &["fixture.one".to_string(), "fixture.two".to_string()]);
 
         let missing = std::panic::catch_unwind(|| {
-            assert_inventory_matches_matrix("label", &expected, &["fixture.one".to_string()]);
+            assert_inventory("label", &expected, &["fixture.one".to_string()]);
         })
         .expect_err("a component the matrix declares but discovery lacks must fail");
         assert!(panic_message(missing.as_ref()).contains("absent from discovery: [fixture.two]"));
 
         let extra = std::panic::catch_unwind(|| {
-            assert_inventory_matches_matrix(
+            assert_inventory(
                 "label",
                 &expected,
                 &["fixture.one".to_string(), "fixture.two".to_string(), "fixture.three".to_string()],
@@ -1933,7 +1951,7 @@ mod tests {
         let operation = |name: &str| ("fixture.two_operations".to_string(), name.to_string());
         let discovered = BTreeSet::from([operation("outer"), operation("inner")]);
         let captured = BTreeSet::from([operation("outer")]);
-        let problems = capture_coverage_problems("component/fixture.two_operations", &discovered, &captured, &BTreeSet::new());
+        let problems = coverage_problems("component/fixture.two_operations", &discovered, &captured, &BTreeSet::new());
         assert_eq!(
             problems,
             vec![
@@ -1945,17 +1963,17 @@ mod tests {
 
         let nested_capture = BTreeSet::from([operation("outer"), operation("inner")]);
         assert!(
-            capture_coverage_problems("component/fixture.two_operations", &discovered, &nested_capture, &BTreeSet::new()).is_empty(),
+            coverage_problems("component/fixture.two_operations", &discovered, &nested_capture, &BTreeSet::new()).is_empty(),
             "a nested operation span exercises the semantic operation"
         );
 
         let excluded = BTreeSet::from([operation("inner")]);
         assert!(
-            capture_coverage_problems("component/fixture.two_operations", &discovered, &captured, &excluded).is_empty(),
+            coverage_problems("component/fixture.two_operations", &discovered, &captured, &excluded).is_empty(),
             "an exact operation-level exclusion covers the one intentional gap"
         );
         assert!(
-            capture_coverage_problems("component/fixture.two_operations", &discovered, &nested_capture, &excluded)[0]
+            coverage_problems("component/fixture.two_operations", &discovered, &nested_capture, &excluded)[0]
                 .contains("capture exclusions are stale"),
             "an exclusion fails once the operation is captured"
         );
@@ -2019,7 +2037,7 @@ mod tests {
         let registry = synthetic_async_registry();
         let unlimited = serde_json::json!([]);
         let synchronous = synthetic_component_row("fixture.sync", &["discover", "capture"], &unlimited);
-        assert_capture_rows_are_synchronous("rust", &registry, &[&synchronous]);
+        assert_capture_sync("rust", &registry, &[&synchronous]);
 
         let limitation = serde_json::json!([{ "code": ASYNC_LIMITATION, "detail": "Capture context is not task-safe." }]);
         for (component, expected) in [
@@ -2027,11 +2045,11 @@ mod tests {
             ("fixture.async_setup", "setup 'make'"),
         ] {
             let discovery_only = synthetic_component_row(component, &["discover"], &limitation);
-            assert_capture_rows_are_synchronous("rust", &registry, &[&discovery_only]);
+            assert_capture_sync("rust", &registry, &[&discovery_only]);
 
             let capturing = synthetic_component_row(component, &["discover", "capture"], &unlimited);
             let failure = std::panic::catch_unwind(|| {
-                assert_capture_rows_are_synchronous("rust", &registry, &[&capturing]);
+                assert_capture_sync("rust", &registry, &[&capturing]);
             })
             .expect_err("a capture row over an async component must fail");
             let message = panic_message(failure.as_ref());
@@ -2048,7 +2066,7 @@ mod tests {
                 code: ASYNC_LIMITATION.to_string(),
                 reason: "Native capture context is not task-safe.".to_string(),
             });
-            assert_capture_rows_are_synchronous("rust", &registry, &[&excluded]);
+            assert_capture_sync("rust", &registry, &[&excluded]);
         }
     }
 
@@ -2058,8 +2076,8 @@ mod tests {
     fn the_async_limitation_forces_a_discovery_only_row() {
         let limitation = serde_json::json!([{ "code": ASYNC_LIMITATION, "detail": "Capture context is not task-safe." }]);
         let matrix = |row: Row| Matrix {
-            format: "specgate.ctsc-golden-matrix".to_string(),
-            format_version: "0.1.0".to_string(),
+            format: MATRIX_FORMAT.to_string(),
+            format_version: MATRIX_FORMAT_VERSION.to_string(),
             artifact_root: "test/goldens/ctsc".to_string(),
             bindings: BTreeMap::from([("rust".to_string(), "test/bindings/rust.yaml".to_string())]),
             sources: SourceCoverage {
