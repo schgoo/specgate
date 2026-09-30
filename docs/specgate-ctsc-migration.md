@@ -155,7 +155,9 @@ the Rust and C# registries still differ in exactly the declared ways.
 - Async metadata is retained for linking, but native capture rejects async
   operations before polling until capture context can propagate task-safely.
   An async setup is not instrumented at all, so capture rejects the whole
-  component up front rather than encoding a bundle without its inputs.
+  component up front rather than encoding a bundle without its inputs. The
+  ratified design for the replacement is
+  [`decisions/async-capture-context.md`](decisions/async-capture-context.md).
 - Native validation supports JSON and JSONL traces, registry imports, exact
   capture-bundle integrity, and linked type checking. Bundle validation is
   intentionally independent from replay's narrower invocation decoder.
@@ -172,7 +174,9 @@ the Rust and C# registries still differ in exactly the declared ways.
 - Components that declare any async operation or async setup are
   discovery-only: capture rejects an async operation before polling and
   rejects an async setup before it builds anything, so no reference bundle
-  exists. The golden matrix asserts this for every row it captures.
+  exists. The golden matrix asserts this for every row it captures. See
+  [`decisions/async-capture-context.md`](decisions/async-capture-context.md)
+  for the ratified capture-context design.
 - Discovery rejects duplicate operation identity, orphan setups, method
   operations without a receiver setup, operations on private functions, and the
   dynamic runtime `Value`, because none of them can describe a well-formed CTSC
