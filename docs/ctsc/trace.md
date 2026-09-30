@@ -283,6 +283,23 @@ Target-level fault types are stable language-neutral identifiers chosen by the
 producer's native-failure mapping. Other fault types MUST use a producer
 namespace, such as `example.arithmetic_overflow`.
 
+Core target fault types are:
+
+```text
+incomplete_capture
+```
+
+A target MUST emit `incomplete_capture` when a recording ends while one of its
+operations is still outstanding. `conformance.fault.observer` MUST be `target`,
+and the fault MUST be emitted on the unfinished `conformance.operation` span
+itself — never on a scenario or run span. The containing-span `ERROR` status
+rule above applies unchanged.
+
+Unit completion emits no completion event — see §7.6 — so without this fault an
+unfinished unit-outcome operation is indistinguishable from a completed one.
+Emitting the fault on the operation span preserves which operation was
+outstanding, which a supervisor cannot supply.
+
 Native failure names MAY be preserved in
 `conformance.fault.native_type`. CTSC defines no stack-trace field.
 

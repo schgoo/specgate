@@ -527,6 +527,12 @@ fn validate_events(span: &TraceSpan, path: &Path, issues: &mut Vec<ValidationIss
                 );
                 let fault_type = require_string_attribute(&event.attributes, "conformance.fault.type", path, &location, issues);
                 let observer = require_string_attribute(&event.attributes, "conformance.fault.observer", path, &location, issues);
+                require(
+                    fault_type != Some("incomplete_capture") || observer == Some("target"),
+                    &location,
+                    "incomplete_capture fault must be observed by the target",
+                    issues,
+                );
                 if observer == Some("target") {
                     require(
                         span.name == "conformance.operation",
