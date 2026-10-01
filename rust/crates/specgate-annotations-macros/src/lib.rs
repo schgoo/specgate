@@ -221,6 +221,16 @@ pub fn spec_operation(attribute: TokenStream, item: TokenStream) -> TokenStream 
         })
         .collect::<Vec<_>>();
     let is_async = function.sig.asyncness.is_some();
+    // Shared by every return-kind arm so none can omit a step. `inputs_recorded`
+    // must stay after `#input_records`: the snapshot it takes is validated
+    // against the inputs the registry declares for this operation.
+    let prologue = quote! {
+        #begin
+        #(#input_records)*
+        __sg_scope
+            .inputs_recorded()
+            .unwrap_or_else(|error| panic!("failed to snapshot native operation inputs: {error}"));
+    };
     let new_body = if is_async {
         parse_quote!({
             #rt::reject_async_native_capture(#component, #name)
@@ -230,8 +240,7 @@ pub fn spec_operation(attribute: TokenStream, item: TokenStream) -> TokenStream 
     } else {
         match (&function.sig.output, return_kind(&function.sig.output)) {
             (_, ReturnKind::Unit) => parse_quote!({
-                #begin
-                #(#input_records)*
+                #prologue
                 let __sg_return = (move || -> () #body)();
                 __sg_scope
                     .complete_unit()
@@ -239,8 +248,7 @@ pub fn spec_operation(attribute: TokenStream, item: TokenStream) -> TokenStream 
                 __sg_return
             }),
             (ReturnType::Type(_, ty), ReturnKind::Option) => parse_quote!({
-                #begin
-                #(#input_records)*
+                #prologue
                 let __sg_return = (move || -> #ty #body)();
                 match &__sg_return {
                     ::std::option::Option::Some(value) => __sg_scope
@@ -253,8 +261,7 @@ pub fn spec_operation(attribute: TokenStream, item: TokenStream) -> TokenStream 
                 __sg_return
             }),
             (ReturnType::Type(_, ty), ReturnKind::OptionUnit) => parse_quote!({
-                #begin
-                #(#input_records)*
+                #prologue
                 let __sg_return = (move || -> #ty #body)();
                 __sg_scope
                     .complete_result(#rt::ToNativeValue::to_native_value(&__sg_return))
@@ -262,8 +269,7 @@ pub fn spec_operation(attribute: TokenStream, item: TokenStream) -> TokenStream 
                 __sg_return
             }),
             (ReturnType::Type(_, ty), ReturnKind::Result) => parse_quote!({
-                #begin
-                #(#input_records)*
+                #prologue
                 let __sg_return = (move || -> #ty #body)();
                 match &__sg_return {
                     ::std::result::Result::Ok(value) => __sg_scope
@@ -276,8 +282,7 @@ pub fn spec_operation(attribute: TokenStream, item: TokenStream) -> TokenStream 
                 __sg_return
             }),
             (ReturnType::Type(_, ty), ReturnKind::ResultUnit) => parse_quote!({
-                #begin
-                #(#input_records)*
+                #prologue
                 let __sg_return = (move || -> #ty #body)();
                 match &__sg_return {
                     ::std::result::Result::Ok(()) => __sg_scope
@@ -290,8 +295,7 @@ pub fn spec_operation(attribute: TokenStream, item: TokenStream) -> TokenStream 
                 __sg_return
             }),
             (ReturnType::Type(_, ty), ReturnKind::ResultErrorUnit) => parse_quote!({
-                #begin
-                #(#input_records)*
+                #prologue
                 let __sg_return = (move || -> #ty #body)();
                 match &__sg_return {
                     ::std::result::Result::Ok(value) => __sg_scope
@@ -304,8 +308,7 @@ pub fn spec_operation(attribute: TokenStream, item: TokenStream) -> TokenStream 
                 __sg_return
             }),
             (ReturnType::Type(_, ty), ReturnKind::ResultBothUnit) => parse_quote!({
-                #begin
-                #(#input_records)*
+                #prologue
                 let __sg_return = (move || -> #ty #body)();
                 match &__sg_return {
                     ::std::result::Result::Ok(()) => __sg_scope
@@ -318,8 +321,7 @@ pub fn spec_operation(attribute: TokenStream, item: TokenStream) -> TokenStream 
                 __sg_return
             }),
             (ReturnType::Type(_, ty), ReturnKind::Value) => parse_quote!({
-                #begin
-                #(#input_records)*
+                #prologue
                 let __sg_return = (move || -> #ty #body)();
                 __sg_scope
                     .complete_result(#rt::ToNativeValue::to_native_value(&__sg_return))

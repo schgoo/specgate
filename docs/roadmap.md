@@ -73,6 +73,10 @@ it.
 Relates to issue #2, whose problem statement is correct but whose proposed
 solution predates CTSC span parentage.
 
+The capture-context design is ratified in
+[`decisions/async-capture-context.md`](decisions/async-capture-context.md),
+which also covers M2.
+
 ### M2. Rust async context propagation
 
 Operation context must survive every `Future` poll and every spawn, thread, and

@@ -34,6 +34,12 @@ Rust.
   validator, or comparator tests. Do not add a separate behavioral assertion
   format or flat trace compatibility path.
 - Capture observes real annotated operation boundaries through ordinary tests.
+- The native capture sidecar is a provisional snapshot rewritten once each
+  operation's declared inputs are recorded and again at every operation close,
+  valid as of the last completed write and authoritative once the test process
+  exits. Outstanding operations are projected into it with an
+  `incomplete_capture` target fault from a clone, so the live logical clock
+  never moves and completed recordings are unaffected.
 - `specgate capture --component <id>` selects a scenario's *top-level*
   operations of that component and exports each of those subtrees verbatim.
   Nested calls into other annotated components keep their original parentage,

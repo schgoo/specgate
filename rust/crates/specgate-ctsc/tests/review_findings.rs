@@ -429,6 +429,29 @@ fn supervisor_fault_types_are_core_or_producer_namespaced() {
 }
 
 #[test]
+fn incomplete_capture_fault_requires_target_observer() {
+    let mut target = read_json(&corpus().join("trace").join("valid").join("target-fault.otlp.json"));
+    set_attribute(
+        event_mut(span_mut(&mut target, "conformance.operation"), "conformance.fault"),
+        "conformance.fault.type",
+        json!({"stringValue":"incomplete_capture"}),
+    );
+    let report = validate_trace_value("target-incomplete-capture-fault", &target);
+    assert!(report.valid, "{report:#?}");
+
+    let mut supervisor = read_json(&corpus().join("trace").join("valid").join("supervisor-fault.otlp.json"));
+    set_attribute(
+        event_mut(span_mut(&mut supervisor, "conformance.scenario"), "conformance.fault"),
+        "conformance.fault.type",
+        json!({"stringValue":"incomplete_capture"}),
+    );
+    assert_invalid(
+        &validate_trace_value("supervisor-incomplete-capture-fault", &supervisor),
+        "incomplete_capture fault must be observed by the target",
+    );
+}
+
+#[test]
 fn parallel_interval_encloses_every_direct_branch() {
     let mut value = read_json(&corpus().join("trace").join("valid").join("parallel.otlp.json"));
     let parallel_id = span_mut(&mut value, "conformance.parallel")["spanId"]
