@@ -239,9 +239,16 @@ pub(crate) struct TraceSpan {
     pub(crate) end_time: Option<u128>,
     pub(crate) attributes: BTreeMap<String, AnyValue>,
     pub(crate) events: Vec<TraceEvent>,
-    pub(crate) status_error: bool,
+    pub(crate) status: SpanStatus,
     pub(crate) resource_attributes: BTreeMap<String, AnyValue>,
     pub(crate) location: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SpanStatus {
+    Unset,
+    Ok,
+    Error,
 }
 
 #[derive(Debug, Clone)]

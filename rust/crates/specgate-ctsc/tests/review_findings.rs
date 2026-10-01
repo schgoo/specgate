@@ -88,6 +88,10 @@ fn event_mut<'a>(span: &'a mut Value, name: &str) -> &'a mut Value {
         .expect("named event")
 }
 
+fn set_status(span: &mut Value, code: &Value) {
+    span["status"] = json!({"code": code});
+}
+
 fn assert_invalid(report: &ValidationReport, expected: &str) {
     assert!(!report.valid, "artifact unexpectedly passed");
     assert!(
@@ -449,6 +453,43 @@ fn incomplete_capture_fault_requires_target_observer() {
         &validate_trace_value("supervisor-incomplete-capture-fault", &supervisor),
         "incomplete_capture fault must be observed by the target",
     );
+}
+
+#[test]
+fn operation_without_terminal_event_must_be_unit_completion() {
+    let base = read_json(&corpus().join("trace").join("valid").join("unit.otlp.json"));
+
+    let report = validate_trace_value("unit-completion-ok-status", &base);
+    assert!(report.valid, "{report:#?}");
+
+    let mut unset = base.clone();
+    set_status(span_mut(&mut unset, "conformance.operation"), &json!(0));
+    assert_invalid(
+        &validate_trace_value("unit-completion-unset-status", &unset),
+        "operation without a completion or failure event must have OK status",
+    );
+
+    let mut absent = base.clone();
+    span_mut(&mut absent, "conformance.operation")
+        .as_object_mut()
+        .expect("span")
+        .remove("status");
+    assert_invalid(
+        &validate_trace_value("unit-completion-absent-status", &absent),
+        "operation without a completion or failure event must have OK status",
+    );
+
+    let mut error = base.clone();
+    set_status(span_mut(&mut error, "conformance.operation"), &json!(2));
+    assert_invalid(
+        &validate_trace_value("unit-completion-error-status", &error),
+        "operation without a completion or failure event must have OK status",
+    );
+
+    let mut spelled = base;
+    set_status(span_mut(&mut spelled, "conformance.operation"), &json!("STATUS_CODE_OK"));
+    let report = validate_trace_value("unit-completion-spelled-ok-status", &spelled);
+    assert!(report.valid, "{report:#?}");
 }
 
 #[test]
