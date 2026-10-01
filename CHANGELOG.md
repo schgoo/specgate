@@ -4,6 +4,12 @@
 
 ### Changed
 
+- Trace validation now rejects a `conformance.operation` span that carries no
+  completion or failure event unless its status is `OK`. Trace §7.5 requires an
+  unfinished operation to carry an `incomplete_capture` fault, so a span with no
+  terminal event is a §7.6 unit completion and any other status is
+  self-contradictory. Previously an abandoned operation validated clean. The
+  rule is enforced identically by the native validator and `docs/ctsc/validate.py`.
 - Registry documents now order their `components` array by ascending component
   id in every encoder. The selected component no longer leads its own
   dependencies, so `discover` and `capture` emit byte-identical bytes for the

@@ -1,4 +1,4 @@
-use super::model::{AnyValue, CTSC_EVENTS, CTSC_SPANS, CTSC_VERSION, F64Value, TraceDocument, TraceEvent, TraceSpan};
+use super::model::{AnyValue, CTSC_EVENTS, CTSC_SPANS, CTSC_VERSION, F64Value, SpanStatus, TraceDocument, TraceEvent, TraceSpan};
 use super::otlp::{self, ParsedDouble};
 use super::{Loaded, ValidationIssue, issue, located, read_bytes};
 use serde_json::{Map, Value};
@@ -302,10 +302,14 @@ fn parse_span(
             attributes: parse_attributes(json_field(event, "attributes"), path, &event_location, issues),
         });
     }
-    let status_error = json_field(value, "status")
+    let status = json_field(value, "status")
         .and_then(Value::as_object)
         .and_then(|status| json_field(status, "code"))
-        .is_some_and(|code| code.as_i64() == Some(2) || code.as_str() == Some("STATUS_CODE_ERROR"));
+        .map_or(SpanStatus::Unset, |code| match (code.as_i64(), code.as_str()) {
+            (Some(1), _) | (_, Some("STATUS_CODE_OK")) => SpanStatus::Ok,
+            (Some(2), _) | (_, Some("STATUS_CODE_ERROR")) => SpanStatus::Error,
+            _ => SpanStatus::Unset,
+        });
     Some(TraceSpan {
         trace_id,
         span_id,
@@ -315,7 +319,7 @@ fn parse_span(
         end_time,
         attributes,
         events,
-        status_error,
+        status,
         resource_attributes,
         location: located(path, location),
     })
@@ -598,18 +602,27 @@ fn validate_events(span: &TraceSpan, path: &Path, issues: &mut Vec<ValidationIss
             .any(|event| matches!(event.name.as_str(), "conformance.error" | "conformance.fault"))
         {
             require(
-                span.status_error,
+                span.status == SpanStatus::Error,
                 &span.location,
                 "declared error and fault operations must have ERROR status",
                 issues,
             );
         }
+        // §7.5 requires an unfinished operation to carry an `incomplete_capture` fault, which is
+        // itself a terminal event. A span with no terminal event is therefore a §7.6 unit
+        // completion, and any status other than OK is self-contradictory.
+        require(
+            terminated || span.status == SpanStatus::Ok,
+            &span.location,
+            "operation without a completion or failure event must have OK status",
+            issues,
+        );
     }
     if matches!(span.name.as_str(), "conformance.run" | "conformance.scenario")
         && span.events.iter().any(|event| event.name == "conformance.fault")
     {
         require(
-            span.status_error,
+            span.status == SpanStatus::Error,
             &span.location,
             "fault-bearing run or scenario must have ERROR status",
             issues,

@@ -989,6 +989,11 @@ def status_is_error(span: dict[str, Any]) -> bool:
     return status.get("code") in {2, "STATUS_CODE_ERROR"}
 
 
+def status_is_ok(span: dict[str, Any]) -> bool:
+    status = span.get("status") or {}
+    return status.get("code") in {1, "STATUS_CODE_OK"}
+
+
 def validate_trace(path: Path) -> tuple[list[dict[str, Any]], Validator]:
     validator = Validator()
     batches: list[dict[str, Any]] = []
@@ -1213,6 +1218,15 @@ def validate_trace(path: Path) -> tuple[list[dict[str, Any]], Validator]:
                     location,
                     "declared error and fault operations must have ERROR status",
                 )
+            # Trace 7.5 requires an unfinished operation to carry an
+            # incomplete_capture fault, which is itself a terminal event. A span
+            # with no terminal event is therefore a 7.6 unit completion, and any
+            # status other than OK is self-contradictory.
+            validator.require(
+                bool(result_count or non_result_terminal) or status_is_ok(span),
+                location,
+                "operation without a completion or failure event must have OK status",
+            )
         if name in {"conformance.run", "conformance.scenario"} and (
             "conformance.fault" in event_names
         ):
