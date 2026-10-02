@@ -26,11 +26,15 @@ a candidate test suite, not a prerequisite for value.
 
 The concurrency model is the thing not to invent twice.
 
-Thread-local capture state is the single root cause behind async rejection,
-lost completions under parallelism, and the external capture threads consumers
-were forced to build. Solving it once, in the runtime SpecGate owns end to end,
-produces a proven model that C# instrumentation can then implement rather than
-redesign.
+Thread-affine capture state is the root cause behind async rejection and the
+external capture threads consumers were forced to build. Solving it once, in the
+runtime SpecGate owns end to end, produces a proven model that C#
+instrumentation can then implement rather than redesign.
+
+Parallel test execution is not on that list. The CLI harness already runs one
+process per test (`capture.rs:683`, `--test-threads=1`), so per-test isolation
+exists at process granularity, and thread affinity is not what constrains it.
+See [`decisions/async-capture-context.md`](decisions/async-capture-context.md).
 
 Building synchronous C# capture first would mean building on thread-affine
 assumptions that every documented consumer violates, and reworking it when
@@ -48,7 +52,7 @@ async C#. MVP+1 is what serves them.
 | Registry discovery | Rust link-time and C# compiled-assembly reflection; byte-identical for stateless, rich-type, and setup-folding fixtures | `specgate-discovery` |
 | Trace capture | Rust libtest only, synchronous only | `capture.rs:189`, migration limitations |
 | C# trace capture | None - annotations are inert; no recording code exists | `csharp/SpecGate.Annotations` is the whole C# surface |
-| Async capture | Rejected before polling until capture context is task-safe; async setup not instrumented at all | migration limitations |
+| Async capture | Still rejected before polling; the per-run collector is task-safe since M1, but no async instrumentation exists and async setup is not instrumented at all | `lib.rs:1334`, `annotations-macros/src/lib.rs:236` |
 | Observations | Captured but never declared; a component emitting one cannot produce a linkable bundle | migration limitations |
 | Comparison | `compare <reference-trace> <candidate-trace>` exists; fixed `ctsc.strict/0.1.0`; scenarios paired by name | `comparison.rs:185-195` |
 | Replay | Synchronous public Rust free functions, lossless primitive inputs | migration limitations |
@@ -65,10 +69,16 @@ structural.
 Replace thread-local capture state with one per-run collector safe under
 concurrent access.
 
-This is the keystone. A single root cause - thread-local state - produces every
-downstream symptom: async rejection, lost completions under parallelism, and
-the need for external capture threads. Nothing else in MVP lands cleanly before
-it.
+This is the keystone: async rejection and the need for external capture threads
+both trace back to capture state being reachable only from the thread that
+started it. Nothing else in MVP lands cleanly before it.
+
+**State: structurally complete, symptoms still open.** The per-run collector
+exists and is `Send` (`CollectorHandle` in `specgate-runtime`), and trace
+validation rejects an operation span with no terminal event. The ambient lookup
+slot stays thread-local by design, and no public API yet hands a collector to
+another thread, so async capture and external capture threads remain blocked
+until M2 consumes the collector.
 
 Relates to issue #2, whose problem statement is correct but whose proposed
 solution predates CTSC span parentage.
