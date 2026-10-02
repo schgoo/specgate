@@ -24,6 +24,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::Write as _;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 pub use linkme;
 
@@ -571,13 +572,64 @@ impl NativeCaptureState {
     }
 }
 
+/// Shared handle to the collector backing one capture run.
+///
+/// The recording is owned by the collector, not by the ambient slot: an
+/// [`OperationScope`] clones this handle at construction and never consults the
+/// ambient slot again. The inner `Option` is the session's liveness —
+/// [`finish_native_capture`] takes the recording out of the collector, so a
+/// scope that outlives its session still reports "session ended" rather than
+/// mutating a finalized recording.
+///
+/// `Mutex` rather than `RefCell` is what makes the handle `Send`, which is the
+/// entire point of the type: an async wrapper can clone it into a future.
+type CollectorHandle = Arc<Mutex<Option<NativeCaptureState>>>;
+
+/// Lock one collector, recovering deterministically from poisoning.
+///
+/// Poisoning is a failure mode `RefCell` did not have, and refusing the lock is
+/// the wrong answer here. A capture whose critical section panicked is already
+/// destined for an `incomplete_capture` fault on the outstanding operation (see
+/// [`close_outstanding_native_operations`]) or for a `terminal_error` recorded
+/// by [`OperationScope::drop`]. Returning `Err` forever after would replace
+/// that informative artifact with an uninformative "lock poisoned", so the
+/// guard is recovered and the recording is allowed to describe its own failure.
+fn lock_collector(collector: &CollectorHandle) -> MutexGuard<'_, Option<NativeCaptureState>> {
+    collector.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Clone the collector handle installed in the ambient slot, if any.
+///
+/// This is the only read of the ambient slot's contents. The `RefCell` borrow
+/// ends before the returned handle is locked, so no collector lock is ever held
+/// across an ambient-slot borrow.
+fn current_collector() -> Option<CollectorHandle> {
+    NATIVE_CAPTURE.with(|slot| slot.borrow().as_ref().map(Arc::clone))
+}
+
+/// Run `f` against one collector's live recording.
+///
+/// The sole lock acquisition point for mutation. Callers must not perform I/O
+/// or acquire another collector lock inside `f`: unlike a `RefCell` double
+/// borrow, a reentrant `Mutex` acquisition deadlocks silently.
+fn with_collector_mut<T>(collector: &CollectorHandle, f: impl FnOnce(&mut NativeCaptureState) -> Result<T, String>) -> Result<T, String> {
+    let mut guard = lock_collector(collector);
+    let state = guard
+        .as_mut()
+        .ok_or_else(|| "native capture session ended before operation scope".to_string())?;
+    f(state)
+}
+
 /// RAII guard for one annotation-generated synchronous operation invocation.
 ///
-/// The inactive representation is allocation-free and is returned whenever no
+/// A scope owns a shared handle to the collector recording it, captured when
+/// the scope is constructed, rather than an index into ambient storage. The
+/// inactive representation is allocation-free and is returned whenever no
 /// native capture session is active.
 #[derive(Debug)]
 pub struct OperationScope {
     operation_index: Option<usize>,
+    collector: Option<CollectorHandle>,
     closed: bool,
 }
 
@@ -586,7 +638,20 @@ impl OperationScope {
     pub const fn inactive() -> Self {
         Self {
             operation_index: None,
+            collector: None,
             closed: true,
+        }
+    }
+
+    /// The recording this scope owns a handle to, with its operation index.
+    ///
+    /// `None` for an inactive scope, which has no session behind it. The handle
+    /// is cloned out so a caller can keep using it while mutating the scope
+    /// itself (for example setting `closed` before persisting).
+    fn recording(&self) -> Option<(usize, CollectorHandle)> {
+        match (self.operation_index, self.collector.as_ref()) {
+            (Some(operation_index), Some(collector)) => Some((operation_index, Arc::clone(collector))),
+            _ => None,
         }
     }
 
@@ -597,10 +662,10 @@ impl OperationScope {
     /// Returns an error for an out-of-order scope, a duplicate input, or a
     /// scope that has already completed.
     pub fn record_input(&mut self, name: &str, value: Value) -> Result<(), String> {
-        let Some(operation_index) = self.operation_index else {
+        let Some((operation_index, collector)) = self.recording() else {
             return Ok(());
         };
-        with_native_state_mut(|state| {
+        with_collector_mut(&collector, |state| {
             ensure_active_operation(state, operation_index)?;
             let operation = &mut state.operations[operation_index];
             if operation.status.is_some() {
@@ -634,12 +699,14 @@ impl OperationScope {
     ///
     /// Returns an error when the provisional snapshot cannot be persisted.
     pub fn inputs_recorded(&mut self) -> Result<(), String> {
-        if self.operation_index.is_none() {
+        let Some((_operation_index, collector)) = self.recording() else {
             return Ok(());
-        }
-        let has_sidecar = with_native_state_mut(|state| Ok(state.sidecar_path.is_some()))?;
+        };
+        // The lock closes before the write: persistence is I/O and must never
+        // run inside a critical section.
+        let has_sidecar = with_collector_mut(&collector, |state| Ok(state.sidecar_path.is_some()))?;
         if has_sidecar {
-            persist_active_native_capture()?;
+            persist_collector_capture(&collector)?;
         }
         Ok(())
     }
@@ -704,10 +771,10 @@ impl OperationScope {
     }
 
     fn complete(&mut self, terminal: NativeTerminal) -> Result<(), String> {
-        let Some(operation_index) = self.operation_index else {
+        let Some((operation_index, collector)) = self.recording() else {
             return Ok(());
         };
-        let should_persist = with_native_state_mut(|state| {
+        let should_persist = with_collector_mut(&collector, |state| {
             ensure_active_operation(state, operation_index)?;
             if state.operations[operation_index].status.is_some() {
                 return Err(format!(
@@ -752,7 +819,8 @@ impl OperationScope {
         })?;
         self.closed = true;
         if should_persist {
-            persist_active_native_capture()?;
+            // Outside the critical section: see `with_collector_mut`.
+            persist_collector_capture(&collector)?;
         }
 
         Ok(())
@@ -771,11 +839,19 @@ impl Drop for OperationScope {
         if self.closed {
             return;
         }
-        let Some(operation_index) = self.operation_index else {
+        let Some((operation_index, collector)) = self.recording() else {
             return;
         };
+        // M2: `panicking()` answers "did this operation unwind?" only because
+        // capture is synchronous — the thread dropping the scope is the thread
+        // that ran it. Once futures are instrumented it becomes unreliable in
+        // two ways: a future dropped on an executor thread that is panicking
+        // for an unrelated reason reports `true`, and a *cancelled* future is
+        // dropped with no panic at all, so this takes the `terminal_error`
+        // branch below and poisons the session for legitimate cancellation.
+        // Replacing it needs a cancellation representation (M4, human-owned).
         let panicking = std::thread::panicking();
-        let result = with_native_state_mut(|state| {
+        let result = with_collector_mut(&collector, |state| {
             if state
                 .operations
                 .get(operation_index)
@@ -812,7 +888,8 @@ impl Drop for OperationScope {
         });
         match result {
             Ok(true) => {
-                if let Err(error) = persist_active_native_capture() {
+                // Outside the critical section: see `with_collector_mut`.
+                if let Err(error) = persist_collector_capture(&collector) {
                     if panicking {
                         eprintln!("failed to persist native capture during unwind: {error}");
                     } else {
@@ -827,7 +904,7 @@ impl Drop for OperationScope {
     }
 }
 
-/// Start one deterministic thread-local native capture session.
+/// Start one deterministic native capture session for this run.
 ///
 /// # Errors
 ///
@@ -854,7 +931,7 @@ fn start_native_capture_with_sidecar(config: NativeCaptureConfig, sidecar_path: 
         let next_time_unix_nano = scenario_start_time_unix_nano
             .checked_add(config.clock_step_unix_nano)
             .ok_or_else(|| "native capture logical clock overflow".to_string())?;
-        *slot = Some(NativeCaptureState {
+        *slot = Some(Arc::new(Mutex::new(Some(NativeCaptureState {
             run_start_time_unix_nano: config.start_time_unix_nano,
             scenario_start_time_unix_nano,
             next_time_unix_nano,
@@ -865,7 +942,7 @@ fn start_native_capture_with_sidecar(config: NativeCaptureConfig, sidecar_path: 
             active_operations: Vec::new(),
             operations: Vec::new(),
             terminal_error: None,
-        });
+        }))));
         Ok(())
     })
 }
@@ -878,9 +955,15 @@ fn start_native_capture_with_sidecar(config: NativeCaptureConfig, sidecar_path: 
 /// the logical clock cannot advance.
 pub fn begin_native_operation(component_id: &str, operation_name: &str) -> Result<OperationScope, String> {
     activate_native_capture_from_environment()?;
-    NATIVE_CAPTURE.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        let Some(state) = slot.as_mut() else {
+    let Some(collector) = current_collector() else {
+        return Ok(OperationScope::inactive());
+    };
+    // The handle is cloned once, here, and carried by the scope: from this
+    // point the scope works from its own collector, never from the ambient
+    // slot. That is what makes the recording `Send`-reachable in M2.
+    let operation_index = {
+        let mut guard = lock_collector(&collector);
+        let Some(state) = guard.as_mut() else {
             return Ok(OperationScope::inactive());
         };
         if let Some(error) = &state.terminal_error {
@@ -912,10 +995,12 @@ pub fn begin_native_operation(component_id: &str, operation_name: &str) -> Resul
         });
         state.next_operation_id += 1;
         state.active_operations.push(operation_index);
-        Ok(OperationScope {
-            operation_index: Some(operation_index),
-            closed: false,
-        })
+        operation_index
+    };
+    Ok(OperationScope {
+        operation_index: Some(operation_index),
+        collector: Some(collector),
+        closed: false,
     })
 }
 
@@ -955,6 +1040,10 @@ where
 
 impl Drop for DeferredSetupInputs {
     fn drop(&mut self) {
+        // M2: correct only while capture is synchronous — the thread dropping
+        // this guard is the thread that ran the setup. On an executor thread
+        // `panicking()` can report an unrelated unwind, and a cancelled future
+        // never panics at all. See the matching note in `OperationScope::drop`.
         if std::thread::panicking() {
             return;
         }
@@ -1234,9 +1323,9 @@ fn normalize_declared_type(declared: &str) -> String {
 
 /// Reject async operation capture before a future crosses an `.await`.
 ///
-/// Native capture state is thread-local and cannot safely follow a future that
-/// migrates between executor threads. Async operations remain discoverable but
-/// execute without instrumentation when capture is inactive.
+/// The ambient capture context is not yet task-safe and cannot follow a future
+/// that migrates between executor threads. Async operations remain discoverable
+/// but execute without instrumentation when capture is inactive.
 ///
 /// # Errors
 ///
@@ -1297,43 +1386,46 @@ fn close_outstanding_native_operations(state: &mut NativeCaptureState) -> Result
 /// Rejects absent sessions, nested/unclosed scopes, prior scope errors, unused
 /// deterministic operation IDs, and logical clock overflow.
 pub fn finish_native_capture() -> Result<NativeCapture, String> {
-    NATIVE_CAPTURE.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        let Some(mut state) = slot.take() else {
-            return Err("no native capture session is active".to_string());
-        };
-        // An outstanding operation is a contract violation the recording still
-        // has to describe: emit the fault, persist what was observed, and then
-        // fail the run anyway.
-        let outstanding = if state.active_operations.is_empty() {
-            None
-        } else {
-            Some(close_outstanding_native_operations(&mut state)?)
-        };
-        // The session is gone for good from here on, so its recorded setup
-        // construction inputs must not reach the next one.
-        PENDING_SETUP_INPUTS.with(|pending| pending.borrow_mut().clear());
-        if let Some(chain) = outstanding {
-            let message = format!("native capture has nested/unclosed operation scopes: {chain}");
-            if let Some(path) = state.sidecar_path.clone()
-                && let Err(error) = build_native_capture(&state).and_then(|capture| persist_capture_atomically(&path, &capture))
-            {
-                return Err(format!("{message}; the incomplete capture could not be persisted: {error}"));
-            }
-            return Err(message);
+    let Some(collector) = NATIVE_CAPTURE.with(|slot| slot.borrow_mut().take()) else {
+        return Err("no native capture session is active".to_string());
+    };
+    // Take the recording out of the collector as well, not just out of the
+    // ambient slot: a scope still holding a handle must see a finished session
+    // rather than keep mutating a finalized recording.
+    let Some(mut state) = lock_collector(&collector).take() else {
+        return Err("no native capture session is active".to_string());
+    };
+    // An outstanding operation is a contract violation the recording still
+    // has to describe: emit the fault, persist what was observed, and then
+    // fail the run anyway.
+    let outstanding = if state.active_operations.is_empty() {
+        None
+    } else {
+        Some(close_outstanding_native_operations(&mut state)?)
+    };
+    // The session is gone for good from here on, so its recorded setup
+    // construction inputs must not reach the next one.
+    PENDING_SETUP_INPUTS.with(|pending| pending.borrow_mut().clear());
+    if let Some(chain) = outstanding {
+        let message = format!("native capture has nested/unclosed operation scopes: {chain}");
+        if let Some(path) = state.sidecar_path.clone()
+            && let Err(error) = build_native_capture(&state).and_then(|capture| persist_capture_atomically(&path, &capture))
+        {
+            return Err(format!("{message}; the incomplete capture could not be persisted: {error}"));
         }
-        if let Some(error) = state.terminal_error {
-            return Err(error);
-        }
-        if state.next_operation_id < state.config.operation_span_ids.len() {
-            return Err(format!(
-                "native capture supplied {} operation span IDs but consumed {}",
-                state.config.operation_span_ids.len(),
-                state.next_operation_id
-            ));
-        }
-        build_native_capture(&state)
-    })
+        return Err(message);
+    }
+    if let Some(error) = state.terminal_error {
+        return Err(error);
+    }
+    if state.next_operation_id < state.config.operation_span_ids.len() {
+        return Err(format!(
+            "native capture supplied {} operation span IDs but consumed {}",
+            state.config.operation_span_ids.len(),
+            state.next_operation_id
+        ));
+    }
+    build_native_capture(&state)
 }
 
 fn activate_native_capture_from_environment() -> Result<(), String> {
@@ -1374,7 +1466,7 @@ fn next_operation_span_id(state: &NativeCaptureState) -> Result<String, String> 
     }
 }
 
-/// Rewrites the sidecar from the current session state.
+/// Rewrites one collector's sidecar from its current session state.
 ///
 /// With an empty operation stack the recording is complete and is persisted
 /// from live state. With operations still open the snapshot is projected from a
@@ -1382,10 +1474,13 @@ fn next_operation_span_id(state: &NativeCaptureState) -> Result<String, String> 
 /// open operations appear with an `incomplete_capture` fault. The projection
 /// must stay on a clone: its clock and order advances are discarded, leaving
 /// the live session's sequence unchanged.
-fn persist_active_native_capture() -> Result<(), String> {
-    let (path, capture) = NATIVE_CAPTURE.with(|slot| {
-        let slot = slot.borrow();
-        let state = slot
+///
+/// The projection is built under the lock and the lock is released before the
+/// write: no I/O ever runs inside a critical section.
+fn persist_collector_capture(collector: &CollectorHandle) -> Result<(), String> {
+    let (path, capture) = {
+        let guard = lock_collector(collector);
+        let state = guard
             .as_ref()
             .ok_or_else(|| "native capture session ended before snapshot persistence".to_string())?;
         let path = state
@@ -1399,8 +1494,8 @@ fn persist_active_native_capture() -> Result<(), String> {
             close_outstanding_native_operations(&mut provisional)?;
             build_native_capture(&provisional)?
         };
-        Ok::<(PathBuf, NativeCapture), String>((path, capture))
-    })?;
+        (path, capture)
+    };
     persist_capture_atomically(&path, &capture)
 }
 
@@ -1561,37 +1656,28 @@ fn ensure_active_operation(state: &NativeCaptureState, operation_index: usize) -
     }
 }
 
-fn with_native_state_mut<T>(f: impl FnOnce(&mut NativeCaptureState) -> Result<T, String>) -> Result<T, String> {
-    NATIVE_CAPTURE.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        let state = slot
-            .as_mut()
-            .ok_or_else(|| "native capture session ended before operation scope".to_string())?;
-        f(state)
-    })
-}
-
 fn record_native_observation(name: &str, value: &Value) -> Result<(), String> {
-    NATIVE_CAPTURE.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        let Some(state) = slot.as_mut() else {
-            return Ok(());
-        };
-        let Some(operation_index) = state.active_operations.last().copied() else {
-            return Ok(());
-        };
-        if name == "$result" || name == "$fault" {
-            return Ok(());
-        }
-        let observation = NativeObservation {
-            order: state.order()?,
-            time_unix_nano: state.tick()?,
-            name: name.to_string(),
-            value: value.clone(),
-        };
-        state.operations[operation_index].observations.push(observation);
-        Ok(())
-    })
+    let Some(collector) = current_collector() else {
+        return Ok(());
+    };
+    let mut guard = lock_collector(&collector);
+    let Some(state) = guard.as_mut() else {
+        return Ok(());
+    };
+    let Some(operation_index) = state.active_operations.last().copied() else {
+        return Ok(());
+    };
+    if name == "$result" || name == "$fault" {
+        return Ok(());
+    }
+    let observation = NativeObservation {
+        order: state.order()?,
+        time_unix_nano: state.tick()?,
+        name: name.to_string(),
+        value: value.clone(),
+    };
+    state.operations[operation_index].observations.push(observation);
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -1599,7 +1685,13 @@ fn record_native_observation(name: &str, value: &Value) -> Result<(), String> {
 // ---------------------------------------------------------------------------
 
 thread_local! {
-    static NATIVE_CAPTURE: RefCell<Option<NativeCaptureState>> = const { RefCell::new(None) };
+    /// Ambient slot naming the collector for the current run.
+    ///
+    /// The slot stays thread-local — that is what keeps concurrent `#[test]`
+    /// functions isolated from one another. Only its *contents* became shared:
+    /// the recording now lives behind a `Send` handle that an `OperationScope`
+    /// clones at construction.
+    static NATIVE_CAPTURE: RefCell<Option<CollectorHandle>> = const { RefCell::new(None) };
     static PENDING_SETUP_INPUTS: RefCell<BTreeMap<PendingSetupKey, BTreeMap<String, Value>>> =
         const { RefCell::new(BTreeMap::new()) };
 }
@@ -2191,6 +2283,74 @@ mod tests {
         );
         start_native_capture(native_config(&[])).unwrap();
         finish_native_capture().unwrap();
+    }
+
+    /// The structural invariant this collector exists to establish: the
+    /// recording is reachable through a `Send` handle. If someone later adds a
+    /// non-`Send` field to `NativeCaptureState`, this fails to compile rather
+    /// than silently blocking the async wrapper M2 needs.
+    const fn assert_send<T: Send>() {}
+    const _: () = assert_send::<NativeCaptureState>();
+    const _: () = assert_send::<CollectorHandle>();
+
+    /// An `OperationScope` works from the handle it captured at construction,
+    /// not from the ambient slot. Detaching the slot entirely must leave the
+    /// scope able to record and complete its own operation.
+    ///
+    /// Deliberately a pure data-structure test: no macro expansion, and no
+    /// recording across threads (that is the undetermined-parent case, M2+).
+    #[test]
+    fn a_scope_records_through_its_own_handle_after_the_ambient_slot_is_detached() {
+        start_native_capture(native_config(&[])).unwrap();
+        let mut scope = begin_native_operation("fixture.native", "detached").unwrap();
+
+        let collector = NATIVE_CAPTURE
+            .with(|slot| slot.borrow_mut().take())
+            .expect("the session installs a collector handle in the ambient slot");
+
+        scope.record_input("value", Value::Integer(2)).unwrap();
+        scope.complete_result(Value::Integer(3)).unwrap();
+
+        NATIVE_CAPTURE.with(|slot| *slot.borrow_mut() = Some(collector));
+        let capture = finish_native_capture().unwrap();
+        assert_eq!(capture.operations.len(), 1);
+        assert_eq!(capture.operations[0].inputs["value"], Value::Integer(2));
+        assert_eq!(capture.operations[0].status, NativeStatus::Ok);
+    }
+
+    /// A scope that outlives its session reports that the session ended and
+    /// cannot reach the next one.
+    ///
+    /// This pins the reason the collector holds `Option<NativeCaptureState>`
+    /// rather than the state directly. `finish_native_capture` takes the
+    /// recording out of the handle as well as out of the ambient slot, so a
+    /// stranded scope finds its own emptied collector. Were the handle to own
+    /// the state outright, the scope would keep a finalized recording alive and
+    /// silently mutate it; were the scope still an index into the ambient slot,
+    /// it would land in whichever session is installed now and pop *that*
+    /// session's operation stack.
+    #[test]
+    fn a_scope_outliving_its_session_cannot_reach_the_next_one() {
+        start_native_capture(native_config(&[])).unwrap();
+        let mut stranded = begin_native_operation("fixture.native", "stranded").unwrap();
+        assert_eq!(
+            finish_native_capture().unwrap_err(),
+            "native capture has nested/unclosed operation scopes: stranded"
+        );
+
+        start_native_capture(native_config(&[])).unwrap();
+        let mut successor = begin_native_operation("fixture.native", "successor").unwrap();
+        assert_eq!(
+            stranded.record_input("value", Value::Integer(1)).unwrap_err(),
+            "native capture session ended before operation scope"
+        );
+        leak_scope(stranded);
+
+        successor.complete_result(Value::Integer(4)).unwrap();
+        let capture = finish_native_capture().unwrap();
+        assert_eq!(capture.operations.len(), 1, "the successor session must be untouched");
+        assert_eq!(capture.operations[0].operation_name, "successor");
+        assert_eq!(capture.operations[0].status, NativeStatus::Ok);
     }
 
     #[test]

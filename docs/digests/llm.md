@@ -63,7 +63,7 @@ Rust.
   package through candidate-rooted `cargo metadata`. Runtime path and version
   overrides are identity-preserving assertions, not dependency substitutions.
 - Async operations remain discoverable, but native capture rejects them before
-  polling while capture state is thread-local.
+  polling until capture context is task-safe.
 - Observation declarations and configurable comparison profiles are not
   implemented.
 
