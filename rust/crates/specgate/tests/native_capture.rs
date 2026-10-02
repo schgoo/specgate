@@ -144,22 +144,41 @@ fn native_projection_recurses_through_collections_and_annotated_records() {
     );
 }
 
+/// Recording begins at first poll, not at construction.
+///
+/// An `async fn` has no construction-time code, so building the future must
+/// leave the session untouched; a future that is driven to completion on the
+/// calling thread must record exactly one operation with its inputs and result.
 #[test]
-fn async_operation_capture_is_rejected_before_polling_across_await() {
+fn async_operation_records_from_first_poll_through_completion() {
     use std::future::Future;
     use std::task::{Context, Poll, Waker};
 
-    let mut inactive = Box::pin(async_value(2));
-    let mut context = Context::from_waker(Waker::noop());
-    assert_eq!(inactive.as_mut().poll(&mut context), Poll::Ready(4));
+    specgate::__rt::start_native_capture(config(&[])).unwrap();
+    drop(async_value(2));
+    assert!(
+        specgate::__rt::finish_native_capture().unwrap().operations.is_empty(),
+        "constructing a future must not open an operation scope"
+    );
 
+    let mut context = Context::from_waker(Waker::noop());
     specgate::__rt::start_native_capture(config(&[])).unwrap();
     let mut captured = Box::pin(async_value(2));
-    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _ = captured.as_mut().poll(&mut context);
-    }));
-    assert!(panic.is_err());
-    assert!(specgate::__rt::finish_native_capture().unwrap().operations.is_empty());
+    assert_eq!(captured.as_mut().poll(&mut context), Poll::Ready(4));
+    let capture = specgate::__rt::finish_native_capture().unwrap();
+    assert_eq!(capture.operations.len(), 1);
+    assert_eq!(capture.operations[0].operation_name, "async_value");
+    assert_eq!(
+        capture.operations[0].inputs,
+        std::collections::BTreeMap::from([("value".to_string(), Value::Integer(2))])
+    );
+    assert!(matches!(
+        capture.operations[0].completion,
+        Some(specgate::__rt::NativeCompletion::Result {
+            value: Value::Integer(4),
+            ..
+        })
+    ));
 }
 
 #[test]

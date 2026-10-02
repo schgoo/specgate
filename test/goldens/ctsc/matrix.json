@@ -182,10 +182,13 @@
       "rust": {
         "binding": "rust",
         "phases": [
-          "discover"
+          "discover",
+          "capture"
         ],
         "expect": "success",
         "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
           "registry.ctsc.json"
         ]
       },
@@ -203,15 +206,14 @@
         "mode": "byte-identical"
       },
       "replay": {
-        "mode": "not-applicable",
-        "reason": "Discovery-only components produce no capture bundle, so there is nothing to replay."
+        "mode": "unsupported",
+        "expectCategory": "async-operation",
+        "reason": "The operation is async. Replay generates a synchronous candidate call, so the planner rejects an async operation even though capture now records it."
       },
-      "limitations": [
-        {
-          "code": "async-capture-unsupported",
-          "detail": "The component declares an async operation. Native capture state is thread-local and cannot follow a future across executor threads, so this row is discovery-only until capture context becomes task-safe."
-        }
-      ]
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
     },
     {
       "id": "component/fixture.async_smol_timer",
@@ -242,7 +244,7 @@
       "limitations": [
         {
           "code": "async-capture-unsupported",
-          "detail": "The component declares an async operation. Native capture state is thread-local and cannot follow a future across executor threads, so this row is discovery-only until capture context becomes task-safe."
+          "detail": "The component's only operation awaits a smol timer, and no fixture test drives it to completion, so capture would record no span for it. This row pins smol-specific async discovery metadata and stays discovery-only until a capture driver for executor-backed futures exists."
         }
       ]
     },
@@ -275,7 +277,7 @@
       "limitations": [
         {
           "code": "async-capture-unsupported",
-          "detail": "The component declares an async operation. Native capture state is thread-local and cannot follow a future across executor threads, so this row is discovery-only until capture context becomes task-safe."
+          "detail": "The component's only operation awaits `tokio::time::sleep`, which needs an ambient Tokio runtime and reactor to make progress; no fixture test establishes one. This row pins Tokio-specific async discovery metadata and stays discovery-only until a capture driver for executor-backed futures exists."
         }
       ]
     },
@@ -708,7 +710,7 @@
       "limitations": [
         {
           "code": "async-capture-unsupported",
-          "detail": "The component declares an async operation. Native capture state is thread-local and cannot follow a future across executor threads, so this row is discovery-only until capture context becomes task-safe."
+          "detail": "The component's async `fetch` operation is never invoked by a fixture test, so a capture row would fail operation coverage with no span for it. This row exists to pin a broad extraction surface for discovery; giving it a capture driver is separate work."
         }
       ]
     },
@@ -784,7 +786,7 @@
       "limitations": [
         {
           "code": "async-capture-unsupported",
-          "detail": "The component declares an async operation. Native capture state is thread-local and cannot follow a future across executor threads, so this row is discovery-only until capture context becomes task-safe."
+          "detail": "The component's async `fallible_task` operation is never awaited by a fixture test, so a capture row would fail operation coverage with no span for it. This row covers fallible-unit discovery shapes only; driving the async wrapper is separate work."
         }
       ]
     },

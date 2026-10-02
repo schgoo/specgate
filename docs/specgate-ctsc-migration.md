@@ -175,11 +175,13 @@ the Rust and C# registries still differ in exactly the declared ways.
   lossless primitive inputs.
 - Setup-backed methods, async calls, structured replay values, explicit
   mappings, and C# replay are not implemented.
-- Async metadata is retained for linking, but native capture rejects async
-  operations before polling until capture context can propagate task-safely.
-  An async setup is not instrumented at all, so capture rejects the whole
-  component up front rather than encoding a bundle without its inputs. The
-  ratified design for the replacement is
+- A directly-awaited async operation is captured: recording begins at first
+  poll and the scope is held across the body's awaits. Not covered: futures
+  that migrate between executor threads, futures abandoned while still
+  `Pending`, and futures polled concurrently with another instrumented
+  operation, since the active-operation stack is a single nesting stack. An async setup is not instrumented at all, so capture rejects
+  the whole component up front rather than encoding a bundle without its
+  inputs. The ratified design for the remaining work is
   [`decisions/async-capture-context.md`](decisions/async-capture-context.md).
 - Native validation supports JSON and JSONL traces, registry imports, exact
   capture-bundle integrity, and linked type checking. Bundle validation is
@@ -194,10 +196,11 @@ the Rust and C# registries still differ in exactly the declared ways.
   has no link-time observation metadata. A component that emits an observation
   cannot produce a linkable reference bundle, so CTSC-native fixtures express
   intermediate behavior as nested public operations instead.
-- Components that declare any async operation or async setup are
-  discovery-only: capture rejects an async operation before polling and
-  rejects an async setup before it builds anything, so no reference bundle
-  exists. The golden matrix asserts this for every row it captures. See
+- Components that declare an async setup are discovery-only: capture rejects
+  them before it builds anything, so no reference bundle exists. The golden
+  matrix asserts this for every row it captures. An async operation no longer
+  forces discovery-only status, but its bundle cannot be replayed, because the
+  replay planner emits only synchronous candidate calls. See
   [`decisions/async-capture-context.md`](decisions/async-capture-context.md)
   for the ratified capture-context design.
 - Discovery rejects duplicate operation identity, orphan setups, method

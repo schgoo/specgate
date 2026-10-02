@@ -62,8 +62,23 @@ Rust.
 - Generated Rust runners resolve the candidate's exact `specgate-runtime`
   package through candidate-rooted `cargo metadata`. Runtime path and version
   overrides are identity-preserving assertions, not dependency substitutions.
-- Async operations remain discoverable, but native capture rejects them before
-  polling until capture context is task-safe.
+- An `#[spec_operation] async fn` is captured. Recording begins at first poll,
+  not at construction, and the scope is held across every `.await` in the body.
+  A future that is directly awaited on one thread records exactly like a
+  synchronous call. Not covered: a future that migrates between executor
+  threads; a future abandoned while still `Pending`; and a future polled
+  concurrently with another instrumented operation, since the active-operation
+  stack is a single nesting stack. Each of these fails closed rather than
+  recording a wrong trace.
+- Operation recording is behind a per-run `Send` collector handle, but
+  setup-input staging (`PENDING_SETUP_INPUTS`) is still a bare thread-local and
+  is the last thread-affine piece of capture state. Async `#[spec_setup]` is
+  uninstrumented, and instrumenting it requires moving that staging into the
+  collector first.
+- An abandoned async operation's trace representation is decided but not yet
+  implemented: `conformance.abandoned`, `UNSET` status, no status propagation
+  to containing spans. See
+  [`abandonment-terminal-state`](../decisions/abandonment-terminal-state.md).
 - Observation declarations and configurable comparison profiles are not
   implemented.
 

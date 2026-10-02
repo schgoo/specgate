@@ -4,6 +4,24 @@
 
 ### Changed
 
+- `#[spec_operation]` now instruments an `async fn` instead of rejecting it.
+  Recording begins at the future's first poll, not at construction, and the
+  `OperationScope` is held across the body's awaits, so a directly-awaited
+  operation records its inputs, result, and nesting exactly like a synchronous
+  call. The function signature is untouched, so discovery metadata — including
+  `return_type` — is byte-for-byte unchanged and parity with the C# twin holds.
+  The sync and async expansions now share one per-return-kind completion
+  fragment, so the two paths cannot drift. Async `#[spec_setup]` stays
+  uninstrumented and its component stays discovery-only, because deferred setup
+  inputs are still staged outside the per-run collector. Out of scope and
+  failing closed: futures that migrate between executor threads, futures
+  abandoned while still `Pending`, and futures polled concurrently with another
+  instrumented operation (the active-operation stack is a single nesting
+  stack). `reject_async_native_capture` is retained but no longer called.
+- `fixture.async_fetch` graduates from a discovery-only golden row to a full
+  capture row with a linked bundle. Replay stays unsupported for it with the
+  `async-operation` category, because the replay planner emits only synchronous
+  candidate calls.
 - Native capture state is now owned by a per-run collector rather than by a
   thread-local. `OperationScope` clones a shared, `Send` handle to its recording
   at construction and works from that handle instead of re-reading ambient
