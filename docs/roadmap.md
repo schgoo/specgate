@@ -52,7 +52,7 @@ async C#. MVP+1 is what serves them.
 | Registry discovery | Rust link-time and C# compiled-assembly reflection; byte-identical for stateless, rich-type, and setup-folding fixtures | `specgate-discovery` |
 | Trace capture | Rust libtest only, synchronous only | `capture.rs:189`, migration limitations |
 | C# trace capture | None - annotations are inert; no recording code exists | `csharp/SpecGate.Annotations` is the whole C# surface |
-| Async capture | Still rejected before polling; the per-run collector is task-safe since M1, but no async instrumentation exists and async setup is not instrumented at all | `lib.rs:1334`, `annotations-macros/src/lib.rs:236` |
+| Async capture | Still rejected before polling; the per-run operation collector is task-safe since M1, but setup-input staging is still thread-affine, no async instrumentation exists, and async setup is not instrumented at all | `lib.rs:1334`, `lib.rs:1695`, `annotations-macros/src/lib.rs:236` |
 | Observations | Captured but never declared; a component emitting one cannot produce a linkable bundle | migration limitations |
 | Comparison | `compare <reference-trace> <candidate-trace>` exists; fixed `ctsc.strict/0.1.0`; scenarios paired by name | `comparison.rs:185-195` |
 | Replay | Synchronous public Rust free functions, lossless primitive inputs | migration limitations |
@@ -101,6 +101,20 @@ An async `#[spec_setup]` is not instrumented at all today, so capture rejects
 the whole component up front rather than emitting a bundle without setup
 inputs. Setup-folded inputs are part of the declared surface, so this is
 required for correctness, not ergonomics.
+
+This is not only a macro gap. M1 moved the *operation* recording behind a
+`Send` collector handle, but left `PENDING_SETUP_INPUTS` (`lib.rs:1695`) as a
+bare thread-local holding its data directly. It is the last thread-affine piece
+of capture state. A setup stages its inputs for a later operation to fold in,
+so that handoff breaks across threads: a setup polled on one thread stages into
+that thread's map, and an operation polled on another reads an empty one and
+records without the folded inputs, which linked validation then rejects as
+`input names do not match registry operation`.
+
+So M3 has a runtime prerequisite: move setup-input staging into the per-run
+collector, mirroring what M1 did for operation recording. Instrumenting the
+macro first would pass a single-threaded `block_on` test and stay silently
+wrong under any executor that migrates the future between threads.
 
 ### M4. Concurrency semantics in the trace
 

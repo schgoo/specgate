@@ -64,6 +64,11 @@ Rust.
   overrides are identity-preserving assertions, not dependency substitutions.
 - Async operations remain discoverable, but native capture rejects them before
   polling until capture context is task-safe.
+- Operation recording is behind a per-run `Send` collector handle, but
+  setup-input staging (`PENDING_SETUP_INPUTS`) is still a bare thread-local and
+  is the last thread-affine piece of capture state. Async `#[spec_setup]` is
+  uninstrumented, and instrumenting it requires moving that staging into the
+  collector first.
 - An abandoned async operation's trace representation is decided but not yet
   implemented: `conformance.abandoned`, `UNSET` status, no status propagation
   to containing spans. See
