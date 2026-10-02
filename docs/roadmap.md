@@ -51,9 +51,9 @@ async C#. MVP+1 is what serves them.
 | Area | State | Evidence |
 |---|---|---|
 | Registry discovery | Rust link-time and C# compiled-assembly reflection; byte-identical for stateless, rich-type, and setup-folding fixtures | `specgate-discovery` |
-| Trace capture | Rust libtest only, synchronous only | `capture.rs:189`, migration limitations |
+| Trace capture | Rust libtest only; synchronous calls and directly-awaited async operations | `capture.rs:189`, migration limitations |
 | C# trace capture | None - annotations are inert; no recording code exists | `csharp/SpecGate.Annotations` is the whole C# surface |
-| Async capture | A directly-awaited async operation captures: recording begins at first poll (M2 slice 1). Still unsupported: async `#[spec_setup]`, futures that migrate across threads, and abandoned futures. Setup-input staging remains thread-affine | `annotations-macros/src/lib.rs` async arm, `lib.rs:1695` |
+| Async capture | A directly-awaited async operation captures: recording begins at first poll (M2 slice 1). Still unsupported: async `#[spec_setup]`, futures that migrate across threads, futures polled concurrently with another instrumented operation, and abandoned futures. Setup-input staging remains thread-affine | `annotations-macros/src/lib.rs` async arm, `PENDING_SETUP_INPUTS` |
 | Observations | Captured but never declared; a component emitting one cannot produce a linkable bundle | migration limitations |
 | Comparison | `compare <reference-trace> <candidate-trace>` exists; fixed `ctsc.strict/0.1.0`; scenarios paired by name | `comparison.rs:185-195` |
 | Replay | Synchronous public Rust free functions, lossless primitive inputs | migration limitations |
@@ -114,7 +114,7 @@ inputs. Setup-folded inputs are part of the declared surface, so this is
 required for correctness, not ergonomics.
 
 This is not only a macro gap. M1 moved the *operation* recording behind a
-`Send` collector handle, but left `PENDING_SETUP_INPUTS` (`lib.rs:1695`) as a
+`Send` collector handle, but left `PENDING_SETUP_INPUTS` in `specgate-runtime` as a
 bare thread-local holding its data directly. It is the last thread-affine piece
 of capture state. A setup stages its inputs for a later operation to fold in,
 so that handoff breaks across threads: a setup polled on one thread stages into

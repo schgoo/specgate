@@ -4,8 +4,8 @@
 //! operations/setups/types, and exercise behavior through ordinary tests.
 //! `specgate capture` records those real invocations as deterministic CTSC
 //! reference traces; `specgate replay` invokes a candidate from the captured
-//! semantic inputs. An async operation is captured from its first poll; an
-//! async setup is not yet instrumented.
+//! semantic inputs. A directly-awaited async operation is captured from its
+//! first poll; an async setup is not yet instrumented.
 //!
 //! ```rust
 //! use specgate::*;

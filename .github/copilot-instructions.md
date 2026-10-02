@@ -66,8 +66,9 @@ A directly-awaited async operation captures natively; recording begins at the
 future's first poll, never at construction, so the instrumented signature stays
 unchanged and registry parity with C# holds. Async `#[spec_setup]` is still
 uninstrumented and rejected, because setup-input staging is thread-affine. A
-future that migrates between executor threads, or is abandoned before
-completing, is not yet supported.
+future that migrates between executor threads, is abandoned before completing,
+or is polled concurrently with another instrumented operation is not yet
+supported; each fails closed.
 
 ## Golden matrix
 

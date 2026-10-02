@@ -176,9 +176,10 @@ the Rust and C# registries still differ in exactly the declared ways.
 - Setup-backed methods, async calls, structured replay values, explicit
   mappings, and C# replay are not implemented.
 - A directly-awaited async operation is captured: recording begins at first
-  poll and the scope is held across the body's awaits. Futures that migrate
-  between executor threads, and futures abandoned while still `Pending`, are
-  not covered. An async setup is not instrumented at all, so capture rejects
+  poll and the scope is held across the body's awaits. Not covered: futures
+  that migrate between executor threads, futures abandoned while still
+  `Pending`, and futures polled concurrently with another instrumented
+  operation, since the active-operation stack is a single nesting stack. An async setup is not instrumented at all, so capture rejects
   the whole component up front rather than encoding a bundle without its
   inputs. The ratified design for the remaining work is
   [`decisions/async-capture-context.md`](decisions/async-capture-context.md).

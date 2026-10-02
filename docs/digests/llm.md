@@ -65,8 +65,11 @@ Rust.
 - An `#[spec_operation] async fn` is captured. Recording begins at first poll,
   not at construction, and the scope is held across every `.await` in the body.
   A future that is directly awaited on one thread records exactly like a
-  synchronous call. A future that migrates between executor threads, or that is
-  abandoned while still `Pending`, is not covered.
+  synchronous call. Not covered: a future that migrates between executor
+  threads; a future abandoned while still `Pending`; and a future polled
+  concurrently with another instrumented operation, since the active-operation
+  stack is a single nesting stack. Each of these fails closed rather than
+  recording a wrong trace.
 - Operation recording is behind a per-run `Send` collector handle, but
   setup-input staging (`PENDING_SETUP_INPUTS`) is still a bare thread-local and
   is the last thread-affine piece of capture state. Async `#[spec_setup]` is

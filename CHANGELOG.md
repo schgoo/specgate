@@ -13,9 +13,11 @@
   The sync and async expansions now share one per-return-kind completion
   fragment, so the two paths cannot drift. Async `#[spec_setup]` stays
   uninstrumented and its component stays discovery-only, because deferred setup
-  inputs are still staged outside the per-run collector. Futures that migrate
-  between executor threads, and futures abandoned while still `Pending`, remain
-  out of scope. `reject_async_native_capture` is retained but no longer called.
+  inputs are still staged outside the per-run collector. Out of scope and
+  failing closed: futures that migrate between executor threads, futures
+  abandoned while still `Pending`, and futures polled concurrently with another
+  instrumented operation (the active-operation stack is a single nesting
+  stack). `reject_async_native_capture` is retained but no longer called.
 - `fixture.async_fetch` graduates from a discovery-only golden row to a full
   capture row with a linked bundle. Replay stays unsupported for it with the
   `async-operation` category, because the replay planner emits only synchronous
