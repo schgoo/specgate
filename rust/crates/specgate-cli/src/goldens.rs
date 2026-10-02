@@ -30,8 +30,9 @@ const CLASS_COMPONENT: &str = "implementation-component";
 const CLASS_NEGATIVE: &str = "negative-fixture";
 const CLASS_REPLACEMENT: &str = "replacement";
 
-/// The limitation code a row declares when its component is async and can
-/// therefore only be discovered, never captured.
+/// The limitation code a row declares when something about its async surface
+/// keeps it discovery-only. A directly-awaited async operation now captures, so
+/// a row that still carries this code must say which remaining case applies.
 const ASYNC_LIMITATION: &str = "async-capture-unsupported";
 const REPLAY_FAILURE_CATEGORIES: &[&str] = &[
     "structured-value",
@@ -814,7 +815,7 @@ fn generate_rust_binding(root: &Path, matrix: &Matrix, out_root: &Path, binding_
         "{binding_key}: discovered components missing from the matrix: {}",
         unmatched.join(", ")
     );
-    assert_capture_rows_are_synchronous(binding_key, &discovered.registry, &rows);
+    assert_capture_rows_have_no_async_setup(binding_key, &discovered.registry, &rows);
 
     for row in rows.iter().filter(|row| !row.captures_rust()) {
         let component = row.component.as_ref().expect("component row");
@@ -961,32 +962,33 @@ fn render_operation_identity((component, operation): &OperationIdentity) -> Stri
     format!("{component}::{operation}")
 }
 
-/// Fail unless every row that captures a Rust bundle is synchronous or
-/// explicitly excludes each asynchronous operation.
+/// Fail unless every row that captures a Rust bundle declares no async setup,
+/// or explicitly excludes each one.
 ///
-/// Native capture state is thread-local: an async operation rejects capture
-/// from inside its own body and an async setup is not instrumented at all. A
-/// row that captures one without an exact exclusion would either fail opaquely
-/// or encode a bundle whose input surface is silently incomplete. The matrix
-/// is checked here, against real discovery, before capture runs.
-fn assert_capture_rows_are_synchronous(binding_key: &str, registry: &Registry, rows: &[&Row]) {
+/// A directly-awaited async `#[spec_operation]` captures normally. An async
+/// `#[spec_setup]` does not: `macros/lib.rs` injects deferred-input recording
+/// only `if !is_async`, so such a setup is left wholly uninstrumented. The
+/// resulting bundle is not silently incomplete — inputs are always emitted even
+/// when empty, so CTSC Linked validation always runs and rejects the operation
+/// with "input names do not match registry operation". This guard exists for
+/// error quality, not correctness: it turns a confusing late validation failure
+/// into a clear up-front one that names the setup, before any test binary is
+/// built. M3 instruments async setups and removes this guard.
+fn assert_capture_rows_have_no_async_setup(binding_key: &str, registry: &Registry, rows: &[&Row]) {
     for row in rows.iter().filter(|row| row.captures_rust()) {
         let component = row.component.as_deref().expect("component row");
         let mut asynchronous = registry
             .ops
             .iter()
-            .filter(|candidate| candidate.is_async && candidate.component == component)
+            .filter(|candidate| candidate.is_async && candidate.is_setup && candidate.component == component)
             .filter(|candidate| !row.capture_exclusions.iter().any(|exclusion| exclusion.operation == candidate.name))
-            .map(|candidate| {
-                let kind = if candidate.is_setup { "setup" } else { "operation" };
-                format!("{kind} '{}'", candidate.fn_name)
-            })
+            .map(|candidate| format!("setup '{}'", candidate.fn_name))
             .collect::<Vec<_>>();
         asynchronous.sort();
         assert!(
             asynchronous.is_empty(),
             "row '{}' captures component '{component}', which declares async {}; \
-             async operations require exact captureExclusions until capture context is task-safe ({binding_key})",
+             async setups require exact captureExclusions until setup inputs are recorded per run ({binding_key})",
             row.id,
             asynchronous.join(", ")
         );
@@ -2010,46 +2012,39 @@ mod tests {
         .expect("synthetic registry parses")
     }
 
-    /// Capture cannot instrument async work in either direction: an async
-    /// operation rejects capture from its own body and an async setup records
-    /// nothing at all. A row that claims a capture bundle for such a component
-    /// must fail here, naming the async declaration.
+    /// A directly-awaited async operation captures normally, so only an async
+    /// setup blocks a capture row. The setup case must still fail here, naming
+    /// the setup, and an exact exclusion must still release it.
     #[test]
-    fn capture_rows_may_not_declare_async_operations_or_setups() {
+    fn capture_rows_may_not_declare_async_setups() {
         let registry = synthetic_async_registry();
         let unlimited = serde_json::json!([]);
         let synchronous = synthetic_component_row("fixture.sync", &["discover", "capture"], &unlimited);
-        assert_capture_rows_are_synchronous("rust", &registry, &[&synchronous]);
+        assert_capture_rows_have_no_async_setup("rust", &registry, &[&synchronous]);
 
-        let limitation = serde_json::json!([{ "code": ASYNC_LIMITATION, "detail": "Capture context is not task-safe." }]);
-        for (component, expected) in [
-            ("fixture.async_operation", "operation 'fetch'"),
-            ("fixture.async_setup", "setup 'make'"),
-        ] {
-            let discovery_only = synthetic_component_row(component, &["discover"], &limitation);
-            assert_capture_rows_are_synchronous("rust", &registry, &[&discovery_only]);
+        let capturing_async_operation = synthetic_component_row("fixture.async_operation", &["discover", "capture"], &unlimited);
+        assert_capture_rows_have_no_async_setup("rust", &registry, &[&capturing_async_operation]);
 
-            let capturing = synthetic_component_row(component, &["discover", "capture"], &unlimited);
-            let failure = std::panic::catch_unwind(|| {
-                assert_capture_rows_are_synchronous("rust", &registry, &[&capturing]);
-            })
-            .expect_err("a capture row over an async component must fail");
-            let message = panic_message(failure.as_ref());
-            assert!(message.contains(expected), "{message}");
-            assert!(message.contains("captureExclusions"), "{message}");
+        let limitation = serde_json::json!([{ "code": ASYNC_LIMITATION, "detail": "The async setup records no inputs." }]);
+        let discovery_only = synthetic_component_row("fixture.async_setup", &["discover"], &limitation);
+        assert_capture_rows_have_no_async_setup("rust", &registry, &[&discovery_only]);
 
-            let mut excluded = synthetic_component_row(component, &["discover", "capture"], &unlimited);
-            excluded.capture_exclusions.push(CaptureExclusion {
-                operation: if component == "fixture.async_operation" {
-                    "fetch".to_string()
-                } else {
-                    "advance".to_string()
-                },
-                code: ASYNC_LIMITATION.to_string(),
-                reason: "Native capture context is not task-safe.".to_string(),
-            });
-            assert_capture_rows_are_synchronous("rust", &registry, &[&excluded]);
-        }
+        let capturing = synthetic_component_row("fixture.async_setup", &["discover", "capture"], &unlimited);
+        let failure = std::panic::catch_unwind(|| {
+            assert_capture_rows_have_no_async_setup("rust", &registry, &[&capturing]);
+        })
+        .expect_err("a capture row over a component with an async setup must fail");
+        let message = panic_message(failure.as_ref());
+        assert!(message.contains("setup 'make'"), "{message}");
+        assert!(message.contains("captureExclusions"), "{message}");
+
+        let mut excluded = synthetic_component_row("fixture.async_setup", &["discover", "capture"], &unlimited);
+        excluded.capture_exclusions.push(CaptureExclusion {
+            operation: "advance".to_string(),
+            code: ASYNC_LIMITATION.to_string(),
+            reason: "The async setup records no construction inputs.".to_string(),
+        });
+        assert_capture_rows_have_no_async_setup("rust", &registry, &[&excluded]);
     }
 
     /// The limitation is a claim about the row, not a comment: declaring it

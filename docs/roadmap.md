@@ -26,8 +26,9 @@ a candidate test suite, not a prerequisite for value.
 
 The concurrency model is the thing not to invent twice.
 
-Thread-affine capture state is the root cause behind async rejection and the
-external capture threads consumers were forced to build. Solving it once, in the
+Thread-affine capture state is the root cause behind the remaining async gaps
+and the external capture threads consumers were forced to build. Solving it
+once, in the
 runtime SpecGate owns end to end, produces a proven model that C#
 instrumentation can then implement rather than redesign.
 
@@ -52,7 +53,7 @@ async C#. MVP+1 is what serves them.
 | Registry discovery | Rust link-time and C# compiled-assembly reflection; byte-identical for stateless, rich-type, and setup-folding fixtures | `specgate-discovery` |
 | Trace capture | Rust libtest only, synchronous only | `capture.rs:189`, migration limitations |
 | C# trace capture | None - annotations are inert; no recording code exists | `csharp/SpecGate.Annotations` is the whole C# surface |
-| Async capture | Still rejected before polling; the per-run operation collector is task-safe since M1, but setup-input staging is still thread-affine, no async instrumentation exists, and async setup is not instrumented at all | `lib.rs:1334`, `lib.rs:1695`, `annotations-macros/src/lib.rs:236` |
+| Async capture | A directly-awaited async operation captures: recording begins at first poll (M2 slice 1). Still unsupported: async `#[spec_setup]`, futures that migrate across threads, and abandoned futures. Setup-input staging remains thread-affine | `annotations-macros/src/lib.rs` async arm, `lib.rs:1695` |
 | Observations | Captured but never declared; a component emitting one cannot produce a linkable bundle | migration limitations |
 | Comparison | `compare <reference-trace> <candidate-trace>` exists; fixed `ctsc.strict/0.1.0`; scenarios paired by name | `comparison.rs:185-195` |
 | Replay | Synchronous public Rust free functions, lossless primitive inputs | migration limitations |
@@ -93,7 +94,17 @@ Operation context must survive every `Future` poll and every spawn, thread, and
 channel handoff, so that parentage remains correct when execution moves between
 threads.
 
-Unblocks removing the pre-poll async rejection.
+**Slice 1 is done.** The pre-poll rejection is gone and a directly-awaited
+async operation now captures, with recording beginning at the future's first
+poll rather than at construction. An `async fn` has no construction-time code,
+and running code there would require desugaring the signature, which would
+change the registry's `return_type` and break byte-identical parity with the C#
+twin.
+
+Remaining: futures that migrate between executor threads, and operations
+abandoned before completion
+([`abandonment-terminal-state`](decisions/abandonment-terminal-state.md) is
+accepted but not implemented).
 
 ### M3. Async setup instrumentation
 

@@ -842,14 +842,15 @@ impl Drop for OperationScope {
         let Some((operation_index, collector)) = self.recording() else {
             return;
         };
-        // M2: `panicking()` answers "did this operation unwind?" only because
-        // capture is synchronous — the thread dropping the scope is the thread
-        // that ran it. Once futures are instrumented it becomes unreliable in
-        // two ways: a future dropped on an executor thread that is panicking
-        // for an unrelated reason reports `true`, and a *cancelled* future is
-        // dropped with no panic at all, so this takes the `terminal_error`
-        // branch below and poisons the session for legitimate cancellation.
-        // Replacing it needs a cancellation representation (M4, human-owned).
+        // M2: `panicking()` answers "did this operation unwind?" correctly for
+        // a synchronous call and for a directly-awaited future, because in both
+        // cases the thread dropping the scope is the thread that ran it. It is
+        // still unreliable for a future that migrates or is abandoned: dropped
+        // on an executor thread panicking for an unrelated reason it reports
+        // `true`, and an abandoned future is dropped with no panic at all, so
+        // this takes the `terminal_error` branch below. That is the accepted
+        // terminal-state decision for now; representing abandonment as
+        // something other than a poisoned session is M4 and human-owned.
         let panicking = std::thread::panicking();
         let result = with_collector_mut(&collector, |state| {
             if state
@@ -1040,10 +1041,12 @@ where
 
 impl Drop for DeferredSetupInputs {
     fn drop(&mut self) {
-        // M2: correct only while capture is synchronous — the thread dropping
-        // this guard is the thread that ran the setup. On an executor thread
-        // `panicking()` can report an unrelated unwind, and a cancelled future
-        // never panics at all. See the matching note in `OperationScope::drop`.
+        // M2: setups are still synchronous only — an async `#[spec_setup]` is
+        // left uninstrumented and its component is rejected before capture, so
+        // the thread dropping this guard is always the thread that ran the
+        // setup. Instrumenting async setups is M3 and needs the deferred-input
+        // state to move into the collector first. See the matching note in
+        // `OperationScope::drop`.
         if std::thread::panicking() {
             return;
         }
@@ -1323,9 +1326,13 @@ fn normalize_declared_type(declared: &str) -> String {
 
 /// Reject async operation capture before a future crosses an `.await`.
 ///
-/// The ambient capture context is not yet task-safe and cannot follow a future
-/// that migrates between executor threads. Async operations remain discoverable
-/// but execute without instrumentation when capture is inactive.
+/// Retained for M3, not currently called: `#[spec_operation]` no longer expands
+/// to this check, because a directly-awaited async operation records normally
+/// from first poll. The remaining unsupported case is an async
+/// `#[spec_setup]`, which M3 instruments once deferred setup inputs move into
+/// the per-run collector; until then `specgate capture` rejects such a
+/// component up front instead. Removing this published function is also an M3
+/// concern, so it stays part of the surface for now.
 ///
 /// # Errors
 ///
@@ -2286,12 +2293,15 @@ mod tests {
     }
 
     /// The structural invariant this collector exists to establish: the
-    /// recording is reachable through a `Send` handle. If someone later adds a
-    /// non-`Send` field to `NativeCaptureState`, this fails to compile rather
-    /// than silently blocking the async wrapper M2 needs.
+    /// recording is reachable through a `Send` handle, and the scope that holds
+    /// it is itself `Send`. An `#[spec_operation] async fn` holds its
+    /// `OperationScope` across every `.await` in the body, so a non-`Send`
+    /// field added to any of these would make the generated future non-`Send`
+    /// at every call site rather than failing here.
     const fn assert_send<T: Send>() {}
     const _: () = assert_send::<NativeCaptureState>();
     const _: () = assert_send::<CollectorHandle>();
+    const _: () = assert_send::<OperationScope>();
 
     /// An `OperationScope` works from the handle it captured at construction,
     /// not from the ambient slot. Detaching the slot entirely must leave the

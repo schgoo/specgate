@@ -453,12 +453,12 @@ fn select_component(registry: &Registry, component: &str) -> Result<String, Stri
 
 /// Reject a capture batch that selects a component with an async setup.
 ///
-/// An async `#[spec_operation]` rejects native capture from inside its own
-/// body, but an async `#[spec_setup]` is deliberately left uninstrumented:
-/// capture state is thread-local and cannot follow a future across executor
-/// threads. Capturing such a component would therefore succeed while silently
-/// dropping the setup's construction inputs, encoding a bundle that misstates
-/// the component's public input surface. The whole component is rejected here
+/// A directly-awaited async `#[spec_operation]` records normally, but an async
+/// `#[spec_setup]` is deliberately left uninstrumented: deferred setup inputs
+/// are still held outside the per-run collector and cannot follow a future.
+/// Capturing such a component would therefore encode a bundle that misstates
+/// the component's public input surface, which CTSC Linked validation rejects
+/// much later as a mismatched input list. The whole component is rejected here
 /// instead — before any test binary is built, run, or encoded — so the failure
 /// names the setup rather than surfacing as a missing input much later.
 fn reject_async_setup_capture(registry: &Registry, requests: &[CaptureRequest]) -> Result<(), String> {
