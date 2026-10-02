@@ -64,6 +64,10 @@ Rust.
   overrides are identity-preserving assertions, not dependency substitutions.
 - Async operations remain discoverable, but native capture rejects them before
   polling until capture context is task-safe.
+- An abandoned async operation's trace representation is decided but not yet
+  implemented: `conformance.abandoned`, `UNSET` status, no status propagation
+  to containing spans. See
+  [`abandonment-terminal-state`](../decisions/abandonment-terminal-state.md).
 - Observation declarations and configurable comparison profiles are not
   implemented.
 

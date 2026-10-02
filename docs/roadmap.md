@@ -98,7 +98,8 @@ Format-level decisions, not just runtime work:
 
 - unique span identity per retry or repeated identical invocation;
 - explicit parallel regions;
-- cancellation representation;
+- cancellation representation — settled by
+  [`abandonment-terminal-state`](decisions/abandonment-terminal-state.md);
 - known-started but unfinished operations;
 - exactly one completion or fault treatment per span.
 
