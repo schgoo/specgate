@@ -4,6 +4,15 @@
 
 ### Changed
 
+- Native capture state is now owned by a per-run collector rather than by a
+  thread-local. `OperationScope` clones a shared, `Send` handle to its recording
+  at construction and works from that handle instead of re-reading ambient
+  storage. The ambient slot stays thread-local, so test isolation is unchanged;
+  public signatures, generated macro output, generated runner source, and every
+  golden artifact are unchanged. This is the precondition for carrying capture
+  context into a future. Mutex poisoning is recovered deterministically, so a
+  capture whose critical section panicked still produces its
+  `incomplete_capture` fault or terminal error rather than an opaque lock error.
 - Trace validation now rejects a `conformance.operation` span that carries no
   completion or failure event unless its status is `OK`. Trace §7.5 requires an
   unfinished operation to carry an `incomplete_capture` fault, so a span with no

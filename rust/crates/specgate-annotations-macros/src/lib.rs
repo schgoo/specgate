@@ -375,10 +375,10 @@ pub fn spec_operation(attribute: TokenStream, item: TokenStream) -> TokenStream 
 
 /// Register a deterministic setup producer without modifying its behavior.
 ///
-/// An async producer is registered but deliberately left uninstrumented:
-/// capture state is thread-local and cannot follow a future across executor
-/// threads. `specgate capture` therefore rejects any component that declares
-/// an async setup, leaving it discovery-only.
+/// An async producer is registered but deliberately left uninstrumented: the
+/// ambient capture context is not yet task-safe and cannot follow a future
+/// across executor threads. `specgate capture` therefore rejects any component
+/// that declares an async setup, leaving it discovery-only.
 #[proc_macro_attribute]
 pub fn spec_setup(attribute: TokenStream, item: TokenStream) -> TokenStream {
     let SetupArg {
