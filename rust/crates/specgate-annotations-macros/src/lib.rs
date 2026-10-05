@@ -4,9 +4,10 @@
 //! metadata and record the construction inputs the registry folds into the
 //! operation they build; types register raw link-time metadata; `SpecEvent`
 //! projects structured values through `ToNativeValue`; and `spec_trace!`
-//! records native observations. Async operations retain metadata but reject
-//! native capture before polling, and an async setup records no construction
-//! inputs at all, so capture rejects a component that declares one.
+//! records native observations. An async operation begins recording at its
+//! first poll and completes when the body's future resolves; an async setup
+//! records no construction inputs at all, so capture rejects a component that
+//! declares one.
 
 use proc_macro::TokenStream;
 use proc_macro_crate::{FoundCrate, crate_name};
@@ -149,6 +150,7 @@ fn collect_parameters(function: &mut ItemFn, strip: bool) -> Vec<(Ident, Type, S
     result
 }
 
+#[derive(Clone, Copy)]
 enum ReturnKind {
     Unit,
     Option,
@@ -196,6 +198,81 @@ fn type_argument_is_unit(segment: &syn::PathSegment, index: usize) -> bool {
     )
 }
 
+/// The completion step an operation owes its scope, keyed only by return kind.
+///
+/// Both the synchronous and the async expansion consume this fragment, so the
+/// two bodies record the same terminal outcome for the same declared return
+/// type and cannot drift apart. It reads `__sg_return` and closes `__sg_scope`.
+fn completion(rt: &TokenStream2, kind: ReturnKind) -> TokenStream2 {
+    match kind {
+        ReturnKind::Unit => quote! {
+            __sg_scope
+                .complete_unit()
+                .unwrap_or_else(|error| panic!("failed to complete native unit operation: {error}"));
+        },
+        ReturnKind::Option => quote! {
+            match &__sg_return {
+                ::std::option::Option::Some(value) => __sg_scope
+                    .complete_result(#rt::ToNativeValue::to_native_value(value))
+                    .unwrap_or_else(|error| panic!("failed to complete native optional operation: {error}")),
+                ::std::option::Option::None => __sg_scope
+                    .complete_empty()
+                    .unwrap_or_else(|error| panic!("failed to complete native empty operation: {error}")),
+            }
+        },
+        ReturnKind::OptionUnit => quote! {
+            __sg_scope
+                .complete_result(#rt::ToNativeValue::to_native_value(&__sg_return))
+                .unwrap_or_else(|error| panic!("failed to complete native optional unit operation: {error}"));
+        },
+        ReturnKind::Result => quote! {
+            match &__sg_return {
+                ::std::result::Result::Ok(value) => __sg_scope
+                    .complete_result(#rt::ToNativeValue::to_native_value(value))
+                    .unwrap_or_else(|error| panic!("failed to complete native result operation: {error}")),
+                ::std::result::Result::Err(error_value) => __sg_scope
+                    .complete_error("error", #rt::ToNativeValue::to_native_value(error_value))
+                    .unwrap_or_else(|error| panic!("failed to complete native declared error: {error}")),
+            }
+        },
+        ReturnKind::ResultUnit => quote! {
+            match &__sg_return {
+                ::std::result::Result::Ok(()) => __sg_scope
+                    .complete_unit()
+                    .unwrap_or_else(|error| panic!("failed to complete native unit result operation: {error}")),
+                ::std::result::Result::Err(error_value) => __sg_scope
+                    .complete_error("error", #rt::ToNativeValue::to_native_value(error_value))
+                    .unwrap_or_else(|error| panic!("failed to complete native declared error: {error}")),
+            }
+        },
+        ReturnKind::ResultErrorUnit => quote! {
+            match &__sg_return {
+                ::std::result::Result::Ok(value) => __sg_scope
+                    .complete_result(#rt::ToNativeValue::to_native_value(value))
+                    .unwrap_or_else(|error| panic!("failed to complete native result operation: {error}")),
+                ::std::result::Result::Err(()) => __sg_scope
+                    .complete_error_unit("error")
+                    .unwrap_or_else(|error| panic!("failed to complete native valueless declared error: {error}")),
+            }
+        },
+        ReturnKind::ResultBothUnit => quote! {
+            match &__sg_return {
+                ::std::result::Result::Ok(()) => __sg_scope
+                    .complete_unit()
+                    .unwrap_or_else(|error| panic!("failed to complete native unit result operation: {error}")),
+                ::std::result::Result::Err(()) => __sg_scope
+                    .complete_error_unit("error")
+                    .unwrap_or_else(|error| panic!("failed to complete native valueless declared error: {error}")),
+            }
+        },
+        ReturnKind::Value => quote! {
+            __sg_scope
+                .complete_result(#rt::ToNativeValue::to_native_value(&__sg_return))
+                .unwrap_or_else(|error| panic!("failed to complete native result operation: {error}"));
+        },
+    }
+}
+
 /// Mark a function or method as a native CTSC operation boundary.
 #[proc_macro_attribute]
 pub fn spec_operation(attribute: TokenStream, item: TokenStream) -> TokenStream {
@@ -231,105 +308,39 @@ pub fn spec_operation(attribute: TokenStream, item: TokenStream) -> TokenStream 
             .inputs_recorded()
             .unwrap_or_else(|error| panic!("failed to snapshot native operation inputs: {error}"));
     };
+    // One completion fragment per return kind, shared by the sync and async
+    // arms so the two paths cannot drift. It names only `__sg_scope` and
+    // `__sg_return`, never the declared return type, so it is body-shape
+    // agnostic.
+    let completion = completion(&rt, return_kind(&function.sig.output));
+    // Both arms run the original body inside a `move` wrapper so a `return` in
+    // the body leaves the body, not the instrumented wrapper.
+    let invocation = match (&function.sig.output, return_kind(&function.sig.output)) {
+        (_, ReturnKind::Unit) => quote!((move || -> () #body)()),
+        (ReturnType::Type(_, ty), _) => quote!((move || -> #ty #body)()),
+        _ => unreachable!("non-unit functions have explicit return types"),
+    };
     let new_body = if is_async {
+        // An `async fn` has no construction-time code, so recording begins at
+        // first poll: `#prologue` is inside the awaited block, not beside it.
+        // Desugaring the signature to run it earlier would change the
+        // registry's `return_type` and break parity with the C# twin.
         parse_quote!({
-            #rt::reject_async_native_capture(#component, #name)
-                .unwrap_or_else(|error| panic!("{error}"));
-            (async move #body).await
+            (async move {
+                #prologue
+                let __sg_return = (async move #body).await;
+                #completion
+                __sg_return
+            })
+            .await
         })
     } else {
-        match (&function.sig.output, return_kind(&function.sig.output)) {
-            (_, ReturnKind::Unit) => parse_quote!({
-                #prologue
-                let __sg_return = (move || -> () #body)();
-                __sg_scope
-                    .complete_unit()
-                    .unwrap_or_else(|error| panic!("failed to complete native unit operation: {error}"));
-                __sg_return
-            }),
-            (ReturnType::Type(_, ty), ReturnKind::Option) => parse_quote!({
-                #prologue
-                let __sg_return = (move || -> #ty #body)();
-                match &__sg_return {
-                    ::std::option::Option::Some(value) => __sg_scope
-                        .complete_result(#rt::ToNativeValue::to_native_value(value))
-                        .unwrap_or_else(|error| panic!("failed to complete native optional operation: {error}")),
-                    ::std::option::Option::None => __sg_scope
-                        .complete_empty()
-                        .unwrap_or_else(|error| panic!("failed to complete native empty operation: {error}")),
-                }
-                __sg_return
-            }),
-            (ReturnType::Type(_, ty), ReturnKind::OptionUnit) => parse_quote!({
-                #prologue
-                let __sg_return = (move || -> #ty #body)();
-                __sg_scope
-                    .complete_result(#rt::ToNativeValue::to_native_value(&__sg_return))
-                    .unwrap_or_else(|error| panic!("failed to complete native optional unit operation: {error}"));
-                __sg_return
-            }),
-            (ReturnType::Type(_, ty), ReturnKind::Result) => parse_quote!({
-                #prologue
-                let __sg_return = (move || -> #ty #body)();
-                match &__sg_return {
-                    ::std::result::Result::Ok(value) => __sg_scope
-                        .complete_result(#rt::ToNativeValue::to_native_value(value))
-                        .unwrap_or_else(|error| panic!("failed to complete native result operation: {error}")),
-                    ::std::result::Result::Err(error_value) => __sg_scope
-                        .complete_error("error", #rt::ToNativeValue::to_native_value(error_value))
-                        .unwrap_or_else(|error| panic!("failed to complete native declared error: {error}")),
-                }
-                __sg_return
-            }),
-            (ReturnType::Type(_, ty), ReturnKind::ResultUnit) => parse_quote!({
-                #prologue
-                let __sg_return = (move || -> #ty #body)();
-                match &__sg_return {
-                    ::std::result::Result::Ok(()) => __sg_scope
-                        .complete_unit()
-                        .unwrap_or_else(|error| panic!("failed to complete native unit result operation: {error}")),
-                    ::std::result::Result::Err(error_value) => __sg_scope
-                        .complete_error("error", #rt::ToNativeValue::to_native_value(error_value))
-                        .unwrap_or_else(|error| panic!("failed to complete native declared error: {error}")),
-                }
-                __sg_return
-            }),
-            (ReturnType::Type(_, ty), ReturnKind::ResultErrorUnit) => parse_quote!({
-                #prologue
-                let __sg_return = (move || -> #ty #body)();
-                match &__sg_return {
-                    ::std::result::Result::Ok(value) => __sg_scope
-                        .complete_result(#rt::ToNativeValue::to_native_value(value))
-                        .unwrap_or_else(|error| panic!("failed to complete native result operation: {error}")),
-                    ::std::result::Result::Err(()) => __sg_scope
-                        .complete_error_unit("error")
-                        .unwrap_or_else(|error| panic!("failed to complete native valueless declared error: {error}")),
-                }
-                __sg_return
-            }),
-            (ReturnType::Type(_, ty), ReturnKind::ResultBothUnit) => parse_quote!({
-                #prologue
-                let __sg_return = (move || -> #ty #body)();
-                match &__sg_return {
-                    ::std::result::Result::Ok(()) => __sg_scope
-                        .complete_unit()
-                        .unwrap_or_else(|error| panic!("failed to complete native unit result operation: {error}")),
-                    ::std::result::Result::Err(()) => __sg_scope
-                        .complete_error_unit("error")
-                        .unwrap_or_else(|error| panic!("failed to complete native valueless declared error: {error}")),
-                }
-                __sg_return
-            }),
-            (ReturnType::Type(_, ty), ReturnKind::Value) => parse_quote!({
-                #prologue
-                let __sg_return = (move || -> #ty #body)();
-                __sg_scope
-                    .complete_result(#rt::ToNativeValue::to_native_value(&__sg_return))
-                    .unwrap_or_else(|error| panic!("failed to complete native result operation: {error}"));
-                __sg_return
-            }),
-            _ => unreachable!("non-unit functions have explicit return types"),
-        }
+        parse_quote!({
+            #prologue
+            let __sg_return = #invocation;
+            #completion
+            __sg_return
+        })
     };
     *function.block = new_body;
 
@@ -375,10 +386,11 @@ pub fn spec_operation(attribute: TokenStream, item: TokenStream) -> TokenStream 
 
 /// Register a deterministic setup producer without modifying its behavior.
 ///
-/// An async producer is registered but deliberately left uninstrumented: the
-/// ambient capture context is not yet task-safe and cannot follow a future
-/// across executor threads. `specgate capture` therefore rejects any component
-/// that declares an async setup, leaving it discovery-only.
+/// An async producer is registered but deliberately left uninstrumented:
+/// deferred setup inputs are still staged outside the per-run collector and
+/// cannot follow a future. `specgate capture` therefore rejects any component
+/// that declares an async setup, leaving it discovery-only. An async
+/// `#[spec_operation]` is unaffected and records from its first poll.
 #[proc_macro_attribute]
 pub fn spec_setup(attribute: TokenStream, item: TokenStream) -> TokenStream {
     let SetupArg {

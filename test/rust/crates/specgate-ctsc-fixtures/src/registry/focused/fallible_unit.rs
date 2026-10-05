@@ -58,4 +58,9 @@ fn setup_and_fallible_unit_paths_are_deterministic() {
     assert_eq!(counter.count, 8);
     assert_eq!(fallible_void(false), Ok(()));
     assert_eq!(fallible_void(true), Err("failed".to_string()));
+    assert_eq!(smol::block_on(fallible_task(false)), Ok(()));
+    assert_eq!(
+        smol::block_on(fallible_task(true)),
+        Err("failed".to_string())
+    );
 }

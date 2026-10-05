@@ -21,8 +21,8 @@ slices.
 
 ## Major limitations
 
-- Capture supports Rust libtest targets and rejects async operations before
-  polling.
+- Capture supports Rust libtest targets. An async operation is captured when it
+  is awaited directly; async setups are not instrumented.
 - Replay supports synchronous public Rust free functions with primitive
   lossless inputs.
 - Setup-backed methods, structured replay values, explicit mappings, async

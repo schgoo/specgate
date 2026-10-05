@@ -182,10 +182,13 @@
       "rust": {
         "binding": "rust",
         "phases": [
-          "discover"
+          "discover",
+          "capture"
         ],
         "expect": "success",
         "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
           "registry.ctsc.json"
         ]
       },
@@ -203,15 +206,14 @@
         "mode": "byte-identical"
       },
       "replay": {
-        "mode": "not-applicable",
-        "reason": "Discovery-only components produce no capture bundle, so there is nothing to replay."
+        "mode": "unsupported",
+        "expectCategory": "async-operation",
+        "reason": "The operation is async. Replay generates a synchronous candidate call, so the planner rejects an async operation even though capture now records it."
       },
-      "limitations": [
-        {
-          "code": "async-capture-unsupported",
-          "detail": "The component declares an async operation. Native capture state is thread-local and cannot follow a future across executor threads, so this row is discovery-only until capture context becomes task-safe."
-        }
-      ]
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
     },
     {
       "id": "component/fixture.async_smol_timer",
@@ -224,10 +226,13 @@
       "rust": {
         "binding": "rust",
         "phases": [
-          "discover"
+          "discover",
+          "capture"
         ],
         "expect": "success",
         "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
           "registry.ctsc.json"
         ]
       },
@@ -236,15 +241,14 @@
         "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
       },
       "replay": {
-        "mode": "not-applicable",
-        "reason": "Discovery-only components produce no capture bundle, so there is nothing to replay."
+        "mode": "unsupported",
+        "expectCategory": "async-operation",
+        "reason": "The operation is async. Replay generates a synchronous candidate call, so the planner rejects an async operation even though capture now records it."
       },
-      "limitations": [
-        {
-          "code": "async-capture-unsupported",
-          "detail": "The component declares an async operation. Native capture state is thread-local and cannot follow a future across executor threads, so this row is discovery-only until capture context becomes task-safe."
-        }
-      ]
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
     },
     {
       "id": "component/fixture.async_tokio_timer",
@@ -257,10 +261,13 @@
       "rust": {
         "binding": "rust",
         "phases": [
-          "discover"
+          "discover",
+          "capture"
         ],
         "expect": "success",
         "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
           "registry.ctsc.json"
         ]
       },
@@ -269,15 +276,14 @@
         "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
       },
       "replay": {
-        "mode": "not-applicable",
-        "reason": "Discovery-only components produce no capture bundle, so there is nothing to replay."
+        "mode": "unsupported",
+        "expectCategory": "async-operation",
+        "reason": "The operation is async. Replay generates a synchronous candidate call, so the planner rejects an async operation even though capture now records it."
       },
-      "limitations": [
-        {
-          "code": "async-capture-unsupported",
-          "detail": "The component declares an async operation. Native capture state is thread-local and cannot follow a future across executor threads, so this row is discovery-only until capture context becomes task-safe."
-        }
-      ]
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
     },
     {
       "id": "component/fixture.catch_all",
@@ -690,10 +696,13 @@
       "rust": {
         "binding": "rust",
         "phases": [
-          "discover"
+          "discover",
+          "capture"
         ],
         "expect": "success",
         "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
           "registry.ctsc.json"
         ]
       },
@@ -702,15 +711,14 @@
         "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
       },
       "replay": {
-        "mode": "not-applicable",
-        "reason": "Discovery-only components produce no capture bundle, so there is nothing to replay."
+        "mode": "unsupported",
+        "expectCategory": "structured-value",
+        "reason": "Replay planning is all-or-nothing per row, and the planner rejects this component before it reaches the async `fetch` operation: `find` takes a `Vec<i32>`, and replay supports only lossless primitive inputs, so the list input is an unsupported structured replay type."
       },
-      "limitations": [
-        {
-          "code": "async-capture-unsupported",
-          "detail": "The component declares an async operation. Native capture state is thread-local and cannot follow a future across executor threads, so this row is discovery-only until capture context becomes task-safe."
-        }
-      ]
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
     },
     {
       "id": "component/fixture.facade_umbrella",
@@ -783,8 +791,8 @@
       },
       "limitations": [
         {
-          "code": "async-capture-unsupported",
-          "detail": "The component declares an async operation. Native capture state is thread-local and cannot follow a future across executor threads, so this row is discovery-only until capture context becomes task-safe."
+          "code": "observation-not-declared",
+          "detail": "A fixture test now awaits the async `fallible_task` operation, so async is no longer what holds this row back. `UnitCounter::advance` emits a `spec_trace!(\"count\", ...)` observation, and discovery has no link-time observation metadata, so a capture bundle fails bundle and linked validation with `observation 'count' is not declared`. This row stays discovery-only until M5 declares observations."
         }
       ]
     },

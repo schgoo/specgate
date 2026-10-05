@@ -20,6 +20,7 @@ just clippy
 just format-check
 just deny
 just readme-check
+just changelog
 just ctsc-validate
 just ctsc-smoke
 just ctsc-goldens-check
@@ -62,8 +63,13 @@ specgate compare <reference-trace> <candidate-trace> ...
 5. `specgate-cli` exposes discovery, Rust reference capture, and Rust candidate
    replay.
 
-Async operations remain discoverable, but native capture rejects them before
-polling because capture state is thread-local and cannot safely cross `.await`.
+A directly-awaited async operation captures natively; recording begins at the
+future's first poll, never at construction, so the instrumented signature stays
+unchanged and registry parity with C# holds. Async `#[spec_setup]` is still
+uninstrumented and rejected, because setup-input staging is thread-affine. A
+future that migrates between executor threads, is abandoned before completing,
+or is polled concurrently with another instrumented operation is not yet
+supported; each fails closed.
 
 ## Golden matrix
 

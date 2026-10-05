@@ -26,11 +26,16 @@ a candidate test suite, not a prerequisite for value.
 
 The concurrency model is the thing not to invent twice.
 
-Thread-local capture state is the single root cause behind async rejection,
-lost completions under parallelism, and the external capture threads consumers
-were forced to build. Solving it once, in the runtime SpecGate owns end to end,
-produces a proven model that C# instrumentation can then implement rather than
-redesign.
+Thread-affine capture state is the root cause behind the remaining async gaps
+and the external capture threads consumers were forced to build. Solving it
+once, in the
+runtime SpecGate owns end to end, produces a proven model that C#
+instrumentation can then implement rather than redesign.
+
+Parallel test execution is not on that list. The CLI harness already runs one
+process per test (`capture.rs:683`, `--test-threads=1`), so per-test isolation
+exists at process granularity, and thread affinity is not what constrains it.
+See [`decisions/async-capture-context.md`](decisions/async-capture-context.md).
 
 Building synchronous C# capture first would mean building on thread-affine
 assumptions that every documented consumer violates, and reworking it when
@@ -46,9 +51,9 @@ async C#. MVP+1 is what serves them.
 | Area | State | Evidence |
 |---|---|---|
 | Registry discovery | Rust link-time and C# compiled-assembly reflection; byte-identical for stateless, rich-type, and setup-folding fixtures | `specgate-discovery` |
-| Trace capture | Rust libtest only, synchronous only | `capture.rs:189`, migration limitations |
+| Trace capture | Rust libtest only; synchronous calls and directly-awaited async operations | `capture.rs:189`, migration limitations |
 | C# trace capture | None - annotations are inert; no recording code exists | `csharp/SpecGate.Annotations` is the whole C# surface |
-| Async capture | Rejected before polling until capture context is task-safe; async setup not instrumented at all | migration limitations |
+| Async capture | A directly-awaited async operation captures: recording begins at first poll (M2 slice 1). Still unsupported: async `#[spec_setup]`, futures that migrate across threads, futures polled concurrently with another instrumented operation, and abandoned futures. Setup-input staging remains thread-affine | `annotations-macros/src/lib.rs` async arm, `PENDING_SETUP_INPUTS` |
 | Observations | Captured but never declared; a component emitting one cannot produce a linkable bundle | migration limitations |
 | Comparison | `compare <reference-trace> <candidate-trace>` exists; fixed `ctsc.strict/0.1.0`; scenarios paired by name | `comparison.rs:185-195` |
 | Replay | Synchronous public Rust free functions, lossless primitive inputs | migration limitations |
@@ -65,10 +70,16 @@ structural.
 Replace thread-local capture state with one per-run collector safe under
 concurrent access.
 
-This is the keystone. A single root cause - thread-local state - produces every
-downstream symptom: async rejection, lost completions under parallelism, and
-the need for external capture threads. Nothing else in MVP lands cleanly before
-it.
+This is the keystone: async rejection and the need for external capture threads
+both trace back to capture state being reachable only from the thread that
+started it. Nothing else in MVP lands cleanly before it.
+
+**State: structurally complete, symptoms still open.** The per-run collector
+exists and is `Send` (`CollectorHandle` in `specgate-runtime`), and trace
+validation rejects an operation span with no terminal event. The ambient lookup
+slot stays thread-local by design, and no public API yet hands a collector to
+another thread, so async capture and external capture threads remain blocked
+until M2 consumes the collector.
 
 Relates to issue #2, whose problem statement is correct but whose proposed
 solution predates CTSC span parentage.
@@ -83,7 +94,17 @@ Operation context must survive every `Future` poll and every spawn, thread, and
 channel handoff, so that parentage remains correct when execution moves between
 threads.
 
-Unblocks removing the pre-poll async rejection.
+**Slice 1 is done.** The pre-poll rejection is gone and a directly-awaited
+async operation now captures, with recording beginning at the future's first
+poll rather than at construction. An `async fn` has no construction-time code,
+and running code there would require desugaring the signature, which would
+change the registry's `return_type` and break byte-identical parity with the C#
+twin.
+
+Remaining: futures that migrate between executor threads, and operations
+abandoned before completion
+([`abandonment-terminal-state`](decisions/abandonment-terminal-state.md) is
+accepted but not implemented).
 
 ### M3. Async setup instrumentation
 
@@ -92,13 +113,36 @@ the whole component up front rather than emitting a bundle without setup
 inputs. Setup-folded inputs are part of the declared surface, so this is
 required for correctness, not ergonomics.
 
+M3 is two slices, in this order.
+
+#### M3 slice 1. Move setup-input staging into the per-run collector
+
+Runtime work in `specgate-runtime`. `PENDING_SETUP_INPUTS` is still a bare
+thread-local holding its data directly; M1 moved only *operation* recording
+behind a `Send` collector handle. It is the last thread-affine piece of capture
+state.
+
+A setup stages inputs that a later operation folds in, so across threads the
+handoff breaks: the setup stages into one thread's map, the operation reads
+another thread's empty map and records without the folded inputs, and linked
+validation rejects it with `input names do not match registry operation`.
+
+#### M3 slice 2. Instrument async setups in the macro
+
+`macros/lib.rs` guards setup injection with `if !is_async`, so an async setup
+gets no instrumentation at all. Depends on slice 1.
+
+Doing slice 2 first would pass a single-threaded `block_on` test and be
+silently wrong under any executor that migrates the future between threads.
+
 ### M4. Concurrency semantics in the trace
 
 Format-level decisions, not just runtime work:
 
 - unique span identity per retry or repeated identical invocation;
 - explicit parallel regions;
-- cancellation representation;
+- cancellation representation — settled by
+  [`abandonment-terminal-state`](decisions/abandonment-terminal-state.md);
 - known-started but unfinished operations;
 - exactly one completion or fault treatment per span.
 
@@ -112,14 +156,24 @@ has no link-time observation metadata, so any component emitting one cannot
 produce a linkable reference bundle. Fixtures currently work around this by
 expressing intermediate behavior as nested public operations.
 
-This is an MVP-level hole in capture that is easy to overlook because no
-current fixture trips it.
+`fixture.fallible_unit` now trips it. Every operation it declares, including the
+async `fallible_task`, is driven by a fixture test, so async no longer holds the
+row back; `UnitCounter::advance` emits a `count` observation, and a capture
+bundle fails bundle and linked validation with `observation 'count' is not
+declared`. The row stays discovery-only on an `observation-not-declared`
+limitation until M5 lands.
 
 ### M6. Golden matrix update
 
-The matrix currently **asserts** that components declaring async operations are
-discovery-only. Fixing capture therefore requires matrix changes, new async
-fixtures, and regenerated goldens.
+No matrix row asserts that a component declaring an async operation is
+discovery-only any more. `fixture.async_fetch`, `fixture.extract`,
+`fixture.async_smol_timer`, and `fixture.async_tokio_timer` all capture, and the
+`async-capture-unsupported` limitation code is unused. The harness still refuses
+to let a row carry that code while capturing, so it remains the guard for async
+setups.
+
+Remaining: fixtures and rows for the cases that still fail closed — async
+setups, cross-thread migration, concurrent interleaving, and abandonment.
 
 ---
 
@@ -230,6 +284,13 @@ parked until questions 1 through 3 are resolved.
   subsystems. Issue #2 is the clearest case: right problem, obsolete solution.
 - Epic #48 and children #44-#47 are scoped to synchronous C# capture and need
   rescoping against MVP+1.
+- The golden matrix has no negative-capture row kind. Negative rows cover only
+  `discover` and `build`, so a row cannot declare "capture must refuse this with
+  this fault". Fail-closed guarantees live in side tests instead of the corpus,
+  so they get no parity or staleness checking;
+  `concurrently_interleaved_operations_fail_closed` in
+  `rust/crates/specgate/tests/native_capture.rs` is the current example. Wanted,
+  but it changes golden-matrix declaration semantics and needs a design pass.
 - The external feature request document cites `specgate-harness` paths and a C#
   weaver and runtime that no longer exist. Its evidence and requirements remain
   valid; its citations do not.

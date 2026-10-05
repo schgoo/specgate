@@ -38,8 +38,9 @@ traces and local or explicit registry imports. `compare` applies the fixed
 `ctsc.strict/0.1.0` policy and reports stable semantic mismatch paths.
 Capture bundles contain
 `registry.ctsc.json`, `reference.otlp.json`, and `manifest.json`.
-Async operations and async setups are discoverable but rejected by native
-capture until capture context can propagate safely across executor threads.
+A directly-awaited async operation is captured natively, with recording
+starting at the future's first poll. Async setups remain discoverable but
+rejected by native capture, as do futures that migrate across executor threads.
 
 Rust runner generation resolves the candidate's exact `specgate-runtime`
 source through `cargo metadata`. `SPECGATE_RUNTIME_PATH` and

@@ -26,6 +26,32 @@ async fn async_value(value: i32) -> i32 {
     value * 2
 }
 
+#[spec_operation("async_suspends")]
+async fn async_suspends(value: i32) -> i32 {
+    PendingOnce::default().await;
+    value * 2
+}
+
+/// A future that yields exactly once, so two of them can be interleaved.
+#[derive(Default)]
+struct PendingOnce {
+    polled: bool,
+}
+
+impl Future for PendingOnce {
+    type Output = ();
+
+    fn poll(mut self: std::pin::Pin<&mut Self>, context: &mut std::task::Context<'_>) -> std::task::Poll<()> {
+        if self.polled {
+            std::task::Poll::Ready(())
+        } else {
+            self.polled = true;
+            context.waker().wake_by_ref();
+            std::task::Poll::Pending
+        }
+    }
+}
+
 #[spec_operation("result_unit")]
 fn result_unit(fail: bool) -> Result<(), String> {
     if fail { Err("failed".to_string()) } else { Ok(()) }
@@ -144,22 +170,68 @@ fn native_projection_recurses_through_collections_and_annotated_records() {
     );
 }
 
+/// Recording begins at first poll, not at construction.
+///
+/// An `async fn` has no construction-time code, so building the future must
+/// leave the session untouched; a future that is driven to completion on the
+/// calling thread must record exactly one operation with its inputs and result.
 #[test]
-fn async_operation_capture_is_rejected_before_polling_across_await() {
+fn async_operation_records_from_first_poll_through_completion() {
     use std::future::Future;
     use std::task::{Context, Poll, Waker};
 
-    let mut inactive = Box::pin(async_value(2));
-    let mut context = Context::from_waker(Waker::noop());
-    assert_eq!(inactive.as_mut().poll(&mut context), Poll::Ready(4));
+    specgate::__rt::start_native_capture(config(&[])).unwrap();
+    drop(async_value(2));
+    assert!(
+        specgate::__rt::finish_native_capture().unwrap().operations.is_empty(),
+        "constructing a future must not open an operation scope"
+    );
 
+    let mut context = Context::from_waker(Waker::noop());
     specgate::__rt::start_native_capture(config(&[])).unwrap();
     let mut captured = Box::pin(async_value(2));
-    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _ = captured.as_mut().poll(&mut context);
-    }));
-    assert!(panic.is_err());
-    assert!(specgate::__rt::finish_native_capture().unwrap().operations.is_empty());
+    assert_eq!(captured.as_mut().poll(&mut context), Poll::Ready(4));
+    let capture = specgate::__rt::finish_native_capture().unwrap();
+    assert_eq!(capture.operations.len(), 1);
+    assert_eq!(capture.operations[0].operation_name, "async_value");
+    assert_eq!(
+        capture.operations[0].inputs,
+        std::collections::BTreeMap::from([("value".to_string(), Value::Integer(2))])
+    );
+    assert!(matches!(
+        capture.operations[0].completion,
+        Some(specgate::__rt::NativeCompletion::Result {
+            value: Value::Integer(4),
+            ..
+        })
+    ));
+}
+
+/// Two instrumented operations polled concurrently on one thread fail closed.
+///
+/// `state.active_operations` in `specgate-runtime` is a single nesting stack,
+/// which assumes operations nest like function calls. Interleaved futures do
+/// not nest: the first operation to finish is no longer on top of the stack, so
+/// completion is rejected and the run is poisoned. No thread migration and no
+/// abandonment are involved.
+///
+/// This is expected, not a bug. Concurrent interleaving is unsupported, and
+/// failing loudly is the correct response. The test pins that it keeps failing
+/// loudly, so a future change cannot silently record a wrong trace instead.
+#[test]
+#[should_panic(expected = "attempted completion while a nested scope is active")]
+fn concurrently_interleaved_operations_fail_closed() {
+    use std::future::Future;
+    use std::task::{Context, Poll, Waker};
+
+    specgate::__rt::start_native_capture(config(&[])).unwrap();
+    let mut context = Context::from_waker(Waker::noop());
+    let mut first = Box::pin(async_suspends(2));
+    let mut second = Box::pin(async_suspends(3));
+
+    assert_eq!(first.as_mut().poll(&mut context), Poll::Pending);
+    assert_eq!(second.as_mut().poll(&mut context), Poll::Pending);
+    let _ = first.as_mut().poll(&mut context);
 }
 
 #[test]

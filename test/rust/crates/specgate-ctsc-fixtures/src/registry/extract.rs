@@ -142,4 +142,8 @@ fn extraction_surfaces_have_concrete_behavior() {
     );
     assert_eq!(double(seed()), 42);
     assert_eq!(make_scaler(6).scale(7), 42);
+    assert_eq!(
+        smol::block_on(fetch("https://example.test/data".to_string())),
+        "response from https://example.test/data"
+    );
 }

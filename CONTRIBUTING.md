@@ -79,4 +79,16 @@ Run `just package-smoke` for release changes; it packages all six retained crate
 installs the packaged CLI, and exercises registry-dependency
 discover/capture/replay.
 
-Use Conventional Commits and keep changes scoped.
+Use Conventional Commits and keep changes scoped. The changelog is generated
+from commit subjects, so the subject is the entry a reader sees.
+
+## Changelog
+
+`CHANGELOG.md` entries are one line per change. `just changelog` previews
+entries for commits since the last `vX.Y.Z` tag, grouped by commit type;
+`pwsh scripts/changelog.ps1 -Version <x.y.z> -Apply` writes a release section
+and folds any hand-curated `## [Unreleased]` body in above the generated
+bullets.
+
+Rationale does not belong in the changelog. Put it in the commit body, an ADR
+under `docs/decisions/`, or `docs/roadmap.md`.

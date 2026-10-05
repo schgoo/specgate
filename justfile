@@ -41,6 +41,13 @@ readme:
     cd rust && cargo doc2readme -p specgate-ctsc --lib --template crates/README.j2 --out crates/specgate-ctsc/README.md
     cd rust && cargo doc2readme -p specgate-cli --lib --template crates/README.j2 --out crates/specgate-cli/README.md
 
+# A bullet is a commit subject, so entries stay short by construction. To write
+# a release section instead of previewing:
+#   pwsh scripts/changelog.ps1 -Version 0.6.0 -Apply
+# Preview CHANGELOG entries from commit subjects since the last vX.Y.Z tag
+changelog:
+    pwsh -NoProfile -File scripts/changelog.ps1
+
 readme-check:
     cd rust && cargo doc2readme -p specgate-runtime --lib --template crates/README.j2 --out crates/specgate-runtime/README.md --check
     cd rust && cargo doc2readme -p specgate-annotations-macros --lib --template crates/README.j2 --out crates/specgate-annotations-macros/README.md --check
