@@ -18,10 +18,30 @@
   abandoned while still `Pending`, and futures polled concurrently with another
   instrumented operation (the active-operation stack is a single nesting
   stack). `reject_async_native_capture` is retained but no longer called.
+- A regression test pins that two instrumented operations polled concurrently on
+  a single thread fail closed. `active_operations` is a single nesting stack, so
+  the first future to finish is no longer on top of it and completion panics
+  rather than recording a wrong trace. The test exists so a future change cannot
+  silently turn that loud failure into a bad bundle.
 - `fixture.async_fetch` graduates from a discovery-only golden row to a full
   capture row with a linked bundle. Replay stays unsupported for it with the
   `async-operation` category, because the replay planner emits only synchronous
   candidate calls.
+- `fixture.extract`, `fixture.async_smol_timer`, and `fixture.async_tokio_timer`
+  gain fixture tests that drive their async operations and graduate from
+  discovery-only golden rows to full capture rows with linked bundles. The timer
+  fixtures are driven by a bare `smol::block_on` and a current-thread Tokio
+  runtime, so neither future is migrated between threads. No matrix row carries
+  the `async-capture-unsupported` limitation any more. Replay stays unsupported
+  for all three: `async-operation` for the two timer rows, and
+  `structured-value` for `fixture.extract`, whose `find` operation takes a
+  `Vec<i32>` and is rejected before planning reaches the async `fetch`.
+- `fixture.fallible_unit` also gains a test that awaits its async
+  `fallible_task` operation on both the `Ok` and `Err` paths, but the row stays
+  discovery-only. Its blocker is no longer async: `UnitCounter::advance` emits a
+  `spec_trace!` observation that discovery cannot declare, so a bundle fails
+  validation with `observation 'count' is not declared`. Its limitation is
+  restated as `observation-not-declared`.
 - Native capture state is now owned by a per-run collector rather than by a
   thread-local. `OperationScope` clones a shared, `Send` handle to its recording
   at construction and works from that handle instead of re-reading ambient

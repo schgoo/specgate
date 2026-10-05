@@ -113,19 +113,27 @@ the whole component up front rather than emitting a bundle without setup
 inputs. Setup-folded inputs are part of the declared surface, so this is
 required for correctness, not ergonomics.
 
-This is not only a macro gap. M1 moved the *operation* recording behind a
-`Send` collector handle, but left `PENDING_SETUP_INPUTS` in `specgate-runtime` as a
-bare thread-local holding its data directly. It is the last thread-affine piece
-of capture state. A setup stages its inputs for a later operation to fold in,
-so that handoff breaks across threads: a setup polled on one thread stages into
-that thread's map, and an operation polled on another reads an empty one and
-records without the folded inputs, which linked validation then rejects as
-`input names do not match registry operation`.
+M3 is two slices, in this order.
 
-So M3 has a runtime prerequisite: move setup-input staging into the per-run
-collector, mirroring what M1 did for operation recording. Instrumenting the
-macro first would pass a single-threaded `block_on` test and stay silently
-wrong under any executor that migrates the future between threads.
+#### M3 slice 1. Move setup-input staging into the per-run collector
+
+Runtime work in `specgate-runtime`. `PENDING_SETUP_INPUTS` is still a bare
+thread-local holding its data directly; M1 moved only *operation* recording
+behind a `Send` collector handle. It is the last thread-affine piece of capture
+state.
+
+A setup stages inputs that a later operation folds in, so across threads the
+handoff breaks: the setup stages into one thread's map, the operation reads
+another thread's empty map and records without the folded inputs, and linked
+validation rejects it with `input names do not match registry operation`.
+
+#### M3 slice 2. Instrument async setups in the macro
+
+`macros/lib.rs` guards setup injection with `if !is_async`, so an async setup
+gets no instrumentation at all. Depends on slice 1.
+
+Doing slice 2 first would pass a single-threaded `block_on` test and be
+silently wrong under any executor that migrates the future between threads.
 
 ### M4. Concurrency semantics in the trace
 
@@ -148,14 +156,24 @@ has no link-time observation metadata, so any component emitting one cannot
 produce a linkable reference bundle. Fixtures currently work around this by
 expressing intermediate behavior as nested public operations.
 
-This is an MVP-level hole in capture that is easy to overlook because no
-current fixture trips it.
+`fixture.fallible_unit` now trips it. Every operation it declares, including the
+async `fallible_task`, is driven by a fixture test, so async no longer holds the
+row back; `UnitCounter::advance` emits a `count` observation, and a capture
+bundle fails bundle and linked validation with `observation 'count' is not
+declared`. The row stays discovery-only on an `observation-not-declared`
+limitation until M5 lands.
 
 ### M6. Golden matrix update
 
-The matrix currently **asserts** that components declaring async operations are
-discovery-only. Fixing capture therefore requires matrix changes, new async
-fixtures, and regenerated goldens.
+No matrix row asserts that a component declaring an async operation is
+discovery-only any more. `fixture.async_fetch`, `fixture.extract`,
+`fixture.async_smol_timer`, and `fixture.async_tokio_timer` all capture, and the
+`async-capture-unsupported` limitation code is unused. The harness still refuses
+to let a row carry that code while capturing, so it remains the guard for async
+setups.
+
+Remaining: fixtures and rows for the cases that still fail closed — async
+setups, cross-thread migration, concurrent interleaving, and abandonment.
 
 ---
 
