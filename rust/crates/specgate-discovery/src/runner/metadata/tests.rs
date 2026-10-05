@@ -4,7 +4,9 @@ use super::*;
 
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream};
+#[cfg(windows)]
+use std::net::TcpStream;
+use std::net::{SocketAddr, TcpListener};
 use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
