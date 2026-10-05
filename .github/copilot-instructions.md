@@ -20,6 +20,7 @@ just clippy
 just format-check
 just deny
 just readme-check
+just changelog
 just ctsc-validate
 just ctsc-smoke
 just ctsc-goldens-check
