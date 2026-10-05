@@ -2,8 +2,318 @@
 #
 # `just evaluate` runs the deterministic and semantic lint packs. It is not yet
 # part of `just check`, because the current workspace baseline still reports
-# findings. Scope any genuinely necessary exception as narrowly as possible:
-# prefer an in-source `#[cfg_attr(false, allow(evaluate::<rule>))]` marker on the
-# specific item over a workspace-wide entry here, and always record why.
+# findings. Scope any genuinely necessary exception as narrowly as possible.
+# cargo-evaluate 0.23 supports targeted allows by rule and file only; it has no
+# line, item, or span selector. Each entry below therefore names one exact file.
 
 [lints]
+
+[[config.allow]]
+rule = "m_errors_canonical_structs"
+file = "crates/specgate-cli/src/capture_error.rs"
+reason = "The ratified public ErrorKind/ohno/CTSC design requires CaptureErrorKind as the public CTSC capture taxonomy."
+
+[[config.allow]]
+rule = "m_short_names"
+file = "crates/specgate-cli/src/capture_error.rs"
+reason = "The ratified public ErrorKind/ohno/CTSC design fixes CaptureErrorKind as the public CTSC taxonomy spelling."
+
+[[config.allow]]
+rule = "m_dont_leak_types"
+file = "crates/specgate-cli/src/capture_failure.rs"
+reason = "The ratified public ErrorKind/ohno/CTSC design requires the canonical CaptureError to use ohno and retain its SpecEvent CTSC projection."
+
+[[config.allow]]
+rule = "m_public_display"
+file = "crates/specgate-cli/src/capture_failure.rs"
+reason = "The ratified public ErrorKind/ohno/CTSC design uses ohno to generate Display for the canonical CaptureError."
+
+[[config.allow]]
+rule = "m_errors_canonical_structs"
+file = "crates/specgate-cli/src/discover/failure.rs"
+reason = "The ratified public ErrorKind/ohno/CTSC design requires the public discovery ErrorKind beside the canonical ohno Error and its CTSC projection."
+
+[[config.allow]]
+rule = "m_public_display"
+file = "crates/specgate-cli/src/discover/failure.rs"
+reason = "The ratified public ErrorKind/ohno/CTSC design uses ohno to generate Display for the canonical discovery Error."
+
+[[config.allow]]
+rule = "m_errors_canonical_structs"
+file = "crates/specgate-cli/src/discover/mod.rs"
+reason = "The ratified public ErrorKind/ohno/CTSC design requires re-exporting the public discovery ErrorKind taxonomy."
+
+[[config.allow]]
+rule = "m_dont_leak_types"
+file = "crates/specgate-cli/src/replay/error.rs"
+reason = "The ratified public ErrorKind/ohno/CTSC design requires replay ErrorKind and canonical ohno Error to retain their SpecEvent CTSC projections."
+
+[[config.allow]]
+rule = "m_errors_canonical_structs"
+file = "crates/specgate-cli/src/replay/error.rs"
+reason = "The ratified public ErrorKind/ohno/CTSC design requires the public replay ErrorKind beside the canonical ohno Error."
+
+[[config.allow]]
+rule = "m_public_display"
+file = "crates/specgate-cli/src/replay/error.rs"
+reason = "The ratified public ErrorKind/ohno/CTSC design uses ohno to generate Display for the canonical replay Error."
+
+[[config.allow]]
+rule = "m_errors_canonical_structs"
+file = "crates/specgate-cli/src/replay/mod.rs"
+reason = "The ratified public ErrorKind/ohno/CTSC design requires re-exporting the public replay ErrorKind taxonomy."
+
+[[config.allow]]
+rule = "m_errors_canonical_structs"
+file = "crates/specgate-ctsc/src/comparison/loading.rs"
+reason = "The owner-required public ErrorKind taxonomy is retained inside the canonical ohno document-loading error."
+
+[[config.allow]]
+rule = "m_public_display"
+file = "crates/specgate-ctsc/src/comparison/loading.rs"
+reason = "The owner-required document-loading error uses ohno to generate its canonical Display implementation."
+
+[[config.allow]]
+rule = "m_errors_canonical_structs"
+file = "crates/specgate-ctsc/src/capture/error.rs"
+reason = "The owner-required CTSC capture API uses a public ErrorKind taxonomy inside the canonical ohno Error."
+
+[[config.allow]]
+rule = "m_public_display"
+file = "crates/specgate-ctsc/src/capture/error.rs"
+reason = "The owner-required CTSC capture error uses ohno to generate its canonical Display implementation."
+
+[[config.allow]]
+rule = "m_errors_canonical_structs"
+file = "crates/specgate-ctsc/src/registry/error.rs"
+reason = "The owner-required CTSC registry API uses a public ErrorKind taxonomy inside the canonical ohno Error."
+
+[[config.allow]]
+rule = "m_public_display"
+file = "crates/specgate-ctsc/src/registry/error.rs"
+reason = "The owner-required CTSC registry error uses ohno to generate its canonical Display implementation."
+
+[[config.allow]]
+rule = "m_errors_canonical_structs"
+file = "crates/specgate-ctsc/src/replay/error.rs"
+reason = "The owner-required CTSC replay API uses a public ErrorKind taxonomy inside the canonical ohno Error."
+
+[[config.allow]]
+rule = "m_public_display"
+file = "crates/specgate-ctsc/src/replay/error.rs"
+reason = "The owner-required CTSC replay error uses ohno to generate its canonical Display implementation."
+
+[[config.allow]]
+rule = "m_macro_last_resort"
+file = "crates/specgate-ctsc/src/replay/error.rs"
+reason = "The owner-required CTSC replay error must use ohno for canonical error context and backtrace behavior."
+
+[[config.allow]]
+rule = "m_macros_dont_lie"
+file = "crates/specgate-ctsc/src/replay/error.rs"
+reason = "The owner-required CTSC replay error must use ohno; its generated context and backtrace fields are intentional."
+
+[[config.allow]]
+rule = "m_dont_leak_types"
+file = "crates/specgate-ctsc/src/registry/error.rs"
+reason = "The owner-required public CTSC registry ErrorKind and canonical Error must use ohno; the macro dependency is intrinsic to that API."
+
+[[config.allow]]
+rule = "m_proc_implied_items"
+file = "crates/specgate-ctsc/src/registry/error.rs"
+reason = "The owner-required public CTSC registry ErrorKind and canonical Error must use ohno, whose generated constructor is intrinsic."
+
+[[config.allow]]
+rule = "m_dont_leak_types"
+file = "crates/specgate-ctsc/src/capture/error.rs"
+reason = "The owner-required public CTSC capture ErrorKind and canonical Error must use ohno; the generated surface is intrinsic."
+
+[[config.allow]]
+rule = "m_macros_dont_lie"
+file = "crates/specgate-ctsc/src/capture/error.rs"
+reason = "The owner-required canonical CTSC capture Error must use ohno for generated context and backtrace state."
+
+[[config.allow]]
+rule = "m_macro_last_resort"
+file = "crates/specgate-ctsc/src/registry/error.rs"
+reason = "The owner-required canonical CTSC registry Error must use ohno for context and backtrace support."
+
+[[config.allow]]
+rule = "m_macros_dont_lie"
+file = "crates/specgate-ctsc/src/registry/error.rs"
+reason = "The owner-required canonical CTSC registry Error must use ohno; its generated constructors, context, source, and backtrace state are intrinsic to the mandated error representation."
+
+[[config.allow]]
+rule = "m_errors_canonical_structs"
+file = "crates/specgate-ctsc/src/registry/normalized/error.rs"
+reason = "This isolated internal error uses the owner-required ohno wrapper; ohno captures its backtrace in generated state rather than a visible field."
+
+[[config.allow]]
+rule = "m_balanced_modules"
+file = "crates/specgate-ctsc/src/capture/error.rs"
+reason = "The owner-required public ErrorKind must remain isolated with its ohno Error in this error-only module, giving the pair one canonical public path."
+
+[[config.allow]]
+rule = "m_avoid_statics"
+file = "crates/specgate-annotations-macros-impl/src/operation.rs"
+reason = "Operation metadata must enter linkme's process-local inventory; candidate-rooted Cargo metadata enforces one specgate-runtime package identity so registrations cannot split across runtime versions."
+
+[[config.allow]]
+rule = "m_avoid_statics"
+file = "crates/specgate-discovery/src/runner/metadata/tests.rs"
+reason = "This fixture intentionally proves generated runners share the candidate's exact runtime package instance; the static flag detects the split-runtime failure that production package-identity checks prevent."
+
+[[config.allow]]
+rule = "m_avoid_statics"
+file = "crates/specgate-runtime/src/capture.rs"
+reason = "Native capture is intentionally synchronous and thread-local until task-safe async context propagation is designed; candidate package identity prevents duplicate runtime state."
+
+[[config.allow]]
+rule = "m_avoid_statics"
+file = "crates/specgate-runtime/src/capture/setup.rs"
+reason = "Pending setup inputs share the synchronous capture thread-local by design; candidate package identity prevents duplicate runtime state."
+
+[[config.allow]]
+rule = "m_avoid_statics"
+file = "crates/specgate-runtime/src/registry.rs"
+reason = "Link-time discovery requires linkme distributed slices, and candidate-rooted dependency resolution enforces one runtime package identity so the inventory cannot split."
+
+[[config.allow]]
+rule = "m_avoid_statics"
+file = "crates/specgate/src/lib.rs"
+reason = "The facade's hidden macro plumbing must expose the single linkme inventory; candidate-rooted dependency resolution enforces one runtime package identity."
+
+[[config.allow]]
+rule = "m_dont_leak_types"
+file = "crates/specgate-annotations-macros-impl/src/operation.rs"
+reason = "This sibling implementation crate exists solely to exchange syn and proc-macro2 values with the proc-macro facade; those types are the required interoperability boundary."
+
+[[config.allow]]
+rule = "m_dont_leak_types"
+file = "crates/specgate-annotations-macros-impl/src/setup.rs"
+reason = "This sibling implementation crate exists solely to exchange syn and proc-macro2 values with the proc-macro facade; those types are the required interoperability boundary."
+
+[[config.allow]]
+rule = "m_dont_leak_types"
+file = "crates/specgate-runtime/src/capture/model.rs"
+reason = "Capture configuration is a serde JSON protocol exchanged with generated runners, so unconditional serde interoperability is part of the type's purpose."
+
+[[config.allow]]
+rule = "m_dont_leak_types"
+file = "crates/specgate-runtime/src/lib.rs"
+reason = "The hidden facade re-export is required so macro expansions use the consumer's exact linkme instance without requiring a direct linkme dependency."
+
+[[config.allow]]
+rule = "m_dont_leak_types"
+file = "crates/specgate-runtime/src/registry.rs"
+reason = "The public-but-hidden distributed slices are required link-time registration plumbing for macro expansions and discovery."
+
+[[config.allow]]
+rule = "m_errors_canonical_structs"
+file = "crates/specgate-annotations-macros-impl/src/operation.rs"
+reason = "This internal sibling-crate expansion API must preserve syn spans and diagnostics directly for the proc-macro facade; wrapping syn::Error would degrade compiler diagnostics."
+
+[[config.allow]]
+rule = "m_errors_canonical_structs"
+file = "crates/specgate-annotations-macros-impl/src/setup.rs"
+reason = "This internal sibling-crate expansion API must preserve syn spans and diagnostics directly for the proc-macro facade; wrapping syn::Error would degrade compiler diagnostics."
+
+[[config.allow]]
+rule = "m_errors_canonical_structs"
+file = "crates/specgate-cli/src/main.rs"
+reason = "ArgumentError uses the owner-required ohno canonical error representation; Display intentionally renders the user diagnostic while Error retains generated backtrace context."
+
+[[config.allow]]
+rule = "m_errors_canonical_structs"
+file = "crates/specgate-ctsc/src/comparison.rs"
+reason = "The owner-required structured error design exposes the public ErrorKind taxonomy beside the canonical ohno LoadError."
+
+[[config.allow]]
+rule = "m_errors_canonical_structs"
+file = "crates/specgate-ctsc/src/replay.rs"
+reason = "The owner-required structured error design exposes the public ErrorKind taxonomy beside the canonical ohno replay Error."
+
+[[config.allow]]
+rule = "m_errors_canonical_structs"
+file = "crates/specgate-discovery/src/error.rs"
+reason = "The owner-required structured error design exposes the public ErrorKind taxonomy inside the canonical ohno Error."
+
+[[config.allow]]
+rule = "m_errors_canonical_structs"
+file = "crates/specgate-discovery/src/lib.rs"
+reason = "The owner-required structured error design requires re-exporting discovery's public ErrorKind taxonomy."
+
+[[config.allow]]
+rule = "m_errors_canonical_structs"
+file = "crates/specgate-runtime/src/lib.rs"
+reason = "The owner-required capture API exposes public CaptureErrorKind inside the canonical ohno CaptureError."
+
+[[config.allow]]
+rule = "m_hotpath"
+file = "crates/specgate-runtime/src/capture.rs"
+reason = "The inactive annotation path is covered by the native_capture benchmark; environment activation is required for generated-runner protocol startup before checking thread-local session state."
+
+[[config.allow]]
+rule = "m_throughput"
+file = "crates/specgate-runtime/src/capture.rs"
+reason = "Ordinary libtest scenarios provide no explicit end-of-test hook, so accepted capture semantics persist a cumulative snapshot after each completed top-level operation; operation completion remains explicit and fallible, with no destructor or process-exit I/O."
+
+[[config.allow]]
+rule = "m_panic_continuation"
+file = "crates/specgate-runtime/src/capture/tests.rs"
+reason = "Target code may catch its own panic; accepted capture semantics record that operation as a fault and permit later operations in the same ordinary test scenario."
+
+[[config.allow]]
+rule = "m_panic_is_stop"
+file = "crates/specgate-runtime/src/capture/tests.rs"
+reason = "A caught target panic is observable operation behavior rather than a process stop; the capture session continues because user code explicitly resumed execution."
+
+[[config.allow]]
+rule = "m_init_builder"
+file = "crates/specgate-runtime/src/registry.rs"
+reason = "Link-time metadata builders must remain const for macro-generated statics; stable Rust cannot call Into::into in const functions, so the explicit dependency structs are required."
+
+[[config.allow]]
+rule = "m_macro_main_crate"
+file = "crates/specgate-annotations-macros-impl/src/event.rs"
+reason = "Renamed specgate dependencies are an explicit compatibility requirement, so expansions resolve the facade name with proc-macro-crate."
+
+[[config.allow]]
+rule = "m_macro_main_crate"
+file = "crates/specgate-annotations-macros-impl/src/lib.rs"
+reason = "Renamed specgate dependencies are an explicit compatibility requirement, so expansions resolve the facade name with proc-macro-crate."
+
+[[config.allow]]
+rule = "m_macro_main_crate"
+file = "crates/specgate-annotations-macros-impl/src/operation.rs"
+reason = "Renamed specgate dependencies are an explicit compatibility requirement, so expansions resolve the facade name with proc-macro-crate."
+
+[[config.allow]]
+rule = "m_macro_main_crate"
+file = "crates/specgate-annotations-macros-impl/src/setup.rs"
+reason = "Renamed specgate dependencies are an explicit compatibility requirement, so expansions resolve the facade name with proc-macro-crate."
+
+[[config.allow]]
+rule = "m_macros_dont_lie"
+file = "crates/specgate-cli/src/replay/error.rs"
+reason = "The owner-required canonical replay Error must use ohno; its generated source and backtrace state are intrinsic to that representation."
+
+[[config.allow]]
+rule = "m_proc_implied_items"
+file = "crates/specgate-annotations-macros-impl/src/lib.rs"
+reason = "Link-time discovery requires hygienic hidden metadata items; stable hashed identifiers avoid collisions while keeping them out of the user's namespace."
+
+[[config.allow]]
+rule = "m_proc_implied_items"
+file = "crates/specgate-annotations-macros-impl/src/operation.rs"
+reason = "Each annotated operation must emit a hygienically nested linkme registration item so discovery can inventory operations without runtime initialization."
+
+[[config.allow]]
+rule = "m_public_display"
+file = "crates/specgate-discovery/src/error.rs"
+reason = "The owner-required canonical discovery Error uses ohno to generate its Display implementation."
+
+[[config.allow]]
+rule = "m_public_display"
+file = "crates/specgate-runtime/src/lib.rs"
+reason = "The owner-required canonical CaptureError uses ohno to generate its Display implementation."

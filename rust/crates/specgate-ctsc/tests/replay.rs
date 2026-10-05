@@ -1,13 +1,109 @@
+//! Replay decoding and planning integration tests.
+
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use specgate::{ComponentId, OperationName};
 use specgate_ctsc::{
-    ReplayValue, decode_replay_bundle_result, encode_native_captures_otlp_result, encode_replayed_native_captures_otlp_result,
-    encode_schema_registry_result, validation::validate_bundle,
+    registry::encode as encode_typed_registry,
+    replay::{decode as decode_replay_bundle_result, model::Value as ReplayValue},
+    validation::{BundleBytes, DocumentBytes, bytes, validate_bundle},
 };
-use specgate_runtime::{NativeCapture, NativeCaptureConfig, Value, begin_native_operation, finish_native_capture, start_native_capture};
+use specgate_runtime::capture::{Capture, Config, ConfigDeps, begin_operation, finish, start};
+use specgate_runtime::value::Value;
+
+fn encode_schema_registry_result(
+    id: impl Into<specgate_ctsc::registry::Id>,
+    version: impl Into<specgate_ctsc::registry::Version>,
+    schema: impl AsRef<str>,
+) -> specgate_ctsc::registry::error::Result<specgate_ctsc::registry::Encoding> {
+    encode_typed_registry(id, version, specgate_ctsc::registry::Schema::new(schema.as_ref()))
+}
+
+#[expect(clippy::too_many_arguments, reason = "test helper mirrors all independent capture metadata inputs")]
+fn encode_capture(
+    captures: &[Capture],
+    tool_version: &str,
+    target_name: &str,
+    target_language: &str,
+    registry_id: &str,
+    registry_version: &str,
+    registry_digest: &str,
+    candidate: bool,
+) -> Result<specgate_ctsc::capture::Encoding, specgate_ctsc::capture::error::Error> {
+    let bytes = serde_json::to_vec(captures).expect("runtime captures serialize");
+    let captures: Vec<specgate_ctsc::capture::Capture> = serde_json::from_slice(&bytes).expect("capture boundary matches runtime JSON");
+    let metadata = specgate_ctsc::capture::Metadata::new(
+        tool_version,
+        specgate_ctsc::capture::Target::new(target_name, target_language),
+        specgate_ctsc::capture::Registry::new(registry_id, registry_version, registry_digest),
+    );
+    if candidate {
+        specgate_ctsc::capture::encode_candidate(&captures, &metadata)
+    } else {
+        specgate_ctsc::capture::encode_reference(&captures, &metadata)
+    }
+}
+
+fn encode_native_captures_otlp_result(
+    captures: &[Capture],
+    tool_version: &str,
+    target_name: &str,
+    target_language: &str,
+    registry_id: &str,
+    registry_version: &str,
+    registry_digest: &str,
+) -> Result<specgate_ctsc::capture::Encoding, specgate_ctsc::capture::error::Error> {
+    encode_capture(
+        captures,
+        tool_version,
+        target_name,
+        target_language,
+        registry_id,
+        registry_version,
+        registry_digest,
+        false,
+    )
+}
+
+fn encode_replayed_native_captures_otlp_result(
+    captures: &[Capture],
+    tool_version: &str,
+    target_name: &str,
+    target_language: &str,
+    registry_id: &str,
+    registry_version: &str,
+    registry_digest: &str,
+) -> Result<specgate_ctsc::capture::Encoding, specgate_ctsc::capture::error::Error> {
+    encode_capture(
+        captures,
+        tool_version,
+        target_name,
+        target_language,
+        registry_id,
+        registry_version,
+        registry_digest,
+        true,
+    )
+}
 
 const REGISTRY_ID: &str = "urn:ctsc:registry:fixture.replay";
 const REGISTRY_VERSION: &str = "0.1.0";
+
+#[test]
+fn named_type_owner_preserves_ctsc_wire_fields_without_leaking_identifier_storage() {
+    let encoded = json!({
+        "kind": "named",
+        "name": "Money",
+        "componentId": "example.types",
+        "registryId": "urn:ctsc:registry:types"
+    });
+    let value: specgate_ctsc::replay::model::Type = serde_json::from_value(encoded.clone()).expect("decode named type");
+    let (name, owner) = value.named_parts().expect("expected named type");
+    assert_eq!(name, "Money");
+    assert_eq!(owner.component_id(), Some("example.types"));
+    assert_eq!(owner.registry_id(), Some("urn:ctsc:registry:types"));
+    assert_eq!(serde_json::to_value(value).expect("encode named type"), encoded);
+}
 
 #[test]
 fn decodes_linked_top_level_stimuli_and_ignores_nested_instructions() {
@@ -47,8 +143,9 @@ fn rejects_digest_linkage_empty_scenario_and_structured_values() {
     let mut wrong_version: serde_json::Value = serde_json::from_slice(&manifest).unwrap();
     wrong_version["formatVersion"] = json!("9.9.9");
     assert!(
-        decode_replay_bundle_result(&serde_json::to_vec(&wrong_version).unwrap(), &registry, trace.as_bytes())
+        decode_replay_bundle_result(serde_json::to_vec(&wrong_version).unwrap(), &registry, trace.as_bytes())
             .unwrap_err()
+            .to_string()
             .contains("unsupported capture manifest format/version")
     );
 
@@ -57,6 +154,7 @@ fn rejects_digest_linkage_empty_scenario_and_structured_values() {
     assert!(
         decode_replay_bundle_result(&manifest, &corrupt_registry, trace.as_bytes())
             .unwrap_err()
+            .to_string()
             .contains("registry digest mismatch")
     );
 
@@ -72,6 +170,7 @@ fn rejects_digest_linkage_empty_scenario_and_structured_values() {
     assert!(
         decode_replay_bundle_result(&unlinked_manifest, &registry, &unlinked)
             .unwrap_err()
+            .to_string()
             .contains("conformance.registry.id")
     );
 
@@ -100,6 +199,7 @@ fn rejects_digest_linkage_empty_scenario_and_structured_values() {
     assert!(
         decode_replay_bundle_result(&overflowing_manifest, &registry, &overflowing)
             .unwrap_err()
+            .to_string()
             .contains("outside supported range")
     );
 
@@ -109,6 +209,7 @@ fn rejects_digest_linkage_empty_scenario_and_structured_values() {
     assert!(
         decode_replay_bundle_result(&empty_manifest, &registry, empty_trace.as_bytes())
             .unwrap_err()
+            .to_string()
             .contains("contains no top-level operations")
     );
 
@@ -123,6 +224,7 @@ fn rejects_digest_linkage_empty_scenario_and_structured_values() {
     assert!(
         decode_replay_bundle_result(&structured_manifest, &structured_registry, structured_trace.as_bytes())
             .unwrap_err()
+            .to_string()
             .contains("unsupported structured replay type")
     );
 
@@ -137,7 +239,19 @@ fn rejects_digest_linkage_empty_scenario_and_structured_values() {
     std::fs::write(bundle_dir.join("registry.ctsc.json"), &structured_registry).unwrap();
     std::fs::write(bundle_dir.join("reference.otlp.json"), structured_trace.as_bytes()).unwrap();
     let report = validate_bundle(&bundle_dir);
+    let manifest_path = bundle_dir.join("manifest.json");
+    let registry_path = bundle_dir.join("registry.ctsc.json");
+    let trace_path = bundle_dir.join("reference.otlp.json");
+    let bytes_report = bytes::validate_bundle(
+        &bundle_dir,
+        BundleBytes::new(
+            DocumentBytes::new(&manifest_path, &structured_manifest),
+            DocumentBytes::new(&registry_path, &structured_registry),
+            DocumentBytes::new(&trace_path, structured_trace.as_bytes()),
+        ),
+    );
     std::fs::remove_dir_all(&bundle_dir).unwrap();
+    assert_eq!(bytes_report, report);
     assert!(
         report.valid,
         "bundle validation must not inherit replay's structured-input restriction: {:#?}",
@@ -193,7 +307,7 @@ fn make_registry(schema: &str) -> Vec<u8> {
         .into_bytes()
 }
 
-fn reference_trace(capture: &NativeCapture, registry: &[u8]) -> String {
+fn reference_trace(capture: &Capture, registry: &[u8]) -> String {
     encode_native_captures_otlp_result(
         std::slice::from_ref(capture),
         "0.6.0",
@@ -233,42 +347,41 @@ fn digest(bytes: &[u8]) -> String {
     format!("sha256:{:x}", Sha256::digest(bytes))
 }
 
-fn config(name: &str) -> NativeCaptureConfig {
-    NativeCaptureConfig {
-        scenario_name: name.to_string(),
-        trace_id: "33333333333333333333333333333333".to_string(),
-        run_span_id: "3333333333333301".to_string(),
-        scenario_span_id: "3333333333333302".to_string(),
-        operation_span_ids: Vec::new(),
-        start_time_unix_nano: 0,
-        clock_step_unix_nano: 1,
-    }
+fn config(name: &str) -> Config {
+    Config::builder(ConfigDeps {
+        scenario_name: name.into(),
+        trace_id: "33333333333333333333333333333333".try_into().unwrap(),
+        run_span_id: "3333333333333301".try_into().unwrap(),
+        scenario_span_id: "3333333333333302".try_into().unwrap(),
+    })
+    .build()
+    .unwrap()
 }
 
-fn native_capture(nested: bool) -> NativeCapture {
-    start_native_capture(config("scenario")).unwrap();
-    let mut outer = begin_native_operation("fixture.replay", "outer").unwrap();
-    outer.record_input("value", Value::Integer(2)).unwrap();
+fn native_capture(nested: bool) -> Capture {
+    start(config("scenario")).unwrap();
+    let mut outer = begin_operation(ComponentId::from("fixture.replay"), OperationName::from("outer")).unwrap();
+    outer.input("value", Value::Integer(2)).unwrap();
     if nested {
-        let mut inner = begin_native_operation("fixture.replay", "inner").unwrap();
-        inner.record_input("value", Value::Integer(3)).unwrap();
-        inner.complete_result(Value::Integer(6)).unwrap();
+        let mut inner = begin_operation(ComponentId::from("fixture.replay"), OperationName::from("inner")).unwrap();
+        inner.input("value", Value::Integer(3)).unwrap();
+        inner.result(Value::Integer(6)).unwrap();
     }
-    outer.complete_result(Value::Integer(5)).unwrap();
-    finish_native_capture().unwrap()
+    outer.result(Value::Integer(5)).unwrap();
+    finish().unwrap()
 }
 
-fn empty_native_capture() -> NativeCapture {
-    start_native_capture(config("empty")).unwrap();
-    finish_native_capture().unwrap()
+fn empty_native_capture() -> Capture {
+    start(config("empty")).unwrap();
+    finish().unwrap()
 }
 
-fn structured_native_capture() -> NativeCapture {
-    start_native_capture(config("structured")).unwrap();
-    let mut operation = begin_native_operation("fixture.replay", "items").unwrap();
+fn structured_native_capture() -> Capture {
+    start(config("structured")).unwrap();
+    let mut operation = begin_operation(ComponentId::from("fixture.replay"), OperationName::from("items")).unwrap();
     operation
-        .record_input("values", Value::List(vec![Value::Integer(1), Value::Integer(2)]))
+        .input("values", Value::List(vec![Value::Integer(1), Value::Integer(2)]))
         .unwrap();
-    operation.complete_result(Value::Integer(3)).unwrap();
-    finish_native_capture().unwrap()
+    operation.result(Value::Integer(3)).unwrap();
+    finish().unwrap()
 }

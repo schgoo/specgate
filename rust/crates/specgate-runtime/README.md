@@ -12,7 +12,10 @@ and the link-time operation/type registry used by CTSC discovery.
 Isolated test processes can activate native capture through
 `SPECGATE_NATIVE_CAPTURE`; the first operation starts the session lazily and
 each completed top-level operation atomically refreshes a stable JSON
-sidecar containing the full scenario.
+sidecar containing the full scenario. Operation and setup finalizers consume
+their guards and report failure explicitly. Guard destruction performs only
+infallible in-memory cleanup; it never persists, panics, or writes stderr.
+Manually started sessions remain active until `finish`.
 
 Captured inputs are the registry’s black-box surface, not the raw call:
 `#[spec_setup]` producers record their construction inputs, and the
@@ -21,8 +24,19 @@ setup fills. Attribution is by setup declaration, so running one declaration
 twice in a capture is accepted only when both runs record value-identical
 inputs; differing repeats are rejected rather than misattributed.
 
+Basic operation entry uses owned semantic identities:
+
+```rust
+use specgate_runtime::{ComponentId, OperationName, capture};
+
+let mut scope = capture::begin_operation(ComponentId::from("example"), OperationName::from("run"))?;
+scope.unit()?;
+```
+
 Companion to the `specgate-annotations-macros` proc-macro crate: the macros expand
 into calls into this runtime, so user code never references it directly.
+`ComponentId`, `OperationName`, and `TargetName` provide semantic
+string identities without imposing lexical validation.
 
 
 ---

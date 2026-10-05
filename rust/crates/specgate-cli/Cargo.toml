@@ -12,6 +12,10 @@ categories.workspace = true
 rust-version.workspace = true
 exclude = ["tests/fixtures/**"]
 
+[features]
+default = []
+test-util = []
+
 [lib]
 path = "src/lib.rs"
 
@@ -20,12 +24,15 @@ name = "specgate"
 path = "src/main.rs"
 
 [dependencies]
+ohno = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+rustc-hash = { workspace = true }
 specgate = { workspace = true }
 specgate-ctsc = { workspace = true }
-specgate-discovery = { workspace = true }
+specgate-discovery = { workspace = true, features = ["serde", "raw-registry"] }
+tempfile = { workspace = true }
 
 [dev-dependencies]
 toml = { workspace = true }

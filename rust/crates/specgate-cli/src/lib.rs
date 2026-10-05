@@ -20,24 +20,45 @@
 //! emits an independent deterministic CTSC trace. `validate` provides native
 //! CTSC 0.2 Registry, Trace Core, Linked, and capture-bundle validation.
 //! `compare` applies deterministic `ctsc.strict/0.1.0` semantics. No command
-//! reads `.spec.yaml` or invokes Python.
+//! reads `.spec.yaml` or invokes Python. The library capture entry point accepts
+//! one owned [`CaptureRequest`], constructed with a validated builder, and
+//! returns `Result<CaptureReport, CaptureError>`.
+//!
+//! # Examples
+//!
+//! ```no_run
+//! use specgate_cli::{CapturePaths, CaptureRequest, capture};
+//!
+//! let request = CaptureRequest::builder(CapturePaths {
+//!     binding: "binding.yaml".into(),
+//!     out: "capture".into(),
+//! })
+//!     .component("example.math")
+//!     .build()?;
+//! match capture(request) {
+//!     Ok(report) => println!("registry: {}", report.registry_path.display()),
+//!     Err(error) if error.is_request() => {
+//!         eprintln!("invalid request: {}", error.diagnostic());
+//!     }
+//!     Err(error) => return Err(error.into()),
+//! }
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
 
 specgate::spec_component!("specgate.cli");
 
-/// Native reference capture.
-pub mod capture;
-/// CTSC Strict report formatting.
-pub mod comparison;
-/// Binding discovery and registry export.
+pub mod capture_error;
+mod capture_failure;
+#[path = "capture/mod.rs"]
+mod capture_impl;
 pub mod discover;
-/// Candidate replay.
 pub mod replay;
-/// CTSC validation report formatting.
-pub mod validation;
+mod system;
+
+pub use capture_failure::CaptureError;
+pub use capture_impl::{CapturePaths, CaptureReport, CaptureRequest, CaptureRequestBuilder, capture, capture_with};
+
+pub use system::{CommandEnvironment, Discovery, Execution};
 
 #[cfg(test)]
 mod goldens;
-
-pub use capture::{CaptureOutcome, CaptureReport, capture};
-pub use discover::{DiscoverOutcome, DiscoverReport, discover};
-pub use replay::{ReplayInvocationPlan, ReplayOutcome, ReplayReport, replay};

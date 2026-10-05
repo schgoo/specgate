@@ -1,14 +1,72 @@
+//! CTSC registry, trace, linked, and bundle validator integration tests.
+
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use specgate::{SpecEvent, spec_component, spec_operation};
+use specgate::{ComponentId, OperationName, SpecEvent, spec_component, spec_operation};
 use specgate_ctsc::{
-    encode_native_captures_otlp_result, encode_schema_registry_result,
+    registry::encode as encode_typed_registry,
     validation::{validate_linked, validate_registry, validate_trace},
 };
-use specgate_discovery::discovery::{Registry, normalize_registry};
-use specgate_runtime::{NativeCaptureConfig, Value, begin_native_operation, finish_native_capture, start_native_capture};
+use specgate_discovery::registry::Registry;
+use specgate_discovery::schema::normalize_registry;
+use specgate_runtime::capture::{Capture, Config, ConfigDeps, begin_operation, finish, start};
+use specgate_runtime::value::Value;
 use std::fs;
 use std::path::Path;
+
+fn encode_schema_registry_result(
+    id: impl Into<specgate_ctsc::registry::Id>,
+    version: impl Into<specgate_ctsc::registry::Version>,
+    schema: impl AsRef<str>,
+) -> specgate_ctsc::registry::error::Result<specgate_ctsc::registry::Encoding> {
+    encode_typed_registry(id, version, specgate_ctsc::registry::Schema::new(schema.as_ref()))
+}
+
+#[expect(clippy::too_many_arguments, reason = "test helper mirrors all independent capture metadata inputs")]
+fn encode_capture(
+    captures: &[Capture],
+    tool_version: &str,
+    target_name: &str,
+    target_language: &str,
+    registry_id: &str,
+    registry_version: &str,
+    registry_digest: &str,
+    candidate: bool,
+) -> Result<specgate_ctsc::capture::Encoding, specgate_ctsc::capture::error::Error> {
+    let bytes = serde_json::to_vec(captures).expect("runtime captures serialize");
+    let captures: Vec<specgate_ctsc::capture::Capture> = serde_json::from_slice(&bytes).expect("capture boundary matches runtime JSON");
+    let metadata = specgate_ctsc::capture::Metadata::new(
+        tool_version,
+        specgate_ctsc::capture::Target::new(target_name, target_language),
+        specgate_ctsc::capture::Registry::new(registry_id, registry_version, registry_digest),
+    );
+    if candidate {
+        specgate_ctsc::capture::encode_candidate(&captures, &metadata)
+    } else {
+        specgate_ctsc::capture::encode_reference(&captures, &metadata)
+    }
+}
+
+fn encode_native_captures_otlp_result(
+    captures: &[Capture],
+    tool_version: &str,
+    target_name: &str,
+    target_language: &str,
+    registry_id: &str,
+    registry_version: &str,
+    registry_digest: &str,
+) -> Result<specgate_ctsc::capture::Encoding, specgate_ctsc::capture::error::Error> {
+    encode_capture(
+        captures,
+        tool_version,
+        target_name,
+        target_language,
+        registry_id,
+        registry_version,
+        registry_digest,
+        false,
+    )
+}
 
 spec_component!("fixture.tuple_variants");
 
@@ -30,6 +88,7 @@ enum HygienicVariant {
     Tuple(i32, String),
 }
 
+/// Emit one tuple variant for native validation coverage.
 #[spec_operation("emit_tuple_variant")]
 pub fn emit_tuple_variant(multiple: bool) -> TupleVariant {
     if multiple {
@@ -39,6 +98,7 @@ pub fn emit_tuple_variant(multiple: bool) -> TupleVariant {
     }
 }
 
+/// Emit one macro-hygiene variant for native validation coverage.
 #[spec_operation("emit_hygienic_variant", spec = "fixture.macro_hygiene")]
 pub fn emit_hygienic_variant(named: bool) -> HygienicVariant {
     if named {
@@ -257,7 +317,7 @@ fn registry_encoder_rejects_dependency_cycles() {
         }"#,
     )
     .unwrap_err();
-    assert!(error.contains("fixture.a -> fixture.b -> fixture.a"));
+    assert!(error.to_string().contains("fixture.a -> fixture.b -> fixture.a"));
 }
 
 #[test]
@@ -319,14 +379,14 @@ fn unit_result_and_optional_unit_traces_pass_linked_validation() {
 
 #[test]
 fn annotated_tuple_variants_pass_linked_validation() {
-    let raw_registry = Registry::parse(&specgate::__rt::discovery_json()).unwrap();
-    let schema = normalize_registry(&raw_registry, "rust", "fixture.tuple_variants").unwrap();
+    let raw_registry = Registry::parse(specgate::__rt::discovery().to_string()).unwrap();
+    let schema = normalize_registry(&raw_registry, specgate_discovery::binding::Language::Rust, "fixture.tuple_variants").unwrap();
     let registry_id = "urn:ctsc:registry:fixture.tuple-variants:1";
     let registry_version = "1.0.0";
     let registry = encode_schema_registry_result(
         registry_id.to_string(),
         registry_version.to_string(),
-        &serde_json::to_string(&schema).unwrap(),
+        serde_json::to_string(&schema).unwrap(),
     )
     .unwrap();
     let document: serde_json::Value = serde_json::from_str(&registry.registry_json).unwrap();
@@ -374,14 +434,14 @@ fn annotated_enum_projection_is_hygienic_and_passes_linked_validation() {
         )]))
     );
 
-    let raw_registry = Registry::parse(&specgate::__rt::discovery_json()).unwrap();
-    let schema = normalize_registry(&raw_registry, "rust", "fixture.macro_hygiene").unwrap();
+    let raw_registry = Registry::parse(specgate::__rt::discovery().to_string()).unwrap();
+    let schema = normalize_registry(&raw_registry, specgate_discovery::binding::Language::Rust, "fixture.macro_hygiene").unwrap();
     let registry_id = "urn:ctsc:registry:fixture.macro-hygiene:1";
     let registry_version = "1.0.0";
     let registry = encode_schema_registry_result(
         registry_id.to_string(),
         registry_version.to_string(),
-        &serde_json::to_string(&schema).unwrap(),
+        serde_json::to_string(&schema).unwrap(),
     )
     .unwrap();
     let document: serde_json::Value = serde_json::from_str(&registry.registry_json).unwrap();
@@ -434,18 +494,22 @@ fn validate_generated_document(kind: &str, file_label: &str, json: &str) {
     );
 }
 
-fn native_capture(label: &str, value: Option<&str>) -> specgate_runtime::NativeCapture {
-    start_native_capture(NativeCaptureConfig {
-        scenario_name: label.to_string(),
-        trace_id: "44444444444444444444444444444444".to_string(),
-        run_span_id: "4444444444444401".to_string(),
-        scenario_span_id: "4444444444444402".to_string(),
-        operation_span_ids: vec!["4444444444444403".to_string()],
-        start_time_unix_nano: 4_000_000_000,
-        clock_step_unix_nano: 100,
-    })
+fn native_capture(label: &str, value: Option<&str>) -> Capture {
+    start(
+        Config::builder(ConfigDeps {
+            scenario_name: label.into(),
+            trace_id: "44444444444444444444444444444444".try_into().unwrap(),
+            run_span_id: "4444444444444401".try_into().unwrap(),
+            scenario_span_id: "4444444444444402".try_into().unwrap(),
+        })
+        .operation_span_ids(vec!["4444444444444403".try_into().unwrap()])
+        .start_time(4_000_000_000)
+        .clock_step(100)
+        .build()
+        .unwrap(),
+    )
     .unwrap();
-    let mut operation = begin_native_operation("fixture.native_capture", "echo_optional").unwrap();
+    let mut operation = begin_operation(ComponentId::from("fixture.native_capture"), OperationName::from("echo_optional")).unwrap();
     let input = match value {
         Some(value) => Value::Map(std::collections::BTreeMap::from([(
             "Some".to_string(),
@@ -456,74 +520,76 @@ fn native_capture(label: &str, value: Option<&str>) -> specgate_runtime::NativeC
             Value::Map(std::collections::BTreeMap::new()),
         )])),
     };
-    operation.record_input("value", input).unwrap();
+    operation.input("value", input).unwrap();
     match value {
-        Some(value) => operation.complete_result(Value::String(value.to_string())).unwrap(),
-        None => operation.complete_empty().unwrap(),
+        Some(value) => operation.result(Value::String(value.to_string())).unwrap(),
+        None => operation.empty().unwrap(),
     }
-    finish_native_capture().unwrap()
+    finish().unwrap()
 }
 
-fn unit_result_capture(label: &str, fail: bool) -> specgate_runtime::NativeCapture {
-    start_native_capture(capture_config(label)).unwrap();
-    let mut operation = begin_native_operation("fixture.unit", "fallible").unwrap();
-    operation.record_input("fail", Value::Bool(fail)).unwrap();
+fn unit_result_capture(label: &str, fail: bool) -> Capture {
+    start(capture_config(label)).unwrap();
+    let mut operation = begin_operation(ComponentId::from("fixture.unit"), OperationName::from("fallible")).unwrap();
+    operation.input("fail", Value::Bool(fail)).unwrap();
     if fail {
-        operation.complete_error("error", Value::String("failed".to_string())).unwrap();
+        operation.error("error", Value::String("failed".to_string())).unwrap();
     } else {
-        operation.complete_unit().unwrap();
+        operation.unit().unwrap();
     }
-    finish_native_capture().unwrap()
+    finish().unwrap()
 }
 
-fn optional_unit_capture(label: &str, present: bool) -> specgate_runtime::NativeCapture {
-    start_native_capture(capture_config(label)).unwrap();
-    let mut operation = begin_native_operation("fixture.unit", "optional_unit").unwrap();
-    operation.record_input("present", Value::Bool(present)).unwrap();
+fn optional_unit_capture(label: &str, present: bool) -> Capture {
+    start(capture_config(label)).unwrap();
+    let mut operation = begin_operation(ComponentId::from("fixture.unit"), OperationName::from("optional_unit")).unwrap();
+    operation.input("present", Value::Bool(present)).unwrap();
     let variant = if present { "Some" } else { "None" };
     operation
-        .complete_result(Value::Map(std::collections::BTreeMap::from([(
+        .result(Value::Map(std::collections::BTreeMap::from([(
             variant.to_string(),
             Value::Map(std::collections::BTreeMap::new()),
         )])))
         .unwrap();
-    finish_native_capture().unwrap()
+    finish().unwrap()
 }
 
-fn unit_error_capture(label: &str, fail: bool) -> specgate_runtime::NativeCapture {
-    start_native_capture(capture_config(label)).unwrap();
-    let mut operation = begin_native_operation("fixture.unit", "unit_error").unwrap();
-    operation.record_input("fail", Value::Bool(fail)).unwrap();
+fn unit_error_capture(label: &str, fail: bool) -> Capture {
+    start(capture_config(label)).unwrap();
+    let mut operation = begin_operation(ComponentId::from("fixture.unit"), OperationName::from("unit_error")).unwrap();
+    operation.input("fail", Value::Bool(fail)).unwrap();
     if fail {
-        operation.complete_error_unit("error").unwrap();
+        operation.error_unit("error").unwrap();
     } else {
-        operation.complete_result(Value::Integer(7)).unwrap();
+        operation.result(Value::Integer(7)).unwrap();
     }
-    finish_native_capture().unwrap()
+    finish().unwrap()
 }
 
-fn capture_config(label: &str) -> NativeCaptureConfig {
-    NativeCaptureConfig {
-        scenario_name: label.to_string(),
-        trace_id: "88888888888888888888888888888888".to_string(),
-        run_span_id: "8888888888888801".to_string(),
-        scenario_span_id: "8888888888888802".to_string(),
-        operation_span_ids: vec!["8888888888888803".to_string()],
-        start_time_unix_nano: 5_000_000_000,
-        clock_step_unix_nano: 100,
-    }
+fn capture_config(label: &str) -> Config {
+    Config::builder(ConfigDeps {
+        scenario_name: label.into(),
+        trace_id: "88888888888888888888888888888888".try_into().unwrap(),
+        run_span_id: "8888888888888801".try_into().unwrap(),
+        scenario_span_id: "8888888888888802".try_into().unwrap(),
+    })
+    .operation_span_ids(vec!["8888888888888803".try_into().unwrap()])
+    .start_time(5_000_000_000)
+    .clock_step(100)
+    .build()
+    .unwrap()
 }
 
-fn tuple_variant_capture(label: &str, multiple: bool) -> specgate_runtime::NativeCapture {
-    start_native_capture(capture_config(label)).unwrap();
+fn tuple_variant_capture(label: &str, multiple: bool) -> Capture {
+    start(capture_config(label)).unwrap();
     let _ = emit_tuple_variant(multiple);
-    finish_native_capture().unwrap()
+    finish().unwrap()
 }
 
-fn hygienic_variant_capture(label: &str, named: bool) -> specgate_runtime::NativeCapture {
-    start_native_capture(capture_config(label)).unwrap();
+fn hygienic_variant_capture(label: &str, named: bool) -> Capture {
+    start(capture_config(label)).unwrap();
     let _ = emit_hygienic_variant(named);
-    finish_native_capture().unwrap()
+    finish().unwrap()
 }
 
 fn validate_generated_linked_documents(file_label: &str, trace_json: &str, registry_json: &str) {
