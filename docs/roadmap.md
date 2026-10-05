@@ -284,6 +284,13 @@ parked until questions 1 through 3 are resolved.
   subsystems. Issue #2 is the clearest case: right problem, obsolete solution.
 - Epic #48 and children #44-#47 are scoped to synchronous C# capture and need
   rescoping against MVP+1.
+- The golden matrix has no negative-capture row kind. Negative rows cover only
+  `discover` and `build`, so a row cannot declare "capture must refuse this with
+  this fault". Fail-closed guarantees live in side tests instead of the corpus,
+  so they get no parity or staleness checking;
+  `concurrently_interleaved_operations_fail_closed` in
+  `rust/crates/specgate/tests/native_capture.rs` is the current example. Wanted,
+  but it changes golden-matrix declaration semantics and needs a design pass.
 - The external feature request document cites `specgate-harness` paths and a C#
   weaver and runtime that no longer exist. Its evidence and requirements remain
   valid; its citations do not.
