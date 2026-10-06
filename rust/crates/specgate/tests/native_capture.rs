@@ -32,6 +32,41 @@ async fn async_suspends(value: i32) -> i32 {
     value * 2
 }
 
+/// Suspends once, then records an observation and returns.
+///
+/// Used to prove that a future resumed on another thread still attaches its
+/// observations to its own operation span.
+#[spec_operation("async_traced")]
+async fn async_traced(value: i32) -> i32 {
+    PendingOnce::default().await;
+    spec_trace!("seen", value);
+    value * 2
+}
+
+/// Suspends once, probes the ambient session, then calls a nested operation.
+///
+/// The `start_native_capture` probe is the point: a resumed future must find
+/// the collector handle already installed in the ambient slot. That is exactly
+/// the short-circuit `activate_native_capture_from_environment` relies on, so a
+/// thread that resumes a migrated future cannot start a second session writing
+/// the same sidecar.
+#[spec_operation("async_nests")]
+async fn async_nests(value: i32) -> i32 {
+    PendingOnce::default().await;
+    let rejected = specgate::__rt::start_native_capture(config(&[]))
+        .expect_err("a resumed future must find the session already installed in the ambient slot");
+    spec_trace!("ambient_session", rejected);
+    inner(value)
+}
+
+/// Suspends once, then panics, so a poll unwinds while a borrowed capture
+/// context is installed in the resuming thread's ambient slot.
+#[spec_operation("async_panics")]
+async fn async_panics(value: i32) -> i32 {
+    PendingOnce::default().await;
+    panic!("async_panics unwound at {value}");
+}
+
 /// A future that yields exactly once, so two of them can be interleaved.
 #[derive(Default)]
 struct PendingOnce {
@@ -172,9 +207,11 @@ fn native_projection_recurses_through_collections_and_annotated_records() {
 
 /// Recording begins at first poll, not at construction.
 ///
-/// An `async fn` has no construction-time code, so building the future must
-/// leave the session untouched; a future that is driven to completion on the
-/// calling thread must record exactly one operation with its inputs and result.
+/// `#[spec_operation]` desugars an `async fn` so construction-time code can
+/// capture the caller's operation as the future's parent, but the span itself
+/// is still opened at first poll: building the future must leave the session
+/// untouched, and a future driven to completion on the calling thread must
+/// record exactly one operation with its inputs and result.
 #[test]
 fn async_operation_records_from_first_poll_through_completion() {
     use std::future::Future;
@@ -207,20 +244,20 @@ fn async_operation_records_from_first_poll_through_completion() {
     ));
 }
 
-/// Two instrumented operations polled concurrently on one thread fail closed.
+/// Two instrumented operations polled concurrently on one thread both record.
 ///
-/// `state.active_operations` in `specgate-runtime` is a single nesting stack,
-/// which assumes operations nest like function calls. Interleaved futures do
-/// not nest: the first operation to finish is no longer on top of the stack, so
-/// completion is rejected and the run is poisoned. No thread migration and no
-/// abandonment are involved.
+/// Interleaved operations do not nest: the first to finish is not the most
+/// recently opened. Each instrumented future carries its own capture context
+/// and re-installs it around every poll, so completion no longer depends on
+/// open order and both operations record complete, correctly-parented traces.
 ///
-/// This is expected, not a bug. Concurrent interleaving is unsupported, and
-/// failing loudly is the correct response. The test pins that it keeps failing
-/// loudly, so a future change cannot silently record a wrong trace instead.
+/// This replaces a `#[should_panic]` test that pinned the old fail-closed
+/// behavior. The reason that test existed — so a future change could not
+/// silently record a *wrong* trace — is kept by asserting the trace is right:
+/// distinct span IDs, both parented to the scenario, both `Ok`, both results
+/// correct, and no residual outstanding scope at `finish_native_capture`.
 #[test]
-#[should_panic(expected = "attempted completion while a nested scope is active")]
-fn concurrently_interleaved_operations_fail_closed() {
+fn concurrently_interleaved_operations_record_correct_traces() {
     use std::future::Future;
     use std::task::{Context, Poll, Waker};
 
@@ -231,7 +268,161 @@ fn concurrently_interleaved_operations_fail_closed() {
 
     assert_eq!(first.as_mut().poll(&mut context), Poll::Pending);
     assert_eq!(second.as_mut().poll(&mut context), Poll::Pending);
-    let _ = first.as_mut().poll(&mut context);
+    assert_eq!(first.as_mut().poll(&mut context), Poll::Ready(4));
+    assert_eq!(second.as_mut().poll(&mut context), Poll::Ready(6));
+
+    let capture = specgate::__rt::finish_native_capture().unwrap();
+    assert_eq!(capture.operations.len(), 2);
+    assert_ne!(capture.operations[0].span_id, capture.operations[1].span_id);
+    for (operation, expected) in capture.operations.iter().zip([2, 3]) {
+        assert_eq!(operation.operation_name, "async_suspends");
+        assert_eq!(operation.status, specgate::__rt::NativeStatus::Ok);
+        assert_eq!(
+            operation.parent_span_id, "3333333333333302",
+            "neither operation nests inside the other; both are children of the scenario"
+        );
+        assert_eq!(operation.inputs["value"], Value::Integer(expected));
+        assert!(matches!(
+            operation.completion,
+            Some(specgate::__rt::NativeCompletion::Result { value: Value::Integer(result), .. })
+                if result == expected * 2
+        ));
+    }
+}
+
+/// Drive one future to completion with no executor, so poll order is the
+/// test's own and span IDs stay deterministic.
+fn block_on<F: Future>(future: F) -> F::Output {
+    use std::task::{Context, Poll, Waker};
+
+    let mut pinned = Box::pin(future);
+    let mut context = Context::from_waker(Waker::noop());
+    loop {
+        if let Poll::Ready(value) = pinned.as_mut().poll(&mut context) {
+            return value;
+        }
+    }
+}
+
+/// A future records under the operation that *constructed* it, not under
+/// whatever is current on the thread that resumes it.
+///
+/// `#[spec_operation]` desugars an `async fn` so there is construction-time
+/// code: the capture context is taken while the caller's operation is still
+/// current, and re-installed around every poll. Before that, a future resumed
+/// on a thread with an empty ambient slot silently dropped its observations.
+///
+/// `std::thread::spawn` is used only as transport. Exactly one thread polls at
+/// a time, so the recording order is fully determined.
+#[test]
+fn migrated_future_records_observations_under_its_construction_parent() {
+    specgate::__rt::start_native_capture(config(&[])).unwrap();
+    let mut outer = specgate::__rt::begin_native_operation("fixture.macro_default", "outer").unwrap();
+    outer.record_input("value", Value::Integer(2)).unwrap();
+
+    let migrating = async_traced(2);
+    let worker = std::thread::spawn(move || block_on(migrating));
+    assert_eq!(worker.join().unwrap(), 4);
+
+    outer.complete_result(Value::Integer(4)).unwrap();
+    let capture = specgate::__rt::finish_native_capture().unwrap();
+
+    assert_eq!(capture.operations.len(), 2);
+    assert_eq!(capture.operations[1].operation_name, "async_traced");
+    assert_eq!(
+        capture.operations[1].parent_span_id, capture.operations[0].span_id,
+        "the migrated operation keeps the parent it was constructed under"
+    );
+    assert_eq!(capture.operations[1].observations.len(), 1);
+    assert_eq!(capture.operations[1].observations[0].name, "seen");
+    assert_eq!(capture.operations[1].observations[0].value, Value::Integer(2));
+    assert_eq!(capture.operations[1].status, specgate::__rt::NativeStatus::Ok);
+}
+
+/// A nested operation reached from inside a migrated future is parented to the
+/// migrated operation, and the resuming thread starts no second session.
+///
+/// The second claim is the dangerous one: a thread with an empty ambient slot
+/// and `SPECGATE_NATIVE_CAPTURE` set would start an independent session writing
+/// the same sidecar path, silently clobbering the recording. The body asserts
+/// the slot is already occupied on the resuming thread, which is the exact
+/// condition that short-circuits that activation.
+#[test]
+fn nested_operation_inside_a_migrated_future_is_parented_and_starts_no_second_session() {
+    specgate::__rt::start_native_capture(config(&[])).unwrap();
+    let mut outer = specgate::__rt::begin_native_operation("fixture.macro_default", "outer").unwrap();
+
+    let migrating = async_nests(2);
+    let worker = std::thread::spawn(move || block_on(migrating));
+    assert_eq!(worker.join().unwrap(), 4);
+
+    outer.complete_result(Value::Integer(4)).unwrap();
+    let capture = specgate::__rt::finish_native_capture().unwrap();
+
+    assert_eq!(
+        capture
+            .operations
+            .iter()
+            .map(|operation| operation.operation_name.as_str())
+            .collect::<Vec<_>>(),
+        ["outer", "async_nests", "inner"],
+        "one session recorded all three operations"
+    );
+    assert_eq!(capture.operations[1].parent_span_id, capture.operations[0].span_id);
+    assert_eq!(
+        capture.operations[2].parent_span_id, capture.operations[1].span_id,
+        "the nested operation is parented to the migrated async operation"
+    );
+    assert_eq!(capture.operations[2].component_id, "fixture.macro_override");
+    assert_eq!(
+        capture.operations[1].observations[0].value,
+        Value::String("a native capture session is already active".to_string()),
+        "the resuming thread found the collector handle already installed"
+    );
+}
+
+/// A panicking poll restores the resuming thread's ambient slot.
+///
+/// `InstalledContext::Drop` is the only thing standing between an unwinding
+/// poll and another session's collector handle being stranded in this thread's
+/// thread-local slot. A stranded handle would make every later operation on
+/// that thread record into a session that is already finished. Every other
+/// async test here completes normally, so without this one the restore is
+/// verified only by reading the code.
+#[test]
+fn a_panicking_poll_restores_the_ambient_slot_on_the_resuming_thread() {
+    specgate::__rt::start_native_capture(config(&[])).unwrap();
+    let mut outer = specgate::__rt::begin_native_operation("fixture.macro_default", "outer").unwrap();
+
+    let migrating = async_panics(2);
+    let worker = std::thread::spawn(move || {
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || block_on(migrating)));
+        // The borrowed handle must be gone: starting a session here can only
+        // succeed if this thread's slot is empty again.
+        let restored = specgate::__rt::start_native_capture(config(&[]));
+        let probe = specgate::__rt::finish_native_capture();
+        (unwound.is_err(), restored, probe)
+    });
+
+    let (unwound, restored, probe) = worker.join().unwrap();
+    assert!(unwound, "the body panicked, so the poll unwound");
+    restored.expect("the unwinding poll restored the resuming thread's ambient slot");
+    probe.expect("the probe session on the resuming thread is independent and finishes clean");
+
+    outer.complete_result(Value::Integer(0)).unwrap();
+    let capture = specgate::__rt::finish_native_capture().unwrap();
+
+    assert_eq!(capture.operations.len(), 2);
+    assert_eq!(capture.operations[1].operation_name, "async_panics");
+    assert_eq!(capture.operations[1].status, specgate::__rt::NativeStatus::Error);
+    assert!(
+        matches!(
+            &capture.operations[1].completion,
+            Some(specgate::__rt::NativeCompletion::Fault { fault_type, .. })
+                if fault_type == "specgate.unexpected_target_fault"
+        ),
+        "the unwound operation is recorded as a target fault, not silently dropped"
+    );
 }
 
 #[test]

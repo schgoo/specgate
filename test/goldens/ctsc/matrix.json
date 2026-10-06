@@ -216,6 +216,76 @@
       "limitations": []
     },
     {
+      "id": "component/fixture.async_interleave",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/async",
+      "component": "fixture.async_interleave",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/async/async_interleave.rs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "rust-only",
+        "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
+      },
+      "replay": {
+        "mode": "unsupported",
+        "expectCategory": "async-operation",
+        "reason": "The operation is async. Replay generates a synchronous candidate call, so the planner rejects an async operation even though capture now records it. The captured trace also carries two overlapping sibling operation spans, which strict comparison rejects outside conformance.parallel."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
+      "id": "component/fixture.async_migration",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/async",
+      "component": "fixture.async_migration",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/async/async_migration.rs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "rust-only",
+        "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
+      },
+      "replay": {
+        "mode": "unsupported",
+        "expectCategory": "async-operation",
+        "reason": "The operation is async. Replay generates a synchronous candidate call, so the planner rejects an async operation even though capture now records it."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
       "id": "component/fixture.async_smol_timer",
       "classification": "implementation-component",
       "sourceGroup": "registry",

@@ -4,10 +4,32 @@
 //! metadata and record the construction inputs the registry folds into the
 //! operation they build; types register raw link-time metadata; `SpecEvent`
 //! projects structured values through `ToNativeValue`; and `spec_trace!`
-//! records native observations. An async operation begins recording at its
-//! first poll and completes when the body's future resolves; an async setup
-//! records no construction inputs at all, so capture rejects a component that
-//! declares one.
+//! records native observations. An async operation captures the caller's
+//! operation where its future is *constructed* and begins recording at its
+//! first poll, so it records under the operation that built it even when
+//! another thread resumes it; it completes when the body's future resolves. An
+//! async setup records no construction inputs at all, so capture rejects a
+//! component that declares one.
+//!
+//! To run code at construction time, `#[spec_operation]` rewrites an annotated
+//! `async fn` into a `fn` returning `impl Future<Output = T>`. Three
+//! consequences are worth knowing:
+//!
+//! - **Edition 2024 only.** The rewritten signature relies on edition 2024's
+//!   rule that an RPIT captures every in-scope lifetime. On edition 2021 a
+//!   borrowing `async fn` would need an explicit `use<..>` bound, which is not
+//!   emitted.
+//! - **The returned future is boxed once.** The wrapper owns a `Pin<Box<_>>` of
+//!   the body so it needs no pin projection, which `unsafe_code = "forbid"`
+//!   would otherwise make impossible without a new dependency.
+//! - **No auto-trait bound is declared.** The rewrite emits a bare
+//!   `impl Future<Output = T>`, so `Send`, `Sync`, and the rest leak from the
+//!   body exactly as they do for an un-annotated `async fn`. Declaring `+ Send`
+//!   would reject bodies that hold a non-`Send` value across an `.await`.
+//!
+//! The registry is unaffected: `return_type`, `invocation`, `return_kind`, and
+//! `is_async` are authored from the signature as the caller wrote it, before
+//! the rewrite, so byte-identical parity with the C# twin is preserved.
 
 use proc_macro::TokenStream;
 use proc_macro_crate::{FoundCrate, crate_name};
@@ -298,6 +320,18 @@ pub fn spec_operation(attribute: TokenStream, item: TokenStream) -> TokenStream 
         })
         .collect::<Vec<_>>();
     let is_async = function.sig.asyncness.is_some();
+    // Read every registry-visible fact from the signature the author wrote,
+    // before the async arm rewrites it. The registry's `return_type` and
+    // `is_async` describe the declared operation, not the desugared one, so
+    // byte-level parity with the C# twin depends on this ordering.
+    let return_type = match &function.sig.output {
+        ReturnType::Default => "()".to_string(),
+        ReturnType::Type(_, ty) => quote!(#ty).to_string(),
+    };
+    let output_type: Type = match &function.sig.output {
+        ReturnType::Default => parse_quote!(()),
+        ReturnType::Type(_, ty) => (**ty).clone(),
+    };
     // Shared by every return-kind arm so none can omit a step. `inputs_recorded`
     // must stay after `#input_records`: the snapshot it takes is validated
     // against the inputs the registry declares for this operation.
@@ -321,18 +355,34 @@ pub fn spec_operation(attribute: TokenStream, item: TokenStream) -> TokenStream 
         _ => unreachable!("non-unit functions have explicit return types"),
     };
     let new_body = if is_async {
-        // An `async fn` has no construction-time code, so recording begins at
-        // first poll: `#prologue` is inside the awaited block, not beside it.
-        // Desugaring the signature to run it earlier would change the
-        // registry's `return_type` and break parity with the C# twin.
+        // Desugar `async fn f(..) -> T` into `fn f(..) -> impl Future<Output = T>`
+        // so there *is* construction-time code: `capture_async_context` runs
+        // where the caller's operation is still current, and the wrapper
+        // re-installs that context around every poll. The future then records
+        // under the operation that built it even when another thread resumes
+        // it, and two interleaved operations keep their own contexts.
+        //
+        // The span is still opened at first poll — `#prologue` stays inside
+        // the async block — so building a future and dropping it unpolled
+        // leaves the session untouched.
+        //
+        // No auto-trait bound is declared. Auto-trait leakage still gives the
+        // returned future `Send` when the body is `Send`, which is exactly
+        // what `async fn` does today; declaring `+ Send` would instead reject
+        // bodies that legitimately hold a non-`Send` value across an `.await`.
+        //
+        // The registry is unaffected: `return_type` and `is_async` are read
+        // from the author's signature above, before this rewrite.
+        function.sig.asyncness = None;
+        function.sig.output = parse_quote!(-> impl ::core::future::Future<Output = #output_type>);
         parse_quote!({
-            (async move {
+            let __sg_context = #rt::capture_async_context();
+            #rt::instrument_async_operation(__sg_context, async move {
                 #prologue
                 let __sg_return = (async move #body).await;
                 #completion
                 __sg_return
             })
-            .await
         })
     } else {
         parse_quote!({
@@ -354,11 +404,6 @@ pub fn spec_operation(attribute: TokenStream, item: TokenStream) -> TokenStream 
         let ty = quote!(#ty).to_string();
         quote!((#name, #ty))
     });
-    let return_type = match &function.sig.output {
-        ReturnType::Default => "()".to_string(),
-        ReturnType::Type(_, ty) => quote!(#ty).to_string(),
-    };
-
     quote! {
         #function
 
@@ -390,7 +435,8 @@ pub fn spec_operation(attribute: TokenStream, item: TokenStream) -> TokenStream 
 /// deferred setup inputs are still staged outside the per-run collector and
 /// cannot follow a future. `specgate capture` therefore rejects any component
 /// that declares an async setup, leaving it discovery-only. An async
-/// `#[spec_operation]` is unaffected and records from its first poll.
+/// `#[spec_operation]` is unaffected: it records from its first poll under the
+/// operation that constructed its future.
 #[proc_macro_attribute]
 pub fn spec_setup(attribute: TokenStream, item: TokenStream) -> TokenStream {
     let SetupArg {
