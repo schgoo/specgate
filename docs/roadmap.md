@@ -94,17 +94,34 @@ Operation context must survive every `Future` poll and every spawn, thread, and
 channel handoff, so that parentage remains correct when execution moves between
 threads.
 
-**Slice 1 is done.** The pre-poll rejection is gone and a directly-awaited
-async operation now captures, with recording beginning at the future's first
-poll rather than at construction. An `async fn` has no construction-time code,
-and running code there would require desugaring the signature, which would
-change the registry's `return_type` and break byte-identical parity with the C#
-twin.
+**Slices 1 and 2 are done.** The pre-poll rejection is gone, and an annotated
+`async fn` is rewritten into a `fn` returning `impl Future`, so it captures the
+caller's operation where the future is *constructed* and re-installs that
+context around every poll. A future therefore records under the operation that
+built it even when another executor thread resumes it, and a resumed future no
+longer starts a second session on the new thread. Recording still begins at the
+future's first poll; construction only remembers the parent. The shared
+nesting stack is gone too, so two instrumented operations can be interleaved on
+one thread and both record complete, correctly parented spans. Desugaring does
+not affect the registry: the macro authors `return_type`, `invocation`,
+`return_kind`, and `is_async` from the signature as written, before the
+rewrite, so byte-identical parity with the C# twin is preserved.
 
-Remaining: futures that migrate between executor threads, and operations
-abandoned before completion
+Remaining: operations abandoned before completion
 ([`abandonment-terminal-state`](decisions/abandonment-terminal-state.md) is
 accepted but not implemented).
+
+Raw `std::thread::spawn` is its own slice. A spawned thread finds an empty
+thread-local slot and calls `activate_native_capture_from_environment`, which
+starts a second session writing the same sidecar path, so the recording is
+clobbered rather than merged. Fixing it means making the session reachable
+process-wide, then recording operations first reached on a spawned thread
+under the scenario span with an explicit parent-attribution marker. The parent
+is destroyed at the spawn boundary, so `child of scenario` is a fallback and
+not a fact, and `NativeOperationSpan.parent_span_id` is a bare required
+string that cannot express the difference. Adding that marker is a normative
+trace-shape change, so the slice carries validator, C# parity, and golden work
+that the migration slice does not.
 
 ### M3. Async setup instrumentation
 

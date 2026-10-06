@@ -175,11 +175,15 @@ the Rust and C# registries still differ in exactly the declared ways.
   lossless primitive inputs.
 - Setup-backed methods, async calls, structured replay values, explicit
   mappings, and C# replay are not implemented.
-- A directly-awaited async operation is captured: recording begins at first
-  poll and the scope is held across the body's awaits. Not covered: futures
-  that migrate between executor threads, futures abandoned while still
-  `Pending`, and futures polled concurrently with another instrumented
-  operation, since the active-operation stack is a single nesting stack. An async setup is not instrumented at all, so capture rejects
+- An async operation is captured: the macro rewrites the annotated `async fn`
+  into a `fn` returning `impl Future`, which captures the caller's operation at
+  construction, re-installs it around every poll, begins recording at first
+  poll, and holds the scope across the body's awaits. A migrated future records
+  under the operation that built it and starts no second session on the
+  resuming thread, and interleaved operations both record complete spans. Not
+  covered: futures abandoned while still `Pending`, and operations first
+  reached on a raw `std::thread::spawn`ed thread. An async setup is not
+  instrumented at all, so capture rejects
   the whole component up front rather than encoding a bundle without its
   inputs. The ratified design for the remaining work is
   [`decisions/async-capture-context.md`](decisions/async-capture-context.md).
@@ -200,7 +204,9 @@ the Rust and C# registries still differ in exactly the declared ways.
   them before it builds anything, so no reference bundle exists. The golden
   matrix asserts this for every row it captures. An async operation no longer
   forces discovery-only status, but its bundle cannot be replayed, because the
-  replay planner emits only synchronous candidate calls. See
+  replay planner emits only synchronous candidate calls. A trace that
+  interleaves two sibling operations is additionally unreplayable, because
+  strict comparison rejects overlapping sequential children. See
   [`decisions/async-capture-context.md`](decisions/async-capture-context.md)
   for the ratified capture-context design.
 - Discovery rejects duplicate operation identity, orphan setups, method

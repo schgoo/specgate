@@ -62,14 +62,17 @@ Rust.
 - Generated Rust runners resolve the candidate's exact `specgate-runtime`
   package through candidate-rooted `cargo metadata`. Runtime path and version
   overrides are identity-preserving assertions, not dependency substitutions.
-- An `#[spec_operation] async fn` is captured. Recording begins at first poll,
-  not at construction, and the scope is held across every `.await` in the body.
-  A future that is directly awaited on one thread records exactly like a
-  synchronous call. Not covered: a future that migrates between executor
-  threads; a future abandoned while still `Pending`; and a future polled
-  concurrently with another instrumented operation, since the active-operation
-  stack is a single nesting stack. Each of these fails closed rather than
-  recording a wrong trace.
+- An `#[spec_operation] async fn` is captured. The macro rewrites it into a
+  `fn` returning `impl Future`, which captures the caller's operation at
+  construction and re-installs it around every poll; recording still begins at
+  first poll, and the scope is held across every `.await` in the body. A future
+  that migrates to another executor thread records under the operation that
+  constructed it and does not start a second session there, and two
+  instrumented operations interleaved on one thread both record complete,
+  correctly parented spans. Not covered: a future abandoned while still
+  `Pending`, which fails closed rather than recording a wrong trace; and an
+  operation first reached on a raw `std::thread::spawn`ed thread, which is a
+  separate roadmap slice.
 - Operation recording is behind a per-run `Send` collector handle, but
   setup-input staging (`PENDING_SETUP_INPUTS`) is still a bare thread-local and
   is the last thread-affine piece of capture state. Async `#[spec_setup]` is
