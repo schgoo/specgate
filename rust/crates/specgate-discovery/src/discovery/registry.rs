@@ -594,8 +594,8 @@ impl Registry {
 
 #[cfg(test)]
 mod tests {
-    use super::{Operation, OperationId, Type, TypeId};
-    use crate::identity::ComponentId;
+    use super::{ExceptionMetadata, Field, Operation, OperationId, Type, TypeId, Variant};
+    use crate::identity::{ComponentId, TypeName};
 
     #[test]
     fn identity_required() {
@@ -656,12 +656,76 @@ mod tests {
     }
 
     #[test]
+    fn operation_builder_projects_all_metadata() {
+        let operation = Operation::builder(("demo.component", "run"))
+            .module_path("demo")
+            .function("run_impl")
+            .setup(true)
+            .asynchronous(true)
+            .method(true)
+            .public(false)
+            .return_type("Result<State, Fault>")
+            .fills("state")
+            .params(vec![Field {
+                name: "state".into(),
+                ty: "State".into(),
+            }])
+            .csharp_class(Some("Demo.Service".into()))
+            .declaring_type(Some("Service".into()))
+            .csharp_method(Some("Run".into()))
+            .csharp_static(Some(true))
+            .csharp_return(Some("State".into()))
+            .csharp_params(vec![Field {
+                name: "state".into(),
+                ty: "State".into(),
+            }])
+            .csharp_exceptions(Some(vec![TypeName::from("Demo.Fault")]))
+            .build();
+
+        assert_eq!(operation.module_path, "demo");
+        assert_eq!(operation.fn_name, "run_impl");
+        assert!(operation.is_setup && operation.is_async && operation.is_method);
+        assert!(!operation.is_public);
+        assert_eq!(operation.return_type, "Result<State, Fault>");
+        assert_eq!(operation.fills, "state");
+        assert_eq!(operation.params.len(), 1);
+        assert_eq!(operation.cs_class.as_deref(), Some("Demo.Service"));
+        assert_eq!(operation.cs_method_of.as_deref(), Some("Service"));
+        assert_eq!(operation.cs_method.as_deref(), Some("Run"));
+        assert_eq!(operation.cs_is_static, Some(true));
+        assert_eq!(operation.cs_return.as_deref(), Some("State"));
+        assert_eq!(operation.cs_params.len(), 1);
+        assert_eq!(operation.cs_exceptions.as_ref().unwrap(), [TypeName::from("Demo.Fault")]);
+    }
+
+    #[test]
+    fn exception_metadata_preserves_protocol_states() {
+        assert_eq!(ExceptionMetadata::from(None).as_ref(), None);
+        assert_eq!(ExceptionMetadata::from(Some(Vec::new())).as_ref(), Some([].as_slice()));
+        let named = ExceptionMetadata::from(Some(vec![TypeName::from("Demo.Fault")]));
+        assert_eq!(named.as_ref().unwrap(), [TypeName::from("Demo.Fault")]);
+    }
+
+    #[test]
     fn type_builder() {
-        let metadata = Type::builder(TypeId::new("demo.component", "Status", "enum")).build();
+        let metadata = Type::builder(TypeId::new("demo.component", "Status", "enum"))
+            .fields(vec![Field {
+                name: "code".into(),
+                ty: "i32".into(),
+            }])
+            .variants(vec![Variant {
+                name: "Ready".into(),
+                fields: vec![Field {
+                    name: "value".into(),
+                    ty: "i32".into(),
+                }],
+                tuple: Some(vec!["String".into()]),
+            }])
+            .build();
         assert_eq!(metadata.name, "Status");
         assert_eq!(metadata.kind, "enum");
-        assert!(metadata.fields.is_empty());
-        assert!(metadata.variants.is_empty());
+        assert_eq!(metadata.fields[0].name, "code");
+        assert_eq!(metadata.variants[0].name, "Ready");
     }
 
     #[test]
@@ -670,5 +734,15 @@ mod tests {
             .unwrap_err();
         assert!(error.is_registry());
         assert!(error.to_string().contains("failed to parse discovery JSON"));
+    }
+
+    #[test]
+    fn empty_registry_queries_are_stable() {
+        let registry = super::Registry::parse(r#"{"operations":[],"types":[]}"#).unwrap();
+        assert!(registry.operations_for("missing").is_empty());
+        assert!(registry.setups_for("missing", "operation").is_empty());
+        assert!(registry.local_types("missing").is_empty());
+        assert!(registry.present_components().is_empty());
+        assert!(registry.type_names().is_empty());
     }
 }

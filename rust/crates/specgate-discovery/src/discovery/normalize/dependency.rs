@@ -2,7 +2,7 @@
 
 use super::TypeSyntax;
 
-use crate::discovery::model::{DependencySchema, Field, TypeDeclaration, TypeKind, Variant};
+use crate::discovery::model::{Dependency, Field, TypeDef, TypeDefDeps, TypeKind, Variant};
 use crate::discovery::registry::Registry;
 use crate::discovery::types::{builtin, collect_into, map};
 use crate::error::{Error, ErrorKind};
@@ -238,7 +238,7 @@ pub(super) fn dependency_types(
     root: impl AsRef<str>,
     syntax: TypeSyntax,
     registry: &Registry,
-) -> Result<Vec<DependencySchema>, Error> {
+) -> Result<Vec<Dependency>, Error> {
     let root = root.as_ref();
     let type_names = registry.type_names();
     graph
@@ -291,19 +291,19 @@ pub(super) fn dependency_types(
                             })
                         })
                         .collect::<Result<Vec<_>, Error>>()?;
-                    Ok(TypeDeclaration {
+                    TypeDef::builder(TypeDefDeps {
                         name: ty.name.as_str().into(),
                         kind: TypeKind::parse(ty.kind.as_str()),
-                        fields,
-                        variants,
                     })
+                    .fields(fields)
+                    .variants(variants)
+                    .build()
                 })
                 .collect::<Result<Vec<_>, Error>>()?;
-            Ok(DependencySchema {
-                component: component.as_str().into(),
-                dependencies: dependencies.iter().map(|dependency| dependency.as_str().into()).collect(),
-                types,
-            })
+            Ok(Dependency::builder(component.as_str())
+                .dependencies(dependencies.iter().map(|dependency| dependency.as_str().into()))
+                .types(types)
+                .build())
         })
         .collect()
 }

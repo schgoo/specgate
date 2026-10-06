@@ -161,6 +161,7 @@ impl From<String> for CaptureError {
     }
 }
 
+/// Types used by generated native capture runners.
 pub mod generated;
 
 #[doc(hidden)]
@@ -257,11 +258,14 @@ identity_string!(
     "A binding-target selector name.\n\nConstruct with `From`, borrow with `as_str` or `AsRef<str>`, and consume with `into_inner`."
 );
 
+/// Link-time operation and type metadata.
 pub mod registry;
 
+/// Semantic native values emitted by captured operations.
 pub mod value;
 use value::Value;
 
+/// Native capture session lifecycle and evidence models.
 pub mod capture;
 
 // ---------------------------------------------------------------------------
@@ -347,8 +351,7 @@ macro_rules! native_unsigned {
 }
 
 native_signed!(i8, i16, i32);
-native_signed!(u8, u16, u32);
-native_unsigned!(u64);
+native_unsigned!(u8, u16, u32, u64);
 
 impl ToNativeValue for i64 {
     fn to_native_value(&self) -> Value {

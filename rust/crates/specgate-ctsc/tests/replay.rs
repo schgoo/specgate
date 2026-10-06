@@ -15,7 +15,7 @@ fn encode_schema_registry_result(
     id: impl Into<specgate_ctsc::registry::Id>,
     version: impl Into<specgate_ctsc::registry::Version>,
     schema: impl AsRef<str>,
-) -> specgate_ctsc::registry::error::Result<specgate_ctsc::registry::Encoding> {
+) -> specgate_ctsc::registry::Result<specgate_ctsc::registry::Encoding> {
     encode_typed_registry(id, version, specgate_ctsc::registry::Schema::new(schema.as_ref()))
 }
 
@@ -29,7 +29,7 @@ fn encode_capture(
     registry_version: &str,
     registry_digest: &str,
     candidate: bool,
-) -> Result<specgate_ctsc::capture::Encoding, specgate_ctsc::capture::error::Error> {
+) -> Result<specgate_ctsc::capture::Encoding, specgate_ctsc::capture::Error> {
     let bytes = serde_json::to_vec(captures).expect("runtime captures serialize");
     let captures: Vec<specgate_ctsc::capture::Capture> = serde_json::from_slice(&bytes).expect("capture boundary matches runtime JSON");
     let metadata = specgate_ctsc::capture::Metadata::new(
@@ -52,7 +52,7 @@ fn encode_native_captures_otlp_result(
     registry_id: &str,
     registry_version: &str,
     registry_digest: &str,
-) -> Result<specgate_ctsc::capture::Encoding, specgate_ctsc::capture::error::Error> {
+) -> Result<specgate_ctsc::capture::Encoding, specgate_ctsc::capture::Error> {
     encode_capture(
         captures,
         tool_version,
@@ -73,7 +73,7 @@ fn encode_replayed_native_captures_otlp_result(
     registry_id: &str,
     registry_version: &str,
     registry_digest: &str,
-) -> Result<specgate_ctsc::capture::Encoding, specgate_ctsc::capture::error::Error> {
+) -> Result<specgate_ctsc::capture::Encoding, specgate_ctsc::capture::Error> {
     encode_capture(
         captures,
         tool_version,
@@ -351,8 +351,8 @@ fn config(name: &str) -> Config {
     Config::builder(ConfigDeps {
         scenario_name: name.into(),
         trace_id: "33333333333333333333333333333333".try_into().unwrap(),
-        run_span_id: "3333333333333301".try_into().unwrap(),
-        scenario_span_id: "3333333333333302".try_into().unwrap(),
+        run_id: "3333333333333301".try_into().unwrap(),
+        scenario_id: "3333333333333302".try_into().unwrap(),
     })
     .build()
     .unwrap()

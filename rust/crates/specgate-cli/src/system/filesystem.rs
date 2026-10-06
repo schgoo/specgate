@@ -15,7 +15,9 @@ use std::{
 ///
 /// Real scratch guards own invocation-unique temporary directories and remove
 /// only their own roots. With `test-util`, tests can seed isolated files and
-/// environment values, inject failures, and verify scratch ownership:
+/// environment values, inject failures, and verify scratch ownership.
+///
+/// # Examples
 ///
 /// ```
 /// # #[cfg(feature = "test-util")] {

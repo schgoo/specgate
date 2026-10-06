@@ -125,15 +125,17 @@ pub(super) fn cargo_manifest(plan: &Plan) -> Result<specgate_discovery::runner::
                 plan.target.package_version.clone(),
                 plan.target.package_root.clone(),
             )
-            .map_err(|error| error.to_string())?,
+            .map_err(|error| Error::wrap(ErrorKind::Linking, "candidate replay dependency is invalid", error))?,
         ),
         ("serde_json".to_string(), serde_json),
         (
             "specgate_runtime".to_string(),
-            specgate_discovery::runner::Dependency::from_source(&plan.target.runtime).map_err(|error| error.to_string())?,
+            specgate_discovery::runner::Dependency::from_source(&plan.target.runtime)
+                .map_err(|error| Error::wrap(ErrorKind::Linking, "runtime replay dependency is invalid", error))?,
         ),
     ]);
-    specgate_discovery::runner::runner_cargo("specgate-replay-runner", dependencies).map_err(|error| Error::from(error.to_string()))
+    specgate_discovery::runner::runner_cargo("specgate-replay-runner", dependencies)
+        .map_err(|error| Error::wrap(ErrorKind::Linking, "replay runner manifest is invalid", error))
 }
 
 pub(super) fn source(plan: &Plan) -> String {
@@ -162,7 +164,7 @@ pub(super) fn source(plan: &Plan) -> String {
         );
         write!(
             source,
-            "            scenario_name: {}.to_string(),\n            trace_id: specgate_runtime::capture::TraceId::try_from({}).map_err(|error| error.to_string())?,\n            run_span_id: specgate_runtime::capture::SpanId::try_from({}).map_err(|error| error.to_string())?,\n            scenario_span_id: specgate_runtime::capture::SpanId::try_from({}).map_err(|error| error.to_string())?,\n        }})\n        .start_time({start_time})\n        .clock_step({CLOCK_STEP})\n        .build().map_err(|error| error.to_string())?,\n    ).map_err(|error| error.to_string())?;\n",
+            "            scenario_name: {}.to_string(),\n            trace_id: specgate_runtime::capture::TraceId::try_from({}).map_err(|error| error.to_string())?,\n            run_id: specgate_runtime::capture::SpanId::try_from({}).map_err(|error| error.to_string())?,\n            scenario_id: specgate_runtime::capture::SpanId::try_from({}).map_err(|error| error.to_string())?,\n        }})\n        .start_time({start_time})\n        .clock_step({CLOCK_STEP})\n        .build().map_err(|error| error.to_string())?,\n    ).map_err(|error| error.to_string())?;\n",
             string_literal(&scenario.name),
             string_literal(&trace_id),
             string_literal(&run_span_id),

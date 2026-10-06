@@ -87,10 +87,10 @@ pub fn decode(manifest: impl AsRef<[u8]>, registry: impl AsRef<[u8]>, trace: imp
 ///
 /// Returns an actionable error for malformed JSON, invalid manifests or
 /// digests, broken trace linkage, empty scenarios, or unsupported values.
-fn decode_inner(manifest_json: &[u8], registry_json: &[u8], reference_otlp_json: &[u8]) -> Result<Bundle, Error> {
+fn decode_inner(manifest_json: &[u8], registry_json: &[u8], trace_json: &[u8]) -> Result<Bundle, Error> {
     let manifest: Manifest =
         serde_json::from_slice(manifest_json).map_err(|error| Error::json("malformed capture manifest JSON", error))?;
-    validate_manifest(&manifest)?;
+    let manifest = validate_manifest(manifest)?;
 
     let registry_digest = sha256_digest(registry_json);
     if manifest.registry.digest != registry_digest {
@@ -100,11 +100,11 @@ fn decode_inner(manifest_json: &[u8], registry_json: &[u8], reference_otlp_json:
         )
         .into());
     }
-    let reference_digest = sha256_digest(reference_otlp_json);
-    if manifest.reference.digest != reference_digest {
+    let reference_digest = sha256_digest(trace_json);
+    if manifest.reference_digest != reference_digest {
         return Err(format!(
             "capture reference digest mismatch: manifest declares '{}' but exact reference bytes digest to '{reference_digest}'",
-            manifest.reference.digest
+            manifest.reference_digest
         )
         .into());
     }
@@ -146,8 +146,7 @@ fn decode_inner(manifest_json: &[u8], registry_json: &[u8], reference_otlp_json:
         .into());
     }
 
-    let document: OtlpDoc =
-        serde_json::from_slice(reference_otlp_json).map_err(|error| Error::json("malformed reference OTLP JSON", error))?;
+    let document: OtlpDoc = serde_json::from_slice(trace_json).map_err(|error| Error::json("malformed reference OTLP JSON", error))?;
     let scenarios = decode_scenarios(&document, &manifest, &registry)?;
 
     Ok(Bundle {
@@ -158,7 +157,7 @@ fn decode_inner(manifest_json: &[u8], registry_json: &[u8], reference_otlp_json:
 }
 
 mod manifest;
-use manifest::{Manifest, validate_manifest};
+use manifest::{Manifest, ValidatedManifest, validate_manifest};
 
 fn sha256_digest(bytes: &[u8]) -> String {
     format!("{DIGEST_SCHEME}{:x}", Sha256::digest(bytes))
@@ -227,8 +226,8 @@ fn decode_registry(document: &RegistryDoc, digest: String) -> Result<Registry, E
     operations.shrink_to_fit();
     Ok(Registry {
         identity: RegistryIdentity {
-            id: RegistryId::from_artifact(document.registry_id.clone()),
-            version: RegistryVersion::from_artifact(document.version.clone()),
+            id: RegistryId::try_new(&document.registry_id)?,
+            version: RegistryVersion::try_new(&document.version)?,
             digest: ArtifactDigest::try_new(digest).expect("computed SHA-256 digest is canonical"),
         },
         operations,

@@ -88,9 +88,14 @@ impl Identity {
 
 /// Encode completed captures with the selected deterministic identity range.
 ///
-/// Returns an error for empty capture sets, invalid intervals, or exhausted
-/// identity/timestamp arithmetic. See the capture integration tests for the
-/// reference and candidate byte-parity examples.
+/// See the capture integration tests for the reference and candidate
+/// byte-parity examples.
+///
+/// # Errors
+///
+/// Returns an error for an empty capture set, invalid span intervals or
+/// relationships, exhausted identity or timestamp arithmetic, or JSON
+/// serialization failure.
 pub(super) fn encode(captures: impl AsRef<[Capture]>, metadata: &Metadata, identity: Identity) -> Result<Encoding, error::Error> {
     let captures = captures.as_ref();
     let trace_id = identity.trace_id.as_str();
@@ -236,7 +241,7 @@ pub(super) fn encode(captures: impl AsRef<[Capture]>, metadata: &Metadata, ident
             schema_url: schema_url.into_boxed_str(),
         }],
     };
-    let mut otlp_json = serde_json::to_string(&document)?;
+    let mut otlp_json = serde_json::to_string(&document).map_err(error::Error::json)?;
     otlp_json.shrink_to_fit();
     let span_count = operation_count
         .checked_add(captures.len())

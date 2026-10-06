@@ -182,6 +182,16 @@ pub fn validate_bundle(directory: impl AsRef<Path>) -> ValidationReport {
 
 pub mod reader {
     //! Path validators using a caller-supplied document-loading boundary.
+    //!
+    //! # Examples
+    //!
+    //! ```no_run
+    //! use specgate_ctsc::comparison::SystemReader;
+    //! use specgate_ctsc::validation::reader::validate_trace;
+    //!
+    //! let report = validate_trace("trace.otlp.json", &SystemReader::system());
+    //! assert_eq!(report.artifact.to_string_lossy(), "trace.otlp.json");
+    //! ```
 
     use super::{Path, PathBuf, ValidationLevel, ValidationReport, bundle, check_linked, registry, trace};
     use crate::comparison::DocumentReader;
@@ -201,7 +211,7 @@ pub mod reader {
     #[must_use]
     pub fn validate_trace(path: impl AsRef<Path>, reader: &impl DocumentReader) -> ValidationReport {
         let path = path.as_ref();
-        ValidationReport::new(ValidationLevel::Trace, path, trace::load_with_reader(path, reader).issues)
+        ValidationReport::new(ValidationLevel::Trace, path, trace::load_from(path, reader).issues)
     }
 
     /// Validate a linked trace and registry through `reader`.
@@ -214,7 +224,7 @@ pub mod reader {
     ) -> ValidationReport {
         let trace_path = trace_path.as_ref();
         let registry = registry::load_reader(root.as_ref(), imports.as_ref(), reader);
-        let parsed = trace::load_with_reader(trace_path, reader);
+        let parsed = trace::load_from(trace_path, reader);
         let mut issues = registry.issues;
         issues.extend(parsed.issues);
         if issues.is_empty()
@@ -237,6 +247,24 @@ pub mod bytes {
     //! Sans-I/O, pure byte-oriented counterparts to the path validators.
     //!
     //! Use these functions for already-loaded artifacts. They perform no filesystem access.
+    //!
+    //! # Examples
+    //!
+    //! ```
+    //! use specgate_ctsc::validation::{BundleBytes, DocumentBytes, bytes};
+    //! use std::path::Path;
+    //!
+    //! let registry = DocumentBytes::new(Path::new("registry.ctsc.json"), br#"{}"#);
+    //! let trace = DocumentBytes::new(Path::new("reference.otlp.json"), br#"{"resourceSpans":[]}"#);
+    //! let manifest = DocumentBytes::new(Path::new("capture.ctsc.json"), br#"{}"#);
+    //!
+    //! assert!(!bytes::validate_registry(registry, []).valid);
+    //! assert!(!bytes::validate_linked(trace, registry, []).valid);
+    //! assert!(!bytes::validate_bundle(
+    //!     Path::new("capture"),
+    //!     BundleBytes::new(manifest, registry, trace),
+    //! ).valid);
+    //! ```
 
     use super::{BundleBytes, DocumentBytes, Path, ValidationLevel, ValidationReport, bundle, check_linked, load_bytes, registry};
 

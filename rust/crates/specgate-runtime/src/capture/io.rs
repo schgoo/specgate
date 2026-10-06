@@ -255,7 +255,7 @@ use persistence_stage::PersistenceStage;
 #[derive(Debug, Default)]
 pub(super) struct FakeFs {
     pub(super) fail_stage: Option<PersistenceStage>,
-    pub(super) replace_failures_remaining: u32,
+    pub(super) replace_failures: u32,
     pub(super) calls: Vec<PersistenceStage>,
     pub(super) snapshots: Vec<Vec<u8>>,
 }
@@ -272,8 +272,8 @@ impl FakeFs {
 
     fn replace(&mut self, bytes: &[u8]) -> std::io::Result<()> {
         self.calls.push(PersistenceStage::Replace);
-        if self.fail_stage == Some(PersistenceStage::Replace) || self.replace_failures_remaining > 0 {
-            self.replace_failures_remaining = self.replace_failures_remaining.saturating_sub(1);
+        if self.fail_stage == Some(PersistenceStage::Replace) || self.replace_failures > 0 {
+            self.replace_failures = self.replace_failures.saturating_sub(1);
             return Err(std::io::Error::other("injected Replace failure"));
         }
         self.snapshots.push(bytes.to_vec());

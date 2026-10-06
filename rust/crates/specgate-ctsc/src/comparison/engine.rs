@@ -72,8 +72,8 @@ pub fn compare_with(
 ) -> ComparisonReport {
     let reference = reference.as_ref();
     let candidate = candidate.as_ref();
-    let reference_trace = crate::validation::trace::load_with_reader(reference, reader);
-    let candidate_trace = crate::validation::trace::load_with_reader(candidate, reader);
+    let reference_trace = crate::validation::trace::load_from(reference, reader);
+    let candidate_trace = crate::validation::trace::load_from(candidate, reader);
     let registry_set = registry
         .as_ref()
         .map(|path| registry::load_reader(path.as_ref(), imports.as_ref(), reader));

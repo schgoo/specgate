@@ -8,7 +8,7 @@
 
 use super::TypeSyntax;
 use super::dependency::{Qualifier, dependency_graph, dependency_types, map_component};
-use crate::discovery::model::{ErrorDeclaration, Field, Input, Operation, Schema, Setup, TypeDeclaration, TypeKind, Variant};
+use crate::discovery::model::{ErrorDeclaration, Field, Input, Operation, Schema, Setup, TypeDef, TypeDefDeps, TypeKind, Variant};
 use crate::discovery::registry::{Operation as RawOperation, Registry};
 use crate::discovery::setup::fold_operation;
 use crate::discovery::types::{RustType, is_unit, map, normalize, parse};
@@ -105,7 +105,7 @@ pub(in crate::discovery) fn build_schema(registry: &Registry, comp: impl AsRef<s
         .local_types(comp)
         .into_iter()
         .map(|t| {
-            let fields = t
+            let fields: Vec<Field> = t
                 .fields
                 .iter()
                 .map(|field| {
@@ -115,7 +115,7 @@ pub(in crate::discovery) fn build_schema(registry: &Registry, comp: impl AsRef<s
                     })
                 })
                 .collect::<Result<Vec<_>, Error>>()?;
-            let variants = t
+            let variants: Vec<Variant> = t
                 .variants
                 .iter()
                 .map(|v| {
@@ -146,12 +146,13 @@ pub(in crate::discovery) fn build_schema(registry: &Registry, comp: impl AsRef<s
                     })
                 })
                 .collect::<Result<Vec<_>, Error>>()?;
-            Ok(TypeDeclaration {
+            TypeDef::builder(TypeDefDeps {
                 name: t.name.clone(),
                 kind: TypeKind::parse(t.kind.as_str()),
-                fields,
-                variants,
             })
+            .fields(fields)
+            .variants(variants)
+            .build()
         })
         .collect::<Result<Vec<_>, Error>>()?;
 
@@ -225,18 +226,16 @@ pub(in crate::discovery) fn build_normalized(registry: &Registry, comp: impl AsR
     let types = registry
         .local_types(comp)
         .into_iter()
-        .map(|t| TypeDeclaration {
-            name: t.name.clone(),
-            kind: TypeKind::parse(t.kind.as_str()),
-            fields: t
+        .map(|t| {
+            let fields: Vec<Field> = t
                 .fields
                 .iter()
                 .map(|field| Field {
                     name: field.name.clone(),
                     ty: qualifier.qualify(&field.ty).into(),
                 })
-                .collect(),
-            variants: t
+                .collect();
+            let variants: Vec<Variant> = t
                 .variants
                 .iter()
                 .map(|v| Variant {
@@ -254,9 +253,16 @@ pub(in crate::discovery) fn build_normalized(registry: &Registry, comp: impl AsR
                         .as_ref()
                         .map(|tuple| tuple.iter().map(|ty| qualifier.qualify(ty).into()).collect()),
                 })
-                .collect(),
+                .collect();
+            TypeDef::builder(TypeDefDeps {
+                name: t.name.clone(),
+                kind: TypeKind::parse(t.kind.as_str()),
+            })
+            .fields(fields)
+            .variants(variants)
+            .build()
         })
-        .collect();
+        .collect::<Result<Vec<_>, Error>>()?;
 
     Ok(Schema {
         component: comp.into(),

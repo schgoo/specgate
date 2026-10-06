@@ -81,8 +81,7 @@ pub mod schema {
     //! per-component failures during batched discovery.
     #[doc(inline)]
     pub use crate::discovery::model::{
-        DependencySchema, ErrorDeclaration, Field, Input, Operation, OperationBuilder, Schema, Setup, TypeDeclaration, TypeKind,
-        UnknownKind, Variant,
+        Dependency, ErrorDeclaration, Field, Input, Operation, OperationBuilder, Schema, Setup, TypeDef, TypeKind, UnknownKind, Variant,
     };
     #[doc(inline)]
     pub use crate::discovery::{normalize_registry, schema};

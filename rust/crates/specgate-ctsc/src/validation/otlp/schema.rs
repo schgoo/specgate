@@ -15,10 +15,20 @@ impl TracesData {
         let mut child_path = String::with_capacity(path_capacity(path, ".resourceSpans[]"));
         let mut attributes_path = String::with_capacity(path_capacity(path, ".resourceSpans[].resource.attributes"));
         let mut scope_path = String::with_capacity(path_capacity(path, ".resourceSpans[].scopeSpans[]"));
+        let mut scope_detail_path = String::with_capacity(path_capacity(path, ".resourceSpans[].scopeSpans[].scope"));
+        let mut span_path = String::with_capacity(path_capacity(path, ".resourceSpans[].scopeSpans[].spans[]"));
+        let mut span_paths = SpanPaths::new(path);
         for (index, resource) in self.resource_spans.as_deref().unwrap_or_default().iter().enumerate() {
             child_path.clear();
             write!(child_path, "{path}.resourceSpans[{index}]").expect("writing to a String cannot fail");
-            resource.validate(&child_path, &mut attributes_path, &mut scope_path)?;
+            resource.validate(
+                &child_path,
+                &mut attributes_path,
+                &mut scope_path,
+                &mut scope_detail_path,
+                &mut span_path,
+                &mut span_paths,
+            )?;
         }
         Ok(())
     }
@@ -36,7 +46,15 @@ struct ResourceSpans {
 }
 
 impl ResourceSpans {
-    fn validate(&self, path: impl AsRef<str>, attributes_path: &mut String, child_path: &mut String) -> Result<(), ParseError> {
+    fn validate(
+        &self,
+        path: impl AsRef<str>,
+        attributes_path: &mut String,
+        child_path: &mut String,
+        scope_path: &mut String,
+        span_path: &mut String,
+        span_paths: &mut SpanPaths,
+    ) -> Result<(), ParseError> {
         let path = path.as_ref();
         if let Some(resource) = &self.resource {
             attributes_path.clear();
@@ -46,7 +64,7 @@ impl ResourceSpans {
         for (index, scope) in self.scope_spans.as_deref().unwrap_or_default().iter().enumerate() {
             child_path.clear();
             write!(child_path, "{path}.scopeSpans[{index}]").expect("writing to a String cannot fail");
-            scope.validate(&child_path)?;
+            scope.validate(&child_path, scope_path, span_path, span_paths)?;
         }
         Ok(())
     }
@@ -81,19 +99,23 @@ struct ScopeSpans {
 }
 
 impl ScopeSpans {
-    fn validate(&self, path: impl AsRef<str>) -> Result<(), ParseError> {
+    fn validate(
+        &self,
+        path: impl AsRef<str>,
+        scope_path: &mut String,
+        child_path: &mut String,
+        span_paths: &mut SpanPaths,
+    ) -> Result<(), ParseError> {
         let path = path.as_ref();
         if let Some(scope) = &self.scope {
-            let mut scope_path = String::with_capacity(path.len() + ".scope".len());
+            scope_path.clear();
             write!(scope_path, "{path}.scope").expect("writing to a String cannot fail");
-            scope.validate(&mut scope_path)?;
+            scope.validate(scope_path)?;
         }
-        let mut child_path = String::with_capacity(path_capacity(path, ".spans[]"));
-        let mut span_paths = SpanPaths::new(path);
         for (index, span) in self.spans.as_deref().unwrap_or_default().iter().enumerate() {
             child_path.clear();
             write!(child_path, "{path}.spans[{index}]").expect("writing to a String cannot fail");
-            span.validate(&child_path, &mut span_paths)?;
+            span.validate(&mut *child_path, span_paths)?;
         }
         Ok(())
     }

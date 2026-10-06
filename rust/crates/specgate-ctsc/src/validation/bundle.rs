@@ -46,7 +46,7 @@ pub(crate) fn validate_read(directory: impl AsRef<Path>, reader: &impl crate::co
         |bytes| registry::load_bytes(DocumentBytes::new(&registry_path, bytes), &[]),
     );
     let trace = trace_bytes.as_deref().map_or_else(
-        || super::trace::load_with_reader(&trace_path, reader),
+        || super::trace::load_from(&trace_path, reader),
         |bytes| load_bytes(&trace_path, bytes),
     );
     validate_loaded(

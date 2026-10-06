@@ -34,11 +34,12 @@
 //! );
 //! let encoded = encode_reference([capture], &metadata)?;
 //! assert_eq!(encoded.span_count, 3);
-//! # Ok::<(), specgate_ctsc::capture::error::Error>(())
+//! # Ok::<(), specgate_ctsc::capture::Error>(())
 //! ```
 
 /// Structured capture encoding errors and stable failure classifications.
-pub mod error;
+mod error;
+pub use error::{Error, ErrorKind};
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -443,7 +444,7 @@ impl OperationBuilder {
     ///
     /// # Errors
     /// Returns an encoding error when the end timestamp precedes the start timestamp.
-    pub fn build(self) -> Result<Operation, error::Error> {
+    pub fn build(self) -> Result<Operation, Error> {
         if self.operation.end_ns < self.operation.start_ns {
             return Err(format!(
                 "operation end timestamp {} precedes start timestamp {}",
@@ -511,7 +512,7 @@ impl Capture {
     /// let error = capture.operations(vec![operation.clone(), operation]).build()
     ///     .expect_err("duplicate span identities must be rejected");
     /// assert!(error.to_string().contains("unique"));
-    /// # Ok::<(), specgate_ctsc::capture::error::Error>(())
+    /// # Ok::<(), specgate_ctsc::capture::Error>(())
     /// ```
     #[must_use]
     pub fn builder(deps: impl Into<CaptureDeps>) -> CaptureBuilder {
@@ -538,7 +539,7 @@ impl CaptureBuilder {
     ///
     /// # Errors
     /// Returns an encoding error when operation span identifiers are duplicated.
-    pub fn build(self) -> Result<Capture, error::Error> {
+    pub fn build(self) -> Result<Capture, Error> {
         let ids = self
             .capture
             .operations
@@ -645,7 +646,7 @@ impl Metadata {
 /// # Errors
 /// Returns a structured error for invalid parentage, exhausted identifiers,
 /// timestamp overflow, or serialization failure.
-pub fn encode_reference(captures: impl AsRef<[Capture]>, metadata: &Metadata) -> Result<Encoding, error::Error> {
+pub fn encode_reference(captures: impl AsRef<[Capture]>, metadata: &Metadata) -> Result<Encoding, Error> {
     encoding::encode(captures.as_ref(), metadata, encoding::Identity::REFERENCE)
 }
 
@@ -659,7 +660,7 @@ pub fn encode_reference(captures: impl AsRef<[Capture]>, metadata: &Metadata) ->
 ///
 /// # Errors
 /// Returns the same structured failures as [`encode_reference`].
-pub fn encode_candidate(captures: impl AsRef<[Capture]>, metadata: &Metadata) -> Result<Encoding, error::Error> {
+pub fn encode_candidate(captures: impl AsRef<[Capture]>, metadata: &Metadata) -> Result<Encoding, Error> {
     encoding::encode(captures.as_ref(), metadata, encoding::Identity::CANDIDATE)
 }
 

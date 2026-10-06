@@ -47,8 +47,8 @@ fn main() {
     let config = Config::builder(ConfigDeps {
         scenario_name: "bench".into(),
         trace_id: "00112233445566778899aabbccddeeff".try_into().unwrap(),
-        run_span_id: "0011223344556677".try_into().unwrap(),
-        scenario_span_id: "8899aabbccddeeff".try_into().unwrap(),
+        run_id: "0011223344556677".try_into().unwrap(),
+        scenario_id: "8899aabbccddeeff".try_into().unwrap(),
     })
     .build()
     .unwrap();
@@ -64,8 +64,8 @@ fn main() {
     let checkpoint_config = Config::builder(ConfigDeps {
         scenario_name: "checkpoint".into(),
         trace_id: "11112222333344445555666677778888".try_into().unwrap(),
-        run_span_id: "1111222233334444".try_into().unwrap(),
-        scenario_span_id: "5555666677778888".try_into().unwrap(),
+        run_id: "1111222233334444".try_into().unwrap(),
+        scenario_id: "5555666677778888".try_into().unwrap(),
     })
     .build()
     .unwrap();

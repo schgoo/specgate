@@ -128,8 +128,8 @@ impl DeferredSetup {
 /// start(Config::builder(ConfigDeps {
 ///     scenario_name: "setup".into(),
 ///     trace_id: TraceId::parse("11111111111111111111111111111111")?,
-///     run_span_id: SpanId::parse("1111111111111101")?,
-///     scenario_span_id: SpanId::parse("1111111111111102")?,
+///     run_id: SpanId::parse("1111111111111101")?,
+///     scenario_id: SpanId::parse("1111111111111102")?,
 /// }).build()?)?;
 /// record_setup(SetupProvenance {
 ///     component_id: ComponentName::new("example.component"),

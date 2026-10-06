@@ -1,11 +1,11 @@
 //! OTLP span linkage validation and replay scenario assembly.
 
 use super::{
-    BTreeMap, COMPONENT_ID, CTSC_VERSION, ComponentId, EMPTY_EVENT, ERROR_EVENT, ERROR_NAME, ERROR_VALUE, FAULT_EVENT, Input, Manifest,
-    OBS_EVENT, OBS_NAME, OPERATION_INPUTS, OPERATION_NAME, OPERATION_SPAN, Operation, OperationName, PARALLEL_SPAN, REGISTRY_DIGEST,
-    REGISTRY_ID, REGISTRY_VERSION, RESULT_EVENT, RESULT_VALUE, RUN_SPAN, Registry, SCENARIO_INDEX, SCENARIO_NAME, SCENARIO_SPAN,
-    SPAN_WIDTH, Scenario, ScenarioIndex, ScenarioName, TARGET_LANGUAGE, TARGET_NAME, TOOL_NAME, TOOL_VERSION_KEY, TRACE_WIDTH, Type,
-    VERSION_KEY, Value, error,
+    BTreeMap, COMPONENT_ID, CTSC_VERSION, ComponentId, EMPTY_EVENT, ERROR_EVENT, ERROR_NAME, ERROR_VALUE, FAULT_EVENT, Input, OBS_EVENT,
+    OBS_NAME, OPERATION_INPUTS, OPERATION_NAME, OPERATION_SPAN, Operation, OperationName, PARALLEL_SPAN, REGISTRY_DIGEST, REGISTRY_ID,
+    REGISTRY_VERSION, RESULT_EVENT, RESULT_VALUE, RUN_SPAN, Registry, SCENARIO_INDEX, SCENARIO_NAME, SCENARIO_SPAN, SPAN_WIDTH, Scenario,
+    ScenarioIndex, ScenarioName, TARGET_LANGUAGE, TARGET_NAME, TOOL_NAME, TOOL_VERSION_KEY, TRACE_WIDTH, Type, VERSION_KEY,
+    ValidatedManifest, Value, error,
 };
 mod wire;
 pub(super) use wire::OtlpDoc as Document;
@@ -20,11 +20,15 @@ struct ScenarioRef<'a> {
     trace_id: &'a str,
     span_id: &'a str,
     name: String,
-    index: i64,
+    index: ScenarioIndex,
     position: usize,
 }
 
-pub(super) fn decode_scenarios(document: &Document, manifest: &Manifest, registry: &Registry) -> Result<Vec<Scenario>, error::Error> {
+pub(super) fn decode_scenarios(
+    document: &Document,
+    manifest: &ValidatedManifest,
+    registry: &Registry,
+) -> Result<Vec<Scenario>, error::Error> {
     if document.resource_spans.len() != 1 {
         return Err(format!(
             "reference OTLP must contain exactly one resourceSpans entry, found {}",
@@ -115,9 +119,7 @@ pub(super) fn decode_scenarios(document: &Document, manifest: &Manifest, registr
         )?
         .to_string();
         let index = require_integer(&attributes, SCENARIO_INDEX, format!("scenario span '{}'", span_ref.span.span_id))?;
-        if index < 0 {
-            return Err(format!("scenario '{name}' has negative index {index}").into());
-        }
+        let index = ScenarioIndex::new(index).ok_or_else(|| format!("scenario '{name}' has negative index {index}"))?;
         scenario_refs.push(ScenarioRef {
             trace_id: &span_ref.span.trace_id,
             span_id: &span_ref.span.span_id,
@@ -129,16 +131,16 @@ pub(super) fn decode_scenarios(document: &Document, manifest: &Manifest, registr
     scenario_refs.sort_by_key(|scenario| (scenario.index, scenario.position));
     for (expected, scenario) in scenario_refs.iter().enumerate() {
         let expected = i64::try_from(expected).map_err(|_error| "reference scenario index exceeds i64".to_string())?;
-        if scenario.index != expected {
+        if scenario.index.get() != expected {
             return Err(format!(
                 "reference scenario indexes must be unique and contiguous from zero; expected {expected}, found {}",
-                scenario.index
+                scenario.index.get()
             )
             .into());
         }
     }
     let trace_names = scenario_refs.iter().map(|scenario| scenario.name.as_str()).collect::<Vec<_>>();
-    let manifest_names = manifest.scenarios.names.iter().map(String::as_str).collect::<Vec<_>>();
+    let manifest_names = manifest.scenario_names.iter().map(String::as_str).collect::<Vec<_>>();
     if trace_names != manifest_names {
         return Err(format!("reference scenario order/names {trace_names:?} do not match capture manifest {manifest_names:?}").into());
     }
@@ -194,8 +196,8 @@ pub(super) fn decode_scenarios(document: &Document, manifest: &Manifest, registr
             })
             .collect();
         scenarios.push(Scenario {
-            name: ScenarioName::from_artifact(scenario.name),
-            index: ScenarioIndex::new(scenario.index).expect("validated scenario indexes are non-negative"),
+            name: ScenarioName::try_new(scenario.name)?,
+            index: scenario.index,
             operations,
         });
     }

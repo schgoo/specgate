@@ -19,49 +19,6 @@ use super::error;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
-macro_rules! text_id {
-    ($name:ident, $doc:literal) => {
-        #[doc = $doc]
-        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
-        #[serde(transparent)]
-        pub struct $name(String);
-        impl $name {
-            /// Construct internally from spelling already accepted by artifact validation.
-            pub(super) fn from_artifact(value: impl Into<String>) -> Self {
-                Self(value.into())
-            }
-            /// Borrow the preserved spelling.
-            pub fn as_str(&self) -> &str {
-                &self.0
-            }
-        }
-        impl<'de> Deserialize<'de> for $name {
-            fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-                Ok(Self::from_artifact(String::deserialize(deserializer)?))
-            }
-        }
-        impl AsRef<str> for $name {
-            fn as_ref(&self) -> &str {
-                self.as_str()
-            }
-        }
-        impl std::fmt::Display for $name {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.write_str(self.as_str())
-            }
-        }
-        impl PartialEq<String> for $name {
-            fn eq(&self, other: &String) -> bool {
-                self.as_str() == other
-            }
-        }
-        impl PartialEq<&str> for $name {
-            fn eq(&self, other: &&str) -> bool {
-                self.as_str() == *other
-            }
-        }
-    };
-}
 macro_rules! guarded_text_id {
     ($name:ident, $doc:literal) => {
         #[doc = $doc]
@@ -112,8 +69,8 @@ macro_rules! guarded_text_id {
         }
     };
 }
-text_id!(RegistryId, "Registry identity used by replay linkage.");
-text_id!(RegistryVersion, "Registry version used by replay linkage.");
+guarded_text_id!(RegistryId, "Registry identity used by replay linkage.");
+guarded_text_id!(RegistryVersion, "Registry version used by replay linkage.");
 /// Exact lowercase SHA-256 artifact digest used by replay linkage.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(transparent)]
@@ -125,8 +82,8 @@ impl ArtifactDigest {
     ///
     /// # Errors
     /// Returns a replay decoding error when the digest is not canonical SHA-256 text.
-    pub fn try_new(value: impl Into<String>) -> Result<Self, error::Error> {
-        let value = value.into();
+    pub fn try_new(value: impl AsRef<str>) -> Result<Self, error::Error> {
+        let value = value.as_ref();
         let valid = value.strip_prefix("sha256:").is_some_and(|hex| {
             hex.len() == SHA256_HEX_LEN && hex.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
         });
@@ -135,7 +92,7 @@ impl ArtifactDigest {
                 .to_string()
                 .into());
         }
-        Ok(Self(value))
+        Ok(Self(value.to_owned()))
     }
     /// Borrow the canonical digest spelling.
     #[must_use]
@@ -170,7 +127,7 @@ impl PartialEq<&str> for ArtifactDigest {
 }
 guarded_text_id!(ComponentId, "Component identity used by operation lookup.");
 guarded_text_id!(OperationName, "Semantic operation name.");
-text_id!(ScenarioName, "Semantic scenario name.");
+guarded_text_id!(ScenarioName, "Semantic scenario name.");
 
 /// Non-negative scenario ordering index.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -204,11 +161,12 @@ impl TypeOwner {
     /// Build an optional named-type owner qualification from boundary text.
     ///
     /// # Errors
-    /// Returns [`Error`](error::Error) when a supplied component identity is empty.
+    /// Returns [`Error`](error::Error) when a supplied component or registry
+    /// identity is empty.
     pub fn try_new<C: AsRef<str>, R: AsRef<str>>(component_id: Option<C>, registry_id: Option<R>) -> Result<Self, error::Error> {
         Ok(Self {
             component_id: component_id.map(|value| ComponentId::try_new(value.as_ref())).transpose()?,
-            registry_id: registry_id.map(|value| RegistryId::from_artifact(value.as_ref())),
+            registry_id: registry_id.map(|value| RegistryId::try_new(value.as_ref())).transpose()?,
         })
     }
 

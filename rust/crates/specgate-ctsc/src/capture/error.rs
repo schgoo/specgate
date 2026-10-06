@@ -19,7 +19,7 @@ impl std::fmt::Display for ErrorKind {
 ///
 /// # Examples
 /// ```
-/// # let error: specgate_ctsc::capture::error::Error = "invalid capture".to_string().into();
+/// # let error: specgate_ctsc::capture::Error = "invalid capture".to_string().into();
 /// assert!(error.is_encoding());
 /// ```
 #[ohno::error]
@@ -48,8 +48,8 @@ impl Error {
     }
 }
 
-impl From<serde_json::Error> for Error {
-    fn from(source: serde_json::Error) -> Self {
+impl Error {
+    pub(super) fn json(source: serde_json::Error) -> Self {
         Self::caused_by(ErrorKind::Encoding, "native CTSC OTLP serialization failed".to_string(), source)
     }
 }

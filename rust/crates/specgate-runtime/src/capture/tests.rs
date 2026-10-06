@@ -1,15 +1,15 @@
 use super::io::persistence_stage::PersistenceStage;
 use super::*;
 
-fn native_config<'a>(operation_span_ids: impl AsRef<[&'a str]>) -> Config {
-    let operation_span_ids = operation_span_ids.as_ref();
+fn native_config<'a>(span_ids: impl AsRef<[&'a str]>) -> Config {
+    let span_ids = span_ids.as_ref();
     Config::builder(ConfigDeps {
         scenario_name: "scenario".to_string(),
         trace_id: "11111111111111111111111111111111".try_into().unwrap(),
-        run_span_id: "1111111111111101".try_into().unwrap(),
-        scenario_span_id: "1111111111111102".try_into().unwrap(),
+        run_id: "1111111111111101".try_into().unwrap(),
+        scenario_id: "1111111111111102".try_into().unwrap(),
     })
-    .operation_span_ids(operation_span_ids.iter().map(|id| (*id).try_into().unwrap()).collect::<Vec<_>>())
+    .operation_ids(span_ids.iter().map(|id| (*id).try_into().unwrap()).collect::<Vec<_>>())
     .start_time(1_000)
     .clock_step(10)
     .build()
@@ -307,7 +307,7 @@ fn sidecar_failures() {
 #[test]
 fn replacement_retry() {
     let file_system = start_sidecar(FakeFs {
-        replace_failures_remaining: 2,
+        replace_failures: 2,
         ..FakeFs::default()
     });
     let scope = begin_operation(ComponentId::from("fixture.native"), OperationName::from("retry")).unwrap();
@@ -398,8 +398,8 @@ fn nested_capture() {
 
     let capture = finish().unwrap();
     assert_eq!(capture.operations.len(), 2);
-    assert_eq!(capture.operations[0].parent_span_id, capture.scenario.span_id);
-    assert_eq!(capture.operations[1].parent_span_id, capture.operations[0].span_id);
+    assert_eq!(capture.operations[0].parent_id, capture.scenario.span_id);
+    assert_eq!(capture.operations[1].parent_id, capture.operations[0].span_id);
     assert_ne!(capture.operations[0].span_id, capture.operations[1].span_id);
     assert_eq!(capture.operations[0].observations[0].name, "checkpoint");
     assert!(matches!(&capture.operations[0].inputs["optional"], Value::Map(values) if values.contains_key("Some")));

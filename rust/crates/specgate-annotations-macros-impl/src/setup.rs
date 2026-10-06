@@ -24,7 +24,7 @@ use super::{
 ///     quote!(pub fn counter(start: i32) -> i32 { start }),
 /// )?;
 /// let expanded = expanded.to_string();
-/// assert!(expanded.contains("OpMeta :: builder"));
+/// assert!(expanded.contains("OpMeta :: const_builder"));
 /// assert!(expanded.contains("defer_setup"));
 /// assert!(expanded.contains("example.counter"));
 /// # Ok::<(), syn::Error>(())
@@ -98,7 +98,7 @@ pub fn expand_setup(attribute: TokenStream2, item: TokenStream2) -> syn::Result<
         const #const_name: () = {
             #[#rt::_private::linkme::distributed_slice(#rt::SPECGATE_OPS)]
             #[linkme(crate = #rt::_private::linkme)]
-            static __SPECGATE_META: #rt::OpMeta = #rt::OpMeta::builder(#rt::OpMetaDeps {
+            static __SPECGATE_META: #rt::OpMeta = #rt::OpMeta::const_builder(#rt::OpDeps {
                 name: #rt::OpName::new(#operation),
                 module_path: #rt::ModulePath::new(::core::module_path!()),
                 fn_name: #rt::FnName::new(#function_name),

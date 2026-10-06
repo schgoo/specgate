@@ -14,6 +14,96 @@ const DYNAMIC_VALUE: &str = "is the dynamic runtime value";
 const MISSING_OWNER: &str = "has no registered component owner";
 const UNKNOWN_TYPE: &str = "unknown named type";
 
+#[derive(Clone, Copy)]
+struct NegativeOperations {
+    inner: OperationMode,
+}
+
+#[derive(Clone, Copy)]
+enum OperationMode {
+    Real,
+    #[cfg(test)]
+    Fake(OperationFns),
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy)]
+struct OperationFns {
+    discover: DiscoverFn,
+    resolve: ResolveFn,
+    write: WriteFn,
+    build: BuildFn,
+}
+
+#[cfg(test)]
+type DiscoverFn = fn(
+    &Path,
+    Option<&str>,
+    &[specgate_discovery::identity::ComponentId],
+) -> Result<specgate_discovery::output::Batch, specgate_discovery::Error>;
+#[cfg(test)]
+type ResolveFn = fn(&Path, Option<&str>) -> Result<specgate_discovery::binding::ResolvedTarget, specgate_discovery::Error>;
+#[cfg(test)]
+type WriteFn = fn(&Path, &[u8]) -> Result<(), GoldenError>;
+#[cfg(test)]
+type BuildFn = fn(&Path, &Path, &str) -> std::io::Result<std::process::Output>;
+
+impl NegativeOperations {
+    const fn real() -> Self {
+        Self {
+            inner: OperationMode::Real,
+        }
+    }
+
+    #[cfg(test)]
+    const fn fake(functions: OperationFns) -> Self {
+        Self {
+            inner: OperationMode::Fake(functions),
+        }
+    }
+
+    fn discover(
+        self,
+        binding: &Path,
+        target: Option<&str>,
+        components: &[specgate_discovery::identity::ComponentId],
+    ) -> Result<specgate_discovery::output::Batch, specgate_discovery::Error> {
+        match self.inner {
+            OperationMode::Real => discover_batch(binding, target, components),
+            #[cfg(test)]
+            OperationMode::Fake(functions) => (functions.discover)(binding, target, components),
+        }
+    }
+
+    fn resolve(
+        self,
+        binding: &Path,
+        target: Option<&str>,
+    ) -> Result<specgate_discovery::binding::ResolvedTarget, specgate_discovery::Error> {
+        match self.inner {
+            OperationMode::Real => resolve_target(binding, target),
+            #[cfg(test)]
+            OperationMode::Fake(functions) => (functions.resolve)(binding, target),
+        }
+    }
+
+    fn write(self, path: &Path, bytes: &[u8]) -> Result<(), GoldenError> {
+        match self.inner {
+            OperationMode::Real => write_bytes(path, bytes),
+            #[cfg(test)]
+            OperationMode::Fake(functions) => (functions.write)(path, bytes),
+        }
+    }
+
+    fn build(self, manifest: &Path, target_dir: &Path, feature: &str) -> std::io::Result<std::process::Output> {
+        match self.inner {
+            OperationMode::Real => cargo_build(manifest, target_dir, feature),
+            #[cfg(test)]
+            OperationMode::Fake(functions) => (functions.build)(manifest, target_dir, feature),
+        }
+    }
+}
+
 /// Classify a normalized discovery diagnostic into a stable golden category.
 pub(super) fn error_category(message: impl AsRef<str>) -> &'static str {
     let message = message.as_ref();
@@ -69,7 +159,7 @@ pub(super) fn generate_negatives(
     out_root: impl AsRef<Path>,
     scratch: impl AsRef<Path>,
 ) -> Result<(), GoldenError> {
-    generate_with(root, matrix, out_root, scratch, cargo_build)
+    generate_with(root, matrix, out_root, scratch, NegativeOperations::real())
 }
 
 fn rust_language(row: &Row) -> Result<&LanguageRow, GoldenError> {
@@ -89,7 +179,7 @@ fn generate_with(
     matrix: &Matrix,
     out_root: impl AsRef<Path>,
     scratch: impl AsRef<Path>,
-    build: impl Fn(&Path, &Path, &str) -> std::io::Result<std::process::Output>,
+    operations: NegativeOperations,
 ) -> Result<(), GoldenError> {
     let root = root.as_ref();
     let out_root = out_root.as_ref();
@@ -110,10 +200,11 @@ fn generate_with(
     }
     if !discovery_rows.is_empty() {
         let binding_key = rust_language(discovery_rows[0])?.binding.clone();
-        let binding = repo_path(root, &matrix.bindings[&binding_key]);
-        let binding = binding
-            .to_str()
-            .ok_or_else(|| GoldenError::message(format!("{binding_key}: binding path is not UTF-8")))?;
+        let binding_relative = matrix
+            .bindings
+            .get(&binding_key)
+            .ok_or_else(|| GoldenError::message(format!("{binding_key}: matrix references an undeclared binding")))?;
+        let binding = repo_path(root, binding_relative);
         let components = discovery_rows
             .iter()
             .map(|row| negative_component(row))
@@ -123,7 +214,8 @@ fn generate_with(
             .copied()
             .map(specgate_discovery::identity::ComponentId::from)
             .collect::<Vec<_>>();
-        let discovered = discover_batch(binding, None, &component_ids)
+        let discovered = operations
+            .discover(&binding, None, &component_ids)
             .map_err(|source| GoldenError::wrap(format!("{binding_key}: negative discovery failed"), source))?;
         // The compile-error row is deliberately excluded: its component only
         // exists behind a Cargo feature that does not compile, so the shared
@@ -162,7 +254,7 @@ fn generate_with(
                 component,
                 detail: &serde_json::json!({ "message": message }),
             });
-            write_bytes(row.rust_dir(out_root).join(error_file()), &bytes)?;
+            operations.write(&row.rust_dir(out_root).join(error_file()), &bytes)?;
         }
     }
 
@@ -175,15 +267,18 @@ fn generate_with(
             .feature
             .as_deref()
             .ok_or_else(|| GoldenError::message(format!("{}: build-negative row must name a Cargo feature", row.id)))?;
-        let binding = repo_path(root, &matrix.bindings[&language.binding]);
-        let binding_text = binding
-            .to_str()
-            .ok_or_else(|| GoldenError::message(format!("{}: binding path is not UTF-8", row.id)))?;
-        let resolved = resolve_target(binding_text, None)
+        let binding_relative = matrix
+            .bindings
+            .get(&language.binding)
+            .ok_or_else(|| GoldenError::message(format!("{}: matrix references undeclared binding '{}'", row.id, language.binding)))?;
+        let binding = repo_path(root, binding_relative);
+        let resolved = operations
+            .resolve(&binding, None)
             .map_err(|source| GoldenError::wrap(format!("{}: binding resolution failed", row.id), source))?;
         let manifest = resolved.target.package_root.join("Cargo.toml");
         let target_dir = scratch.join("negative-build").join(feature);
-        let output = build(&manifest, &target_dir, feature)
+        let output = operations
+            .build(&manifest, &target_dir, feature)
             .map_err(|source| GoldenError::wrap(format!("{}: failed to invoke cargo", row.id), source))?;
         if output.status.success() {
             return Err(GoldenError::message(format!(
@@ -205,7 +300,7 @@ fn generate_with(
                 "diagnosticCodes": rejection.codes,
             }),
         });
-        write_bytes(row.rust_dir(out_root).join(error_file()), &bytes)?;
+        operations.write(&row.rust_dir(out_root).join(error_file()), &bytes)?;
     }
     Ok(())
 }
@@ -224,6 +319,46 @@ fn cargo_build(manifest: &Path, target_dir: &Path, feature: &str) -> std::io::Re
         .env_remove("CARGO_MANIFEST_DIR")
         .env("CARGO_TARGET_DIR", target_dir)
         .output()
+}
+
+#[cfg(test)]
+mod operation_tests {
+    use super::*;
+
+    fn unused_discover(
+        _binding: &Path,
+        _target: Option<&str>,
+        _components: &[specgate_discovery::identity::ComponentId],
+    ) -> Result<specgate_discovery::output::Batch, specgate_discovery::Error> {
+        unreachable!("discovery is not used by this boundary test")
+    }
+
+    fn unused_resolve(
+        _binding: &Path,
+        _target: Option<&str>,
+    ) -> Result<specgate_discovery::binding::ResolvedTarget, specgate_discovery::Error> {
+        unreachable!("resolution is not used by this boundary test")
+    }
+
+    fn fail_write(_path: &Path, _bytes: &[u8]) -> Result<(), GoldenError> {
+        Err(GoldenError::message("injected write failure"))
+    }
+
+    fn fail_build(_manifest: &Path, _target_dir: &Path, _feature: &str) -> std::io::Result<std::process::Output> {
+        Err(std::io::Error::other("injected build failure"))
+    }
+
+    #[test]
+    fn fake_operations_inject_external_failures() {
+        let operations = NegativeOperations::fake(OperationFns {
+            discover: unused_discover,
+            resolve: unused_resolve,
+            write: fail_write,
+            build: fail_build,
+        });
+        operations.write(Path::new("ignored"), &[]).unwrap_err();
+        operations.build(Path::new("ignored"), Path::new("ignored"), "feature").unwrap_err();
+    }
 }
 
 /// The sources a row declares as the intentional fault, as repository-relative

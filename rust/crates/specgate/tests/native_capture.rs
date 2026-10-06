@@ -80,10 +80,10 @@ fn config(operation_span_ids: &[&str]) -> specgate::__rt::Config {
     specgate::__rt::Config::builder(specgate::__rt::ConfigDeps {
         scenario_name: "macro".into(),
         trace_id: "33333333333333333333333333333333".try_into().unwrap(),
-        run_span_id: "3333333333333301".try_into().unwrap(),
-        scenario_span_id: "3333333333333302".try_into().unwrap(),
+        run_id: "3333333333333301".try_into().unwrap(),
+        scenario_id: "3333333333333302".try_into().unwrap(),
     })
-    .operation_span_ids(operation_span_ids.iter().map(|id| (*id).try_into().unwrap()).collect::<Vec<_>>())
+    .operation_ids(operation_span_ids.iter().map(|id| (*id).try_into().unwrap()).collect::<Vec<_>>())
     .start_time(3_000)
     .clock_step(10)
     .build()
@@ -100,7 +100,7 @@ fn operation_macro_captures_components_nesting_results_and_observations() {
     assert_eq!(capture.operations[0].component_id, "fixture.macro_default");
     assert_eq!(capture.operations[0].operation_name, "outer");
     assert_eq!(capture.operations[1].component_id, "fixture.macro_override");
-    assert_eq!(capture.operations[1].parent_span_id, capture.operations[0].span_id);
+    assert_eq!(capture.operations[1].parent_id, capture.operations[0].span_id);
     assert_eq!(capture.operations[0].inputs["value"], Value::Integer(2));
     assert_eq!(capture.operations[1].inputs["value"], Value::Integer(3));
     assert_eq!(capture.operations[1].observations[0].name, "seen");

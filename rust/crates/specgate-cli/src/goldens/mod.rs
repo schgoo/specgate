@@ -60,6 +60,11 @@ const CLASS_COMPONENT: &str = "implementation-component";
 /// The limitation code a row declares when its component is async and can
 /// therefore only be discovered, never captured.
 const ASYNC_LIMITATION: &str = "async-capture-unsupported";
+// These are the stable planner limitations accepted by `unsupported` replay
+// rows. Each category names a capability deliberately outside native replay:
+// structured-value projection, setup injection, instance methods, async
+// execution, or a non-Rust target. Changes must update matrix rows and the
+// generated golden artifacts through `just ctsc-goldens-update`.
 const REPLAY_FAILURES: &[&str] = &[
     "structured-value",
     "setup-backed-operation",

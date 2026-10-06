@@ -11,6 +11,17 @@ use super::{
     cargo_bin, run_span, scenario_span, trace_id,
 };
 
+// Cargo's `--message-format=json` schema identifies test binaries with these
+// exact reason/profile/target-kind tokens. Changing them would silently omit
+// eligible artifacts from capture.
+const CARGO_ARTIFACT_REASON: &str = "compiler-artifact";
+const CARGO_TEST_PROFILE: &str = "test";
+const CARGO_LIBRARY_KIND: &str = "lib";
+const FALLBACK_TEST_LABEL: &str = "test";
+// Stable libtest `--list --format terse` suffix. A different suffix would
+// prevent enumerated test cases from being isolated into capture processes.
+const LIBTEST_CASE_SUFFIX: &str = ": test";
+
 /// Allocate the command-scoped scratch directory used by build and sidecar artifacts.
 ///
 /// Returns a contextual I/O error when allocation fails.
@@ -59,10 +70,10 @@ pub(super) fn build_binaries(
         let Ok(message) = serde_json::from_str::<serde_json::Value>(line) else {
             continue;
         };
-        if message.get("reason").and_then(serde_json::Value::as_str) != Some("compiler-artifact")
+        if message.get("reason").and_then(serde_json::Value::as_str) != Some(CARGO_ARTIFACT_REASON)
             || !message
                 .get("profile")
-                .and_then(|profile| profile.get("test"))
+                .and_then(|profile| profile.get(CARGO_TEST_PROFILE))
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false)
         {
@@ -76,10 +87,10 @@ pub(super) fn build_binaries(
             continue;
         }
         let target = &message["target"];
-        let label = target["name"].as_str().unwrap_or("test").to_string();
+        let label = target["name"].as_str().unwrap_or(FALLBACK_TEST_LABEL).to_string();
         let is_library = target["kind"]
             .as_array()
-            .is_some_and(|kinds| kinds.iter().any(|kind| kind.as_str() == Some("lib")));
+            .is_some_and(|kinds| kinds.iter().any(|kind| kind.as_str() == Some(CARGO_LIBRARY_KIND)));
         binaries.push(TestBinary {
             label,
             executable,
@@ -121,7 +132,7 @@ pub(super) fn enumerate_tests(execution: &Execution, binaries: impl AsRef<[TestB
             )));
         }
         for line in String::from_utf8_lossy(&output.stdout).lines() {
-            let Some(test_name) = line.strip_suffix(": test") else {
+            let Some(test_name) = line.strip_suffix(LIBTEST_CASE_SUFFIX) else {
                 continue;
             };
             let test_name = test_name.trim().to_string();
@@ -263,8 +274,8 @@ pub(super) fn run_tests(
             capture: Config::builder(ConfigDeps {
                 scenario_name: test.scenario_name.clone(),
                 trace_id: trace_id(),
-                run_span_id: run_span(),
-                scenario_span_id: scenario_span(),
+                run_id: run_span(),
+                scenario_id: scenario_span(),
             })
             .start_time(START_TIME)
             .clock_step(CLOCK_STEP)

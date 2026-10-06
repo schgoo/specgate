@@ -23,7 +23,7 @@ pub(super) fn filter(scenarios: impl AsRef<[Capture]>, component: &ComponentId) 
                 .operations
                 .iter()
                 .filter(|operation| {
-                    operation.parent_span_id == capture.scenario.span_id && operation.component_id.as_str() == component.as_str()
+                    operation.parent_id == capture.scenario.span_id && operation.component_id.as_str() == component.as_str()
                 })
                 .map(|operation| operation.span_id.clone()),
         );
@@ -33,7 +33,7 @@ pub(super) fn filter(scenarios: impl AsRef<[Capture]>, component: &ComponentId) 
         // Capture records parents before children, so adding each child as its
         // parent becomes retained computes the transitive subtree in one pass.
         for operation in &capture.operations {
-            if retained.contains(&operation.parent_span_id) {
+            if retained.contains(&operation.parent_id) {
                 retained.insert(operation.span_id.clone());
             }
         }

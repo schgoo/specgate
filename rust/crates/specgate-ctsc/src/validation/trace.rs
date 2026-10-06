@@ -148,10 +148,10 @@ impl FaultObserver {
 
 /// Read a trace path and collect parse and semantic issues without failing fast.
 pub(crate) fn load_trace(path: impl AsRef<Path>) -> Loaded<TraceDocument> {
-    load_with_reader(path.as_ref(), &crate::comparison::SystemReader::system())
+    load_from(path.as_ref(), &crate::comparison::SystemReader::system())
 }
 
-pub(crate) fn load_with_reader(path: impl AsRef<Path>, reader: &impl crate::comparison::DocumentReader) -> Loaded<TraceDocument> {
+pub(crate) fn load_from(path: impl AsRef<Path>, reader: &impl crate::comparison::DocumentReader) -> Loaded<TraceDocument> {
     let path = path.as_ref();
     let mut issues = Vec::new();
     let Some(bytes) = super::finish_read(path, reader.read(path), &mut issues) else {

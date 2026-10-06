@@ -249,7 +249,8 @@ fn append_refs(t: &RustType, out: &mut Vec<String>) {
 }
 
 /// Parse a (possibly space-separated) Rust type string into a [`RustType`].
-pub(super) fn parse(s: &str) -> Option<RustType> {
+pub(super) fn parse(value: impl AsRef<str>) -> Option<RustType> {
+    let s = value.as_ref();
     let tokens = tokenize_type(s);
     let mut pos = 0;
     let t = parse_tokens(&tokens, &mut pos)?;

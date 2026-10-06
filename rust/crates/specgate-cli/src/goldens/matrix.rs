@@ -9,9 +9,9 @@
 use super::*;
 
 /// Locate the repository root containing the checked-in matrix.
-pub(super) fn repo_root() -> PathBuf {
-    std::env::current_dir()
-        .expect("current directory")
+pub(super) fn repo_root(start: impl AsRef<Path>) -> PathBuf {
+    start
+        .as_ref()
         .ancestors()
         .find(|path| path.join("rust").join("Cargo.toml").is_file() && path.join("justfile").is_file())
         .expect("repository root")

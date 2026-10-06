@@ -20,8 +20,8 @@ impl std::fmt::Display for ErrorKind {
 ///
 /// # Examples
 /// ```
-/// # let error: specgate_ctsc::registry::error::Error = "invalid input".to_string().into();
-/// assert_eq!(error.kind(), specgate_ctsc::registry::error::ErrorKind::Encoding);
+/// # let error: specgate_ctsc::registry::Error = "invalid input".to_string().into();
+/// assert_eq!(error.kind(), specgate_ctsc::registry::ErrorKind::Encoding);
 /// ```
 #[ohno::error]
 #[display("{diagnostic}")]
@@ -62,8 +62,8 @@ impl From<super::normalized::error::Error> for Error {
         Self::caused_by(ErrorKind::Encoding, source.to_string(), source)
     }
 }
-impl From<serde_json::Error> for Error {
-    fn from(source: serde_json::Error) -> Self {
+impl Error {
+    pub(super) fn json(source: serde_json::Error) -> Self {
         Self::caused_by(ErrorKind::Encoding, "registry JSON processing failed".to_string(), source)
     }
 }

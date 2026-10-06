@@ -77,8 +77,8 @@ pub mod __rt {
     };
     pub use specgate_runtime::generated::{FAILURE_MARKER, Stage, report_completion, report_error};
     pub use specgate_runtime::registry::{
-        ComponentName, FieldMeta, FieldName, FnName, ModulePath, OPERATIONS as SPECGATE_OPS, OpMeta, OpMetaDeps, OpName, RustType,
-        TYPES as SPECGATE_TYPES, TypeKind, TypeMeta, TypeMetaDeps, TypeName, VariantMeta, VariantName, discovery,
+        ComponentName, FieldMeta, FieldName, FnName, ModulePath, OPERATIONS as SPECGATE_OPS, OpDeps, OpMeta, OpName, RustType,
+        TYPES as SPECGATE_TYPES, TypeDeps, TypeKind, TypeMeta, TypeName, VariantMeta, VariantName, discovery,
     };
     pub use specgate_runtime::value::Value;
     pub use specgate_runtime::{ComponentId, OperationName, SpecEvent, TargetName, ToNativeValue, emit_event, emit_lazy};

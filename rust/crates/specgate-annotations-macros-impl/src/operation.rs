@@ -14,7 +14,7 @@ use super::{
 ///
 /// Changing this discriminator renames link-time registration symbols and can
 /// cause collisions with metadata emitted by other annotation kinds.
-const OPERATION_METADATA_NAMESPACE: &str = "OPERATION";
+const METADATA_NAMESPACE: &str = "OPERATION";
 
 /// Expand a `spec_operation` attribute into capture instrumentation and metadata.
 ///
@@ -232,11 +232,7 @@ pub fn expand_operation(attribute: TokenStream2, item: TokenStream2) -> syn::Res
     *function.block = new_body;
 
     let function_name = function.sig.ident.to_string();
-    let const_name = metadata_ident(
-        OPERATION_METADATA_NAMESPACE,
-        format!("{function_name}:{name}"),
-        function.sig.ident.span(),
-    );
+    let const_name = metadata_ident(METADATA_NAMESPACE, format!("{function_name}:{name}"), function.sig.ident.span());
     let is_method = has_receiver(&function);
     let is_public = matches!(function.vis, syn::Visibility::Public(_));
     let parameter_metadata = params.iter().map(|(_ident, ty, name)| {
@@ -258,7 +254,7 @@ pub fn expand_operation(attribute: TokenStream2, item: TokenStream2) -> syn::Res
         const #const_name: () = {
             #[#rt::_private::linkme::distributed_slice(#rt::SPECGATE_OPS)]
             #[linkme(crate = #rt::_private::linkme)]
-            static __SPECGATE_META: #rt::OpMeta = #rt::OpMeta::builder(#rt::OpMetaDeps {
+            static __SPECGATE_META: #rt::OpMeta = #rt::OpMeta::const_builder(#rt::OpDeps {
                 name: #rt::OpName::new(#name),
                 module_path: #rt::ModulePath::new(::core::module_path!()),
                 fn_name: #rt::FnName::new(#function_name),

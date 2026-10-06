@@ -165,8 +165,8 @@ fn config() -> specgate::__rt::Config {
     specgate::__rt::Config::builder(specgate::__rt::ConfigDeps {
         scenario_name: "setup-inputs".into(),
         trace_id: "44444444444444444444444444444444".try_into().unwrap(),
-        run_span_id: "4444444444444401".try_into().unwrap(),
-        scenario_span_id: "4444444444444402".try_into().unwrap(),
+        run_id: "4444444444444401".try_into().unwrap(),
+        scenario_id: "4444444444444402".try_into().unwrap(),
     })
     .start_time(4_000)
     .clock_step(10)

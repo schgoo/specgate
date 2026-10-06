@@ -93,7 +93,7 @@ impl State {
     fn tick(&mut self) -> Result<i64, CaptureError> {
         let current = self.next_time_ns;
         self.next_time_ns = current
-            .checked_add(self.config.clock_step_unix_nano)
+            .checked_add(self.config.step_ns)
             .ok_or_else(|| "native capture logical clock overflow".to_string())?;
         Ok(current)
     }
@@ -305,7 +305,7 @@ impl OperationScope {
                 NativeTerminal::Result(value) => (
                     Some(Completion::Result {
                         order: state.order()?,
-                        time_unix_nano: state.tick()?,
+                        time_ns: state.tick()?,
                         value,
                     }),
                     Status::Ok,
@@ -313,14 +313,14 @@ impl OperationScope {
                 NativeTerminal::Empty => (
                     Some(Completion::Empty {
                         order: state.order()?,
-                        time_unix_nano: state.tick()?,
+                        time_ns: state.tick()?,
                     }),
                     Status::Ok,
                 ),
                 NativeTerminal::Error { name, value } => (
                     Some(Completion::Error {
                         order: state.order()?,
-                        time_unix_nano: state.tick()?,
+                        time_ns: state.tick()?,
                         name,
                         value,
                     }),
@@ -329,7 +329,7 @@ impl OperationScope {
                 NativeTerminal::Fault => (
                     Some(Completion::Fault {
                         order: state.order()?,
-                        time_unix_nano: state.tick()?,
+                        time_ns: state.tick()?,
                         fault_type: UNEXPECTED_FAULT.to_string(),
                         message: "operation unwound before returning".to_string(),
                         observer: TARGET_OBSERVER.to_string(),
@@ -395,10 +395,10 @@ fn cleanup_unfinished(state: &mut State, operation_index: usize, panicking: bool
     }
     assert!(panicking, "native operation '{operation_name}' scope closed without completion");
     let completion = state.order().and_then(|order| {
-        let time_unix_nano = state.tick()?;
+        let time_ns = state.tick()?;
         Ok(Completion::Fault {
             order,
-            time_unix_nano,
+            time_ns,
             fault_type: UNEXPECTED_FAULT.to_string(),
             message: "operation unwound before returning".to_string(),
             observer: TARGET_OBSERVER.to_string(),
@@ -437,15 +437,15 @@ fn start_with(config: Config, sidecar_path: Option<PathBuf>, file_system: FileSy
         let mut slot = slot.borrow_mut();
         assert!(slot.is_none(), "a native capture session is already active");
         let scenario_start = config
-            .start_time_unix_nano
-            .checked_add(config.clock_step_unix_nano)
+            .start_ns
+            .checked_add(config.step_ns)
             .ok_or_else(|| "native capture logical clock overflow".to_string())?;
         let next_time_ns = scenario_start
-            .checked_add(config.clock_step_unix_nano)
+            .checked_add(config.step_ns)
             .ok_or_else(|| "native capture logical clock overflow".to_string())?;
-        let operation_capacity = config.operation_span_ids.len();
+        let operation_capacity = config.operation_ids.len();
         *slot = Some(State {
-            run_start_ns: config.start_time_unix_nano,
+            run_start_ns: config.start_ns,
             scenario_start,
             next_time_ns,
             config,
@@ -595,10 +595,10 @@ fn finish_active() -> Result<Capture, CaptureError> {
         if let Some(error) = state.terminal_error {
             return Err(error.into_error());
         }
-        if state.next_op < state.config.operation_span_ids.len() {
+        if state.next_op < state.config.operation_ids.len() {
             return Err(format!(
                 "native capture supplied {} operation span IDs but consumed {}",
-                state.config.operation_span_ids.len(),
+                state.config.operation_ids.len(),
                 state.next_op
             )
             .into());
@@ -765,7 +765,7 @@ fn activate_env() -> Result<(), CaptureError> {
 }
 
 fn next_span(state: &State) -> Result<SpanId, CaptureError> {
-    if let Some(span_id) = state.config.operation_span_ids.get(state.next_op) {
+    if let Some(span_id) = state.config.operation_ids.get(state.next_op) {
         return Ok(span_id.clone());
     }
 
@@ -847,7 +847,7 @@ pub(crate) fn record_observation(name: String, value: Value) -> Result<(), Captu
         }
         let observation = Observation {
             order: state.order()?,
-            time_unix_nano: state.tick()?,
+            time_ns: state.tick()?,
             name,
             value,
         };

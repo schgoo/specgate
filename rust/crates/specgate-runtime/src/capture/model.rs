@@ -11,8 +11,8 @@
 //! let config = Config::builder(ConfigDeps {
 //!     scenario_name: "addition".into(),
 //!     trace_id: TraceId::parse("11111111111111111111111111111111")?,
-//!     run_span_id: SpanId::parse("1111111111111101")?,
-//!     scenario_span_id: SpanId::parse("1111111111111102")?,
+//!     run_id: SpanId::parse("1111111111111101")?,
+//!     scenario_id: SpanId::parse("1111111111111102")?,
 //! })
 //! .start_time(1_000)
 //! .clock_step(10)
@@ -108,9 +108,12 @@ pub struct Config {
     pub(super) trace_id: TraceId,
     pub(super) run_span_id: SpanId,
     pub(super) scenario_span_id: SpanId,
-    pub(super) operation_span_ids: Vec<SpanId>,
-    pub(super) start_time_unix_nano: i64,
-    pub(super) clock_step_unix_nano: i64,
+    #[serde(rename = "operation_span_ids")]
+    pub(super) operation_ids: Vec<SpanId>,
+    #[serde(rename = "start_time_unix_nano")]
+    pub(super) start_ns: i64,
+    #[serde(rename = "clock_step_unix_nano")]
+    pub(super) step_ns: i64,
 }
 
 /// Required identities for [`Config::builder`].
@@ -122,9 +125,9 @@ pub struct ConfigDeps {
     /// Nonzero lowercase hexadecimal trace identifier.
     pub trace_id: TraceId,
     /// Run span identifier.
-    pub run_span_id: SpanId,
+    pub run_id: SpanId,
     /// Scenario span identifier.
-    pub scenario_span_id: SpanId,
+    pub scenario_id: SpanId,
 }
 
 /// Validating builder for native capture configuration.
@@ -145,13 +148,13 @@ impl Config {
             config: Self {
                 scenario_name: deps.scenario_name,
                 trace_id: deps.trace_id,
-                run_span_id: deps.run_span_id,
-                scenario_span_id: deps.scenario_span_id,
-                operation_span_ids: Vec::new(),
+                run_span_id: deps.run_id,
+                scenario_span_id: deps.scenario_id,
+                operation_ids: Vec::new(),
                 // Capture clocks start at the Unix epoch and advance one nanosecond by
                 // default; changing these protocol defaults alters deterministic bytes.
-                start_time_unix_nano: DEFAULT_START_TIME_UNIX_NANO,
-                clock_step_unix_nano: DEFAULT_CLOCK_STEP_UNIX_NANO,
+                start_ns: DEFAULT_START_TIME_UNIX_NANO,
+                step_ns: DEFAULT_CLOCK_STEP_UNIX_NANO,
             },
         }
     }
@@ -159,20 +162,20 @@ impl Config {
 impl ConfigBuilder {
     /// Set deterministic operation span identifiers.
     #[must_use]
-    pub fn operation_span_ids(mut self, ids: impl Into<Vec<SpanId>>) -> Self {
-        self.config.operation_span_ids = ids.into();
+    pub fn operation_ids(mut self, ids: impl Into<Vec<SpanId>>) -> Self {
+        self.config.operation_ids = ids.into();
         self
     }
     /// Set the initial logical timestamp.
     #[must_use]
     pub const fn start_time(mut self, value: i64) -> Self {
-        self.config.start_time_unix_nano = value;
+        self.config.start_ns = value;
         self
     }
     /// Set the logical clock step.
     #[must_use]
     pub const fn clock_step(mut self, value: i64) -> Self {
-        self.config.clock_step_unix_nano = value;
+        self.config.step_ns = value;
         self
     }
     /// Validate and build the configuration.
@@ -203,9 +206,9 @@ impl<'de> Deserialize<'de> for Config {
             trace_id: unchecked.trace_id,
             run_span_id: unchecked.run_span_id,
             scenario_span_id: unchecked.scenario_span_id,
-            operation_span_ids: unchecked.operation_span_ids,
-            start_time_unix_nano: unchecked.start_time_unix_nano,
-            clock_step_unix_nano: unchecked.clock_step_unix_nano,
+            operation_ids: unchecked.operation_span_ids,
+            start_ns: unchecked.start_time_unix_nano,
+            step_ns: unchecked.clock_step_unix_nano,
         };
         validate_config(&config).map_err(serde::de::Error::custom)?;
         Ok(config)
@@ -232,16 +235,17 @@ pub struct EnvConfig {
     reason = "native span boundaries are exhaustively serialized capture evidence"
 )]
 pub struct SpanBoundary {
-    /// Span identifier.
-    /// Operation span identifier.
+    /// Run or scenario span identifier.
     pub span_id: SpanId,
-    /// Optional parent span identifier.
-    /// Parent scenario or operation span identifier.
-    pub parent_span_id: Option<SpanId>,
+    /// Optional parent run span identifier.
+    #[serde(rename = "parent_span_id")]
+    pub parent_id: Option<SpanId>,
     /// Start timestamp in Unix nanoseconds.
-    pub start_time_unix_nano: i64,
+    #[serde(rename = "start_time_unix_nano")]
+    pub start_ns: i64,
     /// End timestamp in Unix nanoseconds.
-    pub end_time_unix_nano: i64,
+    #[serde(rename = "end_time_unix_nano")]
+    pub end_ns: i64,
     /// Terminal span status.
     pub status: Status,
 }
@@ -267,7 +271,8 @@ pub struct Observation {
     /// Stable event order within the capture.
     pub order: u64,
     /// Event timestamp in Unix nanoseconds.
-    pub time_unix_nano: i64,
+    #[serde(rename = "time_unix_nano")]
+    pub time_ns: i64,
     /// Semantic observation name.
     pub name: String,
     /// Semantic observation value.
@@ -285,7 +290,8 @@ pub enum Completion {
         /// Stable event order.
         order: u64,
         /// Completion timestamp in Unix nanoseconds.
-        time_unix_nano: i64,
+        #[serde(rename = "time_unix_nano")]
+        time_ns: i64,
         /// Semantic result value.
         #[serde(with = "crate::value::wire")]
         value: Value,
@@ -295,14 +301,16 @@ pub enum Completion {
         /// Stable event order.
         order: u64,
         /// Completion timestamp in Unix nanoseconds.
-        time_unix_nano: i64,
+        #[serde(rename = "time_unix_nano")]
+        time_ns: i64,
     },
     /// Declared error completion.
     Error {
         /// Stable event order.
         order: u64,
         /// Completion timestamp in Unix nanoseconds.
-        time_unix_nano: i64,
+        #[serde(rename = "time_unix_nano")]
+        time_ns: i64,
         /// Declared error name.
         name: String,
         #[serde(skip_serializing_if = "Option::is_none", with = "crate::value::wire::optional")]
@@ -314,7 +322,8 @@ pub enum Completion {
         /// Stable event order.
         order: u64,
         /// Completion timestamp in Unix nanoseconds.
-        time_unix_nano: i64,
+        #[serde(rename = "time_unix_nano")]
+        time_ns: i64,
         /// Stable fault category.
         fault_type: String,
         /// Native fault message.
@@ -333,16 +342,18 @@ pub struct OperationSpan {
     /// Operation span identifier.
     pub span_id: SpanId,
     /// Parent scenario or operation span identifier.
-    pub parent_span_id: SpanId,
-    /// Owning component identifier.
+    #[serde(rename = "parent_span_id")]
+    pub parent_id: SpanId,
     /// Owning component identifier.
     pub component_id: ComponentId,
     /// Semantic operation name.
     pub operation_name: OperationName,
     /// Start timestamp in Unix nanoseconds.
-    pub start_time_unix_nano: i64,
+    #[serde(rename = "start_time_unix_nano")]
+    pub start_ns: i64,
     /// End timestamp in Unix nanoseconds.
-    pub end_time_unix_nano: i64,
+    #[serde(rename = "end_time_unix_nano")]
+    pub end_ns: i64,
     /// Terminal operation status.
     pub status: Status,
     /// Semantic inputs keyed by name.
@@ -366,13 +377,13 @@ pub struct SpanDeps {
     /// Operation span identifier.
     pub span_id: SpanId,
     /// Parent scenario or operation span identifier.
-    pub parent_span_id: SpanId,
+    pub parent_id: SpanId,
     /// Owning component identifier.
     pub component_id: ComponentId,
     /// Semantic operation name.
     pub operation_name: OperationName,
     /// Start timestamp in Unix nanoseconds.
-    pub start_time_unix_nano: i64,
+    pub start_ns: i64,
 }
 
 /// Controlled builder for a completed native operation span.
@@ -396,19 +407,19 @@ impl OperationSpan {
     /// let span = OperationSpan::builder(SpanDeps {
     ///     order: 0,
     ///     span_id: SpanId::parse("1111111111111101")?,
-    ///     parent_span_id: SpanId::parse("1111111111111102")?,
+    ///     parent_id: SpanId::parse("1111111111111102")?,
     ///     component_id: ComponentId::from("example.component"),
     ///     operation_name: OperationName::from("run"),
-    ///     start_time_unix_nano: 1,
+    ///     start_ns: 1,
     /// })
     /// .end_time(2)
     /// .completion(Completion::Empty {
     ///     order: 1,
-    ///     time_unix_nano: 2,
+    ///     time_ns: 2,
     /// })
     /// .build()?;
     ///
-    /// assert_eq!(span.end_time_unix_nano, 2);
+    /// assert_eq!(span.end_ns, 2);
     /// # Ok::<(), specgate_runtime::CaptureError>(())
     /// ```
     #[must_use]
@@ -418,11 +429,11 @@ impl OperationSpan {
             span: Self {
                 order: deps.order,
                 span_id: deps.span_id,
-                parent_span_id: deps.parent_span_id,
+                parent_id: deps.parent_id,
                 component_id: deps.component_id,
                 operation_name: deps.operation_name,
-                start_time_unix_nano: deps.start_time_unix_nano,
-                end_time_unix_nano: deps.start_time_unix_nano,
+                start_ns: deps.start_ns,
+                end_ns: deps.start_ns,
                 status: Status::Ok,
                 inputs: BTreeMap::new(),
                 observations: Vec::new(),
@@ -435,7 +446,7 @@ impl SpanBuilder {
     /// Set the terminal timestamp.
     #[must_use]
     pub const fn end_time(mut self, value: i64) -> Self {
-        self.span.end_time_unix_nano = value;
+        self.span.end_ns = value;
         self
     }
     /// Set the terminal status.
@@ -468,7 +479,7 @@ impl SpanBuilder {
     /// Returns a configuration error when the terminal timestamp precedes the
     /// start, completion is absent, or status disagrees with completion kind.
     pub fn build(self) -> Result<OperationSpan, CaptureError> {
-        if self.span.end_time_unix_nano < self.span.start_time_unix_nano {
+        if self.span.end_ns < self.span.start_ns {
             return Err("native operation end timestamp precedes its start timestamp".to_string().into());
         }
         let completion_is_error = match self.span.completion.as_ref() {

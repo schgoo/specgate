@@ -31,8 +31,10 @@ fn with_source(message: impl Into<String>, source: Error) -> Error {
 // layout lowercases the same configuration name in its output directory.
 const BUILD_CONFIGURATION: &str = "Debug";
 const CONFIGURATION_DIR: &str = "debug";
-// Preserve enough compiler context for actionable diagnostics without
-// allowing verbose MSBuild output to dominate one discovery error.
+// Forty lines preserve the compiler's primary diagnostic plus typical
+// project/target context while keeping a failed MSBuild invocation below a
+// screenful. Raising this improves unusual multi-error context but inflates
+// every discovery failure; lowering it can hide the relevant primary span.
 const DIAGNOSTIC_LIMIT: usize = 40;
 
 /// Paths produced by compiling one C# fixture.

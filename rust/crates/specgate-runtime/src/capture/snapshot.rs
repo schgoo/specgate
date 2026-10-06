@@ -82,7 +82,7 @@ impl<'a> CaptureSnapshot<'a> {
         }
         let scenario_end_ns = state.next_time_ns;
         let run_end_ns = scenario_end_ns
-            .checked_add(state.config.clock_step_unix_nano)
+            .checked_add(state.config.step_ns)
             .ok_or_else(|| "native capture logical clock overflow".to_string())?;
         let status = if state.operations.iter().any(|operation| operation.status == Some(Status::Error)) {
             Status::Error
@@ -121,7 +121,7 @@ pub(super) fn build(state: &State) -> Result<Capture, CaptureError> {
     }
     let scenario_end_ns = state.next_time_ns;
     let run_end_ns = scenario_end_ns
-        .checked_add(state.config.clock_step_unix_nano)
+        .checked_add(state.config.step_ns)
         .ok_or_else(|| "native capture logical clock overflow".to_string())?;
     let has_error = state.operations.iter().any(|operation| operation.status == Some(Status::Error));
     let operations = state
@@ -130,11 +130,11 @@ pub(super) fn build(state: &State) -> Result<Capture, CaptureError> {
         .map(|operation| OperationSpan {
             order: operation.order,
             span_id: operation.span_id.clone(),
-            parent_span_id: operation.parent_span_id.clone(),
+            parent_id: operation.parent_span_id.clone(),
             component_id: operation.component_id.clone(),
             operation_name: operation.operation_name.clone(),
-            start_time_unix_nano: operation.start_ns,
-            end_time_unix_nano: operation.end_ns.expect("completed capture operation must have an end timestamp"),
+            start_ns: operation.start_ns,
+            end_ns: operation.end_ns.expect("completed capture operation must have an end timestamp"),
             status: operation.status.expect("completed capture operation must have terminal status"),
             inputs: operation.inputs.clone(),
             observations: operation.observations.clone(),
@@ -147,16 +147,16 @@ pub(super) fn build(state: &State) -> Result<Capture, CaptureError> {
         scenario_name: state.config.scenario_name.clone(),
         run: SpanBoundary {
             span_id: state.config.run_span_id.clone(),
-            parent_span_id: None,
-            start_time_unix_nano: state.run_start_ns,
-            end_time_unix_nano: run_end_ns,
+            parent_id: None,
+            start_ns: state.run_start_ns,
+            end_ns: run_end_ns,
             status: root_status,
         },
         scenario: SpanBoundary {
             span_id: state.config.scenario_span_id.clone(),
-            parent_span_id: Some(state.config.run_span_id.clone()),
-            start_time_unix_nano: state.scenario_start,
-            end_time_unix_nano: scenario_end_ns,
+            parent_id: Some(state.config.run_span_id.clone()),
+            start_ns: state.scenario_start,
+            end_ns: scenario_end_ns,
             status: root_status,
         },
         operations,
@@ -164,18 +164,18 @@ pub(super) fn build(state: &State) -> Result<Capture, CaptureError> {
 }
 
 pub(super) fn validate_config(config: &Config) -> Result<(), CaptureError> {
-    if config.start_time_unix_nano < 0 {
+    if config.start_ns < 0 {
         return Err("native capture start timestamp must be non-negative".to_string().into());
     }
-    if config.clock_step_unix_nano <= 0 {
+    if config.step_ns <= 0 {
         return Err("native capture logical clock step must be positive".to_string().into());
     }
-    let mut span_ids = HashSet::with_capacity(config.operation_span_ids.len() + 2);
+    let mut span_ids = HashSet::with_capacity(config.operation_ids.len() + 2);
     span_ids.insert(config.run_span_id.as_str());
     if !span_ids.insert(config.scenario_span_id.as_str()) {
         return Err("native capture span IDs must be unique".to_string().into());
     }
-    for (index, span_id) in config.operation_span_ids.iter().enumerate() {
+    for (index, span_id) in config.operation_ids.iter().enumerate() {
         if !span_ids.insert(span_id.as_str()) {
             return Err(format!("native capture operation span ID at index {index} is duplicated").into());
         }

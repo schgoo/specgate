@@ -18,7 +18,7 @@ fn encode_schema_registry_result(
     id: impl Into<specgate_ctsc::registry::Id>,
     version: impl Into<specgate_ctsc::registry::Version>,
     schema: impl AsRef<str>,
-) -> specgate_ctsc::registry::error::Result<specgate_ctsc::registry::Encoding> {
+) -> specgate_ctsc::registry::Result<specgate_ctsc::registry::Encoding> {
     encode_typed_registry(id, version, specgate_ctsc::registry::Schema::new(schema.as_ref()))
 }
 
@@ -32,7 +32,7 @@ fn encode_capture(
     registry_version: &str,
     registry_digest: &str,
     candidate: bool,
-) -> Result<specgate_ctsc::capture::Encoding, specgate_ctsc::capture::error::Error> {
+) -> Result<specgate_ctsc::capture::Encoding, specgate_ctsc::capture::Error> {
     let bytes = serde_json::to_vec(captures).expect("runtime captures serialize");
     let captures: Vec<specgate_ctsc::capture::Capture> = serde_json::from_slice(&bytes).expect("capture boundary matches runtime JSON");
     let metadata = specgate_ctsc::capture::Metadata::new(
@@ -55,7 +55,7 @@ fn encode_native_captures_otlp_result(
     registry_id: &str,
     registry_version: &str,
     registry_digest: &str,
-) -> Result<specgate_ctsc::capture::Encoding, specgate_ctsc::capture::error::Error> {
+) -> Result<specgate_ctsc::capture::Encoding, specgate_ctsc::capture::Error> {
     encode_capture(
         captures,
         tool_version,
@@ -499,10 +499,10 @@ fn native_capture(label: &str, value: Option<&str>) -> Capture {
         Config::builder(ConfigDeps {
             scenario_name: label.into(),
             trace_id: "44444444444444444444444444444444".try_into().unwrap(),
-            run_span_id: "4444444444444401".try_into().unwrap(),
-            scenario_span_id: "4444444444444402".try_into().unwrap(),
+            run_id: "4444444444444401".try_into().unwrap(),
+            scenario_id: "4444444444444402".try_into().unwrap(),
         })
-        .operation_span_ids(vec!["4444444444444403".try_into().unwrap()])
+        .operation_ids(vec!["4444444444444403".try_into().unwrap()])
         .start_time(4_000_000_000)
         .clock_step(100)
         .build()
@@ -570,10 +570,10 @@ fn capture_config(label: &str) -> Config {
     Config::builder(ConfigDeps {
         scenario_name: label.into(),
         trace_id: "88888888888888888888888888888888".try_into().unwrap(),
-        run_span_id: "8888888888888801".try_into().unwrap(),
-        scenario_span_id: "8888888888888802".try_into().unwrap(),
+        run_id: "8888888888888801".try_into().unwrap(),
+        scenario_id: "8888888888888802".try_into().unwrap(),
     })
-    .operation_span_ids(vec!["8888888888888803".try_into().unwrap()])
+    .operation_ids(vec!["8888888888888803".try_into().unwrap()])
     .start_time(5_000_000_000)
     .clock_step(100)
     .build()

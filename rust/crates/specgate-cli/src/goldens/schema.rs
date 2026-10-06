@@ -317,6 +317,7 @@ impl ParityDifference {
 pub(super) fn semantic_differences(rust: &serde_json::Value, csharp: &serde_json::Value) -> Vec<ParityDifference> {
     let mut differences = Vec::new();
     collect_differences(rust, csharp, "", &mut differences);
+    differences.shrink_to_fit();
     differences
 }
 

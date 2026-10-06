@@ -239,7 +239,7 @@ impl serde::Serialize for TypeKind {
     clippy::exhaustive_structs,
     reason = "normalized schema DTOs are intentionally constructible and destructurable by consumers"
 )]
-pub struct TypeDeclaration {
+pub struct TypeDef {
     /// Semantic type name.
     pub name: TypeName,
     /// Type kind: `struct` or `enum`.
@@ -248,6 +248,80 @@ pub struct TypeDeclaration {
     pub fields: Vec<Field>,
     /// Enum variants.
     pub variants: Vec<Variant>,
+}
+
+/// Required identities for [`TypeDef::builder`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeDefDeps {
+    /// Semantic type name.
+    pub name: TypeName,
+    /// Type kind.
+    pub kind: TypeKind,
+}
+
+/// Staged construction for a normalized type declaration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[must_use]
+pub struct TypeDefBuilder {
+    declaration: TypeDef,
+}
+
+impl TypeDef {
+    /// Start a declaration builder with the required type identity.
+    pub fn builder(deps: impl Into<TypeDefDeps>) -> TypeDefBuilder {
+        let deps = deps.into();
+        TypeDefBuilder {
+            declaration: Self {
+                name: deps.name,
+                kind: deps.kind,
+                fields: Vec::new(),
+                variants: Vec::new(),
+            },
+        }
+    }
+}
+
+impl TypeDefBuilder {
+    /// Set struct fields.
+    pub fn fields(mut self, fields: impl Into<Vec<Field>>) -> Self {
+        let mut fields = fields.into();
+        fields.shrink_to_fit();
+        self.declaration.fields = fields;
+        self
+    }
+
+    /// Set enum variants.
+    pub fn variants(mut self, variants: impl Into<Vec<Variant>>) -> Self {
+        let mut variants = variants.into();
+        variants.shrink_to_fit();
+        self.declaration.variants = variants;
+        self
+    }
+
+    /// Finish the declaration after checking kind-specific payloads.
+    ///
+    /// # Errors
+    ///
+    /// Returns a normalization error when a struct declares enum variants or
+    /// an enum declares struct fields.
+    pub fn build(self) -> Result<TypeDef, Error> {
+        match self.declaration.kind {
+            TypeKind::Struct if !self.declaration.variants.is_empty() => {
+                return Err(Error::message(
+                    ErrorKind::Normalization,
+                    format!("struct type '{}' cannot declare enum variants", self.declaration.name),
+                ));
+            }
+            TypeKind::Enum if !self.declaration.fields.is_empty() => {
+                return Err(Error::message(
+                    ErrorKind::Normalization,
+                    format!("enum type '{}' cannot declare struct fields", self.declaration.name),
+                ));
+            }
+            TypeKind::Struct | TypeKind::Enum | TypeKind::Other(_) => {}
+        }
+        Ok(self.declaration)
+    }
 }
 
 /// A component's normalized, folded schema.
@@ -263,11 +337,11 @@ pub struct Schema {
     /// Direct component dependencies.
     pub dependencies: Vec<ComponentId>,
     /// Referenced dependency type declarations.
-    pub dependency_types: Vec<DependencySchema>,
+    pub dependency_types: Vec<Dependency>,
     /// Normalized operation declarations.
     pub operations: Vec<Operation>,
     /// Component-owned named types.
-    pub types: Vec<TypeDeclaration>,
+    pub types: Vec<TypeDef>,
 }
 
 /// Staged construction for a normalized component schema.
@@ -301,7 +375,7 @@ impl SchemaBuilder {
         self
     }
     /// Set referenced dependency type declarations.
-    pub fn dependency_types(mut self, dependency_types: impl IntoIterator<Item = DependencySchema>) -> Self {
+    pub fn dependency_types(mut self, dependency_types: impl IntoIterator<Item = Dependency>) -> Self {
         let mut values = dependency_types.into_iter().collect::<Vec<_>>();
         values.shrink_to_fit();
         self.schema.dependency_types = values;
@@ -315,7 +389,7 @@ impl SchemaBuilder {
         self
     }
     /// Set component-owned named types.
-    pub fn types(mut self, types: impl IntoIterator<Item = TypeDeclaration>) -> Self {
+    pub fn types(mut self, types: impl IntoIterator<Item = TypeDef>) -> Self {
         let mut values = types.into_iter().collect::<Vec<_>>();
         values.shrink_to_fit();
         self.schema.types = values;
@@ -337,13 +411,106 @@ impl SchemaBuilder {
     clippy::exhaustive_structs,
     reason = "normalized schema DTOs are intentionally constructible and destructurable by consumers"
 )]
-pub struct DependencySchema {
+pub struct Dependency {
     /// Dependency component identifier.
     pub component: ComponentId,
     /// Dependency's direct dependencies.
     pub dependencies: Vec<ComponentId>,
     /// Referenced types owned by the dependency.
-    pub types: Vec<TypeDeclaration>,
+    pub types: Vec<TypeDef>,
+}
+
+/// Staged construction for referenced dependency types.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[must_use]
+pub struct DependencyBuilder {
+    schema: Dependency,
+}
+
+impl Dependency {
+    /// Begin a dependency schema with its required component identity.
+    pub fn builder(component: impl Into<ComponentId>) -> DependencyBuilder {
+        DependencyBuilder {
+            schema: Self {
+                component: component.into(),
+                dependencies: Vec::new(),
+                types: Vec::new(),
+            },
+        }
+    }
+}
+
+impl DependencyBuilder {
+    /// Set direct dependencies of the referenced component.
+    pub fn dependencies(mut self, dependencies: impl IntoIterator<Item = ComponentId>) -> Self {
+        let mut values = dependencies.into_iter().collect::<Vec<_>>();
+        values.shrink_to_fit();
+        self.schema.dependencies = values;
+        self
+    }
+
+    /// Set referenced type declarations.
+    pub fn types(mut self, types: impl IntoIterator<Item = TypeDef>) -> Self {
+        let mut values = types.into_iter().collect::<Vec<_>>();
+        values.shrink_to_fit();
+        self.schema.types = values;
+        self
+    }
+
+    /// Finish the dependency schema.
+    #[must_use]
+    pub fn build(self) -> Dependency {
+        self.schema
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn type_def_rejects_kind_payload_mismatches() {
+        let struct_result = TypeDef::builder(TypeDefDeps {
+            name: "Record".into(),
+            kind: TypeKind::Struct,
+        })
+        .variants(vec![Variant {
+            name: "Unexpected".into(),
+            fields: Vec::new(),
+            tuple: None,
+        }])
+        .build();
+        assert!(matches!(struct_result, Err(ref error) if error.is_normalization()));
+
+        let enum_result = TypeDef::builder(TypeDefDeps {
+            name: "Choice".into(),
+            kind: TypeKind::Enum,
+        })
+        .fields(vec![Field {
+            name: "unexpected".into(),
+            ty: "string".into(),
+        }])
+        .build();
+        assert!(matches!(enum_result, Err(ref error) if error.is_normalization()));
+    }
+
+    #[test]
+    fn dependency_builder_collects_referenced_types() {
+        let ty = TypeDef::builder(TypeDefDeps {
+            name: "Shared".into(),
+            kind: TypeKind::Struct,
+        })
+        .build()
+        .expect("empty struct declaration should be valid");
+        let dependency = Dependency::builder("shared.types")
+            .dependencies(["shared.base".into()])
+            .types([ty.clone()])
+            .build();
+
+        assert_eq!(dependency.component.as_str(), "shared.types");
+        assert_eq!(dependency.dependencies[0].as_str(), "shared.base");
+        assert_eq!(dependency.types, vec![ty]);
+    }
 }
 
 /// Raw and normalized metadata for one selected binding target.

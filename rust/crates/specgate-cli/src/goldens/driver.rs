@@ -22,7 +22,8 @@ pub(super) fn clear_artifacts(root: impl AsRef<Path>) -> std::io::Result<()> {
 }
 
 pub(super) fn run(mode: Mode) -> Result<(), GoldenError> {
-    let root = repo_root();
+    let current = std::env::current_dir().map_err(|source| GoldenError::wrap("failed to read current directory", source))?;
+    let root = repo_root(current);
     let matrix = load_matrix(&root);
     check_shape(&matrix);
     check_coverage(&root, &matrix)?;

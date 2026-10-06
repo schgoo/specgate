@@ -24,7 +24,12 @@ pub(super) fn verify_replay(
         .iter()
         .filter(|row| row.classification == Classification::ImplementationComponent && row.captures_rust())
     {
-        let binding = row.rust.as_ref().expect("rust row").binding.clone();
+        let binding = row
+            .rust
+            .as_ref()
+            .unwrap_or_else(|| panic!("matrix row '{}' capturing Rust must define Rust settings", row.id))
+            .binding
+            .clone();
         by_binding.entry(binding).or_default().push(row);
     }
 
@@ -33,7 +38,13 @@ pub(super) fn verify_replay(
         let binding = repo_path(root, &matrix.bindings[&binding_key]);
         let components = rows
             .iter()
-            .map(|row| specgate_discovery::identity::ComponentId::from(row.component.as_deref().expect("component row")))
+            .map(|row| {
+                specgate_discovery::identity::ComponentId::from(
+                    row.component
+                        .as_deref()
+                        .unwrap_or_else(|| panic!("matrix row '{}' capturing Rust must name a component", row.id)),
+                )
+            })
             .collect::<Vec<_>>();
         let candidates = Candidates::discover(binding, None, &components)
             .map_err(|error| GoldenError::message(format!("{binding_key}: candidate discovery failed: {error}")))?;
@@ -57,7 +68,11 @@ pub(super) fn verify_replay(
                     ));
                 }
                 (ReplayMode::Unsupported, Err(reason)) => {
-                    let expected = row.replay.expect_category.as_deref().expect("validated replay category");
+                    let expected = row
+                        .replay
+                        .expect_category
+                        .as_deref()
+                        .unwrap_or_else(|| panic!("unsupported replay row '{}' must declare expectCategory", row.id));
                     match classify(&reason) {
                         Some(actual) if actual.code() == expected => {}
                         Some(actual) => problems.push(format!(
@@ -87,7 +102,9 @@ pub(super) fn verify_replay(
         assert_eq!(
             reports.len(),
             planned.len(),
-            "{binding_key}: replay returned the wrong report count"
+            "{binding_key}: replay execution must return one report per plan (reports={}, plans={})",
+            reports.len(),
+            planned.len()
         );
         for (_plan, candidate, row) in &planned {
             let bundle = row.rust_dir(out_root);
@@ -100,7 +117,12 @@ pub(super) fn verify_replay(
             }
         }
     }
-    assert!(problems.is_empty(), "replay verification failed:\n  {}", problems.join("\n  "));
+    if !problems.is_empty() {
+        return Err(GoldenError::message(format!(
+            "replay verification failed:\n  {}",
+            problems.join("\n  ")
+        )));
+    }
     Ok(())
 }
 // ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 //! Encoding normalized discovery schemas as canonical CTSC registries.
 
-pub mod error;
+mod error;
+pub use error::{Error, ErrorKind, Result};
 
 use crate::replay::model::{RegistryInput, Type};
 use serde::{Deserialize, Serialize};
@@ -115,11 +116,11 @@ impl AsRef<Schema> for Schema {
 /// let schema = specgate_ctsc::registry::Schema::new(schema);
 /// let encoded = specgate_ctsc::registry::encode("registry", "1", schema)?;
 /// assert!(encoded.registry_json.contains("\"registryId\":\"registry\""));
-/// # Ok::<(), specgate_ctsc::registry::error::Error>(())
+/// # Ok::<(), specgate_ctsc::registry::Error>(())
 /// ```
 /// # Errors
 /// Returns a structured error when JSON, declarations, or type references are invalid.
-pub fn encode(id: impl Into<Id>, version: impl Into<Version>, schema: impl AsRef<Schema>) -> error::Result<Encoding> {
+pub fn encode(id: impl Into<Id>, version: impl Into<Version>, schema: impl AsRef<Schema>) -> Result<Encoding> {
     encode_one(id.into().0, version.into().0, <Schema as AsRef<str>>::as_ref(schema.as_ref()))
 }
 
@@ -134,12 +135,12 @@ pub fn encode(id: impl Into<Id>, version: impl Into<Version>, schema: impl AsRef
 /// let schemas = [Schema::new(r#"{"component":"a","dependencies":[],"dependency_types":[],"operations":[],"types":[]}"#)];
 /// let encoded = encode_many("registry", "1", schemas)?;
 /// assert_eq!(encoded.operation_count, 0);
-/// # Ok::<(), specgate_ctsc::registry::error::Error>(())
+/// # Ok::<(), specgate_ctsc::registry::Error>(())
 /// ```
 ///
 /// # Errors
 /// Returns a structured error when any schema or merged declaration is invalid.
-pub fn encode_many(id: impl Into<Id>, version: impl Into<Version>, schemas: impl AsRef<[Schema]>) -> error::Result<Encoding> {
+pub fn encode_many(id: impl Into<Id>, version: impl Into<Version>, schemas: impl AsRef<[Schema]>) -> Result<Encoding> {
     encode_all(id.into().0, version.into().0, schemas.as_ref())
 }
 
@@ -210,10 +211,14 @@ fn append_components(schema_json: impl AsRef<str>, components: &mut Vec<Componen
         .operations
         .iter()
         .map(|operation| operation.to_ctsc(&context))
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<std::result::Result<Vec<_>, _>>()?;
     operations.sort_by(|left, right| left.name.cmp(&right.name));
 
-    let mut types = schema.types.iter().map(|ty| ty.to_ctsc(&context)).collect::<Result<Vec<_>, _>>()?;
+    let mut types = schema
+        .types
+        .iter()
+        .map(|ty| ty.to_ctsc(&context))
+        .collect::<std::result::Result<Vec<_>, _>>()?;
     types.sort_by(|left, right| left.name.cmp(&right.name));
 
     components.clear();
@@ -245,7 +250,7 @@ fn append_components(schema_json: impl AsRef<str>, components: &mut Vec<Componen
             .types
             .iter()
             .map(|ty| ty.to_ctsc(&dependency_context))
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<std::result::Result<Vec<_>, _>>()?;
         dependency_types.sort_by(|left, right| left.name.cmp(&right.name));
         components.push(Component {
             id: dependency.component.to_string(),
@@ -263,7 +268,7 @@ fn append_components(schema_json: impl AsRef<str>, components: &mut Vec<Componen
     Ok(())
 }
 
-fn encode_one(registry_id: String, registry_version: String, schema_json: impl AsRef<str>) -> error::Result<Encoding> {
+fn encode_one(registry_id: String, registry_version: String, schema_json: impl AsRef<str>) -> Result<Encoding> {
     encode_document(registry_id, registry_version, parse_components(schema_json)?)
 }
 
@@ -277,7 +282,7 @@ fn encode_one(registry_id: String, registry_version: String, schema_json: impl A
 ///
 /// Returns the same errors as [`encode_schema_registry_result`], or an error
 /// when repeated component declarations disagree.
-fn encode_all(registry_id: String, registry_version: String, schema_json: &[Schema]) -> error::Result<Encoding> {
+fn encode_all(registry_id: String, registry_version: String, schema_json: &[Schema]) -> Result<Encoding> {
     if schema_json.is_empty() {
         return Err("cannot encode a registry without normalized schemas".to_string().into());
     }
@@ -303,17 +308,17 @@ fn encode_all(registry_id: String, registry_version: String, schema_json: &[Sche
 /// position for any selected or root component. `discover` and `capture`
 /// therefore emit byte-identical documents for the same logical component set,
 /// which matters because both write to the same `registry.ctsc.json` path.
-fn encode_document(registry_id: String, registry_version: String, mut components: Vec<Component>) -> error::Result<Encoding> {
+fn encode_document(registry_id: String, registry_version: String, mut components: Vec<Component>) -> Result<Encoding> {
     components.sort_by(|left, right| left.id.cmp(&right.id));
     let operation_count = components.iter().try_fold(0_usize, |count, component| {
         count
             .checked_add(component.operations.len())
-            .ok_or_else(|| error::Error::from("operation count overflow".to_string()))
+            .ok_or_else(|| Error::from("operation count overflow".to_string()))
     })?;
     let type_count = components.iter().try_fold(0_usize, |count, component| {
         count
             .checked_add(component.types.len())
-            .ok_or_else(|| error::Error::from("type count overflow".to_string()))
+            .ok_or_else(|| Error::from("type count overflow".to_string()))
     })?;
     let document = RegistryDocument {
         format: REGISTRY_FORMAT,
@@ -323,17 +328,17 @@ fn encode_document(registry_id: String, registry_version: String, mut components
         components,
     };
     Ok(Encoding {
-        operation_count: i32::try_from(operation_count).map_err(|_error| error::Error::from("operation count exceeds i32".to_string()))?,
-        type_count: i32::try_from(type_count).map_err(|_error| error::Error::from("type count exceeds i32".to_string()))?,
+        operation_count: i32::try_from(operation_count).map_err(|_error| Error::from("operation count exceeds i32".to_string()))?,
+        type_count: i32::try_from(type_count).map_err(|_error| Error::from("type count exceeds i32".to_string()))?,
         registry_json: {
-            let mut json = serde_json::to_string(&document)?;
+            let mut json = serde_json::to_string(&document).map_err(Error::json)?;
             json.shrink_to_fit();
             json
         },
     })
 }
 
-pub(crate) fn merge_component(existing: &mut Component, incoming: Component) -> error::Result<()> {
+pub(crate) fn merge_component(existing: &mut Component, incoming: Component) -> Result<()> {
     let dependencies = existing
         .dependencies
         .iter()

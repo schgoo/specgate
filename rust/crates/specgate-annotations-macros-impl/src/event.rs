@@ -215,7 +215,7 @@ pub fn expand_event(input: TokenStream2) -> syn::Result<TokenStream2> {
         const _: () = {
             #[#rt::_private::linkme::distributed_slice(#rt::SPECGATE_TYPES)]
             #[linkme(crate = #rt::_private::linkme)]
-            static __SPECGATE_META: #rt::TypeMeta = #rt::TypeMeta::builder(#rt::TypeMetaDeps {
+            static __SPECGATE_META: #rt::TypeMeta = #rt::TypeMeta::const_builder(#rt::TypeDeps {
                 name: #rt::TypeName::new(#type_name),
                 module_path: #rt::ModulePath::new(::core::module_path!()),
                 kind: #kind,

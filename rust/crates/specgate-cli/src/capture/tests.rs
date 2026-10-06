@@ -342,8 +342,12 @@ mod cases {
             .collect()
     }
 
+    fn parse_trace(reader: impl std::io::Read) -> serde_json::Value {
+        serde_json::from_reader(reader).expect("valid OTLP JSON")
+    }
+
     fn read_trace(bundle: impl AsRef<Path>) -> serde_json::Value {
-        serde_json::from_slice(&std::fs::read(bundle.as_ref().join(TRACE_FILE)).expect("captured trace")).expect("valid OTLP JSON")
+        parse_trace(std::fs::File::open(bundle.as_ref().join(TRACE_FILE)).expect("captured trace"))
     }
 
     #[test]
@@ -553,7 +557,7 @@ mod cases {
             selected[0]
                 .operations
                 .iter()
-                .map(|operation| (operation.operation_name.as_str(), operation.parent_span_id.as_str()))
+                .map(|operation| (operation.operation_name.as_str(), operation.parent_id.as_str()))
                 .collect::<Vec<_>>(),
             vec![("root", "1111111111111102"), ("nested", "1111111111111103")]
         );

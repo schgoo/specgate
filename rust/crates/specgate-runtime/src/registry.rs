@@ -121,7 +121,7 @@ static_text!(VariantName, "A semantic enum-variant name embedded in link-time me
     clippy::exhaustive_structs,
     reason = "macro expansions construct this fixed registration protocol directly"
 )]
-pub struct OpMetaDeps {
+pub struct OpDeps {
     /// Semantic operation or setup name.
     pub name: OpName,
     /// Native module path.
@@ -138,7 +138,7 @@ pub struct OpMetaDeps {
 
 /// Const builder for link-time operation metadata.
 #[derive(Debug, Clone, Copy)]
-pub struct OpMetaBuilder {
+pub struct OpBuilder {
     meta: OpMeta,
 }
 
@@ -217,10 +217,10 @@ impl OpMeta {
     /// # Examples
     /// ```
     /// use specgate_runtime::registry::{
-    ///     ComponentName, FnName, ModulePath, OpMeta, OpMetaDeps, OpName, RustType,
+    ///     ComponentName, FnName, ModulePath, OpDeps, OpMeta, OpName, RustType,
     /// };
     ///
-    /// const META: OpMeta = OpMeta::builder(OpMetaDeps {
+    /// let metadata = OpMeta::builder(OpDeps {
     ///     name: OpName::new("run"),
     ///     module_path: ModulePath::new("example"),
     ///     fn_name: FnName::new("run"),
@@ -231,11 +231,18 @@ impl OpMeta {
     /// .public(true)
     /// .build();
     ///
-    /// # let _ = META;
+    /// assert!(metadata.is_public());
     /// ```
     #[must_use]
-    pub const fn builder(deps: OpMetaDeps) -> OpMetaBuilder {
-        OpMetaBuilder {
+    pub fn builder(deps: impl Into<OpDeps>) -> OpBuilder {
+        Self::const_builder(deps.into())
+    }
+
+    /// Start the const builder used by generated metadata.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn const_builder(deps: OpDeps) -> OpBuilder {
+        OpBuilder {
             meta: Self {
                 name: deps.name.0,
                 module_path: deps.module_path.0,
@@ -253,7 +260,7 @@ impl OpMeta {
     }
 }
 
-impl OpMetaBuilder {
+impl OpBuilder {
     /// Mark setup-producer metadata.
     #[must_use]
     pub const fn setup(mut self, fills: Option<FieldName>) -> Self {
@@ -334,7 +341,7 @@ impl TypeKind {
     clippy::exhaustive_structs,
     reason = "macro expansions construct this fixed registration protocol directly"
 )]
-pub struct TypeMetaDeps {
+pub struct TypeDeps {
     /// Semantic type name.
     pub name: TypeName,
     /// Native module path.
@@ -347,7 +354,7 @@ pub struct TypeMetaDeps {
 
 /// Const builder for link-time semantic-type metadata.
 #[derive(Debug, Clone, Copy)]
-pub struct TypeMetaBuilder {
+pub struct TypeBuilder {
     meta: TypeMeta,
 }
 
@@ -372,10 +379,10 @@ impl TypeMeta {
     /// # Examples
     /// ```
     /// use specgate_runtime::registry::{
-    ///     ComponentName, ModulePath, TypeKind, TypeMeta, TypeMetaDeps, TypeName,
+    ///     ComponentName, ModulePath, TypeDeps, TypeKind, TypeMeta, TypeName,
     /// };
     ///
-    /// const META: TypeMeta = TypeMeta::builder(TypeMetaDeps {
+    /// let metadata = TypeMeta::builder(TypeDeps {
     ///     name: TypeName::new("Request"),
     ///     module_path: ModulePath::new("example"),
     ///     kind: TypeKind::Struct,
@@ -384,11 +391,18 @@ impl TypeMeta {
     /// .fields(&[])
     /// .build();
     ///
-    /// # let _ = META;
+    /// assert_eq!(metadata.kind(), TypeKind::Struct);
     /// ```
     #[must_use]
-    pub const fn builder(deps: TypeMetaDeps) -> TypeMetaBuilder {
-        TypeMetaBuilder {
+    pub fn builder(deps: impl Into<TypeDeps>) -> TypeBuilder {
+        Self::const_builder(deps.into())
+    }
+
+    /// Start the const builder used by generated metadata.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn const_builder(deps: TypeDeps) -> TypeBuilder {
+        TypeBuilder {
             meta: Self {
                 name: deps.name,
                 module_path: deps.module_path,
@@ -399,9 +413,15 @@ impl TypeMeta {
             },
         }
     }
+
+    /// Return the semantic type kind.
+    #[must_use]
+    pub const fn kind(&self) -> TypeKind {
+        self.kind
+    }
 }
 
-impl TypeMetaBuilder {
+impl TypeBuilder {
     /// Set named struct fields.
     #[must_use]
     pub const fn fields(mut self, fields: &'static [FieldMeta]) -> Self {
@@ -422,13 +442,10 @@ impl TypeMetaBuilder {
     /// Panics when the selected kind carries metadata for the other data shape.
     #[must_use]
     pub const fn build(self) -> TypeMeta {
-        assert!(
-            match self.meta.kind {
-                TypeKind::Struct => self.meta.variants.is_empty(),
-                TypeKind::Enum => self.meta.fields.is_empty(),
-            },
-            "semantic type metadata kind disagrees with its fields or variants"
-        );
+        match self.meta.kind {
+            TypeKind::Struct => assert!(self.meta.variants.is_empty(), "struct metadata must not declare enum variants"),
+            TypeKind::Enum => assert!(self.meta.fields.is_empty(), "enum metadata must not declare struct fields"),
+        }
         self.meta
     }
 }

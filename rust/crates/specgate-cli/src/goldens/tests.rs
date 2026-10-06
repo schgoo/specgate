@@ -77,7 +77,7 @@ mod cases {
 
     #[test]
     pub(super) fn covers_sources() {
-        let root = repo_root();
+        let root = repo_root(std::env::current_dir().expect("current directory"));
         let matrix = load_matrix(&root);
         check_shape(&matrix);
         check_coverage(&root, &matrix).expect("golden sources should be covered");
@@ -177,7 +177,7 @@ mod cases {
 
     #[test]
     pub(super) fn parity_exceptions() {
-        let root = repo_root();
+        let root = repo_root(std::env::current_dir().expect("current directory"));
         let matrix = load_matrix(&root);
         let artifacts = repo_path(&root, &matrix.artifact_root);
         let exceptions = matrix

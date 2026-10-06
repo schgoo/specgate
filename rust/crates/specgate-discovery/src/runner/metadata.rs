@@ -1,4 +1,12 @@
-//! Cargo package identity and generated-runner metadata.
+//! Candidate-rooted Cargo package resolution for generated discovery runners.
+//!
+//! Resolution starts from the candidate manifest, captures the exact
+//! `specgate-runtime` package identity selected by Cargo metadata, and writes
+//! private runner manifests that preserve that source. Runtime path/version
+//! overrides are assertions against the selected package, never substitutions,
+//! so generated runners cannot split link-time registration or capture state.
+//! The invocation cache owns temporary package roots, while concrete
+//! filesystem and process wrappers provide deterministic failure seams.
 //!
 //! # Example
 //! ```no_run
@@ -7,10 +15,6 @@
 //! assert_eq!(dependency.package, "demo");
 //! # Ok::<(), specgate_discovery::Error>(())
 //! ```
-
-//! Cache lifecycle, Cargo metadata identity, and generated manifests.
-
-//! Runtime cache, Cargo source resolution, and generated manifest support.
 
 use crate::error::{Error, ErrorKind};
 mod models;

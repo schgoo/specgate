@@ -77,7 +77,22 @@ pub(super) struct ManifestScenarios {
     pub(super) names: Vec<String>,
 }
 
-pub(super) fn validate_manifest(manifest: &Manifest) -> Result<(), error::Error> {
+/// Manifest data safe for replay after all wire invariants are checked.
+pub(super) struct ValidatedManifest {
+    pub(super) component_id: String,
+    pub(super) registry: ValidatedRegistry,
+    pub(super) reference_digest: Digest,
+    pub(super) scenario_names: Vec<String>,
+}
+
+/// Registry linkage safe for replay after manifest validation.
+pub(super) struct ValidatedRegistry {
+    pub(super) id: String,
+    pub(super) version: String,
+    pub(super) digest: Digest,
+}
+
+pub(super) fn validate_manifest(manifest: Manifest) -> Result<ValidatedManifest, error::Error> {
     if manifest.format != MANIFEST_FORMAT || manifest.format_version != MANIFEST_VERSION {
         return Err(format!(
             "unsupported capture manifest format/version '{}/{}'; expected '{MANIFEST_FORMAT}/{MANIFEST_VERSION}'",
@@ -125,7 +140,18 @@ pub(super) fn validate_manifest(manifest: &Manifest) -> Result<(), error::Error>
     if unique_names.len() != manifest.scenarios.names.len() {
         return Err("capture manifest contains duplicate scenario names".to_string().into());
     }
-    Ok(())
+    let mut scenario_names = manifest.scenarios.names;
+    scenario_names.shrink_to_fit();
+    Ok(ValidatedManifest {
+        component_id: manifest.component_id,
+        registry: ValidatedRegistry {
+            id: manifest.registry.id,
+            version: manifest.registry.version,
+            digest: manifest.registry.digest,
+        },
+        reference_digest: manifest.reference.digest,
+        scenario_names,
+    })
 }
 
 /// Syntactically valid lowercase SHA-256 artifact digest.
