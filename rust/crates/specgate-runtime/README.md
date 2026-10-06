@@ -14,6 +14,13 @@ Isolated test processes can activate native capture through
 each completed top-level operation atomically refreshes a stable JSON
 sidecar containing the full scenario.
 
+The ambient session handle is thread-local, which is what isolates
+concurrent `#[test]`s, but recording is not thread-affine: an instrumented
+future carries the collector handle and parent operation it was constructed
+with and re-installs them around every poll, so an operation keeps its
+parentage across thread migration and two operations can be interleaved on
+one thread.
+
 Captured inputs are the registry’s black-box surface, not the raw call:
 `#[spec_setup]` producers record their construction inputs, and the
 operation they build adopts those inputs in place of the parameters the

@@ -7,6 +7,13 @@
 //! each completed top-level operation atomically refreshes a stable JSON
 //! sidecar containing the full scenario.
 //!
+//! The ambient session handle is thread-local, which is what isolates
+//! concurrent `#[test]`s, but recording is not thread-affine: an instrumented
+//! future carries the collector handle and parent operation it was constructed
+//! with and re-installs them around every poll, so an operation keeps its
+//! parentage across thread migration and two operations can be interleaved on
+//! one thread.
+//!
 //! Captured inputs are the registry's black-box surface, not the raw call:
 //! `#[spec_setup]` producers record their construction inputs, and the
 //! operation they build adopts those inputs in place of the parameters the
@@ -24,7 +31,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::Write as _;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::task::{Context, Poll};
 
 pub use linkme;
 
@@ -508,6 +517,11 @@ struct PendingNativeOperation {
     order: u64,
     span_id: String,
     parent_span_id: String,
+    /// The operation that was current when this one opened, so completing it
+    /// restores the caller's current pointer rather than popping a shared
+    /// stack. Interleaved operations do not nest, so a stack cannot answer
+    /// "who was current before me" once two of them are open at once.
+    parent_operation: Option<usize>,
     component_id: String,
     operation_name: String,
     start_time_unix_nano: i64,
@@ -549,7 +563,14 @@ struct NativeCaptureState {
     next_time_unix_nano: i64,
     next_operation_id: usize,
     next_order: u64,
-    active_operations: Vec<usize>,
+    /// The operation observations attach to and new operations are parented
+    /// to, or `None` for the scenario span itself.
+    ///
+    /// Not a nesting stack: an instrumented future saves and restores this
+    /// pointer around every poll, so two interleaved operations each see their
+    /// own context. The outstanding set is derived from operation status
+    /// instead — see [`outstanding_operations`].
+    current_operation: Option<usize>,
     operations: Vec<PendingNativeOperation>,
     terminal_error: Option<String>,
 }
@@ -569,6 +590,39 @@ impl NativeCaptureState {
             .checked_add(1)
             .ok_or_else(|| "native capture event order overflow".to_string())?;
         Ok(current)
+    }
+}
+
+/// Indices of every operation that has opened and not yet reached a status.
+///
+/// Returned in open order, which is index order: operations are only ever
+/// pushed. Callers that close them walk this in reverse so an operation is
+/// always closed before the operation that was current when it opened,
+/// preserving the innermost-first closure order the LIFO stack used to give.
+fn outstanding_operations(state: &NativeCaptureState) -> Vec<usize> {
+    state
+        .operations
+        .iter()
+        .enumerate()
+        .filter(|(_index, operation)| operation.status.is_none())
+        .map(|(index, _operation)| index)
+        .collect()
+}
+
+/// True when any operation has opened and not yet reached a status.
+fn has_outstanding_operations(state: &NativeCaptureState) -> bool {
+    state.operations.iter().any(|operation| operation.status.is_none())
+}
+
+/// Hand the current pointer back to whoever held it when `operation_index`
+/// opened.
+///
+/// Only the operation that is actually current moves the pointer. A completion
+/// that arrives while some other operation is current — the interleaved case —
+/// leaves the pointer alone, because the operation it names is still running.
+fn release_operation(state: &mut NativeCaptureState, operation_index: usize) {
+    if state.current_operation == Some(operation_index) {
+        state.current_operation = state.operations[operation_index].parent_operation;
     }
 }
 
@@ -814,7 +868,7 @@ impl OperationScope {
             operation.completion = completion;
             operation.end_time_unix_nano = Some(end_time_unix_nano);
             operation.status = Some(status);
-            state.active_operations.pop();
+            release_operation(state, operation_index);
             Ok(state.sidecar_path.is_some())
         })?;
         self.closed = true;
@@ -843,14 +897,14 @@ impl Drop for OperationScope {
             return;
         };
         // M2: `panicking()` answers "did this operation unwind?" correctly for
-        // a synchronous call and for a directly-awaited future, because in both
-        // cases the thread dropping the scope is the thread that ran it. It is
-        // still unreliable for a future that migrates or is abandoned: dropped
-        // on an executor thread panicking for an unrelated reason it reports
-        // `true`, and an abandoned future is dropped with no panic at all, so
-        // this takes the `terminal_error` branch below. That is the accepted
-        // terminal-state decision for now; representing abandonment as
-        // something other than a poisoned session is M4 and human-owned.
+        // a synchronous call and for an awaited future, because in both cases
+        // the thread dropping the scope is the thread that ran the body. It is
+        // still unreliable for an abandoned future: dropped on an executor
+        // thread panicking for an unrelated reason it reports `true`, and an
+        // abandoned future is dropped with no panic at all, so this takes the
+        // `terminal_error` branch below. That is the accepted terminal-state
+        // decision for now; representing abandonment as something other than a
+        // poisoned session is M4 and human-owned.
         let panicking = std::thread::panicking();
         let result = with_collector_mut(&collector, |state| {
             if state
@@ -875,7 +929,7 @@ impl Drop for OperationScope {
                 operation.completion = Some(completion);
                 operation.end_time_unix_nano = Some(end_time_unix_nano);
                 operation.status = Some(NativeStatus::Error);
-                state.active_operations.pop();
+                release_operation(state, operation_index);
                 Ok(state.sidecar_path.is_some())
             } else {
                 let message = format!(
@@ -883,7 +937,7 @@ impl Drop for OperationScope {
                     state.operations[operation_index].operation_name
                 );
                 state.terminal_error = Some(message.clone());
-                state.active_operations.pop();
+                release_operation(state, operation_index);
                 Err(message)
             }
         });
@@ -940,7 +994,7 @@ fn start_native_capture_with_sidecar(config: NativeCaptureConfig, sidecar_path: 
             sidecar_path,
             next_operation_id: 0,
             next_order: 0,
-            active_operations: Vec::new(),
+            current_operation: None,
             operations: Vec::new(),
             terminal_error: None,
         }))));
@@ -973,9 +1027,10 @@ pub fn begin_native_operation(component_id: &str, operation_name: &str) -> Resul
 
         let (inputs, setup_filled_parameters) = folded_setup_inputs(component_id, operation_name)?;
         let span_id = next_operation_span_id(state)?;
-        let parent_span_id = state.active_operations.last().map_or_else(
+        let parent_operation = state.current_operation;
+        let parent_span_id = parent_operation.map_or_else(
             || state.config.scenario_span_id.clone(),
-            |index| state.operations[*index].span_id.clone(),
+            |index| state.operations[index].span_id.clone(),
         );
         let start_time_unix_nano = state.tick()?;
         let order = state.order()?;
@@ -984,6 +1039,7 @@ pub fn begin_native_operation(component_id: &str, operation_name: &str) -> Resul
             order,
             span_id,
             parent_span_id,
+            parent_operation,
             component_id: component_id.to_string(),
             operation_name: operation_name.to_string(),
             start_time_unix_nano,
@@ -995,7 +1051,7 @@ pub fn begin_native_operation(component_id: &str, operation_name: &str) -> Resul
             completion: None,
         });
         state.next_operation_id += 1;
-        state.active_operations.push(operation_index);
+        state.current_operation = Some(operation_index);
         operation_index
     };
     Ok(OperationScope {
@@ -1003,6 +1059,152 @@ pub fn begin_native_operation(component_id: &str, operation_name: &str) -> Resul
         collector: Some(collector),
         closed: false,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Async capture context — the recording an instrumented future carries with it.
+// ---------------------------------------------------------------------------
+
+/// The recording context an instrumented future carries across `.await`.
+///
+/// Captured where the future is *constructed*, which is the only moment the
+/// caller's operation is still on the stack, and re-installed around every
+/// poll. The future therefore records under the operation that built it no
+/// matter which thread resumes it.
+///
+/// The span itself is not opened here. Construction only remembers *who the
+/// parent is*; `begin_native_operation` still runs at first poll, so a future
+/// that is built and never polled leaves the session untouched.
+///
+/// `current_operation` is mutable state, not a constant: it holds the
+/// operation the future was inside when its last poll returned, so a suspended
+/// operation resumes as the current one instead of as its own parent.
+#[derive(Debug)]
+#[doc(hidden)]
+pub struct CaptureContext {
+    collector: Option<CollectorHandle>,
+    current_operation: Option<usize>,
+}
+
+/// Capture the ambient recording context for a future under construction.
+///
+/// Deliberately does *not* activate an environment-requested session: a future
+/// constructed before the first annotated call must behave exactly as it does
+/// without this wrapper, letting `begin_native_operation` start the session at
+/// first poll.
+///
+/// The cost of that choice is a real boundary, not just a fallback. A session
+/// starts lazily — `activate_native_capture_from_environment` is reached only
+/// from `begin_native_operation`, and nothing starts a session eagerly — so the
+/// *top-level* annotated future of a capture run is always constructed before
+/// any session exists. It therefore captures an empty context and takes the
+/// no-install path in `InstrumentedFuture::poll` for its entire lifetime. Only
+/// futures constructed *inside* an already-recording operation carry a context
+/// and survive migration. In `fixture.async_migration`, `migrate` is
+/// unprotected and only `fetch`, built inside `migrate`'s body, is protected.
+///
+/// The consequence: if a top-level annotated future were handed to a
+/// multi-threaded executor, operations first reached after it migrated would
+/// find an empty ambient slot and start a second session on the same sidecar —
+/// the same defect this wrapper fixes one level down. That is the same
+/// unresolved boundary as an operation first reached through a raw
+/// `std::thread::spawn`, and it is tracked as its own roadmap slice.
+#[doc(hidden)]
+#[must_use]
+pub fn capture_async_context() -> CaptureContext {
+    let collector = current_collector();
+    let current_operation = collector
+        .as_ref()
+        .and_then(|collector| lock_collector(collector).as_ref().and_then(|state| state.current_operation));
+    CaptureContext {
+        collector,
+        current_operation,
+    }
+}
+
+/// Install one capture context for the duration of a poll and restore it after.
+///
+/// Installing the *collector handle*, not just the current pointer, is what
+/// stops a resumed future on a fresh thread from starting a second session
+/// through `activate_native_capture_from_environment` and clobbering the
+/// sidecar the first session is writing.
+///
+/// `Drop` restores, so an unwinding poll cannot strand the ambient slot.
+struct InstalledContext<'a> {
+    context: &'a mut CaptureContext,
+    previous_collector: Option<CollectorHandle>,
+    previous_operation: Option<usize>,
+}
+
+impl<'a> InstalledContext<'a> {
+    fn install(context: &'a mut CaptureContext) -> Self {
+        let previous_collector = NATIVE_CAPTURE.with(|slot| slot.replace(context.collector.clone()));
+        let previous_operation = swap_current_operation(context.collector.as_ref(), context.current_operation);
+        Self {
+            context,
+            previous_collector,
+            previous_operation,
+        }
+    }
+}
+
+impl Drop for InstalledContext<'_> {
+    fn drop(&mut self) {
+        self.context.current_operation = swap_current_operation(self.context.collector.as_ref(), self.previous_operation);
+        let previous_collector = self.previous_collector.take();
+        NATIVE_CAPTURE.with(|slot| *slot.borrow_mut() = previous_collector);
+    }
+}
+
+/// Exchange one collector's current-operation pointer, if it still has a live
+/// recording.
+fn swap_current_operation(collector: Option<&CollectorHandle>, value: Option<usize>) -> Option<usize> {
+    let collector = collector?;
+    let mut guard = lock_collector(collector);
+    let state = guard.as_mut()?;
+    std::mem::replace(&mut state.current_operation, value)
+}
+
+/// An annotated `async fn` body plus the capture context it was built with.
+///
+/// The body is boxed so the wrapper is `Unpin` and its own `poll` needs no
+/// structural pin projection: `Pin::as_mut` on the box is safe, and
+/// `unsafe_code = "forbid"` leaves no in-place alternative without a new
+/// dependency.
+#[derive(Debug)]
+#[doc(hidden)]
+pub struct InstrumentedFuture<F> {
+    context: CaptureContext,
+    future: Pin<Box<F>>,
+}
+
+/// Wrap one annotated async body so it records under its construction context.
+#[doc(hidden)]
+pub fn instrument_async_operation<F: Future>(context: CaptureContext, future: F) -> InstrumentedFuture<F> {
+    InstrumentedFuture {
+        context,
+        future: Box::pin(future),
+    }
+}
+
+impl<F: Future> Future for InstrumentedFuture<F> {
+    type Output = F::Output;
+
+    fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
+        let InstrumentedFuture { context: captured, future } = self.get_mut();
+        if captured.collector.is_none() {
+            // No session was active at construction, so this future carries no
+            // context for its whole lifetime. Leaving the ambient slot alone is
+            // what lets a future built before the session starts record at all;
+            // the cost is that such a future is not migration-safe. See
+            // `capture_async_context`.
+            return future.as_mut().poll(context);
+        }
+        let installed = InstalledContext::install(captured);
+        let polled = future.as_mut().poll(context);
+        drop(installed);
+        polled
+    }
 }
 
 #[derive(Debug)]
@@ -1327,8 +1529,9 @@ fn normalize_declared_type(declared: &str) -> String {
 /// Reject async operation capture before a future crosses an `.await`.
 ///
 /// Retained for M3, not currently called: `#[spec_operation]` no longer expands
-/// to this check, because a directly-awaited async operation records normally
-/// from first poll. The remaining unsupported case is an async
+/// to this check, because an async operation records normally from first poll,
+/// including across thread migration. The remaining unsupported case is an
+/// async
 /// `#[spec_setup]`, which M3 instruments once deferred setup inputs move into
 /// the per-run collector; until then `specgate capture` rejects such a
 /// component up front instead. Removing this published function is also an M3
@@ -1355,15 +1558,20 @@ pub fn reject_async_native_capture(component_id: &str, operation_name: &str) -> 
 /// Closing all of them — not just the innermost — is what lets the recording
 /// still encode as well-formed spans with an end time and a status.
 ///
+/// The outstanding set is derived from operation status rather than from a
+/// nesting stack, and is walked in reverse open order, which reproduces the
+/// innermost-first closure order nesting used to give and keeps interleaved
+/// operations in a deterministic order too.
+///
 /// Returns the outstanding chain, outermost first, for the caller's error.
 fn close_outstanding_native_operations(state: &mut NativeCaptureState) -> Result<String, String> {
-    let chain = state
-        .active_operations
+    let outstanding = outstanding_operations(state);
+    let chain = outstanding
         .iter()
         .map(|index| state.operations[*index].operation_name.as_str())
         .collect::<Vec<_>>()
         .join(" -> ");
-    while let Some(operation_index) = state.active_operations.last().copied() {
+    for operation_index in outstanding.into_iter().rev() {
         let operation_name = state.operations[operation_index].operation_name.clone();
         let completion = NativeCompletion::Fault {
             order: state.order()?,
@@ -1377,7 +1585,7 @@ fn close_outstanding_native_operations(state: &mut NativeCaptureState) -> Result
         operation.completion = Some(completion);
         operation.end_time_unix_nano = Some(end_time_unix_nano);
         operation.status = Some(NativeStatus::Error);
-        state.active_operations.pop();
+        release_operation(state, operation_index);
     }
     Ok(chain)
 }
@@ -1405,10 +1613,10 @@ pub fn finish_native_capture() -> Result<NativeCapture, String> {
     // An outstanding operation is a contract violation the recording still
     // has to describe: emit the fault, persist what was observed, and then
     // fail the run anyway.
-    let outstanding = if state.active_operations.is_empty() {
-        None
-    } else {
+    let outstanding = if has_outstanding_operations(&state) {
         Some(close_outstanding_native_operations(&mut state)?)
+    } else {
+        None
     };
     // The session is gone for good from here on, so its recorded setup
     // construction inputs must not reach the next one.
@@ -1494,12 +1702,12 @@ fn persist_collector_capture(collector: &CollectorHandle) -> Result<(), String> 
             .sidecar_path
             .clone()
             .ok_or_else(|| "native capture has no sidecar path".to_string())?;
-        let capture = if state.active_operations.is_empty() {
-            build_native_capture(state)?
-        } else {
+        let capture = if has_outstanding_operations(state) {
             let mut provisional = state.clone();
             close_outstanding_native_operations(&mut provisional)?;
             build_native_capture(&provisional)?
+        } else {
+            build_native_capture(state)?
         };
         (path, capture)
     };
@@ -1552,7 +1760,7 @@ fn persist_capture_atomically(path: &Path, capture: &NativeCapture) -> Result<()
 }
 
 fn build_native_capture(state: &NativeCaptureState) -> Result<NativeCapture, String> {
-    if !state.active_operations.is_empty() {
+    if has_outstanding_operations(state) {
         return Err("native capture contains active operation scopes".to_string());
     }
     if let Some(error) = &state.terminal_error {
@@ -1642,10 +1850,15 @@ fn validate_hex_id(label: &str, value: &str, length: usize) -> Result<(), String
     Ok(())
 }
 
+/// Reject a second terminal event for one operation.
+///
+/// Operation identity is the scope's own index, so this no longer asks whether
+/// the operation is on top of a nesting stack: interleaved operations complete
+/// out of open order by construction, and that is now recorded rather than
+/// rejected. Double completion stays a hard error because it would overwrite a
+/// terminal event the recording already carries.
 fn ensure_active_operation(state: &NativeCaptureState, operation_index: usize) -> Result<(), String> {
-    if state.active_operations.last().copied() == Some(operation_index) {
-        Ok(())
-    } else if state
+    if state
         .operations
         .get(operation_index)
         .and_then(|operation| operation.status)
@@ -1656,10 +1869,7 @@ fn ensure_active_operation(state: &NativeCaptureState, operation_index: usize) -
             state.operations[operation_index].operation_name
         ))
     } else {
-        Err(format!(
-            "native operation '{}' attempted completion while a nested scope is active",
-            state.operations[operation_index].operation_name
-        ))
+        Ok(())
     }
 }
 
@@ -1671,7 +1881,7 @@ fn record_native_observation(name: &str, value: &Value) -> Result<(), String> {
     let Some(state) = guard.as_mut() else {
         return Ok(());
     };
-    let Some(operation_index) = state.active_operations.last().copied() else {
+    let Some(operation_index) = state.current_operation else {
         return Ok(());
     };
     if name == "$result" || name == "$fault" {
@@ -1696,8 +1906,14 @@ thread_local! {
     ///
     /// The slot stays thread-local — that is what keeps concurrent `#[test]`
     /// functions isolated from one another. Only its *contents* became shared:
-    /// the recording now lives behind a `Send` handle that an `OperationScope`
-    /// clones at construction.
+    /// the recording lives behind a `Send` handle that an `OperationScope`
+    /// clones at construction. An instrumented future swaps its own captured
+    /// handle into this slot around each poll, so a future resumed on a fresh
+    /// thread finds its session here instead of starting a second one through
+    /// `activate_native_capture_from_environment`.
+    ///
+    /// `PENDING_SETUP_INPUTS` is still a bare thread-local and is the last
+    /// thread-affine piece of capture state; M3 moves it into the collector.
     static NATIVE_CAPTURE: RefCell<Option<CollectorHandle>> = const { RefCell::new(None) };
     static PENDING_SETUP_INPUTS: RefCell<BTreeMap<PendingSetupKey, BTreeMap<String, Value>>> =
         const { RefCell::new(BTreeMap::new()) };

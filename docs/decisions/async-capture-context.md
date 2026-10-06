@@ -19,14 +19,43 @@ execution.
 
 ## Decision
 
-1. A recording is scoped to a test, not a thread. The recording handle lives
+1. A recording is scoped to a test, not a thread. The recording context lives
    inside the future and captures its parent at construction time, not by
    lookup at poll time. This survives thread migration. Inline combinators
    (`join!`, `select!`, `FuturesUnordered`) need no special handling, because
-   each future carries its own handle; spawned tasks use the identical
+   each future carries its own context; spawned tasks use the identical
    mechanism.
-2. Concurrent branches buffer their spans and emit complete subtrees at the
-   join. Nothing interleaves writes into shared state during execution.
+
+   *Amended 2026-10 during M2 slice 2.* Construction time captures the
+   collector handle and the parent operation only; the operation span is still
+   opened at the future's first poll. A future that is constructed and never
+   polled therefore leaves the session untouched, which keeps constructed-and-
+   dropped futures out of the unimplemented abandonment path. Each poll
+   re-installs the captured collector *and* the captured current-operation
+   pointer, which is also what stops a resumed future from starting a second
+   session on the new thread.
+
+   Known boundary: because the session starts lazily at the first annotated
+   call, the *top-level* annotated future of a run is constructed before any
+   session exists and so carries no context at all. Only futures built inside
+   an already-recording operation survive migration. A top-level future handed
+   to a multi-threaded executor would reach the same empty-slot second-session
+   defect as an operation first reached through a raw `std::thread::spawn`;
+   both wait on the same slice that makes the session reachable
+   process-globally.
+2. Spans are written incrementally into a single per-test collector. Operations
+   are opened and closed in place, and the current-operation pointer is swapped
+   around each poll.
+
+   *Amended 2026-10 during M2 slice 2.* This replaces the original decision
+   that concurrent branches buffer their spans and emit complete subtrees at
+   the join. Buffering was only needed because parentage was derived from a
+   shared LIFO nesting stack; once each future carries its own parent, a single
+   incremental writer is correct, keeps the logical clock and span identifiers
+   assigned in operation-start order, and avoids holding an unbounded subtree
+   in memory for a long-running branch. Interleaved writes into the collector
+   are safe because the collector is behind a mutex and parentage no longer
+   depends on write order.
 3. The recorder takes no position on concurrency it cannot determine
    structurally. It does not synthesize parallel regions from timestamp
    overlap, and it does not refuse overlap. `trace.md` §6.4 is explicit that
@@ -71,8 +100,9 @@ enclosure but deliberately does not check sibling overlap — that absence is
 load-bearing, and it is what lets overlapping siblings validate cleanly while
 only `ctsc.strict/0.1.0` objects.
 
-New CTSC-native trace and capture tests pin per-test scoping, buffered subtree
-emission at joins, and each of the three surfaced limitations.
+New CTSC-native trace and capture tests pin per-test scoping, incremental
+recording of interleaved operations, cross-thread migration under the
+construction-time parent, and each of the three surfaced limitations.
 
 Golden matrix rows currently assert that async components are discovery-only;
 those rows change when capture stops rejecting async.

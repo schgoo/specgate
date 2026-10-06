@@ -4,8 +4,9 @@
 //! operations/setups/types, and exercise behavior through ordinary tests.
 //! `specgate capture` records those real invocations as deterministic CTSC
 //! reference traces; `specgate replay` invokes a candidate from the captured
-//! semantic inputs. A directly-awaited async operation is captured from its
-//! first poll; an async setup is not yet instrumented.
+//! semantic inputs. An async operation records from its first poll under the
+//! operation that constructed its future, so it survives migration to another
+//! executor thread; an async setup is not yet instrumented.
 //!
 //! ```rust
 //! use specgate::*;
@@ -34,9 +35,10 @@ pub use specgate_runtime::{SpecEvent, ToNativeValue, Value};
 pub mod __rt {
     pub use specgate_runtime::linkme;
     pub use specgate_runtime::{
-        NativeCapture, NativeCaptureConfig, NativeCaptureEnvironmentConfig, NativeCompletion, NativeObservation, NativeOperationSpan,
-        NativeSpanBoundary, NativeStatus, OpMeta, OperationScope, SPECGATE_OPS, SPECGATE_TYPES, SpecEvent, ToNativeValue, TypeMeta, Value,
-        VariantMeta, begin_native_operation, defer_setup_inputs, discovery_json, emit_event, finish_native_capture, record_setup_inputs,
-        reject_async_native_capture, start_native_capture,
+        CaptureContext, InstrumentedFuture, NativeCapture, NativeCaptureConfig, NativeCaptureEnvironmentConfig, NativeCompletion,
+        NativeObservation, NativeOperationSpan, NativeSpanBoundary, NativeStatus, OpMeta, OperationScope, SPECGATE_OPS, SPECGATE_TYPES,
+        SpecEvent, ToNativeValue, TypeMeta, Value, VariantMeta, begin_native_operation, capture_async_context, defer_setup_inputs,
+        discovery_json, emit_event, finish_native_capture, instrument_async_operation, record_setup_inputs, reject_async_native_capture,
+        start_native_capture,
     };
 }
