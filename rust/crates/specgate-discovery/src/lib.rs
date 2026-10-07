@@ -35,7 +35,7 @@
 
 mod csharp_discovery;
 mod discovery;
-/// Structured discovery errors and stable failure classification.
+/// Opaque discovery errors with contextual source chains.
 mod error;
 /// Strong semantic identities used throughout discovery.
 pub mod identity;
@@ -51,7 +51,7 @@ pub mod test_util;
 #[doc(inline)]
 pub use discovery::{discover, discover_batch, discover_many, discover_resolved};
 #[doc(inline)]
-pub use error::{Error, ErrorKind};
+pub use error::Error;
 
 pub mod output {
     //! Result models returned by discovery workflows.

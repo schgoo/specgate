@@ -17,12 +17,12 @@ let report = specgate_ctsc::compare("reference.json", "candidate.json", None::<&
 println!("{}", report.equivalent);
 ```
 
-Registry encoding returns structured errors instead of panicking:
+Registry encoding returns opaque contextual errors instead of panicking:
 
 ```rust
 let schema = specgate_ctsc::registry::Schema::new("not JSON");
 let error = specgate_ctsc::registry::encode("example", "1", schema).unwrap_err();
-assert!(error.is_encoding());
+assert!(!error.to_string().is_empty());
 ```
 
 Byte validation is pure and reports all discovered issues:
@@ -52,7 +52,7 @@ assert!(encode_reference([], &metadata).is_err());
 
 Part of the [SpecGate](https://github.com/schgoo/specgate) project.
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQbJSusbBjLO7EbSlASCvKRTqwbmd2gsLYkxMobU3WiDiuhvKthYvRhcoQbOp0Ft4p9jCYbeZMEGsXlfhsbr-DH9ZjImkUbH_kmknpee9dhZIGDbXNwZWNnYXRlLWN0c2NlMC42LjBtc3BlY2dhdGVfY3RzYw
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQbJSusbBjLO7EbSlASCvKRTqwbmd2gsLYkxMobU3WiDiuhvKthYvRhcoQbjwwNeiA1CWobPWXemSEYo2kbsTC6M8G5ez4bF96Ajh4YvH1hZIGDbXNwZWNnYXRlLWN0c2NlMC42LjBtc3BlY2dhdGVfY3RzYw
  [__link0]: https://docs.rs/specgate-ctsc/0.6.0/specgate_ctsc/capture/index.html
  [__link1]: https://docs.rs/specgate-ctsc/0.6.0/specgate_ctsc/registry/index.html
  [__link2]: https://docs.rs/specgate-ctsc/0.6.0/specgate_ctsc/replay/index.html

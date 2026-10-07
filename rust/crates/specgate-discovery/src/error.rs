@@ -1,9 +1,8 @@
-//! Structured failures from discovery workflows.
+//! Opaque failures from discovery workflows.
 
-/// Stable stage at which a discovery workflow failed.
+/// Internal stage at which a discovery workflow failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum ErrorKind {
+pub(crate) enum ErrorKind {
     /// Binding loading, parsing, validation, or target selection failed.
     Binding,
     /// Raw registry JSON could not be parsed.
@@ -18,11 +17,10 @@ pub enum ErrorKind {
     System,
 }
 
-/// An actionable discovery failure with a stable stage and source chain.
+/// An actionable opaque discovery failure with a source chain.
 ///
 /// Errors are obtained from discovery APIs rather than constructed by callers.
-/// Classification, user-facing diagnostics, and the standard source chain can
-/// then be inspected independently.
+/// Display and the standard source chain preserve the situational detail.
 ///
 /// # Examples
 ///
@@ -31,8 +29,7 @@ pub enum ErrorKind {
 /// use std::error::Error as _;
 ///
 /// let error = resolve_target("missing-binding.yaml", None).unwrap_err();
-/// assert!(error.is_binding());
-/// eprintln!("{}", error.diagnostic());
+/// eprintln!("{error}");
 /// if let Some(source) = error.source() {
 ///     eprintln!("caused by: {source}");
 /// }
@@ -45,39 +42,16 @@ pub struct Error {
 }
 
 impl Error {
-    /// Whether binding loading or selection failed.
-    #[must_use]
-    pub const fn is_binding(&self) -> bool {
-        matches!(self.kind, ErrorKind::Binding)
-    }
-    /// Whether registry parsing failed.
-    #[must_use]
-    pub const fn is_registry(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) const fn is_registry(&self) -> bool {
         matches!(self.kind, ErrorKind::Registry)
     }
-    /// Whether semantic normalization failed.
-    #[must_use]
-    pub const fn is_normalization(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) const fn is_normalization(&self) -> bool {
         matches!(self.kind, ErrorKind::Normalization)
     }
-    /// Whether Cargo discovery failed.
-    #[must_use]
-    pub const fn is_cargo(&self) -> bool {
-        matches!(self.kind, ErrorKind::Cargo)
-    }
-    /// Whether C# discovery failed.
-    #[must_use]
-    pub const fn is_csharp(&self) -> bool {
-        matches!(self.kind, ErrorKind::CSharp)
-    }
-    /// Whether an operating-system interaction failed.
-    #[must_use]
-    pub const fn is_system(&self) -> bool {
-        matches!(self.kind, ErrorKind::System)
-    }
-    /// Return the exact actionable text intended for users.
-    #[must_use]
-    pub fn diagnostic(&self) -> &str {
+    #[cfg(test)]
+    pub(crate) fn diagnostic(&self) -> &str {
         &self.diagnostic
     }
 

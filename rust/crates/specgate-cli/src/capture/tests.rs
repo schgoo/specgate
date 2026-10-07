@@ -68,8 +68,9 @@ mod cases {
         system.fail_next("allocation unavailable");
         let internal = scratch_dir(&system, "candidate").expect_err("injected scratch allocation must fail");
         let error = public_error(CaptureErrorKind::Execution)(internal);
-        assert!(error.is_execution());
+        assert_eq!(error.stage(), CaptureErrorKind::Execution);
         assert_eq!(error.diagnostic(), "failed to create capture scratch directory");
+        assert!(error.to_string().contains("caused by: allocation unavailable"));
     }
 
     #[test]
@@ -271,7 +272,8 @@ mod cases {
             leaf_error
                 .diagnostic()
                 .contains("no passing tests captured operations for component 'fixture.cli.nested_leaf'"),
-            "{leaf_error}"
+            "{}",
+            leaf_error.diagnostic()
         );
         assert!(!component_leaf.out.exists());
 
@@ -436,7 +438,7 @@ mod cases {
         })
         .build()
         .unwrap_err();
-        assert!(binding_error.is_request());
+        assert_eq!(binding_error.stage(), CaptureErrorKind::Request);
         assert_eq!(binding_error.to_string(), "capture requires a non-empty binding path");
 
         let output_error = CaptureRequest::builder(CapturePaths {
@@ -445,7 +447,7 @@ mod cases {
         })
         .build()
         .unwrap_err();
-        assert!(output_error.is_request());
+        assert_eq!(output_error.stage(), CaptureErrorKind::Request);
         assert_eq!(output_error.to_string(), "capture requires a non-empty output directory");
 
         let request = CaptureRequest::builder(CapturePaths {
@@ -466,7 +468,7 @@ mod cases {
         })
         .build()
         .unwrap_err();
-        assert!(binding_error.is_request());
+        assert_eq!(binding_error.stage(), CaptureErrorKind::Request);
         assert_eq!(binding_error.to_string(), "capture binding path must be valid UTF-8");
 
         let output_error = CaptureRequest::builder(CapturePaths {
@@ -475,7 +477,7 @@ mod cases {
         })
         .build()
         .unwrap_err();
-        assert!(output_error.is_request());
+        assert_eq!(output_error.stage(), CaptureErrorKind::Request);
         assert_eq!(output_error.to_string(), "capture output path must be valid UTF-8");
     }
 
@@ -483,21 +485,21 @@ mod cases {
     fn preserves_sources() {
         use std::error::Error as _;
 
-        let context = ContextError::with_source(
+        let context = FailureContext::with_source(
             "failed to read native capture sidecar: disk unavailable",
             std::io::Error::other("disk unavailable"),
         );
         let error = public_error(CaptureErrorKind::Execution)(context);
-        assert!(error.is_execution());
+        assert_eq!(error.stage(), CaptureErrorKind::Execution);
         assert_eq!(error.diagnostic(), "failed to read native capture sidecar: disk unavailable");
-        let context_source = error.source().expect("capture context source");
-        assert!(context_source.to_string().starts_with(error.diagnostic()));
         assert_eq!(
-            context_source.source().map(ToString::to_string).as_deref(),
+            ohno::ErrorExt::find_source::<std::io::Error>(&error)
+                .map(ToString::to_string)
+                .as_deref(),
             Some("disk unavailable")
         );
 
-        let domain = public_error(CaptureErrorKind::Selection)(ContextError::domain("select a component"));
+        let domain = public_error(CaptureErrorKind::Selection)(FailureContext::domain("select a component"));
         assert!(domain.source().is_none(), "domain diagnostics must not synthesize sources");
     }
 
@@ -522,7 +524,7 @@ mod cases {
         .component("fixture.cli.replay")
         .build()
         .expect_err("an empty output path must fail");
-        assert!(error.is_request());
+        assert_eq!(error.stage(), CaptureErrorKind::Request);
         assert!(error.to_string().contains("non-empty output directory"));
     }
 
@@ -640,10 +642,18 @@ mod cases {
     fn async_setup() {
         let registry = async_registry(true);
         let reason = validate_setups(&registry, &[request("fixture.async_setup")]).expect_err("an async setup is not capturable");
-        assert!(reason.diagnostic().contains("component 'fixture.async_setup'"), "{reason}");
-        assert!(reason.diagnostic().contains("async setup 'make'"), "{reason}");
-        assert!(reason.diagnostic().contains("'fixture.async_setup::advance'"), "{reason}");
-        assert!(reason.diagnostic().contains("discovery-only"), "{reason}");
+        assert!(
+            reason.diagnostic().contains("component 'fixture.async_setup'"),
+            "{}",
+            reason.diagnostic()
+        );
+        assert!(reason.diagnostic().contains("async setup 'make'"), "{}", reason.diagnostic());
+        assert!(
+            reason.diagnostic().contains("'fixture.async_setup::advance'"),
+            "{}",
+            reason.diagnostic()
+        );
+        assert!(reason.diagnostic().contains("discovery-only"), "{}", reason.diagnostic());
 
         assert!(
             validate_setups(&registry, &[request("fixture.sync_setup")]).is_ok(),
@@ -656,7 +666,11 @@ mod cases {
 
         let batched = validate_setups(&registry, &[request("fixture.sync_setup"), request("fixture.async_setup")])
             .expect_err("every requested component is screened, not just the first");
-        assert!(batched.diagnostic().contains("component 'fixture.async_setup'"), "{batched}");
+        assert!(
+            batched.diagnostic().contains("component 'fixture.async_setup'"),
+            "{}",
+            batched.diagnostic()
+        );
 
         let mut excluded = request("fixture.async_setup");
         excluded.excluded_operations.insert("advance".to_string());
@@ -693,9 +707,9 @@ mod cases {
         )
         .expect_err("the hidden marker must not become an ordinary skipped test");
         let error = public_error(CaptureErrorKind::Execution)(context);
-        assert!(error.is_execution());
-        assert!(error.diagnostic().contains("native capture persistence failed"));
-        assert!(error.diagnostic().contains("tests::persistence"));
+        assert_eq!(error.stage(), CaptureErrorKind::Execution);
+        assert!(error.to_string().contains("native capture persistence failed"));
+        assert!(error.to_string().contains("tests::persistence"));
     }
 
     fn request_at(component: impl AsRef<str>, out: PathBuf) -> BundleRequest {

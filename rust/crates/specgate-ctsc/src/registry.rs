@@ -1,7 +1,7 @@
 //! Encoding normalized discovery schemas as canonical CTSC registries.
 
 mod error;
-pub use error::{Error, ErrorKind, Result};
+pub use error::{Error, Result};
 
 use crate::replay::model::{RegistryInput, Type};
 use serde::{Deserialize, Serialize};

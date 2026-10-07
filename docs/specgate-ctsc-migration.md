@@ -44,8 +44,11 @@ Rust exposes `ComponentId`, `OperationName`, and `TargetName` as unrestricted
 semantic string identities. The public capture library API accepts one owned
 `CaptureRequest`, whose constructor validates that its `PathBuf` filesystem
 inputs are UTF-8 representable, and returns `Result<CaptureReport, CaptureError>`. Capture failures retain actionable text
-and expose a stable stage category; the CLI syntax, formatting, and exit codes
-remain unchanged. See [the ratified decision](decisions/rust-semantic-identities-and-capture-api.md).
+through an opaque `ohno` error. Machine-readable capture, discover, and replay
+failure stages are separate protocol data types whose established CTSC wire
+names remain unchanged. The CLI syntax, formatting, and exit codes remain
+unchanged. See [the capture API decision](decisions/rust-semantic-identities-and-capture-api.md)
+and [the opaque-error decision](decisions/opaque-rust-errors.md).
 
 Rust and C# registry output is byte-identical for the stateless, rich-type, and
 setup-folding fixtures. Raw language-specific invocation metadata remains

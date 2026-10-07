@@ -252,7 +252,9 @@ fn unset_fills_resolves_the_parameter_by_setup_return_type() {
 fn missing_zero_input_setup_provenance_fails_before_suppressing_a_filled_parameter() {
     specgate::__rt::start(config()).unwrap();
     assert_eq!(double_it(21), 42, "capture failure must not alter target behavior");
-    let message = specgate::__rt::finish().expect_err("capture must reject a folded setup parameter with no successful setup provenance");
+    let message = specgate::__rt::finish()
+        .expect_err("capture must reject a folded setup parameter with no successful setup provenance")
+        .to_string();
     assert!(
         message.contains("fixture.setup_inputs::double_it") && message.contains("seed_value"),
         "the capture failure must name the folded operation and missing setup: {message}"
@@ -270,7 +272,9 @@ fn a_panicking_setup_leaves_no_provenance_for_the_following_operation() {
 
     let counter = FragileCounter { count: 7 };
     assert_eq!(counter.inspect_fragile(), 7, "capture failure must preserve the target result");
-    let message = specgate::__rt::finish().expect_err("a failed setup must not leave stale provenance behind");
+    let message = specgate::__rt::finish()
+        .expect_err("a failed setup must not leave stale provenance behind")
+        .to_string();
     assert!(
         message.contains("fixture.setup_inputs::inspect_fragile") && message.contains("make_fragile_counter"),
         "capture must fail for the missing successful setup: {message}"
@@ -323,7 +327,9 @@ fn finishing_a_session_clears_setup_provenance_for_the_next_one() {
 
     specgate::__rt::start(config()).unwrap();
     counter.increment();
-    let message = specgate::__rt::finish().expect_err("a new session must require a fresh successful setup");
+    let message = specgate::__rt::finish()
+        .expect_err("a new session must require a fresh successful setup")
+        .to_string();
     assert!(
         message.contains("fixture.setup_inputs::increment") && message.contains("make_counter"),
         "the new session must not inherit old setup provenance: {message}"
@@ -355,7 +361,9 @@ fn repeating_one_setup_with_different_inputs_fails_the_scenario() {
     specgate::__rt::start(config()).unwrap();
     let _first = make_counter(4);
     let _second = make_counter(9);
-    let message = specgate::__rt::finish().expect_err("a differing repeat construction must not be silently accepted");
+    let message = specgate::__rt::finish()
+        .expect_err("a differing repeat construction must not be silently accepted")
+        .to_string();
     assert!(
         message.contains("ran twice in one capture with different inputs")
             && message.contains("initial=Integer(4) then initial=Integer(9)"),

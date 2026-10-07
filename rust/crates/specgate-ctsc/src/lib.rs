@@ -10,11 +10,11 @@
 //! println!("{}", report.equivalent);
 //! ```
 //!
-//! Registry encoding returns structured errors instead of panicking:
+//! Registry encoding returns opaque contextual errors instead of panicking:
 //! ```
 //! let schema = specgate_ctsc::registry::Schema::new("not JSON");
 //! let error = specgate_ctsc::registry::encode("example", "1", schema).unwrap_err();
-//! assert!(error.is_encoding());
+//! assert!(!error.to_string().is_empty());
 //! ```
 //! Byte validation is pure and reports all discovered issues:
 //! ```

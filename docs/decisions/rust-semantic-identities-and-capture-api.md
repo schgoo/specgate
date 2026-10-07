@@ -33,9 +33,9 @@ empty values, and must remain transparent CTSC strings.
 - Keep the annotated operation name `capture`, with the accepted structured
   request input shape.
 - Return `Result<CaptureReport, CaptureError>`. `CaptureError` uses ohno and is
-  available at the crate root. Its stable stage taxonomy is available as
-  `specgate_cli::capture_error::CaptureErrorKind`; callers normally use focused
-  predicates on the error.
+  available at the crate root. The later
+  [opaque-error decision](opaque-rust-errors.md) supersedes this decision's
+  original public `CaptureErrorKind` taxonomy and predicates.
 - Preserve capture selection semantics and the public CLI command, arguments,
   defaults, usage, formatting, and exit behavior.
 
@@ -62,4 +62,6 @@ The existing golden matrix continues to validate capture and replay semantics.
 
 ## Supersedes / superseded by
 
-None.
+The public capture-error taxonomy is superseded by
+[`opaque-rust-errors.md`](opaque-rust-errors.md). The remaining decision is
+unchanged.

@@ -73,7 +73,7 @@ pub(super) fn verify_replay(
                         .expect_category
                         .as_deref()
                         .unwrap_or_else(|| panic!("unsupported replay row '{}' must declare expectCategory", row.id));
-                    match classify(&reason) {
+                    match classify(reason.to_string()) {
                         Some(actual) if actual.code() == expected => {}
                         Some(actual) => problems.push(format!(
                             "{}: expected replay failure category '{expected}' but got '{}': {reason}",

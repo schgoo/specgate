@@ -2,21 +2,16 @@
 
 #[cfg(any(test, feature = "test-util"))]
 use std::collections::BTreeMap;
-use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-/// Stable document-loading failure classification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum ErrorKind {
-    /// Document bytes could not be read.
+enum Operation {
     Read,
-    /// A document path could not be resolved to canonical identity.
     Canonicalize,
 }
-impl fmt::Display for ErrorKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl std::fmt::Display for Operation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Self::Read => "read",
             Self::Canonicalize => "canonicalize",
@@ -26,31 +21,21 @@ impl fmt::Display for ErrorKind {
 
 /// Crate-owned failure to load or resolve a comparison document.
 #[ohno::error]
-#[display("failed to {kind} document '{}'", path.display())]
+#[display("failed to {operation} document '{}'", path.display())]
 pub struct LoadError {
-    kind: ErrorKind,
+    operation: Operation,
     path: PathBuf,
 }
 impl LoadError {
     /// Wrap a document read failure with its path, source, and a captured backtrace.
     #[must_use]
     pub fn reading(path: impl AsRef<Path>, source: std::io::Error) -> Self {
-        Self::caused_by(ErrorKind::Read, path.as_ref().to_path_buf(), source)
+        Self::caused_by(Operation::Read, path.as_ref().to_path_buf(), source)
     }
     /// Wrap a path-resolution failure with its path, source, and a captured backtrace.
     #[must_use]
     pub fn canonicalizing(path: impl AsRef<Path>, source: std::io::Error) -> Self {
-        Self::caused_by(ErrorKind::Canonicalize, path.as_ref().to_path_buf(), source)
-    }
-    /// Stable failure classification.
-    #[must_use]
-    pub const fn kind(&self) -> ErrorKind {
-        self.kind
-    }
-    /// Document path associated with the failure.
-    #[must_use]
-    pub fn path(&self) -> &Path {
-        &self.path
+        Self::caused_by(Operation::Canonicalize, path.as_ref().to_path_buf(), source)
     }
 }
 

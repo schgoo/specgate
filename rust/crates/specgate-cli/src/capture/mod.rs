@@ -19,8 +19,8 @@
 //! # }
 //! ```
 
-use crate::capture_error::CaptureErrorKind;
 use crate::capture_failure::CaptureError;
+use crate::capture_failure::FailureStage as CaptureErrorKind;
 use crate::system::{CommandEnvironment, Discovery, Execution, ProcessRequest};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -33,15 +33,14 @@ use specgate_discovery::runner::cargo_bin;
 use specgate_discovery::schema::normalize_registry;
 
 use std::collections::BTreeSet;
-use std::error::Error as _;
 use std::path::{Path, PathBuf};
 
-fn encode_otlp(captures: impl AsRef<[Capture]>, metadata: &ctsc_capture::Metadata) -> Result<ctsc_capture::Encoding, ContextError> {
+fn encode_otlp(captures: impl AsRef<[Capture]>, metadata: &ctsc_capture::Metadata) -> Result<ctsc_capture::Encoding, FailureContext> {
     let bytes =
-        serde_json::to_vec(captures.as_ref()).map_err(|error| ContextError::with_source("failed to convert captured evidence", error))?;
+        serde_json::to_vec(captures.as_ref()).map_err(|error| FailureContext::with_source("failed to convert captured evidence", error))?;
     let captures: Vec<ctsc_capture::Capture> =
-        serde_json::from_slice(&bytes).map_err(|error| ContextError::with_source("failed to convert captured evidence", error))?;
-    ctsc_capture::encode_reference(&captures, metadata).map_err(|error| ContextError::with_source(error.to_string(), error))
+        serde_json::from_slice(&bytes).map_err(|error| FailureContext::with_source("failed to convert captured evidence", error))?;
+    ctsc_capture::encode_reference(&captures, metadata).map_err(|error| FailureContext::with_source(error.to_string(), error))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -124,7 +123,7 @@ const CAPTURE_ENV: &str = "SPECGATE_NATIVE_CAPTURE";
 mod request;
 pub use request::{CapturePaths, CaptureReport, CaptureRequest, CaptureRequestBuilder};
 mod failure;
-use failure::{ContextError, public_error};
+use failure::{FailureContext, public_error};
 mod model;
 use model::{
     CaptureManifest, IsolatedTest, Language, Reference, RegistryDto, RegistryId, Scenarios, TargetDto, TestBinary, Tool, Version,

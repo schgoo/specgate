@@ -35,19 +35,13 @@
 //! })
 //!     .component("example.math")
 //!     .build()?;
-//! match capture(request) {
-//!     Ok(report) => println!("registry: {}", report.registry_path.display()),
-//!     Err(error) if error.is_request() => {
-//!         eprintln!("invalid request: {}", error.diagnostic());
-//!     }
-//!     Err(error) => return Err(error.into()),
-//! }
+//! let report = capture(request)?;
+//! println!("registry: {}", report.registry_path.display());
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
 specgate::spec_component!("specgate.cli");
 
-pub mod capture_error;
 mod capture_failure;
 #[path = "capture/mod.rs"]
 mod capture_impl;
@@ -59,6 +53,24 @@ pub use capture_failure::CaptureError;
 pub use capture_impl::{CapturePaths, CaptureReport, CaptureRequest, CaptureRequestBuilder, capture, capture_with};
 
 pub use system::{CommandEnvironment, Discovery, Execution};
+
+/// Render a capture result using the stable CLI line protocol.
+#[doc(hidden)]
+#[must_use]
+pub fn format_capture(outcome: &Result<CaptureReport, CaptureError>) -> String {
+    match outcome {
+        Ok(report) => format!(
+            "Complete(component={}, scenarios={}, operations={}, registry={}, trace={}, manifest={})\n",
+            report.component_id(),
+            report.scenarios(),
+            report.operations(),
+            report.registry_path.display(),
+            report.trace_path.display(),
+            report.manifest_path.display()
+        ),
+        Err(error) => format!("Error({})\n", error.diagnostic()),
+    }
+}
 
 #[cfg(test)]
 mod goldens;

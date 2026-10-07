@@ -2,7 +2,7 @@
 use super::facade::BundleRequest;
 use super::filter::filter;
 use super::{
-    BTreeSet, CaptureManifest, CaptureReport, ComponentId, ContextError, ExecutedTests, FORMAT_VERSION, Language, MANIFEST_FILE,
+    BTreeSet, CaptureManifest, CaptureReport, ComponentId, ExecutedTests, FORMAT_VERSION, FailureContext, Language, MANIFEST_FILE,
     MANIFEST_FORMAT, PathBuf, REGISTRY_FILE, REGISTRY_PREFIX, REGISTRY_VERSION, Reference, RegistryDto, RegistryId, Scenarios, TRACE_FILE,
     Target, TargetDto, Tool, Version, WireDigest, artifact_path, ctsc_capture, encode_otlp, encode_registries, normalize_registry,
     sha256_digest,
@@ -19,7 +19,11 @@ pub(super) struct EncodedBundle {
     pub(super) report: CaptureReport,
 }
 
-pub(super) fn encode_bundle(discovered: &Target, request: &BundleRequest, executed: &ExecutedTests) -> Result<EncodedBundle, ContextError> {
+pub(super) fn encode_bundle(
+    discovered: &Target,
+    request: &BundleRequest,
+    executed: &ExecutedTests,
+) -> Result<EncodedBundle, FailureContext> {
     let resolved = &discovered.target;
     let selected_id = &request.component;
     let selected = selected_id.as_str();
@@ -38,7 +42,7 @@ pub(super) fn encode_bundle(discovered: &Target, request: &BundleRequest, execut
                     .join(", ")
             )
         };
-        return Err(ContextError::domain(format!(
+        return Err(FailureContext::domain(format!(
             "no passing tests captured operations for component '{selected}'; add a handwritten test that invokes the component{failures}"
         )));
     }
@@ -57,15 +61,15 @@ pub(super) fn encode_bundle(discovered: &Target, request: &BundleRequest, execut
     let mut schemas = Vec::with_capacity(components.len());
     for component in &components {
         let schema = normalize_registry(&discovered.registry, resolved.language, *component)?;
-        schemas.push(
-            serde_json::to_string(&schema)
-                .map_err(|error| ContextError::with_source(format!("failed to serialize normalized discovery schema: {error}"), error))?,
-        );
+        schemas
+            .push(serde_json::to_string(&schema).map_err(|error| {
+                FailureContext::with_source(format!("failed to serialize normalized discovery schema: {error}"), error)
+            })?);
     }
     let registry_id = format!("{REGISTRY_PREFIX}{selected}");
     let schemas = schemas.into_iter().map(specgate_ctsc::registry::Schema::new).collect::<Vec<_>>();
     let registry_encoding = encode_registries(registry_id.clone(), REGISTRY_VERSION.to_string(), &schemas)
-        .map_err(|error| ContextError::with_source(format!("failed to encode discovered registry: {error}"), error))?;
+        .map_err(|error| FailureContext::with_source(format!("failed to encode discovered registry: {error}"), error))?;
     let registry_bytes = registry_encoding.registry_json.into_bytes();
     let registry_digest = sha256_digest(&registry_bytes);
 
@@ -113,7 +117,7 @@ pub(super) fn encode_bundle(discovered: &Target, request: &BundleRequest, execut
         },
     };
     let manifest_bytes = serde_json::to_vec(&manifest)
-        .map_err(|error| ContextError::with_source(format!("failed to serialize capture manifest: {error}"), error))?;
+        .map_err(|error| FailureContext::with_source(format!("failed to serialize capture manifest: {error}"), error))?;
     Ok(EncodedBundle {
         out: request.out.clone(),
         registry_bytes,

@@ -1,7 +1,7 @@
 //! Verified replay planning from linked capture bundles.
 
 mod error;
-pub use error::{Error, ErrorKind};
+pub use error::Error;
 
 use crate::registry::Component;
 use serde::Deserialize;

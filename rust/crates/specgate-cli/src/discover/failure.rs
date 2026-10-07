@@ -1,9 +1,11 @@
-//! Canonical structured discover failures and their stable taxonomy.
-/// Stable classification for a discovery failure.
+//! Opaque discover failures and their CTSC protocol stage.
+/// Machine-readable stage recorded for a failed discover operation.
+///
+/// This is CTSC protocol data, not the internal classification of [`Error`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, SpecEvent)]
 #[spec_event(name = "DiscoverErrorKind")]
 #[non_exhaustive]
-pub enum ErrorKind {
+pub(crate) enum FailureStage {
     /// `Request` construction failed.
     Request,
     /// Binding or implementation discovery failed.
@@ -16,13 +18,13 @@ pub enum ErrorKind {
 use specgate::SpecEvent;
 
 /// Stable source spelling required by the established CTSC projected type name.
-type DiscoverErrorKind = ErrorKind;
+type DiscoverErrorKind = FailureStage;
 
-/// A structured failure from [`super::discover`].
+/// An opaque failure from [`super::discover`].
 ///
-/// The predicates classify the failed workflow stage without parsing the
-/// human-readable diagnostic. Standard [`std::error::Error`] chaining retains
-/// filesystem and discovery causes.
+/// Standard [`std::error::Error`] chaining retains filesystem and discovery
+/// causes. The CTSC projection records [`FailureStage`] independently from the
+/// Rust error API.
 ///
 /// # Examples
 /// ```
@@ -33,8 +35,7 @@ type DiscoverErrorKind = ErrorKind;
 ///     component: ComponentName::parse("example.math")?, registry_id: RegistryId::parse("id")?,
 ///     registry_version: RegistryVersion::parse("1")?,
 /// }).build().unwrap_err();
-/// assert!(error.is_request());
-/// assert!(!error.diagnostic().is_empty());
+/// assert!(!error.to_string().is_empty());
 /// # Ok(())
 /// # }
 /// ```
@@ -59,41 +60,23 @@ impl From<crate::system::DiscoveryFailure> for Error {
 
 impl Error {
     pub(crate) fn request(message: impl Into<String>) -> Self {
-        Self::new(ErrorKind::Request, message.into())
+        Self::new(FailureStage::Request, message.into())
     }
     pub(crate) fn discovery(message: impl Into<String>, source: impl std::error::Error + Send + Sync + 'static) -> Self {
-        Self::caused_by(ErrorKind::Discovery, message.into(), source)
+        Self::caused_by(FailureStage::Discovery, message.into(), source)
     }
     pub(crate) fn encoding(message: impl Into<String>) -> Self {
-        Self::new(ErrorKind::Encoding, message.into())
+        Self::new(FailureStage::Encoding, message.into())
     }
     pub(crate) fn publication(message: impl Into<String>, source: impl std::error::Error + Send + Sync + 'static) -> Self {
-        Self::caused_by(ErrorKind::Publication, message.into(), source)
+        Self::caused_by(FailureStage::Publication, message.into(), source)
     }
-    /// Whether request validation failed.
-    #[must_use]
-    pub const fn is_request(&self) -> bool {
-        matches!(self.kind, ErrorKind::Request)
-    }
-    /// Whether target discovery failed.
-    #[must_use]
-    pub const fn is_discovery(&self) -> bool {
-        matches!(self.kind, ErrorKind::Discovery)
-    }
-    /// Whether registry encoding failed.
-    #[must_use]
-    pub const fn is_encoding(&self) -> bool {
-        matches!(self.kind, ErrorKind::Encoding)
-    }
-    /// Whether output publication failed.
-    #[must_use]
-    pub const fn is_publication(&self) -> bool {
-        matches!(self.kind, ErrorKind::Publication)
-    }
-    /// Return the diagnostic rendered to CLI users.
-    #[must_use]
-    pub fn diagnostic(&self) -> &str {
+    pub(super) fn diagnostic(&self) -> &str {
         &self.diagnostic
+    }
+    #[cfg(test)]
+    pub(crate) const fn stage(&self) -> FailureStage {
+        self.kind
     }
 }
 

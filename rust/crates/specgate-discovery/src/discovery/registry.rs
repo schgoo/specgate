@@ -1,8 +1,9 @@
 //! Raw discovery registry models and parsing.
 
 use super::BTreeSet;
+use crate::Error;
+use crate::error::ErrorKind;
 use crate::identity::{ComponentId, FieldName, FunctionName, KindName, ModulePath, OperationName, TypeExpression, TypeName, VariantName};
-use crate::{Error, ErrorKind};
 use serde::Deserialize;
 
 // ---------------------------------------------------------------------------

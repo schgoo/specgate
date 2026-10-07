@@ -40,8 +40,9 @@ libtest scenario.
   environment-driven capture child, generated instrumentation writes the
   diagnostic with one hidden stable marker from the runtime facade while
   preserving the target return. The parent CLI inspects captured output even
-  after a successful libtest exit and reports `CaptureErrorKind::Execution`
-  instead of treating the process as successful or as an ordinary failed test.
+  after a successful libtest exit and records the independent CTSC
+  `CaptureErrorKind` value `Execution` instead of treating the process as
+  successful or as an ordinary failed test. The Rust error remains opaque.
   Ordinary failed tests remain skippable in product capture and rejected by
   strict golden capture.
 
@@ -70,4 +71,5 @@ encoding. The CTSC smoke and golden gates pin artifact compatibility.
 
 ## Supersedes / superseded by
 
-None.
+The treatment of Rust error internals is governed by
+[`opaque-rust-errors.md`](opaque-rust-errors.md).

@@ -37,9 +37,9 @@
 //! # Ok::<(), specgate_ctsc::capture::Error>(())
 //! ```
 
-/// Structured capture encoding errors and stable failure classifications.
+/// Opaque capture encoding errors.
 mod error;
-pub use error::{Error, ErrorKind};
+pub use error::Error;
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -538,8 +538,23 @@ impl CaptureBuilder {
     /// Finish the capture.
     ///
     /// # Errors
-    /// Returns an encoding error when operation span identifiers are duplicated.
+    /// Returns an encoding error when a run or scenario interval ends before
+    /// it starts, or when operation span identifiers are duplicated.
     pub fn build(self) -> Result<Capture, Error> {
+        if self.capture.run.interval.end_ns < self.capture.run.interval.start_ns {
+            return Err(format!(
+                "capture run end {} precedes start {}",
+                self.capture.run.interval.end_ns, self.capture.run.interval.start_ns
+            )
+            .into());
+        }
+        if self.capture.scenario.interval.end_ns < self.capture.scenario.interval.start_ns {
+            return Err(format!(
+                "capture scenario end {} precedes start {}",
+                self.capture.scenario.interval.end_ns, self.capture.scenario.interval.start_ns
+            )
+            .into());
+        }
         let ids = self
             .capture
             .operations
@@ -550,6 +565,45 @@ impl CaptureBuilder {
             return Err("capture operation span IDs must be unique".to_string().into());
         }
         Ok(self.capture)
+    }
+}
+
+#[cfg(test)]
+mod capture_builder_tests {
+    use super::{Boundary, BoundarySpan, Capture, CaptureDeps, SpanId, Status, TimeInterval, TraceId};
+
+    fn boundary(span_id: &str, start_ns: i64, end_ns: i64) -> Boundary {
+        Boundary {
+            span: BoundarySpan {
+                span_id: SpanId::new(span_id),
+                parent_id: None,
+            },
+            interval: TimeInterval { start_ns, end_ns },
+            status: Status::Ok,
+        }
+    }
+
+    #[test]
+    fn rejects_reversed_run_and_scenario_intervals() {
+        let invalid_run = Capture::builder(CaptureDeps {
+            trace_id: TraceId::new("00000000000000000000000000000001"),
+            scenario_name: "invalid-run".into(),
+            run: boundary("0000000000000001", 2, 1),
+            scenario: boundary("0000000000000002", 1, 2),
+        })
+        .build()
+        .unwrap_err();
+        assert!(invalid_run.to_string().contains("capture run end 1 precedes start 2"));
+
+        let invalid_scenario = Capture::builder(CaptureDeps {
+            trace_id: TraceId::new("00000000000000000000000000000001"),
+            scenario_name: "invalid-scenario".into(),
+            run: boundary("0000000000000001", 1, 2),
+            scenario: boundary("0000000000000002", 2, 1),
+        })
+        .build()
+        .unwrap_err();
+        assert!(invalid_scenario.to_string().contains("capture scenario end 1 precedes start 2"));
     }
 }
 

@@ -276,7 +276,7 @@ impl FailurePoint {
         let spelling = file.to_string_lossy();
         if spelling.is_empty() || spelling.contains(['/', '\\', ':']) {
             return Err(Error::message(
-                crate::ErrorKind::System,
+                crate::error::ErrorKind::System,
                 "failure filename must be one non-empty path component without ':', '/' or '\\'",
             ));
         }

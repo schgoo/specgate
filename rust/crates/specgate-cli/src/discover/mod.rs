@@ -1,7 +1,9 @@
 //! Binding discovery and deterministic CTSC registry publication.
 
 mod failure;
-pub use failure::{Error, ErrorKind};
+pub use failure::Error;
+#[cfg(test)]
+use failure::FailureStage as ErrorKind;
 
 use crate::system::{CommandEnvironment, Discovery};
 use specgate::spec_operation;
@@ -15,7 +17,8 @@ use model::{DiscoverReport, DiscoverRequest};
 /// Discover one target and publish compact CTSC registry JSON.
 ///
 /// # Errors
-/// Returns a categorized error for request, discovery, encoding, or publication failures.
+/// Returns an opaque error enriched with request, discovery, encoding, or
+/// publication context.
 ///
 /// # Examples
 /// ```no_run
@@ -322,7 +325,7 @@ mod tests {
             &discovery,
         )
         .expect_err("missing component metadata");
-        assert!(missing.is_discovery());
+        assert_eq!(missing.stage(), ErrorKind::Discovery);
 
         discovery.push_batch(Ok(discovered));
         system.fail_next("publication denied");
@@ -332,7 +335,7 @@ mod tests {
             &discovery,
         )
         .expect_err("publication failure");
-        assert!(publication.is_publication());
+        assert_eq!(publication.stage(), ErrorKind::Publication);
     }
 
     #[test]
@@ -462,10 +465,10 @@ mod tests {
 
     #[test]
     fn request_validation() {
-        assert!(request("", "registry.json").unwrap_err().is_request());
-        assert!(request("binding.yaml", "").unwrap_err().is_request());
+        assert_eq!(request("", "registry.json").unwrap_err().stage(), ErrorKind::Request);
+        assert_eq!(request("binding.yaml", "").unwrap_err().stage(), ErrorKind::Request);
         let empty_component = ComponentName::parse("").unwrap_err();
-        assert!(empty_component.is_request());
+        assert_eq!(empty_component.stage(), ErrorKind::Request);
         let built = request("binding.yaml", "registry.json").unwrap();
         assert_eq!(built.target(), "rust");
         assert_eq!(built.component(), "example.math");

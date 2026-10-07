@@ -1,5 +1,5 @@
 //! Private capture manifest and execution data transfer objects.
-use super::{ArtifactName, ComponentId, ContextError, PathBuf, Serialize};
+use super::{ArtifactName, ComponentId, FailureContext, PathBuf, Serialize};
 /// Hexadecimal width of a 32-byte SHA-256 digest.
 const SHA256_WIDTH: usize = 64;
 use specgate_discovery::identity::TargetName;
@@ -17,14 +17,14 @@ impl From<specgate_discovery::binding::Language> for Language {
 #[serde(transparent)]
 pub(super) struct RegistryId(String);
 impl RegistryId {
-    fn try_new(value: String) -> Result<Self, ContextError> {
+    fn try_new(value: String) -> Result<Self, FailureContext> {
         (!value.trim().is_empty())
             .then_some(Self(value))
-            .ok_or_else(|| ContextError::domain("manifest registry identity must not be empty"))
+            .ok_or_else(|| FailureContext::domain("manifest registry identity must not be empty"))
     }
 }
 impl TryFrom<String> for RegistryId {
-    type Error = ContextError;
+    type Error = FailureContext;
     fn try_from(value: String) -> Result<Self, Self::Error> {
         Self::try_new(value)
     }
@@ -34,17 +34,17 @@ impl TryFrom<String> for RegistryId {
 #[serde(transparent)]
 pub(super) struct WireDigest(String);
 impl WireDigest {
-    fn try_new(value: String) -> Result<Self, ContextError> {
+    fn try_new(value: String) -> Result<Self, FailureContext> {
         let valid = value
             .strip_prefix("sha256:")
             .is_some_and(|hex| hex.len() == SHA256_WIDTH && hex.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()));
         valid
             .then_some(Self(value))
-            .ok_or_else(|| ContextError::domain("manifest digest must be a lowercase SHA-256 identity"))
+            .ok_or_else(|| FailureContext::domain("manifest digest must be a lowercase SHA-256 identity"))
     }
 }
 impl TryFrom<String> for WireDigest {
-    type Error = ContextError;
+    type Error = FailureContext;
     fn try_from(value: String) -> Result<Self, Self::Error> {
         Self::try_new(value)
     }
@@ -54,14 +54,14 @@ impl TryFrom<String> for WireDigest {
 #[serde(transparent)]
 pub(super) struct Version(&'static str);
 impl Version {
-    fn try_new(value: &'static str) -> Result<Self, ContextError> {
+    fn try_new(value: &'static str) -> Result<Self, FailureContext> {
         (!value.trim().is_empty())
             .then_some(Self(value))
-            .ok_or_else(|| ContextError::domain("manifest version must not be empty"))
+            .ok_or_else(|| FailureContext::domain("manifest version must not be empty"))
     }
 }
 impl TryFrom<&'static str> for Version {
-    type Error = ContextError;
+    type Error = FailureContext;
     fn try_from(value: &'static str) -> Result<Self, Self::Error> {
         Self::try_new(value)
     }

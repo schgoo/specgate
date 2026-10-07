@@ -44,8 +44,8 @@ reason = "This unpublished sibling implementation crate exchanges syn and proc-m
 
 [[config.allow]]
 rule = "m_dont_leak_types"
-file = "crates/specgate-cli/src/capture_error.rs"
-reason = "CaptureErrorKind must implement SpecEvent because capture operations record this public stable error classification as a structured CTSC result."
+file = "crates/specgate-cli/src/discover/failure.rs"
+reason = "The opaque public discover error uses ohno for repository-standard source/backtrace behavior and SpecEvent solely for its CTSC operation projection; neither macro exposes error internals."
 
 [[config.allow]]
 rule = "m_dont_leak_types"
@@ -79,88 +79,23 @@ reason = "The unpublished proc-macro implementation boundary returns syn::Error 
 
 [[config.allow]]
 rule = "m_errors_canonical_structs"
-file = "crates/specgate-cli/src/capture_error.rs"
-reason = "The ratified structured-error policy makes CaptureErrorKind a public stable classification carried by the public CaptureError."
-
-[[config.allow]]
-rule = "m_errors_canonical_structs"
-file = "crates/specgate-cli/src/discover/failure.rs"
-reason = "The ratified structured-error policy exposes the public discovery ErrorKind through the canonical Error type."
-
-[[config.allow]]
-rule = "m_errors_canonical_structs"
-file = "crates/specgate-cli/src/discover/mod.rs"
-reason = "The discovery module intentionally re-exports its public stable ErrorKind classification beside Error."
-
-[[config.allow]]
-rule = "m_errors_canonical_structs"
 file = "crates/specgate-cli/src/main.rs"
 reason = "ArgumentError Display intentionally renders the actionable user diagnostic; generated source and backtrace context remain available through std::error::Error."
 
 [[config.allow]]
 rule = "m_errors_canonical_structs"
 file = "crates/specgate-cli/src/replay/error.rs"
-reason = "The ratified structured-error policy exposes the public replay ErrorKind through the canonical Error type."
-
-[[config.allow]]
-rule = "m_errors_canonical_structs"
-file = "crates/specgate-cli/src/replay/mod.rs"
-reason = "The replay module intentionally re-exports its public stable ErrorKind classification beside Error."
-
-[[config.allow]]
-rule = "m_errors_canonical_structs"
-file = "crates/specgate-ctsc/src/capture.rs"
-reason = "The capture module intentionally re-exports its public stable ErrorKind classification beside Error."
-
-[[config.allow]]
-rule = "m_errors_canonical_structs"
-file = "crates/specgate-ctsc/src/capture/error.rs"
-reason = "The ratified structured-error policy exposes the public CTSC capture ErrorKind through the canonical Error type."
-
-[[config.allow]]
-rule = "m_errors_canonical_structs"
-file = "crates/specgate-ctsc/src/comparison.rs"
-reason = "The comparison module intentionally re-exports its public stable ErrorKind classification beside LoadError."
+reason = "The ratified opaque-error policy reports context through Display and retains causes and backtraces through std::error::Error and ohno::ErrorExt rather than rendering internal state."
 
 [[config.allow]]
 rule = "m_errors_canonical_structs"
 file = "crates/specgate-ctsc/src/comparison/loading.rs"
-reason = "The ratified structured-error policy exposes the public comparison ErrorKind through the canonical LoadError type."
-
-[[config.allow]]
-rule = "m_errors_canonical_structs"
-file = "crates/specgate-ctsc/src/registry.rs"
-reason = "The registry module intentionally re-exports its public stable ErrorKind classification beside Error."
-
-[[config.allow]]
-rule = "m_errors_canonical_structs"
-file = "crates/specgate-ctsc/src/registry/error.rs"
-reason = "The ratified structured-error policy exposes the public CTSC registry ErrorKind through the canonical Error type."
-
-[[config.allow]]
-rule = "m_errors_canonical_structs"
-file = "crates/specgate-ctsc/src/replay.rs"
-reason = "The replay module intentionally re-exports its public stable ErrorKind classification beside Error."
-
-[[config.allow]]
-rule = "m_errors_canonical_structs"
-file = "crates/specgate-ctsc/src/replay/error.rs"
-reason = "The ratified structured-error policy exposes the public CTSC replay ErrorKind through the canonical Error type."
+reason = "The ratified opaque-error policy deliberately keeps document paths and operation categories out of the public LoadError API; Display and the source chain retain reporting context."
 
 [[config.allow]]
 rule = "m_errors_canonical_structs"
 file = "crates/specgate-discovery/src/error.rs"
-reason = "The ratified structured-error policy exposes the public discovery ErrorKind through the canonical Error type."
-
-[[config.allow]]
-rule = "m_errors_canonical_structs"
-file = "crates/specgate-discovery/src/lib.rs"
-reason = "The discovery crate intentionally re-exports its public stable ErrorKind classification beside Error."
-
-[[config.allow]]
-rule = "m_errors_canonical_structs"
-file = "crates/specgate-runtime/src/lib.rs"
-reason = "The ratified structured-error policy exposes public CaptureErrorKind through the canonical CaptureError type."
+reason = "The ratified opaque-error policy deliberately forbids public error categories and predicates; actionable context remains in Display and the standard source chain."
 
 [[config.allow]]
 rule = "m_from_error"
@@ -194,6 +129,11 @@ reason = "Renamed specgate dependencies are an explicit compatibility requiremen
 
 [[config.allow]]
 rule = "m_macros_dont_lie"
+file = "crates/specgate-cli/src/capture_failure.rs"
+reason = "The ohno-generated source and backtrace state are intentional parts of the repository-standard opaque error representation."
+
+[[config.allow]]
+rule = "m_macros_dont_lie"
 file = "crates/specgate-cli/src/replay/error.rs"
 reason = "The ohno-generated source and backtrace state are intentional parts of the repository-standard structured error representation."
 
@@ -216,6 +156,11 @@ reason = "Target code may catch its own panic; accepted capture semantics record
 rule = "m_panic_is_stop"
 file = "crates/specgate-runtime/src/capture/tests.rs"
 reason = "A caught target panic is observable operation behavior rather than a process stop because user code explicitly resumed execution."
+
+[[config.allow]]
+rule = "m_proc_implied_items"
+file = "crates/specgate-cli/src/discover/mod.rs"
+reason = "The annotated discover operation must emit collision-resistant link-time metadata so discovery can inventory the public CTSC boundary."
 
 [[config.allow]]
 rule = "m_proc_implied_items"
@@ -284,13 +229,13 @@ reason = "False positive: #[ohno::error] and #[display] generate the canonical D
 
 [[config.allow]]
 rule = "m_short_names"
-file = "crates/specgate-cli/src/capture_error.rs"
-reason = "CaptureErrorKind is the ratified stable public CTSC capture classification and remains explicit outside its defining module."
+file = "crates/specgate-runtime/src/lib.rs"
+reason = "ToNativeValue explicitly distinguishes CTSC native-value projection from serde and other value conversions across the public facade; shortening it to ToValue would make that boundary ambiguous."
 
 [[config.allow]]
-rule = "m_short_names"
-file = "crates/specgate-runtime/src/lib.rs"
-reason = "CaptureErrorKind is the ratified stable public capture classification carried by CaptureError and remains explicit outside its defining module."
+rule = "m_test_util"
+file = "crates/specgate-cli/src/discover/failure.rs"
+reason = "The crate-private stage accessor exists only for same-crate unit tests; enabling it for downstream test-util consumers would expose the private CTSC projection taxonomy that the opaque-error decision removes from the public API."
 
 [[config.allow]]
 rule = "m_throughput"

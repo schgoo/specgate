@@ -183,8 +183,9 @@ fn async_operation_capture_is_rejected_before_polling_across_await() {
     let mut captured = Box::pin(async_value(2));
     assert_eq!(captured.as_mut().poll(&mut context), Poll::Ready(4));
     let error = specgate::__rt::finish().unwrap_err();
-    assert!(error.contains("async operation"));
-    assert!(error.contains("task-safe"));
+    let diagnostic = error.to_string();
+    assert!(diagnostic.contains("async operation"));
+    assert!(diagnostic.contains("task-safe"));
 }
 
 #[test]

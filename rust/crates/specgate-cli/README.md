@@ -42,13 +42,8 @@ let request = CaptureRequest::builder(CapturePaths {
 })
     .component("example.math")
     .build()?;
-match capture(request) {
-    Ok(report) => println!("registry: {}", report.registry_path.display()),
-    Err(error) if error.is_request() => {
-        eprintln!("invalid request: {}", error.diagnostic());
-    }
-    Err(error) => return Err(error.into()),
-}
+let report = capture(request)?;
+println!("registry: {}", report.registry_path.display());
 ```
 
 
@@ -56,5 +51,5 @@ match capture(request) {
 
 Part of the [SpecGate](https://github.com/schgoo/specgate) project.
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQbJSusbBjLO7EbSlASCvKRTqwbmd2gsLYkxMobU3WiDiuhvKthYvRhcoQbVlXKAHUTcpMbHB7BsLfHeVYbI8g-02d6Es8bOCuT4CLPNiphZIGDbHNwZWNnYXRlLWNsaWUwLjYuMGxzcGVjZ2F0ZV9jbGk
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQbJSusbBjLO7EbSlASCvKRTqwbmd2gsLYkxMobU3WiDiuhvKthYvRhcoQb4GvBxa0gqAQbspVZLx_5jEcboeIRckwX8rcbhGCVVqvHzx1hZIGDbHNwZWNnYXRlLWNsaWUwLjYuMGxzcGVjZ2F0ZV9jbGk
  [__link0]: https://docs.rs/specgate-cli/0.6.0/specgate_cli/?search=CaptureRequest

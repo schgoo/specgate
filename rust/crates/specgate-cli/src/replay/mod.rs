@@ -45,8 +45,9 @@ const RUST_KEYWORDS: &[&str] = &[
 ];
 
 mod error;
+pub use error::Error;
+use error::FailureStage as ErrorKind;
 use error::failure;
-pub use error::{Error, ErrorKind};
 
 fn encode_otlp(
     captures: impl AsRef<[Capture]>,
@@ -74,6 +75,24 @@ mod facade;
 use facade::read_bundle;
 #[doc(inline)]
 pub use facade::{replay, replay_with};
+
+/// Render a replay result using the stable CLI line protocol.
+#[doc(hidden)]
+#[must_use]
+pub fn format_outcome(outcome: &Result<Report, Error>) -> String {
+    match outcome {
+        Ok(report) => format!(
+            "Complete(component={}, scenarios={}, operations={}, plans={}, output={})\n",
+            report.component_id(),
+            report.scenarios,
+            report.operations,
+            report.plans,
+            report.output_path.display()
+        ),
+        Err(error) => format!("Error({})\n", error.diagnostic()),
+    }
+}
+
 mod execution;
 pub(crate) use execution::Candidates;
 use execution::{CandidatesInner, DiscoveryContext, DiscoveryInput};

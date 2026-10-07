@@ -26,7 +26,7 @@ mod report;
 
 pub use engine::compare_with;
 pub(crate) use engine::{compare_bytes, compare_paths};
-pub use loading::{DocumentReader, ErrorKind, LoadError, SystemReader};
+pub use loading::{DocumentReader, LoadError, SystemReader};
 pub use report::{
     ComparisonDiagnostic, ComparisonMismatch, ComparisonReport, DiagnosticLocation, DiagnosticText, ReportBuilder, ReportPaths,
     SemanticPath, SemanticValue, ValidationDiagnostic,

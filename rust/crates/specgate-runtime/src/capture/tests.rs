@@ -201,7 +201,7 @@ fn different_setup() {
     )
     .unwrap_err();
     assert_eq!(error.kind(), CaptureErrorKind::SetupAmbiguity);
-    assert!(error.contains("ran twice in one capture with different inputs"));
+    assert!(error.to_string().contains("ran twice in one capture with different inputs"));
     assert_eq!(
         recorded_inputs("fixture.native", "increment").unwrap(),
         BTreeMap::from([("initial".to_string(), Value::Integer(4))]),
@@ -293,8 +293,8 @@ fn sidecar_failures() {
         });
         let scope = begin_operation(ComponentId::from("fixture.native"), OperationName::from("persist")).unwrap();
         let error = scope.unit().expect_err("the injected persistence stage must fail");
-        assert!(error.contains(generated::FAILURE_MARKER), "{error}");
-        assert!(error.contains(format!("{stage:?}")), "{error}");
+        assert!(error.to_string().contains(generated::FAILURE_MARKER), "{error}");
+        assert!(error.to_string().contains(&format!("{stage:?}")), "{error}");
         assert!(
             begin_operation(ComponentId::from("fixture.native"), OperationName::from("later")).is_err(),
             "a persistence failure must terminalize the active session"
@@ -460,14 +460,14 @@ fn stable_serde() {
 
 #[test]
 fn invalid_config() {
-    assert!(TraceId::try_from("bad").unwrap_err().contains("trace ID"));
+    assert!(TraceId::try_from("bad").unwrap_err().to_string().contains("trace ID"));
     let uppercase_trace = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
     let uppercase_span = "AAAAAAAAAAAAAAAA";
-    assert!(TraceId::try_from(uppercase_trace).unwrap_err().contains("lowercase"));
-    assert!(SpanId::try_from(uppercase_span).unwrap_err().contains("lowercase"));
+    assert!(TraceId::try_from(uppercase_trace).unwrap_err().to_string().contains("lowercase"));
+    assert!(SpanId::try_from(uppercase_span).unwrap_err().to_string().contains("lowercase"));
     serde_json::from_str::<TraceId>(&format!("\"{uppercase_trace}\"")).unwrap_err();
     serde_json::from_str::<SpanId>(&format!("\"{uppercase_span}\"")).unwrap_err();
 
     start(native_config(["1111111111111103"])).unwrap();
-    assert!(finish().unwrap_err().contains("consumed 0"));
+    assert!(finish().unwrap_err().to_string().contains("consumed 0"));
 }

@@ -51,10 +51,9 @@ const TRACE_HEX_LEN: usize = 32;
 // OTLP span IDs are exactly 8 bytes rendered as 16 lowercase hexadecimal digits.
 const SPAN_HEX_LEN: usize = 16;
 
-/// Stable category for native-capture failures.
+/// Internal category for native-capture failures.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum CaptureErrorKind {
+pub(crate) enum CaptureErrorKind {
     /// Capture configuration or activation was invalid.
     Configuration,
     /// Capture persistence failed.
@@ -65,7 +64,7 @@ pub enum CaptureErrorKind {
     SetupMissing,
 }
 
-/// Canonical native-capture failure with source chain and backtrace.
+/// Opaque native-capture failure with source chain and backtrace.
 #[ohno::error]
 #[display("{diagnostic}")]
 pub struct CaptureError {
@@ -123,20 +122,11 @@ impl CaptureError {
             ),
         )
     }
-    /// Stable failure category.
-    #[must_use]
-    pub const fn kind(&self) -> CaptureErrorKind {
+    pub(crate) const fn kind(&self) -> CaptureErrorKind {
         self.kind
     }
-    /// Actionable failure diagnostic.
-    #[must_use]
-    pub fn diagnostic(&self) -> &str {
+    pub(crate) fn diagnostic(&self) -> &str {
         &self.diagnostic
-    }
-    /// Whether the actionable diagnostic contains a substring.
-    #[must_use]
-    pub fn contains(&self, pattern: impl AsRef<str>) -> bool {
-        self.diagnostic.contains(pattern.as_ref())
     }
 }
 impl PartialEq for CaptureError {

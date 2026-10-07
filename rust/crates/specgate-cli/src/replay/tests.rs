@@ -227,7 +227,7 @@ mod cases {
         let unsupported_output = output_dir("unsupported-language").with_extension("otlp.json");
         assert!(matches!(
             replay(Request::builder(Paths::new(&capture_dir, csharp_binding(), &unsupported_output)).build().unwrap()),
-            Err(error) if error.diagnostic().contains("only Rust candidates") && error.diagnostic().contains("csharp")
+            Err(error) if error.to_string().contains("only Rust candidates") && error.to_string().contains("csharp")
         ));
         assert!(!unsupported_output.exists());
 
@@ -362,8 +362,8 @@ mod cases {
         bundle.scenarios[0].operations[0].inputs[0].value_type = bundle.registry.operations[0].inputs()[0].value_type.clone();
         let candidate = candidate_metadata(raw_operation("add"), normalized_operation("add"));
         let reason = build_plan(&bundle, &candidate).unwrap_err();
-        assert!(reason.diagnostic().contains("unsupported structured type"));
-        assert_eq!(classify(&reason), Some(ReplayLimitation::StructuredValue));
+        assert!(reason.to_string().contains("unsupported structured type"));
+        assert_eq!(classify(reason.to_string()), Some(ReplayLimitation::StructuredValue));
     }
 
     #[test]
@@ -569,6 +569,6 @@ mod cases {
     fn assert_error(candidate: &Candidate, expected: impl AsRef<str>) {
         let expected = expected.as_ref();
         let error = build_plan(&reference_bundle(), candidate).unwrap_err();
-        assert!(error.diagnostic().contains(expected), "expected '{expected}' in '{error}'");
+        assert!(error.to_string().contains(expected), "expected '{expected}' in '{error}'");
     }
 }

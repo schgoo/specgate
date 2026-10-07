@@ -50,8 +50,8 @@ pub(super) fn generate_rust(
         return Ok(());
     }
     let binding = repo_path(root, &matrix.bindings[binding_key]);
-    let discovered =
-        discover(&binding, ALL_COMPONENTS).map_err(|error| GoldenError::message(format!("{binding_key}: discovery failed: {error}")))?;
+    let discovered = discover(&binding, ALL_COMPONENTS)
+        .map_err(|error| GoldenError::message(format!("{binding_key}: discovery failed: {}", error.diagnostic())))?;
     let present = discovered.registry.present_components();
     for row in &rows {
         let component = row
@@ -111,7 +111,7 @@ pub(super) fn generate_rust(
         return Ok(());
     }
     let reports = capture_strict(&discovered, &requests)
-        .map_err(|error| GoldenError::message(format!("{binding_key}: batched capture failed: {error}")))?;
+        .map_err(|error| GoldenError::message(format!("{binding_key}: batched capture failed: {}", error.diagnostic())))?;
     assert_eq!(
         reports.len(),
         requests.len(),

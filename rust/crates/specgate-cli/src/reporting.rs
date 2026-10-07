@@ -85,18 +85,7 @@ pub(super) fn format_validation(report: &ValidationReport) -> String {
 /// assert!(format_capture(&outcome).starts_with("Error("));
 /// ```
 pub(super) fn format_capture(outcome: &Result<specgate_cli::CaptureReport, specgate_cli::CaptureError>) -> String {
-    match outcome {
-        Ok(report) => format!(
-            "Complete(component={}, scenarios={}, operations={}, registry={}, trace={}, manifest={})\n",
-            report.component_id(),
-            report.scenarios(),
-            report.operations(),
-            report.registry_path.display(),
-            report.trace_path.display(),
-            report.manifest_path.display()
-        ),
-        Err(error) => format!("Error({})\n", error.diagnostic()),
-    }
+    specgate_cli::format_capture(outcome)
 }
 
 /// Render a replay result using the stable CLI line protocol.
@@ -110,15 +99,5 @@ pub(super) fn format_capture(outcome: &Result<specgate_cli::CaptureReport, specg
 /// assert!(rendered.ends_with("\n"));
 /// ```
 pub(super) fn format_replay(outcome: &Result<specgate_cli::replay::Report, specgate_cli::replay::Error>) -> String {
-    match outcome {
-        Ok(report) => format!(
-            "Complete(component={}, scenarios={}, operations={}, plans={}, output={})\n",
-            report.component_id(),
-            report.scenarios,
-            report.operations,
-            report.plans,
-            report.output_path.display()
-        ),
-        Err(error) => format!("Error({})\n", error.diagnostic()),
-    }
+    specgate_cli::replay::format_outcome(outcome)
 }

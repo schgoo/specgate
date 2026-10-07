@@ -1,7 +1,7 @@
 //! Component selection and top-level capture filtering.
 
 use super::facade::BundleRequest;
-use super::{Capture, ComponentId, ContextError, Registry};
+use super::{Capture, ComponentId, FailureContext, Registry};
 
 /// Select the scenarios that belong to `component`, by *top-level* operation
 /// only.
@@ -46,16 +46,16 @@ pub(super) fn filter(scenarios: impl AsRef<[Capture]>, component: &ComponentId) 
     captures
 }
 
-pub(super) fn select_component(registry: &Registry, component: impl AsRef<str>) -> Result<ComponentId, ContextError> {
+pub(super) fn select_component(registry: &Registry, component: impl AsRef<str>) -> Result<ComponentId, FailureContext> {
     let component = component.as_ref();
     let components = registry.present_components();
     if component.is_empty() {
         return match components.len() {
-            0 => Err(ContextError::domain(
+            0 => Err(FailureContext::domain(
                 "no components found: target has no annotated operations or types",
             )),
             1 => Ok(ComponentId::from(components[0].as_str())),
-            _ => Err(ContextError::domain(format!(
+            _ => Err(FailureContext::domain(format!(
                 "multiple components present ({}); select one with --component <id>",
                 components
                     .iter()
@@ -68,7 +68,7 @@ pub(super) fn select_component(registry: &Registry, component: impl AsRef<str>) 
     if components.iter().any(|candidate| candidate == component) {
         Ok(ComponentId::from(component))
     } else {
-        Err(ContextError::domain(format!(
+        Err(FailureContext::domain(format!(
             "component '{component}' not found; available components: {}",
             components.join(", ")
         )))
@@ -85,7 +85,7 @@ pub(super) fn select_component(registry: &Registry, component: impl AsRef<str>) 
 /// the component's public input surface. The whole component is rejected here
 /// instead — before any test binary is built, run, or encoded — so the failure
 /// names the setup rather than surfacing as a missing input much later.
-pub(super) fn validate_setups(registry: &Registry, requests: impl AsRef<[BundleRequest]>) -> Result<(), ContextError> {
+pub(super) fn validate_setups(registry: &Registry, requests: impl AsRef<[BundleRequest]>) -> Result<(), FailureContext> {
     for request in requests.as_ref() {
         let component = request.component.as_str();
         let setup = registry
@@ -95,7 +95,7 @@ pub(super) fn validate_setups(registry: &Registry, requests: impl AsRef<[BundleR
             .filter(|candidate| !excluded(request, &candidate.name))
             .min_by(|left, right| left.name.cmp(&right.name).then_with(|| left.fn_name.cmp(&right.fn_name)));
         if let Some(setup) = setup {
-            return Err(ContextError::domain(format!(
+            return Err(FailureContext::domain(format!(
                 "component '{component}' declares async setup '{}' for operation '{component}::{}'; native capture cannot instrument an async setup, so this component is discovery-only until capture context is task-safe",
                 setup.fn_name, setup.name
             )));

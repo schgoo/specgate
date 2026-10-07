@@ -17,9 +17,9 @@
 //! ```
 
 use super::failure;
-#[cfg(any(test, feature = "test-util"))]
-use crate::ErrorKind;
 use crate::error::Error;
+#[cfg(any(test, feature = "test-util"))]
+use crate::error::ErrorKind;
 #[cfg(any(test, feature = "test-util"))]
 use std::cell::RefCell;
 #[cfg(any(test, feature = "test-util"))]

@@ -1,9 +1,11 @@
-//! Canonical structured replay failure.
-/// Stable classification for replay failures.
+//! Opaque replay failures and their CTSC protocol stage.
+/// Machine-readable stage recorded for a failed replay operation.
+///
+/// This is CTSC protocol data, not the internal classification of [`Error`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, SpecEvent)]
 #[spec_event(name = "ReplayErrorKind")]
 #[non_exhaustive]
-pub enum ErrorKind {
+pub(crate) enum FailureStage {
     /// The request was invalid.
     Request,
     /// The capture bundle could not be read or decoded.
@@ -18,25 +20,24 @@ pub enum ErrorKind {
 use specgate::SpecEvent;
 
 /// Stable source spelling consumed by CTSC field metadata.
-type ReplayErrorKind = ErrorKind;
+type ReplayErrorKind = FailureStage;
 
-/// A structured failure from [`super::replay`].
+/// An opaque failure from [`super::replay`].
 ///
 /// `Display` renders the CLI diagnostic. [`std::error::Error::source`] retains
 /// an upstream cause when present, and [`ohno::ErrorExt::backtrace`] exposes the
 /// captured backtrace separately.
 ///
-/// Use the stage predicates for control flow and [`Error::diagnostic`]
-/// for reporting; wrapped filesystem, process, and discovery causes remain in
-/// the standard error chain.
+/// Wrapped filesystem, process, and discovery causes remain in the standard
+/// error chain. The CTSC projection records [`FailureStage`] independently from
+/// the Rust error API.
 ///
 /// # Examples
 /// ```
 /// use specgate_cli::replay::{Paths, Request};
 /// let error = Request::builder(Paths::new("", "binding.yaml", "out.json"))
 ///     .build().unwrap_err();
-/// assert!(error.is_request());
-/// assert!(!error.diagnostic().is_empty());
+/// assert!(!error.to_string().is_empty());
 /// ```
 // Workspace error policy requires `ohno`; this expansion supplies the documented
 // source chain, backtrace, and `new`/`caused_by` constructors.
@@ -52,40 +53,14 @@ pub struct Error {
     diagnostic: String,
 }
 impl Error {
-    pub(crate) fn new_message(kind: ErrorKind, value: impl Into<String>) -> Self {
+    pub(crate) fn new_message(kind: FailureStage, value: impl Into<String>) -> Self {
         Self::new(kind, value.into())
     }
-    pub(crate) fn wrap(kind: ErrorKind, diagnostic: impl Into<String>, source: impl std::error::Error + Send + Sync + 'static) -> Self {
+    pub(crate) fn wrap(kind: FailureStage, diagnostic: impl Into<String>, source: impl std::error::Error + Send + Sync + 'static) -> Self {
         Self::caused_by(kind, diagnostic.into(), source)
     }
-    /// Whether request validation failed.
-    #[must_use]
-    pub const fn is_request(&self) -> bool {
-        matches!(self.kind, ErrorKind::Request)
-    }
-    /// Whether capture loading failed.
-    #[must_use]
-    pub const fn is_capture(&self) -> bool {
-        matches!(self.kind, ErrorKind::Capture)
-    }
-    /// Whether discovery or linking failed.
-    #[must_use]
-    pub const fn is_linking(&self) -> bool {
-        matches!(self.kind, ErrorKind::Linking)
-    }
-    /// Whether candidate execution failed.
-    #[must_use]
-    pub const fn is_execution(&self) -> bool {
-        matches!(self.kind, ErrorKind::Execution)
-    }
-    /// Whether output publication failed.
-    #[must_use]
-    pub const fn is_publication(&self) -> bool {
-        matches!(self.kind, ErrorKind::Publication)
-    }
-    /// Return the CLI diagnostic.
-    #[must_use]
-    pub fn diagnostic(&self) -> &str {
+
+    pub(super) fn diagnostic(&self) -> &str {
         &self.diagnostic
     }
 }
@@ -96,23 +71,17 @@ impl Error {
 // error metadata, so other stages use `new_message` or `wrap` explicitly.
 impl From<String> for Error {
     fn from(diagnostic: String) -> Self {
-        Self::new_message(ErrorKind::Linking, diagnostic)
+        Self::new_message(FailureStage::Linking, diagnostic)
     }
 }
 impl From<&str> for Error {
     fn from(diagnostic: &str) -> Self {
-        Self::new_message(ErrorKind::Linking, diagnostic)
+        Self::new_message(FailureStage::Linking, diagnostic)
     }
 }
 
 pub(super) fn failure<T>(diagnostic: impl Into<String>) -> Result<T, Error> {
     Err(Error::from(diagnostic.into()))
-}
-
-impl AsRef<str> for Error {
-    fn as_ref(&self) -> &str {
-        self.diagnostic()
-    }
 }
 
 /// Stable source spelling consumed by operation metadata.

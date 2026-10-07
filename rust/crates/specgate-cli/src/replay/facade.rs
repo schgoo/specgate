@@ -8,7 +8,8 @@ use super::{
 /// Replay every top-level operation in a verified capture bundle.
 ///
 /// # Errors
-/// Returns a categorized error when loading, linking, executing, or publishing fails.
+/// Returns an opaque error enriched with loading, linking, execution, or
+/// publication context.
 ///
 /// # Examples
 /// ```no_run

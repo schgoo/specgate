@@ -69,11 +69,12 @@ Rust.
 - Environment-driven capture atomically persists the cumulative scenario after
   each successfully completed top-level operation. Persistence failure
   terminalizes the session and is promoted by a hidden runtime/facade marker to
-  `CaptureErrorKind::Execution`; ordinary failed tests remain skippable outside
-  strict golden capture. Generated operations explicitly finalize fault
-  boundaries and resume the original target panic; destructors never persist.
-  Manual sessions use `finish_native_capture`, and no crash-durable or
-  partial-output guarantee is made.
+  the independent CTSC `CaptureErrorKind` value `Execution`; the Rust error
+  remains opaque. Ordinary failed tests remain skippable outside strict golden
+  capture. Generated operations explicitly finalize fault boundaries and
+  resume the original target panic; destructors never persist. Manual sessions
+  use `finish_native_capture`, and no crash-durable or partial-output guarantee
+  is made.
 - Observation declarations and configurable comparison profiles are not
   implemented.
 

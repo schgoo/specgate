@@ -1,7 +1,13 @@
 #![cfg_attr(all(feature = "test-util", not(test)), expect(dead_code, reason = "feature-gated fixture support"))]
 
 //! Capture workflow orchestration and publication.
-use super::*;
+#[cfg(any(test, feature = "test-util"))]
+use super::BTreeSet;
+use super::{
+    CaptureError, CaptureErrorKind, CaptureReport, CaptureRequest, CommandEnvironment, ComponentId, Discovery, ExecutedTests, Execution,
+    FailureContext, MANIFEST_FILE, Path, PathBuf, REGISTRY_FILE, TRACE_FILE, Target, build_binaries, encode_bundle, enumerate_tests,
+    public_error, reject_failures, run_tests, scratch_dir, select_component, spec_operation, validate_setups, write_artifact,
+};
 
 // Ordinary capture publishes evidence from failing tests; golden generation opts into rejecting them.
 const REJECT_FAILURES: bool = false;
@@ -14,8 +20,8 @@ const REJECT_FAILURES: bool = false;
 ///
 /// # Errors
 ///
-/// Returns an [`crate::CaptureError`] categorized by the stage that rejected the
-/// request or failed to produce a complete bundle.
+/// Returns an opaque [`crate::CaptureError`] with the failed operation and any
+/// upstream cause preserved in its enrichment chain.
 ///
 /// # Panics
 ///
@@ -33,13 +39,8 @@ const REJECT_FAILURES: bool = false;
 ///     .target("rust")
 ///     .component("example.math")
 ///     .build()?;
-/// match capture(request) {
-///     Ok(report) => println!("{}", report.manifest_path.display()),
-///     Err(error) if error.is_selection() => {
-///         eprintln!("select a component: {}", error.diagnostic());
-///     }
-///     Err(error) => return Err(error.into()),
-/// }
+/// let report = capture(request)?;
+/// println!("{}", report.manifest_path.display());
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[must_use]
@@ -65,7 +66,7 @@ pub fn capture(request: CaptureRequest) -> Result<CaptureReport, CaptureError> {
 /// ```
 ///
 /// # Errors
-/// Returns a categorized capture failure from request execution or publication.
+/// Returns an opaque capture failure from request execution or publication.
 ///
 /// # Panics
 /// Panics if the internal bundle writer violates its one-report-per-request invariant.
@@ -118,13 +119,13 @@ pub(crate) fn capture_many(
     binding: impl AsRef<Path>,
     target: impl AsRef<str>,
     requests: &[BundleRequest],
-) -> Result<Vec<CaptureReport>, ContextError> {
+) -> Result<Vec<CaptureReport>, FailureContext> {
     assert!(!requests.is_empty(), "capture_many requires at least one bundle request");
     let discovered = discover(binding, target)?;
     let present = discovered.registry.present_components();
     for request in requests {
         if !present.iter().any(|candidate| candidate == request.component.as_str()) {
-            return Err(ContextError::domain(format!(
+            return Err(FailureContext::domain(format!(
                 "component '{}' not found; available components: {}",
                 request.component,
                 present.join(", ")
@@ -135,7 +136,7 @@ pub(crate) fn capture_many(
 }
 
 #[cfg(any(test, feature = "test-util"))]
-pub(crate) fn discover(binding: impl AsRef<Path>, target: impl AsRef<str>) -> Result<Target, ContextError> {
+pub(crate) fn discover(binding: impl AsRef<Path>, target: impl AsRef<str>) -> Result<Target, FailureContext> {
     discover_target(binding, target, &CommandEnvironment::real(), &Discovery::real())
 }
 
@@ -144,22 +145,22 @@ fn discover_target(
     target: impl AsRef<str>,
     system: &CommandEnvironment,
     discovery: &Discovery,
-) -> Result<Target, ContextError> {
+) -> Result<Target, FailureContext> {
     let binding = binding.as_ref();
     let target = target.as_ref();
     let target_name = if target.is_empty() { None } else { Some(target) };
     let discovered = discovery
         .capture_target(binding, target_name, &specgate_discovery::identity::ComponentId::default())
-        .map_err(|error| ContextError::with_source(error.to_string(), error))?;
+        .map_err(|error| FailureContext::with_source(error.to_string(), error))?;
     let resolved = &discovered.target;
     if resolved.language != specgate_discovery::binding::Language::Rust {
-        return Err(ContextError::domain(format!(
+        return Err(FailureContext::domain(format!(
             "capture currently supports only Rust targets; binding language is '{}'",
             resolved.language
         )));
     }
     if !system.is_file(resolved.target.package_root.join("Cargo.toml")) {
-        return Err(ContextError::domain(format!(
+        return Err(FailureContext::domain(format!(
             "capture target '{}' is not a Rust package (no Cargo.toml at {})",
             resolved.name,
             resolved.target.package_root.display()
@@ -173,7 +174,7 @@ fn discover_target(
 /// This is `specgate capture`'s behavior: a failing test contributes no
 /// scenario, and a component left with no scenario at all still errors.
 #[cfg(any(test, feature = "test-util"))]
-pub(crate) fn capture_discovered(discovered: &Target, requests: &[BundleRequest]) -> Result<Vec<CaptureReport>, ContextError> {
+pub(crate) fn capture_discovered(discovered: &Target, requests: &[BundleRequest]) -> Result<Vec<CaptureReport>, FailureContext> {
     discovered_with(discovered, requests, FailureMode::Allow)
 }
 
@@ -184,7 +185,7 @@ pub(crate) fn capture_discovered(discovered: &Target, requests: &[BundleRequest]
 /// to be the corpus's real behavior, so a red test must not be hidden by a
 /// sibling test that happens to cover the same component.
 #[cfg(any(test, feature = "test-util"))]
-pub(crate) fn capture_strict(discovered: &Target, requests: &[BundleRequest]) -> Result<Vec<CaptureReport>, ContextError> {
+pub(crate) fn capture_strict(discovered: &Target, requests: &[BundleRequest]) -> Result<Vec<CaptureReport>, FailureContext> {
     discovered_with(discovered, requests, FailureMode::Reject)
 }
 
@@ -200,13 +201,13 @@ pub(super) fn discovered_with(
     discovered: &Target,
     requests: &[BundleRequest],
     failure_mode: FailureMode,
-) -> Result<Vec<CaptureReport>, ContextError> {
+) -> Result<Vec<CaptureReport>, FailureContext> {
     let executed = execute_tests(discovered, requests)?;
     write_bundles(discovered, requests, &executed, matches!(failure_mode, FailureMode::Reject))
 }
 
 #[cfg(any(test, feature = "test-util"))]
-pub(super) fn execute_tests(discovered: &Target, requests: &[BundleRequest]) -> Result<ExecutedTests, ContextError> {
+pub(super) fn execute_tests(discovered: &Target, requests: &[BundleRequest]) -> Result<ExecutedTests, FailureContext> {
     execute_with(discovered, requests, &CommandEnvironment::real(), &Execution::real())
 }
 
@@ -215,7 +216,7 @@ fn execute_with(
     requests: &[BundleRequest],
     system: &CommandEnvironment,
     execution: &Execution,
-) -> Result<ExecutedTests, ContextError> {
+) -> Result<ExecutedTests, FailureContext> {
     let resolved = &discovered.target;
     validate_setups(&discovered.registry, requests)?;
     let scratch = scratch_dir(system, &resolved.target.package_root)?;
@@ -230,7 +231,7 @@ pub(super) fn write_bundles(
     requests: &[BundleRequest],
     executed: &ExecutedTests,
     reject_failed: bool,
-) -> Result<Vec<CaptureReport>, ContextError> {
+) -> Result<Vec<CaptureReport>, FailureContext> {
     write_with(discovered, requests, executed, reject_failed, &CommandEnvironment::real())
 }
 
@@ -240,7 +241,7 @@ fn write_with(
     executed: &ExecutedTests,
     reject_failed: bool,
     system: &CommandEnvironment,
-) -> Result<Vec<CaptureReport>, ContextError> {
+) -> Result<Vec<CaptureReport>, FailureContext> {
     if reject_failed {
         reject_failures(executed)?;
     }
@@ -253,7 +254,7 @@ fn write_with(
     let mut reports = Vec::with_capacity(encoded.len());
     for bundle in encoded {
         system.create_dir_all(&bundle.out).map_err(|error| {
-            ContextError::with_source(
+            FailureContext::with_source(
                 format!("failed to create capture output directory {}: {error}", bundle.out.display()),
                 error,
             )
