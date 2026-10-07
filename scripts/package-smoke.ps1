@@ -1,5 +1,8 @@
 $ErrorActionPreference = 'Stop'
 
+$previousRustupToolchain = $env:RUSTUP_TOOLCHAIN
+$env:RUSTUP_TOOLCHAIN = '1.96.0'
+
 $root = Split-Path -Parent $PSScriptRoot
 $rust = Join-Path $root 'rust'
 $scratch = Join-Path $rust "target/package-smoke-$PID"
@@ -8,6 +11,13 @@ $install = Join-Path $scratch 'install'
 $candidate = Join-Path $scratch 'candidate'
 $capture = Join-Path $scratch 'capture'
 $registry = Join-Path $scratch 'registry.ctsc.json'
+$rustup = (Get-Command rustup -ErrorAction Stop).Source
+$cargo = & $rustup which cargo --toolchain $env:RUSTUP_TOOLCHAIN
+$rustc = & $rustup which rustc --toolchain $env:RUSTUP_TOOLCHAIN
+$rustdoc = & $rustup which rustdoc --toolchain $env:RUSTUP_TOOLCHAIN
+if ($LASTEXITCODE -ne 0 -or !$cargo -or !$rustc -or !$rustdoc) {
+    throw "Rust toolchain '$env:RUSTUP_TOOLCHAIN' is not installed with cargo, rustc, and rustdoc."
+}
 $replay = Join-Path $scratch 'candidate.otlp.json'
 
 function Cargo-Path([string]$Path) {
@@ -28,7 +38,20 @@ try {
 
     Push-Location $rust
     try {
-        Invoke-Checked cargo @('package', '--workspace', '--allow-dirty', '--no-verify')
+        $packageArguments = @('package', '--workspace', '--allow-dirty', '--no-verify')
+        foreach ($name in @(
+            'specgate',
+            'specgate-annotations-macros',
+            'specgate-annotations-macros-impl',
+            'specgate-runtime',
+            'specgate-discovery',
+            'specgate-ctsc',
+            'specgate-cli'
+        )) {
+            $packageArguments += '--config'
+            $packageArguments += "patch.crates-io.$name.path=`"crates/$name`""
+        }
+        Invoke-Checked $cargo $packageArguments
     }
     finally {
         Pop-Location
@@ -40,6 +63,7 @@ try {
     foreach ($name in @(
         'specgate',
         'specgate-annotations-macros',
+        'specgate-annotations-macros-impl',
         'specgate-runtime',
         'specgate-discovery',
         'specgate-ctsc',
@@ -57,6 +81,7 @@ try {
 [patch.crates-io]
 specgate = { path = "$(Cargo-Path (Join-Path $packageRoot 'specgate-0.6.0'))" }
 specgate-annotations-macros = { path = "$(Cargo-Path (Join-Path $packageRoot 'specgate-annotations-macros-0.6.0'))" }
+specgate-annotations-macros-impl = { path = "$(Cargo-Path (Join-Path $packageRoot 'specgate-annotations-macros-impl-0.6.0'))" }
 specgate-runtime = { path = "$(Cargo-Path (Join-Path $packageRoot 'specgate-runtime-0.6.0'))" }
 specgate-discovery = { path = "$(Cargo-Path (Join-Path $packageRoot 'specgate-discovery-0.6.0'))" }
 specgate-ctsc = { path = "$(Cargo-Path (Join-Path $packageRoot 'specgate-ctsc-0.6.0'))" }
@@ -64,11 +89,15 @@ specgate-ctsc = { path = "$(Cargo-Path (Join-Path $packageRoot 'specgate-ctsc-0.
     Set-Content -Path (Join-Path $cargoHome 'config.toml') -Value $config -NoNewline
 
     $env:CARGO_HOME = $cargoHome
+    $env:RUSTC = $rustc
+    $env:RUSTDOC = $rustdoc
+    $toolchainBin = Split-Path -Parent $cargo
+    $env:PATH = "$toolchainBin$([IO.Path]::PathSeparator)$env:PATH"
     $env:SPECGATE_CACHE_DIR = Join-Path $scratch 'runtime-cache'
     Remove-Item Env:SPECGATE_RUNTIME_PATH -ErrorAction SilentlyContinue
     Remove-Item Env:SPECGATE_RUNTIME_VERSION -ErrorAction SilentlyContinue
 
-    Invoke-Checked cargo @(
+    Invoke-Checked $cargo @(
         'install',
         '--path', (Join-Path $packageRoot 'specgate-cli-0.6.0'),
         '--root', $install,
@@ -165,5 +194,13 @@ finally {
     Remove-Item Env:SPECGATE_RUNTIME_PATH -ErrorAction SilentlyContinue
     Remove-Item Env:SPECGATE_RUNTIME_VERSION -ErrorAction SilentlyContinue
     Remove-Item Env:SOURCE_DATE_EPOCH -ErrorAction SilentlyContinue
+    Remove-Item Env:RUSTC -ErrorAction SilentlyContinue
+    Remove-Item Env:RUSTDOC -ErrorAction SilentlyContinue
+    if ($null -eq $previousRustupToolchain) {
+        Remove-Item Env:RUSTUP_TOOLCHAIN -ErrorAction SilentlyContinue
+    }
+    else {
+        $env:RUSTUP_TOOLCHAIN = $previousRustupToolchain
+    }
     Remove-Item -Recurse -Force $scratch -ErrorAction SilentlyContinue
 }

@@ -1,5 +1,11 @@
+//! CTSC Strict comparison integration tests.
+
 use sha2::{Digest as _, Sha256};
-use specgate_ctsc::comparison::compare;
+use specgate_ctsc::{
+    compare, compare_documents, compare_reader,
+    comparison::{DocumentReader, LoadError},
+    validation::DocumentBytes,
+};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -54,6 +60,17 @@ fn attribute_mut<'a>(container: &'a mut serde_json::Value, key: &str) -> &'a mut
         .expect("attribute")
 }
 
+fn result_value_mut(value: &mut serde_json::Value) -> &mut serde_json::Value {
+    let operation = first_span_mut(value, "conformance.operation");
+    let result = operation["events"]
+        .as_array_mut()
+        .expect("events")
+        .iter_mut()
+        .find(|event| event["name"] == "conformance.result")
+        .expect("result");
+    attribute_mut(result, "conformance.result.value")
+}
+
 fn compare_values(
     reference: &serde_json::Value,
     candidate: &serde_json::Value,
@@ -67,6 +84,24 @@ fn compare_values(
     let report = compare(&reference_path, &candidate_path, registry, &[]);
     std::fs::remove_dir_all(scratch).expect("remove scratch");
     report
+}
+
+#[test]
+fn byte_and_path_comparison_reports_are_identical() {
+    let reference_path = corpus().join("trace").join("valid").join("sequential.otlp.json");
+    let candidate_path = corpus().join("trace").join("valid").join("parallel.otlp.json");
+    let reference = std::fs::read(&reference_path).expect("reference fixture");
+    let candidate = std::fs::read(&candidate_path).expect("candidate fixture");
+
+    let path_report = compare(&reference_path, &candidate_path, None::<&Path>, &[]);
+    let byte_report = compare_documents(
+        DocumentBytes::new(&reference_path, &reference),
+        DocumentBytes::new(&candidate_path, &candidate),
+        None,
+        [],
+    );
+
+    assert_eq!(byte_report, path_report);
 }
 
 #[test]
@@ -172,6 +207,55 @@ fn strict_reports_changed_result_inputs_completion_and_event_order() {
             "{label}: {report:#?}"
         );
     }
+}
+
+#[test]
+fn strict_compares_finite_binary64_exactly_and_non_finite_values_by_normalized_symbol() {
+    let mut reference = read_json(&corpus().join("trace").join("valid").join("sequential.otlp.json"));
+    let values = [
+        serde_json::json!({"doubleValue": 1.25}),
+        serde_json::json!({"doubleValue": "NaN"}),
+        serde_json::json!({"doubleValue": "Infinity"}),
+        serde_json::json!({"doubleValue": "-Infinity"}),
+    ];
+
+    for value in &values {
+        *result_value_mut(&mut reference) = value.clone();
+        let report = compare_values(&reference, &reference, None);
+        assert!(report.equivalent, "{value}: {report:#?}");
+    }
+
+    *result_value_mut(&mut reference) = serde_json::json!({"doubleValue": 1.25});
+    let mut adjacent = reference.clone();
+    *result_value_mut(&mut adjacent) = serde_json::json!({"doubleValue": f64::from_bits(1.25_f64.to_bits() + 1)});
+    let report = compare_values(&reference, &adjacent, None);
+    assert!(report.validation_failures.is_empty(), "{report:#?}");
+    assert!(
+        report.mismatches.iter().any(|mismatch| mismatch.path.ends_with(".result")),
+        "{report:#?}"
+    );
+
+    for value in values.iter().skip(1) {
+        let mut non_finite = reference.clone();
+        *result_value_mut(&mut non_finite) = value.clone();
+        let report = compare_values(&reference, &non_finite, None);
+        assert!(report.validation_failures.is_empty(), "{value}: {report:#?}");
+        assert!(
+            report.mismatches.iter().any(|mismatch| mismatch.path.ends_with(".result")),
+            "{report:#?}"
+        );
+    }
+
+    let mut nan = reference.clone();
+    *result_value_mut(&mut nan) = serde_json::json!({"doubleValue": "NaN"});
+    let mut infinity = reference.clone();
+    *result_value_mut(&mut infinity) = serde_json::json!({"doubleValue": "Infinity"});
+    let report = compare_values(&nan, &infinity, None);
+    assert!(report.validation_failures.is_empty(), "{report:#?}");
+    assert!(
+        report.mismatches.iter().any(|mismatch| mismatch.path.ends_with(".result")),
+        "{report:#?}"
+    );
 }
 
 #[test]
@@ -602,4 +686,33 @@ fn linked_trace(
             ]}]
         }]
     })
+}
+
+#[derive(Debug)]
+struct DeniedReader;
+impl DocumentReader for DeniedReader {
+    fn read(&self, path: &Path) -> Result<Vec<u8>, LoadError> {
+        Err(LoadError::reading(path, std::io::ErrorKind::PermissionDenied.into()))
+    }
+    fn canonicalize(&self, path: &Path) -> Result<PathBuf, LoadError> {
+        Ok(path.to_path_buf())
+    }
+}
+
+#[test]
+fn injected_reader_reports_loading_failures() {
+    let report = compare_reader(
+        Path::new("reference.json"),
+        Path::new("candidate.json"),
+        None::<&Path>,
+        &[],
+        &DeniedReader,
+    );
+    assert_eq!(report.validation_failures.len(), 2);
+    assert!(
+        report
+            .validation_failures
+            .iter()
+            .all(|failure| failure.message.contains("failed to read file"))
+    );
 }

@@ -1,10 +1,243 @@
 # cargo-evaluate configuration for the SpecGate workspace.
 #
-# `just evaluate` runs the deterministic and semantic lint packs. It is not yet
-# part of `just check`, because the current workspace baseline still reports
-# findings. Scope any genuinely-necessary exception as narrowly as possible —
-# prefer an in-source `#[cfg_attr(false, allow(evaluate::<rule>))]` marker on the
-# specific item over a workspace-wide entry here, and always record why.
+# `just evaluate` runs the deterministic and semantic lint packs. Exceptions
+# are exact rule/file pairs retained only where a ratified design or evaluator
+# limitation prevents a source fix. cargo-evaluate 0.23 has no line, item, or
+# span selector, so each exception necessarily covers one complete file.
 
-[config]
-disabled = []
+[lints]
+
+[[config.allow]]
+rule = "m_avoid_statics"
+file = "crates/specgate-annotations-macros-impl/src/event.rs"
+reason = "SpecEvent derives must emit hygienic linkme registrations; candidate-rooted dependency resolution enforces one specgate-runtime package identity."
+
+[[config.allow]]
+rule = "m_avoid_statics"
+file = "crates/specgate-discovery/src/runner/metadata/tests.rs"
+reason = "This fixture deliberately uses shared static state to detect the split-runtime package-identity failure that production resolution rejects."
+
+[[config.allow]]
+rule = "m_avoid_statics"
+file = "crates/specgate-runtime/src/capture.rs"
+reason = "Native capture is intentionally synchronous and thread-local until task-safe context propagation is designed; candidate package identity prevents duplicate runtime state."
+
+[[config.allow]]
+rule = "m_avoid_statics"
+file = "crates/specgate-runtime/src/capture/setup.rs"
+reason = "Pending setup inputs share the synchronous capture thread-local by design; candidate package identity prevents duplicate runtime state."
+
+[[config.allow]]
+rule = "m_avoid_statics"
+file = "crates/specgate-runtime/src/registry.rs"
+reason = "Link-time discovery requires linkme distributed slices, and candidate-rooted dependency resolution enforces one runtime package identity."
+
+[[config.allow]]
+rule = "m_dont_leak_types"
+file = "crates/specgate-annotations-macros-impl/src/operation.rs"
+reason = "This unpublished sibling implementation crate exchanges syn and proc-macro2 values with the proc-macro facade so compiler spans and diagnostics remain intact."
+
+[[config.allow]]
+rule = "m_dont_leak_types"
+file = "crates/specgate-annotations-macros-impl/src/setup.rs"
+reason = "This unpublished sibling implementation crate exchanges syn and proc-macro2 values with the proc-macro facade so compiler spans and diagnostics remain intact."
+
+[[config.allow]]
+rule = "m_dont_leak_types"
+file = "crates/specgate-cli/src/discover/failure.rs"
+reason = "The opaque public discover error uses ohno for repository-standard source/backtrace behavior and SpecEvent solely for its CTSC operation projection; neither macro exposes error internals."
+
+[[config.allow]]
+rule = "m_dont_leak_types"
+file = "crates/specgate-runtime/src/capture/model.rs"
+reason = "The public native capture DTOs intentionally implement serde as their stable sidecar protocol; feature-gating those implementations would make environment-driven capture unavailable."
+
+[[config.allow]]
+rule = "m_dont_leak_types"
+file = "crates/specgate-ctsc/src/replay/model.rs"
+reason = "False positive: ComponentId, OperationName, RegistryId, RegistryVersion, and ScenarioName are private-field newtypes defined and owned by specgate-ctsc in this file."
+
+[[config.allow]]
+rule = "m_dont_leak_types"
+file = "crates/specgate-runtime/src/lib.rs"
+reason = "Hidden macro plumbing re-exports linkme so expansions use the consumer's exact instance without requiring users to depend on linkme directly."
+
+[[config.allow]]
+rule = "m_errors_canonical_structs"
+file = "crates/specgate-annotations-macros-impl/src/event.rs"
+reason = "The unpublished proc-macro implementation boundary returns syn::Error directly to preserve source spans and native compiler diagnostics."
+
+[[config.allow]]
+rule = "m_errors_canonical_structs"
+file = "crates/specgate-annotations-macros-impl/src/operation.rs"
+reason = "The unpublished proc-macro implementation boundary returns syn::Error directly to preserve source spans and native compiler diagnostics."
+
+[[config.allow]]
+rule = "m_errors_canonical_structs"
+file = "crates/specgate-annotations-macros-impl/src/setup.rs"
+reason = "The unpublished proc-macro implementation boundary returns syn::Error directly to preserve source spans and native compiler diagnostics."
+
+[[config.allow]]
+rule = "m_errors_canonical_structs"
+file = "crates/specgate-cli/src/main.rs"
+reason = "ArgumentError Display intentionally renders the actionable user diagnostic; generated source and backtrace context remain available through std::error::Error."
+
+[[config.allow]]
+rule = "m_errors_canonical_structs"
+file = "crates/specgate-cli/src/replay/error.rs"
+reason = "The ratified opaque-error policy reports context through Display and retains causes and backtraces through std::error::Error and ohno::ErrorExt rather than rendering internal state."
+
+[[config.allow]]
+rule = "m_errors_canonical_structs"
+file = "crates/specgate-ctsc/src/comparison/loading.rs"
+reason = "The ratified opaque-error policy deliberately keeps document paths and operation categories out of the public LoadError API; Display and the source chain retain reporting context."
+
+[[config.allow]]
+rule = "m_errors_canonical_structs"
+file = "crates/specgate-discovery/src/error.rs"
+reason = "The ratified opaque-error policy deliberately forbids public error categories and predicates; actionable context remains in Display and the standard source chain."
+
+[[config.allow]]
+rule = "m_from_error"
+file = "crates/specgate-ctsc/src/capture/error.rs"
+reason = "The serde_json conversion remains a private named adapter so the public Error API does not expose a third-party serde_json::Error conversion."
+
+[[config.allow]]
+rule = "m_macro_last_resort"
+file = "crates/specgate-ctsc/src/capture/error.rs"
+reason = "Repository error policy standardizes structured errors on ohno for consistent source chaining and backtrace behavior."
+
+[[config.allow]]
+rule = "m_macro_main_crate"
+file = "crates/specgate-annotations-macros-impl/src/event.rs"
+reason = "Renamed specgate dependencies are an explicit compatibility requirement, so expansions resolve the facade name with proc-macro-crate."
+
+[[config.allow]]
+rule = "m_macro_main_crate"
+file = "crates/specgate-annotations-macros-impl/src/lib.rs"
+reason = "Renamed specgate dependencies are an explicit compatibility requirement, so expansions resolve the facade name with proc-macro-crate."
+
+[[config.allow]]
+rule = "m_macro_main_crate"
+file = "crates/specgate-annotations-macros-impl/src/operation.rs"
+reason = "Renamed specgate dependencies are an explicit compatibility requirement, so expansions resolve the facade name with proc-macro-crate."
+
+[[config.allow]]
+rule = "m_macro_main_crate"
+file = "crates/specgate-annotations-macros-impl/src/setup.rs"
+reason = "Renamed specgate dependencies are an explicit compatibility requirement, so expansions resolve the facade name with proc-macro-crate."
+
+[[config.allow]]
+rule = "m_macros_dont_lie"
+file = "crates/specgate-cli/src/capture_failure.rs"
+reason = "The ohno-generated source and backtrace state are intentional parts of the repository-standard opaque error representation."
+
+[[config.allow]]
+rule = "m_macros_dont_lie"
+file = "crates/specgate-cli/src/replay/error.rs"
+reason = "The ohno-generated source and backtrace state are intentional parts of the repository-standard structured error representation."
+
+[[config.allow]]
+rule = "m_macros_dont_lie"
+file = "crates/specgate-ctsc/src/capture/error.rs"
+reason = "The ohno-generated source and backtrace state are intentional parts of the repository-standard structured error representation."
+
+[[config.allow]]
+rule = "m_macros_dont_lie"
+file = "crates/specgate-ctsc/src/replay/error.rs"
+reason = "The ohno-generated source and backtrace state are intentional parts of the repository-standard structured error representation."
+
+[[config.allow]]
+rule = "m_panic_continuation"
+file = "crates/specgate-runtime/src/capture/tests.rs"
+reason = "Target code may catch its own panic; accepted capture semantics record that operation as a fault and permit later operations in the same ordinary test scenario."
+
+[[config.allow]]
+rule = "m_panic_is_stop"
+file = "crates/specgate-runtime/src/capture/tests.rs"
+reason = "A caught target panic is observable operation behavior rather than a process stop because user code explicitly resumed execution."
+
+[[config.allow]]
+rule = "m_proc_implied_items"
+file = "crates/specgate-cli/src/discover/mod.rs"
+reason = "The annotated discover operation must emit collision-resistant link-time metadata so discovery can inventory the public CTSC boundary."
+
+[[config.allow]]
+rule = "m_proc_implied_items"
+file = "crates/specgate-annotations-macros-impl/src/event.rs"
+reason = "SpecEvent derives require one hygienically scoped linkme registration item so discovery can inventory semantic types without runtime initialization."
+
+[[config.allow]]
+rule = "m_proc_implied_items"
+file = "crates/specgate-annotations-macros-impl/src/lib.rs"
+reason = "Stable hashed identifiers provide collision-resistant names for the hidden link-time metadata items required by discovery."
+
+[[config.allow]]
+rule = "m_proc_implied_items"
+file = "crates/specgate-annotations-macros-impl/src/setup.rs"
+reason = "Setup attributes require hygienically scoped linkme registration metadata so discovery can associate setup construction with the annotated operation."
+
+[[config.allow]]
+rule = "m_proc_implied_items"
+file = "crates/specgate-annotations-macros/src/lib.rs"
+reason = "The facade documents the hidden collision-resistant link-time metadata emitted by its operation, setup, and event macros."
+
+[[config.allow]]
+rule = "m_public_display"
+file = "crates/specgate-cli/src/capture_failure.rs"
+reason = "False positive: #[ohno::error] and #[display] generate the canonical Display implementation that source-only analysis does not expand."
+
+[[config.allow]]
+rule = "m_public_display"
+file = "crates/specgate-cli/src/discover/failure.rs"
+reason = "False positive: #[ohno::error] and #[display] generate the canonical Display implementation that source-only analysis does not expand."
+
+[[config.allow]]
+rule = "m_public_display"
+file = "crates/specgate-cli/src/replay/error.rs"
+reason = "False positive: #[ohno::error] and #[display] generate the canonical Display implementation that source-only analysis does not expand."
+
+[[config.allow]]
+rule = "m_public_display"
+file = "crates/specgate-ctsc/src/capture/error.rs"
+reason = "False positive: #[ohno::error] and #[display] generate the canonical Display implementation that source-only analysis does not expand."
+
+[[config.allow]]
+rule = "m_public_display"
+file = "crates/specgate-ctsc/src/comparison/loading.rs"
+reason = "False positive: #[ohno::error] and #[display] generate the canonical Display implementation that source-only analysis does not expand."
+
+[[config.allow]]
+rule = "m_public_display"
+file = "crates/specgate-ctsc/src/registry/error.rs"
+reason = "False positive: #[ohno::error] and #[display] generate the canonical Display implementation that source-only analysis does not expand."
+
+[[config.allow]]
+rule = "m_public_display"
+file = "crates/specgate-ctsc/src/replay/error.rs"
+reason = "False positive: #[ohno::error] and #[display] generate the canonical Display implementation that source-only analysis does not expand."
+
+[[config.allow]]
+rule = "m_public_display"
+file = "crates/specgate-discovery/src/error.rs"
+reason = "False positive: #[ohno::error] and #[display] generate the canonical Display implementation that source-only analysis does not expand."
+
+[[config.allow]]
+rule = "m_public_display"
+file = "crates/specgate-runtime/src/lib.rs"
+reason = "False positive: #[ohno::error] and #[display] generate the canonical Display implementation that source-only analysis does not expand."
+
+[[config.allow]]
+rule = "m_short_names"
+file = "crates/specgate-runtime/src/lib.rs"
+reason = "ToNativeValue explicitly distinguishes CTSC native-value projection from serde and other value conversions across the public facade; shortening it to ToValue would make that boundary ambiguous."
+
+[[config.allow]]
+rule = "m_test_util"
+file = "crates/specgate-cli/src/discover/failure.rs"
+reason = "The crate-private stage accessor exists only for same-crate unit tests; enabling it for downstream test-util consumers would expose the private CTSC projection taxonomy that the opaque-error decision removes from the public API."
+
+[[config.allow]]
+rule = "m_throughput"
+file = "crates/specgate-runtime/src/capture.rs"
+reason = "Accepted capture semantics persist a cumulative snapshot after each top-level libtest operation because ordinary tests provide no explicit end hook; persistence remains explicit and fallible with no destructor or crash-durability behavior."

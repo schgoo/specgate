@@ -21,7 +21,7 @@ Set-StrictMode -Version Latest
 
 $root = Split-Path -Parent $PSScriptRoot
 $manifest = Join-Path $root 'rust/Cargo.toml'
-$harnessTest = 'goldens::ctsc_golden_matrix'
+$harnessTest = 'goldens::tests::golden_matrix'
 . (Join-Path $PSScriptRoot 'ctsc-goldens-support.ps1')
 # Scratch is invocation-unique so a concurrent check and update never share,
 # and therefore never clobber, the same regeneration directory.

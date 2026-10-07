@@ -23,7 +23,7 @@ function Assert-Throws {
     throw "Expected action to fail with '$MessageFragment'."
 }
 
-$testName = 'goldens::ctsc_golden_matrix'
+$testName = 'goldens::tests::golden_matrix'
 $harnessMessage = @{
     reason = 'compiler-artifact'
     profile = @{ test = $true }
@@ -57,7 +57,7 @@ Assert-Throws {
 
 Assert-SingleGoldenTestExecution -Lines @(
     'running 1 test',
-    'test goldens::ctsc_golden_matrix ... ok',
+    'test goldens::tests::golden_matrix ... ok',
     'test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 99 filtered out; finished in 0.01s'
 )
 Assert-Throws {

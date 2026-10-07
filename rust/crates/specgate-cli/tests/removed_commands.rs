@@ -1,3 +1,5 @@
+//! Regression tests for removed CLI commands.
+
 use std::process::Command;
 
 #[test]

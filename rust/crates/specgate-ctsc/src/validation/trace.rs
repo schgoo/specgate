@@ -1,18 +1,38 @@
-use super::model::{AnyValue, CTSC_EVENTS, CTSC_SPANS, CTSC_VERSION, F64Value, TraceDocument, TraceEvent, TraceSpan};
+//! Parse and validate CTSC Trace Core OTLP JSON and JSONL while collecting stable diagnostics.
+
+use super::model::{AnyValue, CTSC_EVENTS, CTSC_SPANS, CTSC_VERSION, F64Value, FiniteF64, TraceDocument, TraceEvent, TraceSpan};
 use super::otlp::{self, ParsedDouble};
-use super::{Loaded, ValidationIssue, issue, located, read_bytes};
+use super::{Loaded, ValidationIssue, issue, located};
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 use std::path::Path;
 
-const REQUIRED_RESOURCE_ATTRIBUTES: [&str; 5] = [
+mod ancestry;
+mod fault;
+mod fields;
+use ancestry::validate_ancestry;
+use fault::is_fault;
+use fields::{
+    AttributeType, array_field, check_attr, id_field, is_hex_id, json_field, optional_id, parse_attributes, reject_attrs, require,
+    require_str, string_field, time_field, validate_zero,
+};
+
+// OTLP StatusCode's fixed protobuf value for STATUS_CODE_ERROR. Producers and
+// validators must preserve this numeric mapping for interoperable JSON.
+const STATUS_ERROR: i64 = 2;
+// OTLP trace and span identifiers are 16 and 8 bytes respectively, encoded
+// as two lowercase hexadecimal characters per byte in the JSON mapping.
+const TRACE_ID_LEN: usize = 32;
+const SPAN_ID_LEN: usize = 16;
+const REQUIRED_ATTRS: [&str; 5] = [
     "conformance.version",
     "conformance.tool.name",
     "conformance.tool.version",
     "conformance.target.name",
     "conformance.target.language",
 ];
-const ANY_VALUE_KEYS: [&str; 7] = [
+const VALUE_KEYS: [&str; 7] = [
     "stringValue",
     "boolValue",
     "intValue",
@@ -21,7 +41,7 @@ const ANY_VALUE_KEYS: [&str; 7] = [
     "arrayValue",
     "kvlistValue",
 ];
-const RESOURCE_ATTRIBUTES: [&str; 9] = [
+const RESOURCE_ATTRS: [&str; 9] = [
     "conformance.version",
     "conformance.tool.name",
     "conformance.tool.version",
@@ -32,18 +52,18 @@ const RESOURCE_ATTRIBUTES: [&str; 9] = [
     "conformance.registry.digest",
     "conformance.registry.uri",
 ];
-const RUN_ATTRIBUTES: [&str; 2] = ["conformance.run.id", "conformance.run.name"];
-const SCENARIO_ATTRIBUTES: [&str; 2] = ["conformance.scenario.name", "conformance.scenario.index"];
-const OPERATION_ATTRIBUTES: [&str; 3] = [
+const RUN_ATTRS: [&str; 2] = ["conformance.run.id", "conformance.run.name"];
+const SCENARIO_ATTRS: [&str; 2] = ["conformance.scenario.name", "conformance.scenario.index"];
+const OP_ATTRS: [&str; 3] = [
     "conformance.component.id",
     "conformance.operation.name",
     "conformance.operation.inputs",
 ];
-const PARALLEL_ATTRIBUTES: [&str; 1] = ["conformance.parallel.name"];
-const OBSERVATION_ATTRIBUTES: [&str; 2] = ["conformance.observation.name", "conformance.observation.value"];
-const RESULT_ATTRIBUTES: [&str; 1] = ["conformance.result.value"];
-const ERROR_ATTRIBUTES: [&str; 2] = ["conformance.error.name", "conformance.error.value"];
-const FAULT_ATTRIBUTES: [&str; 10] = [
+const PARALLEL_ATTRS: [&str; 1] = ["conformance.parallel.name"];
+const OBS_ATTRS: [&str; 2] = ["conformance.observation.name", "conformance.observation.value"];
+const RESULT_ATTRS: [&str; 1] = ["conformance.result.value"];
+const ERROR_ATTRS: [&str; 2] = ["conformance.error.name", "conformance.error.value"];
+const FAULT_ATTRS: [&str; 10] = [
     "conformance.fault.type",
     "conformance.fault.message",
     "conformance.fault.native_type",
@@ -55,7 +75,7 @@ const FAULT_ATTRIBUTES: [&str; 10] = [
     "conformance.fault.signal",
     "conformance.fault.timeout_ms",
 ];
-const CORE_SUPERVISOR_FAULT_TYPES: [&str; 7] = [
+const SUPERVISOR_FAULTS: [&str; 7] = [
     "launch_failure",
     "process_exit",
     "signal",
@@ -65,58 +85,153 @@ const CORE_SUPERVISOR_FAULT_TYPES: [&str; 7] = [
     "export_failure",
 ];
 
-pub(crate) fn load_trace(path: &Path) -> Loaded<TraceDocument> {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SpanRole {
+    Run,
+    Scenario,
+    Operation,
+    Parallel,
+    Other,
+}
+impl SpanRole {
+    fn parse(value: impl AsRef<str>) -> Self {
+        match value.as_ref() {
+            "conformance.run" => Self::Run,
+            "conformance.scenario" => Self::Scenario,
+            "conformance.operation" => Self::Operation,
+            "conformance.parallel" => Self::Parallel,
+            _ => Self::Other,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum EventRole {
+    Observation,
+    Result,
+    Empty,
+    Error,
+    Fault,
+    Other,
+}
+impl EventRole {
+    fn parse(value: impl AsRef<str>) -> Self {
+        match value.as_ref() {
+            "conformance.observation" => Self::Observation,
+            "conformance.result" => Self::Result,
+            "conformance.empty" => Self::Empty,
+            "conformance.error" => Self::Error,
+            "conformance.fault" => Self::Fault,
+            _ => Self::Other,
+        }
+    }
+    fn operation_only(self) -> bool {
+        matches!(self, Self::Observation | Self::Result | Self::Empty | Self::Error)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FaultObserver {
+    Target,
+    Supervisor,
+    Other,
+}
+impl FaultObserver {
+    fn parse(value: Option<&str>) -> Self {
+        match value {
+            Some("target") => Self::Target,
+            Some("supervisor") => Self::Supervisor,
+            _ => Self::Other,
+        }
+    }
+}
+
+/// Read a trace path and collect parse and semantic issues without failing fast.
+pub(crate) fn load_trace(path: impl AsRef<Path>) -> Loaded<TraceDocument> {
+    load_from(path.as_ref(), &crate::comparison::SystemReader::system())
+}
+
+pub(crate) fn load_from(path: impl AsRef<Path>, reader: &impl crate::comparison::DocumentReader) -> Loaded<TraceDocument> {
+    let path = path.as_ref();
     let mut issues = Vec::new();
-    let Some(bytes) = read_bytes(path, &mut issues) else {
+    let Some(bytes) = super::finish_read(path, reader.read(path), &mut issues) else {
         return Loaded { value: None, issues };
     };
-    let text = match std::str::from_utf8(&bytes) {
+    load_bytes(path, &bytes)
+}
+
+/// Parse named trace bytes and collect all discoverable validation issues.
+pub(crate) fn load_bytes(path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> Loaded<TraceDocument> {
+    let path = path.as_ref();
+    let bytes = bytes.as_ref();
+    let mut issues = Vec::new();
+    let text = match std::str::from_utf8(bytes) {
         Ok(text) => text,
         Err(error) => {
-            issue(&mut issues, located(path, "$"), format!("trace must be UTF-8: {error}"));
+            issue(located(path, "$"), format!("trace must be UTF-8: {error}"), &mut issues);
             return Loaded { value: None, issues };
         }
     };
-    let documents = parse_documents(text, path, &mut issues);
-    let parsed_any_document = !documents.is_empty();
+    let documents = parse_documents(path, text, &mut issues);
+    let has_documents = !documents.is_empty();
     let mut spans = Vec::new();
+    let mut resource_location = String::with_capacity("$[].resourceSpans[]".len() + 2 * (usize::MAX.ilog10() as usize + 1));
+    let mut resource_field = String::with_capacity(resource_location.capacity() + ".resource".len());
+    let mut raw_spans = Vec::new();
+    let index_digits = usize::MAX.ilog10() as usize + 1;
+    let mut scope_location = String::with_capacity(resource_location.capacity() + ".scopeSpans[]".len() + index_digits);
+    let mut span_location = String::with_capacity(scope_location.capacity() + ".spans[]".len() + index_digits);
+    let mut scope_spans = Vec::new();
+    let mut scope_field = String::with_capacity(scope_location.capacity() + ".scope".len());
+    let mut batch_location = String::with_capacity("$[]".len() + index_digits);
     for (batch_index, value) in documents.iter().enumerate() {
         let Some(batch) = value.as_object() else {
             issue(
-                &mut issues,
-                located(path, &format!("$[{batch_index}]")),
+                located(path, format!("$[{batch_index}]")),
                 "OTLP TracesData must be a JSON object",
+                &mut issues,
             );
             continue;
         };
-        for (resource_index, resource_value) in array_field(batch, "resourceSpans", path, &format!("$[{batch_index}]"), &mut issues)
+        batch_location.clear();
+        write!(batch_location, "$[{batch_index}]").expect("writing to a String cannot fail");
+        for (resource_index, resource_value) in array_field(batch, "resourceSpans", path, &batch_location, &mut issues)
             .iter()
             .enumerate()
         {
-            let resource_location = format!("$[{batch_index}].resourceSpans[{resource_index}]");
+            resource_location.clear();
+            write!(resource_location, "$[{batch_index}].resourceSpans[{resource_index}]").expect("writing to a String cannot fail");
             let Some(resource_spans) = resource_value.as_object() else {
                 issue(
-                    &mut issues,
                     located(path, &resource_location),
                     "resourceSpans item must be an object",
+                    &mut issues,
                 );
                 continue;
             };
-            let mut raw_spans = Vec::new();
+            raw_spans.clear();
+            scope_location.clear();
+            span_location.clear();
+            scope_spans.clear();
+            scope_field.clear();
             for (scope_index, scope_value) in array_field(resource_spans, "scopeSpans", path, &resource_location, &mut issues)
                 .iter()
                 .enumerate()
             {
-                let scope_location = format!("{resource_location}.scopeSpans[{scope_index}]");
+                scope_location.clear();
+                write!(scope_location, "{resource_location}.scopeSpans[{scope_index}]").expect("writing to a String cannot fail");
                 let Some(scope) = scope_value.as_object() else {
-                    issue(&mut issues, located(path, &scope_location), "scopeSpans item must be an object");
+                    issue(located(path, &scope_location), "scopeSpans item must be an object", &mut issues);
                     continue;
                 };
-                let mut scope_spans = Vec::new();
+                scope_spans.clear();
+                scope_field.clear();
+                write!(scope_field, "{scope_location}.scope").expect("writing to a String cannot fail");
                 for (span_index, span_value) in array_field(scope, "spans", path, &scope_location, &mut issues).iter().enumerate() {
-                    let span_location = format!("{scope_location}.spans[{span_index}]");
+                    span_location.clear();
+                    write!(span_location, "{scope_location}.spans[{span_index}]").expect("writing to a String cannot fail");
                     let Some(span) = span_value.as_object() else {
-                        issue(&mut issues, located(path, &span_location), "span must be an object");
+                        issue(located(path, &span_location), "span must be an object", &mut issues);
                         continue;
                     };
                     if span
@@ -124,88 +239,50 @@ pub(crate) fn load_trace(path: &Path) -> Loaded<TraceDocument> {
                         .and_then(Value::as_str)
                         .is_some_and(|name| CTSC_SPANS.contains(&name))
                     {
-                        scope_spans.push((span, span_location));
+                        scope_spans.push((span, span_location.clone()));
                     }
                 }
                 if !scope_spans.is_empty() {
                     if let Some(scope_value) = json_field(scope, "scope") {
                         if let Some(instrumentation_scope) = scope_value.as_object() {
-                            validate_zero_count(
-                                instrumentation_scope,
-                                "droppedAttributesCount",
-                                path,
-                                &format!("{scope_location}.scope"),
-                                &mut issues,
-                            );
-                            let attributes = parse_attributes(
-                                json_field(instrumentation_scope, "attributes"),
-                                path,
-                                &format!("{scope_location}.scope"),
-                                &mut issues,
-                            );
-                            reject_unknown_conformance_attributes(
-                                &attributes,
-                                &[],
-                                &located(path, &format!("{scope_location}.scope")),
-                                &mut issues,
-                            );
+                            validate_zero(instrumentation_scope, "droppedAttributesCount", path, &scope_field, &mut issues);
+                            let attributes =
+                                parse_attributes(json_field(instrumentation_scope, "attributes"), path, &scope_field, &mut issues);
+                            reject_attrs(&attributes, [], located(path, &scope_field), &mut issues);
                         } else if !scope_value.is_null() {
-                            issue(
-                                &mut issues,
-                                located(path, &format!("{scope_location}.scope")),
-                                "scope must be an object",
-                            );
+                            issue(located(path, &scope_field), "scope must be an object", &mut issues);
                         }
                     }
-                    raw_spans.extend(scope_spans);
+                    raw_spans.append(&mut scope_spans);
                 }
             }
             if raw_spans.is_empty() {
                 continue;
             }
+            resource_field.clear();
+            write!(resource_field, "{resource_location}.resource").expect("writing to a String cannot fail");
             let resource_value = json_field(resource_spans, "resource");
             let resource = resource_value.and_then(Value::as_object);
             if resource_value.is_some_and(|value| !value.is_object() && !value.is_null()) {
-                issue(
-                    &mut issues,
-                    located(path, &format!("{resource_location}.resource")),
-                    "resource must be an object",
-                );
+                issue(located(path, &resource_field), "resource must be an object", &mut issues);
             }
             if let Some(resource) = resource {
-                validate_zero_count(
-                    resource,
-                    "droppedAttributesCount",
-                    path,
-                    &format!("{resource_location}.resource"),
-                    &mut issues,
-                );
+                validate_zero(resource, "droppedAttributesCount", path, &resource_field, &mut issues);
             }
             let resource_attributes = parse_attributes(
                 resource.and_then(|value| json_field(value, "attributes")),
                 path,
-                &format!("{resource_location}.resource"),
+                &resource_field,
                 &mut issues,
             );
-            reject_unknown_conformance_attributes(
-                &resource_attributes,
-                &RESOURCE_ATTRIBUTES,
-                &located(path, &format!("{resource_location}.resource")),
-                &mut issues,
-            );
-            for key in REQUIRED_RESOURCE_ATTRIBUTES {
-                let actual = require_string_attribute(
-                    &resource_attributes,
-                    key,
-                    path,
-                    &format!("{resource_location}.resource"),
-                    &mut issues,
-                );
+            reject_attrs(&resource_attributes, RESOURCE_ATTRS, located(path, &resource_field), &mut issues);
+            for key in REQUIRED_ATTRS {
+                let actual = require_str(&resource_attributes, key, path, &resource_field, &mut issues);
                 if key == "conformance.version" && actual.is_some_and(|value| value != CTSC_VERSION) {
                     issue(
+                        located(path, &resource_field),
+                        format!("conformance.version must be '{CTSC_VERSION}'"),
                         &mut issues,
-                        located(path, &format!("{resource_location}.resource")),
-                        "conformance.version must be '0.2.0'",
                     );
                 }
             }
@@ -215,37 +292,46 @@ pub(crate) fn load_trace(path: &Path) -> Loaded<TraceDocument> {
                 "conformance.registry.digest",
                 "conformance.registry.uri",
             ] {
-                validate_optional_attribute_type(
+                check_attr(
                     &resource_attributes,
                     key,
                     AttributeType::String,
-                    &located(path, &format!("{resource_location}.resource")),
+                    located(path, &resource_field),
                     &mut issues,
                 );
             }
-            for (raw, location) in raw_spans {
-                if let Some(span) = parse_span(raw, resource_attributes.clone(), path, &location, &mut issues) {
+            for (raw, location) in raw_spans.drain(..) {
+                let mut context = SpanContext {
+                    path,
+                    location: &location,
+                    issues: &mut issues,
+                };
+                if let Some(span) = parse_span(raw, resource_attributes.clone(), &mut context) {
                     spans.push(span);
                 }
             }
         }
     }
-    if spans.is_empty() && (parsed_any_document || text.trim().is_empty()) {
-        issue(&mut issues, located(path, "$"), "trace contains no CTSC spans");
+    if spans.is_empty() && (has_documents || text.trim().is_empty()) {
+        issue(located(path, "$"), "trace contains no CTSC spans", &mut issues);
     }
     validate_semantics(&spans, path, &mut issues);
+    spans.shrink_to_fit();
+    issues.shrink_to_fit();
     Loaded {
         value: Some(TraceDocument { spans }),
         issues,
     }
 }
 
-fn parse_documents(text: &str, path: &Path, issues: &mut Vec<ValidationIssue>) -> Vec<Value> {
+fn parse_documents(path: impl AsRef<Path>, text: impl AsRef<str>, issues: &mut Vec<ValidationIssue>) -> Vec<Value> {
+    let text = text.as_ref();
+    let path = path.as_ref();
     if path.extension().and_then(|extension| extension.to_str()) != Some("jsonl") {
         return match otlp::parse_document(text) {
             Ok(value) => vec![value],
             Err(error) => {
-                issue(issues, located(path, "$"), format!("invalid OTLP JSON/protobuf mapping: {error}"));
+                issue(located(path, "$"), format!("invalid OTLP JSON/protobuf mapping: {error}"), issues);
                 Vec::new()
             }
         };
@@ -254,63 +340,74 @@ fn parse_documents(text: &str, path: &Path, issues: &mut Vec<ValidationIssue>) -
     for (index, line) in text.lines().enumerate() {
         let line_number = index + 1;
         if line.trim().is_empty() {
-            issue(&mut *issues, located(path, &format!("line {line_number}")), "blank JSONL line");
+            issue(located(path, format!("line {line_number}")), "blank JSONL line", &mut *issues);
             continue;
         }
         match otlp::parse_document(line) {
             Ok(value) => documents.push(value),
             Err(error) => issue(
-                issues,
-                located(path, &format!("line {line_number}")),
+                located(path, format!("line {line_number}")),
                 format!("invalid OTLP JSON/protobuf mapping: {error}"),
+                issues,
             ),
         }
     }
     documents
 }
 
+struct SpanContext<'a> {
+    path: &'a Path,
+    location: &'a str,
+    issues: &'a mut Vec<ValidationIssue>,
+}
+
 fn parse_span(
     value: &Map<String, Value>,
     resource_attributes: BTreeMap<String, AnyValue>,
-    path: &Path,
-    location: &str,
-    issues: &mut Vec<ValidationIssue>,
+    context: &mut SpanContext<'_>,
 ) -> Option<TraceSpan> {
+    let path = context.path;
+    let location = context.location;
+    let issues = &mut *context.issues;
     for key in ["droppedAttributesCount", "droppedEventsCount", "droppedLinksCount"] {
-        validate_zero_count(value, key, path, location, issues);
+        validate_zero(value, key, path, location, issues);
     }
-    let trace_id = hex_id_field(value, "traceId", path, location, issues)?;
-    let span_id = hex_id_field(value, "spanId", path, location, issues)?;
-    let parent_span_id = optional_hex_id_field(value, "parentSpanId", path, location, issues).unwrap_or_default();
+    let trace_id = id_field(value, "traceId", path, location, issues)?;
+    let span_id = id_field(value, "spanId", path, location, issues)?;
+    let parent_span_id = optional_id(value, "parentSpanId", path, location, issues).unwrap_or_default();
     let name = string_field(value, "name", path, location, issues)?;
     let start_time = time_field(value, "startTimeUnixNano", path, location, issues);
     let end_time = time_field(value, "endTimeUnixNano", path, location, issues);
     let attributes = parse_attributes(json_field(value, "attributes"), path, location, issues);
-    let mut events = Vec::new();
-    for (event_index, event_value) in array_field(value, "events", path, location, issues).iter().enumerate() {
-        let event_location = format!("{location}.events[{event_index}]");
+    let event_values = array_field(value, "events", path, location, issues);
+    let mut events = Vec::with_capacity(event_values.len());
+    let mut event_location = String::with_capacity(location.len() + ".events[]".len() + usize::MAX.ilog10() as usize + 1);
+    for (event_index, event_value) in event_values.iter().enumerate() {
+        event_location.clear();
+        write!(event_location, "{location}.events[{event_index}]").expect("writing to a String cannot fail");
         let Some(event) = event_value.as_object() else {
-            issue(&mut *issues, located(path, &event_location), "event must be an object");
+            issue(located(path, &event_location), "event must be an object", &mut *issues);
             continue;
         };
-        validate_zero_count(event, "droppedAttributesCount", path, &event_location, issues);
+        validate_zero(event, "droppedAttributesCount", path, &event_location, issues);
         let Some(event_name) = string_field(event, "name", path, &event_location, issues) else {
             continue;
         };
         events.push(TraceEvent {
-            name: event_name,
+            name: event_name.into(),
             attributes: parse_attributes(json_field(event, "attributes"), path, &event_location, issues),
         });
     }
     let status_error = json_field(value, "status")
         .and_then(Value::as_object)
         .and_then(|status| json_field(status, "code"))
-        .is_some_and(|code| code.as_i64() == Some(2) || code.as_str() == Some("STATUS_CODE_ERROR"));
+        .is_some_and(|code| code.as_i64() == Some(STATUS_ERROR) || code.as_str() == Some("STATUS_CODE_ERROR"));
+    events.shrink_to_fit();
     Some(TraceSpan {
-        trace_id,
-        span_id,
-        parent_span_id,
-        name,
+        trace_id: trace_id.into(),
+        span_id: span_id.into(),
+        parent_span_id: parent_span_id.into(),
+        name: name.into(),
         start_time,
         end_time,
         attributes,
@@ -321,24 +418,26 @@ fn parse_span(
     })
 }
 
-fn validate_semantics(spans: &[TraceSpan], path: &Path, issues: &mut Vec<ValidationIssue>) {
+fn validate_semantics(spans: impl AsRef<[TraceSpan]>, path: impl AsRef<Path>, issues: &mut Vec<ValidationIssue>) {
+    let spans = spans.as_ref();
+    let path = path.as_ref();
     let mut by_id = BTreeMap::<(&str, &str), Vec<&TraceSpan>>::new();
     for span in spans {
         require(
-            is_hex_id(&span.trace_id, 32),
+            is_hex_id(&span.trace_id, TRACE_ID_LEN),
             &span.location,
             "traceId must be 32 lowercase hexadecimal characters and nonzero",
             issues,
         );
         require(
-            is_hex_id(&span.span_id, 16),
+            is_hex_id(&span.span_id, SPAN_ID_LEN),
             &span.location,
             "spanId must be 16 lowercase hexadecimal characters and nonzero",
             issues,
         );
         let candidates = by_id.entry((span.trace_id.as_str(), span.span_id.as_str())).or_default();
         if !candidates.is_empty() {
-            issue(issues, span.location.clone(), "duplicate span ID within trace");
+            issue(span.location.clone(), "duplicate span ID within trace", issues);
         }
         candidates.push(span);
     }
@@ -346,27 +445,28 @@ fn validate_semantics(spans: &[TraceSpan], path: &Path, issues: &mut Vec<Validat
     for span in spans {
         let parent_candidates = by_id.get(&(span.trace_id.as_str(), span.parent_span_id.as_str()));
         if parent_candidates.is_some_and(|candidates| candidates.len() > 1) {
-            issue(issues, span.location.clone(), "parent span ID resolves to multiple CTSC spans");
+            issue(span.location.clone(), "parent span ID resolves to multiple CTSC spans", issues);
         }
         let parent = parent_candidates.and_then(|candidates| (candidates.len() == 1).then_some(candidates[0]));
-        let parent_name = parent.map(|value| value.name.as_str());
+        let parent_role = parent.map_or(SpanRole::Other, |value| SpanRole::parse(value.name.as_str()));
+        let span_role = SpanRole::parse(span.name.as_str());
         require(
             span.start_time.zip(span.end_time).is_some_and(|(start, end)| start <= end),
             &span.location,
             "CTSC spans require start/end timestamps with end not before start",
             issues,
         );
-        match span.name.as_str() {
-            "conformance.run" => {
-                reject_unknown_conformance_attributes(&span.attributes, &RUN_ATTRIBUTES, &span.location, issues);
+        match span_role {
+            SpanRole::Run => {
+                reject_attrs(&span.attributes, RUN_ATTRS, &span.location, issues);
                 require(
                     span.parent_span_id.is_empty(),
                     &span.location,
                     "run span must be a root span",
                     issues,
                 );
-                require_string_attribute(&span.attributes, "conformance.run.id", path, &span.location, issues);
-                validate_optional_attribute_type(
+                require_str(&span.attributes, "conformance.run.id", path, &span.location, issues);
+                check_attr(
                     &span.attributes,
                     "conformance.run.name",
                     AttributeType::String,
@@ -374,16 +474,16 @@ fn validate_semantics(spans: &[TraceSpan], path: &Path, issues: &mut Vec<Validat
                     issues,
                 );
             }
-            "conformance.scenario" => {
-                reject_unknown_conformance_attributes(&span.attributes, &SCENARIO_ATTRIBUTES, &span.location, issues);
+            SpanRole::Scenario => {
+                reject_attrs(&span.attributes, SCENARIO_ATTRS, &span.location, issues);
                 require(
-                    parent_name == Some("conformance.run"),
+                    parent_role == SpanRole::Run,
                     &span.location,
                     "scenario parent must be a conformance.run span",
                     issues,
                 );
-                require_string_attribute(&span.attributes, "conformance.scenario.name", path, &span.location, issues);
-                validate_optional_attribute_type(
+                require_str(&span.attributes, "conformance.scenario.name", path, &span.location, issues);
+                check_attr(
                     &span.attributes,
                     "conformance.scenario.index",
                     AttributeType::Int,
@@ -391,19 +491,16 @@ fn validate_semantics(spans: &[TraceSpan], path: &Path, issues: &mut Vec<Validat
                     issues,
                 );
             }
-            "conformance.operation" => {
-                reject_unknown_conformance_attributes(&span.attributes, &OPERATION_ATTRIBUTES, &span.location, issues);
+            SpanRole::Operation => {
+                reject_attrs(&span.attributes, OP_ATTRS, &span.location, issues);
                 require(
-                    matches!(
-                        parent_name,
-                        Some("conformance.scenario" | "conformance.operation" | "conformance.parallel")
-                    ),
+                    matches!(parent_role, SpanRole::Scenario | SpanRole::Operation | SpanRole::Parallel),
                     &span.location,
                     "operation parent must be scenario, operation, or parallel",
                     issues,
                 );
-                require_string_attribute(&span.attributes, "conformance.component.id", path, &span.location, issues);
-                require_string_attribute(&span.attributes, "conformance.operation.name", path, &span.location, issues);
+                require_str(&span.attributes, "conformance.component.id", path, &span.location, issues);
+                require_str(&span.attributes, "conformance.operation.name", path, &span.location, issues);
                 require(
                     span.attributes
                         .get("conformance.operation.inputs")
@@ -413,15 +510,15 @@ fn validate_semantics(spans: &[TraceSpan], path: &Path, issues: &mut Vec<Validat
                     issues,
                 );
             }
-            "conformance.parallel" => {
-                reject_unknown_conformance_attributes(&span.attributes, &PARALLEL_ATTRIBUTES, &span.location, issues);
+            SpanRole::Parallel => {
+                reject_attrs(&span.attributes, PARALLEL_ATTRS, &span.location, issues);
                 require(
-                    matches!(parent_name, Some("conformance.scenario" | "conformance.operation")),
+                    matches!(parent_role, SpanRole::Scenario | SpanRole::Operation),
                     &span.location,
                     "parallel parent must be scenario or operation",
                     issues,
                 );
-                validate_optional_attribute_type(
+                check_attr(
                     &span.attributes,
                     "conformance.parallel.name",
                     AttributeType::String,
@@ -429,10 +526,10 @@ fn validate_semantics(spans: &[TraceSpan], path: &Path, issues: &mut Vec<Validat
                     issues,
                 );
             }
-            _ => {}
+            SpanRole::Other => {}
         }
         if let Some(parent) = parent
-            && parent.name == "conformance.parallel"
+            && SpanRole::parse(parent.name.as_str()) == SpanRole::Parallel
         {
             require(
                 parent
@@ -451,38 +548,40 @@ fn validate_semantics(spans: &[TraceSpan], path: &Path, issues: &mut Vec<Validat
     }
 }
 
-fn validate_events(span: &TraceSpan, path: &Path, issues: &mut Vec<ValidationIssue>) {
+fn validate_events(span: &TraceSpan, path: impl AsRef<Path>, issues: &mut Vec<ValidationIssue>) {
+    let path = path.as_ref();
+    let span_role = SpanRole::parse(span.name.as_str());
     let mut result_count = 0;
-    let mut other_terminal_count = 0;
+    let mut failure_count = 0;
     let mut terminated = false;
+    let mut location = String::with_capacity(span.location.len() + ".events[]".len() + usize::MAX.ilog10() as usize + 1);
     for (index, event) in span.events.iter().enumerate() {
-        let location = format!("{}.events[{index}]", span.location);
-        if span.name == "conformance.operation" && terminated {
+        location.clear();
+        write!(location, "{}.events[{index}]", span.location).expect("writing to a String cannot fail");
+        if span_role == SpanRole::Operation && terminated {
             issue(
-                issues,
                 location.clone(),
                 "operation events must not appear after the terminal event",
+                issues,
             );
         }
         if !CTSC_EVENTS.contains(&event.name.as_str()) {
-            issue(issues, location, format!("unsupported CTSC event name '{}'", event.name));
+            issue(location.clone(), format!("unsupported CTSC event name '{}'", event.name), issues);
             continue;
         }
-        if matches!(
-            event.name.as_str(),
-            "conformance.observation" | "conformance.result" | "conformance.empty" | "conformance.error"
-        ) {
+        let event_role = EventRole::parse(event.name.as_str());
+        if event_role.operation_only() {
             require(
-                span.name == "conformance.operation",
+                span_role == SpanRole::Operation,
                 &location,
-                &format!("{} must belong to a conformance.operation span", event.name),
+                format!("{} must belong to a conformance.operation span", event.name),
                 issues,
             );
         }
-        match event.name.as_str() {
-            "conformance.observation" => {
-                reject_unknown_conformance_attributes(&event.attributes, &OBSERVATION_ATTRIBUTES, &location, issues);
-                require_string_attribute(&event.attributes, "conformance.observation.name", path, &location, issues);
+        match event_role {
+            EventRole::Observation => {
+                reject_attrs(&event.attributes, OBS_ATTRS, &location, issues);
+                require_str(&event.attributes, "conformance.observation.name", path, &location, issues);
                 require(
                     event.attributes.contains_key("conformance.observation.value"),
                     &location,
@@ -490,8 +589,8 @@ fn validate_events(span: &TraceSpan, path: &Path, issues: &mut Vec<ValidationIss
                     issues,
                 );
             }
-            "conformance.result" => {
-                reject_unknown_conformance_attributes(&event.attributes, &RESULT_ATTRIBUTES, &location, issues);
+            EventRole::Result => {
+                reject_attrs(&event.attributes, RESULT_ATTRS, &location, issues);
                 result_count += 1;
                 terminated = true;
                 require(
@@ -501,49 +600,46 @@ fn validate_events(span: &TraceSpan, path: &Path, issues: &mut Vec<ValidationIss
                     issues,
                 );
             }
-            "conformance.empty" => {
-                reject_unknown_conformance_attributes(&event.attributes, &[], &location, issues);
-                other_terminal_count += 1;
+            EventRole::Empty => {
+                reject_attrs(&event.attributes, [], &location, issues);
+                failure_count += 1;
                 terminated = true;
             }
-            "conformance.error" => {
-                reject_unknown_conformance_attributes(&event.attributes, &ERROR_ATTRIBUTES, &location, issues);
-                other_terminal_count += 1;
+            EventRole::Error => {
+                reject_attrs(&event.attributes, ERROR_ATTRS, &location, issues);
+                failure_count += 1;
                 terminated = true;
-                require_string_attribute(&event.attributes, "conformance.error.name", path, &location, issues);
+                require_str(&event.attributes, "conformance.error.name", path, &location, issues);
             }
-            "conformance.fault" => {
-                reject_unknown_conformance_attributes(&event.attributes, &FAULT_ATTRIBUTES, &location, issues);
-                other_terminal_count += usize::from(span.name == "conformance.operation");
-                terminated |= span.name == "conformance.operation";
+            EventRole::Fault => {
+                reject_attrs(&event.attributes, FAULT_ATTRS, &location, issues);
+                failure_count += usize::from(span_role == SpanRole::Operation);
+                terminated |= span_role == SpanRole::Operation;
                 require(
-                    matches!(
-                        span.name.as_str(),
-                        "conformance.run" | "conformance.scenario" | "conformance.operation"
-                    ),
+                    matches!(span_role, SpanRole::Run | SpanRole::Scenario | SpanRole::Operation),
                     &location,
                     "fault must belong to a run, scenario, or operation span",
                     issues,
                 );
-                let fault_type = require_string_attribute(&event.attributes, "conformance.fault.type", path, &location, issues);
-                let observer = require_string_attribute(&event.attributes, "conformance.fault.observer", path, &location, issues);
-                if observer == Some("target") {
+                let fault_type = require_str(&event.attributes, "conformance.fault.type", path, &location, issues);
+                let observer = require_str(&event.attributes, "conformance.fault.observer", path, &location, issues);
+                if FaultObserver::parse(observer) == FaultObserver::Target {
                     require(
-                        span.name == "conformance.operation",
+                        span_role == SpanRole::Operation,
                         &location,
                         "target fault must belong to an operation span",
                         issues,
                     );
-                } else if observer == Some("supervisor") {
+                } else if FaultObserver::parse(observer) == FaultObserver::Supervisor {
                     require(
-                        matches!(span.name.as_str(), "conformance.run" | "conformance.scenario"),
+                        matches!(span_role, SpanRole::Run | SpanRole::Scenario),
                         &location,
                         "supervisor fault must belong to a run or scenario span",
                         issues,
                     );
                     if let Some(fault_type) = fault_type {
                         require(
-                            CORE_SUPERVISOR_FAULT_TYPES.contains(&fault_type) || is_namespaced_fault_type(fault_type),
+                            SUPERVISOR_FAULTS.contains(&fault_type) || is_fault(fault_type),
                             &location,
                             "supervisor fault type must be a defined core type or a producer-qualified dotted namespace",
                             issues,
@@ -558,24 +654,24 @@ fn validate_events(span: &TraceSpan, path: &Path, issues: &mut Vec<ValidationIss
                     "conformance.fault.operation.component_id",
                     "conformance.fault.signal",
                 ] {
-                    validate_optional_attribute_type(&event.attributes, key, AttributeType::String, &location, issues);
+                    check_attr(&event.attributes, key, AttributeType::String, &location, issues);
                 }
                 for key in ["conformance.fault.exit_code", "conformance.fault.timeout_ms"] {
-                    validate_optional_attribute_type(&event.attributes, key, AttributeType::Int, &location, issues);
+                    check_attr(&event.attributes, key, AttributeType::Int, &location, issues);
                 }
             }
-            _ => {}
+            EventRole::Other => {}
         }
     }
-    if span.name == "conformance.operation" {
+    if span_role == SpanRole::Operation {
         require(
-            other_terminal_count <= 1,
+            failure_count <= 1,
             &span.location,
             "operation must not contain multiple non-result completion/failure events",
             issues,
         );
         require(
-            result_count == 0 || other_terminal_count == 0,
+            result_count == 0 || failure_count == 0,
             &span.location,
             "result events cannot be combined with another completion/failure event",
             issues,
@@ -589,7 +685,7 @@ fn validate_events(span: &TraceSpan, path: &Path, issues: &mut Vec<ValidationIss
         if span
             .events
             .iter()
-            .any(|event| matches!(event.name.as_str(), "conformance.error" | "conformance.fault"))
+            .any(|event| matches!(EventRole::parse(event.name.as_str()), EventRole::Error | EventRole::Fault))
         {
             require(
                 span.status_error,
@@ -599,496 +695,12 @@ fn validate_events(span: &TraceSpan, path: &Path, issues: &mut Vec<ValidationIss
             );
         }
     }
-    if matches!(span.name.as_str(), "conformance.run" | "conformance.scenario")
-        && span.events.iter().any(|event| event.name == "conformance.fault")
-    {
+    if matches!(span_role, SpanRole::Run | SpanRole::Scenario) && span.events.iter().any(|event| event.name == "conformance.fault") {
         require(
             span.status_error,
             &span.location,
             "fault-bearing run or scenario must have ERROR status",
             issues,
         );
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AncestryError {
-    SelfParent,
-    Cycle,
-    MissingRun,
-    MultipleParents,
-}
-
-fn validate_ancestry<'a>(
-    spans: &'a [TraceSpan],
-    by_id: &BTreeMap<(&'a str, &'a str), Vec<&'a TraceSpan>>,
-    issues: &mut Vec<ValidationIssue>,
-) {
-    let mut resolved = Vec::new();
-    let mut roots_by_trace = BTreeMap::<&str, BTreeSet<&str>>::new();
-    for span in spans.iter().filter(|span| span.name != "conformance.run") {
-        match run_ancestor(span, by_id) {
-            Ok(run) => {
-                roots_by_trace
-                    .entry(span.trace_id.as_str())
-                    .or_default()
-                    .insert(run.span_id.as_str());
-                resolved.push((span, run.span_id.as_str()));
-            }
-            Err(AncestryError::SelfParent) => {
-                issue(issues, span.location.clone(), "CTSC ancestor chain contains a self-parent cycle");
-            }
-            Err(AncestryError::Cycle) => {
-                issue(issues, span.location.clone(), "CTSC ancestor chain contains a cycle");
-            }
-            Err(AncestryError::MissingRun) => {
-                issue(
-                    issues,
-                    span.location.clone(),
-                    "CTSC ancestor chain must terminate at a conformance.run span",
-                );
-            }
-            Err(AncestryError::MultipleParents) => {
-                issue(
-                    issues,
-                    span.location.clone(),
-                    "CTSC ancestor chain has invalid multiple ancestry because a parent span ID resolves to multiple CTSC spans",
-                );
-            }
-        }
-    }
-    for (span, _) in resolved {
-        if roots_by_trace.get(span.trace_id.as_str()).is_some_and(|roots| roots.len() > 1) {
-            issue(
-                issues,
-                span.location.clone(),
-                "CTSC spans sharing a traceId must terminate at the same conformance.run span",
-            );
-        }
-    }
-}
-
-fn run_ancestor<'a>(span: &'a TraceSpan, by_id: &BTreeMap<(&'a str, &'a str), Vec<&'a TraceSpan>>) -> Result<&'a TraceSpan, AncestryError> {
-    let mut current = span;
-    let mut seen = BTreeSet::new();
-    loop {
-        if !seen.insert(current.span_id.as_str()) {
-            return Err(AncestryError::Cycle);
-        }
-        if current.name == "conformance.run" {
-            return current
-                .parent_span_id
-                .is_empty()
-                .then_some(current)
-                .ok_or(AncestryError::MissingRun);
-        }
-        if current.parent_span_id == current.span_id {
-            return Err(AncestryError::SelfParent);
-        }
-        if current.parent_span_id.is_empty() {
-            return Err(AncestryError::MissingRun);
-        }
-        let Some(parents) = by_id.get(&(current.trace_id.as_str(), current.parent_span_id.as_str())) else {
-            return Err(AncestryError::MissingRun);
-        };
-        let [parent] = parents.as_slice() else {
-            return Err(AncestryError::MultipleParents);
-        };
-        current = parent;
-    }
-}
-
-fn is_namespaced_fault_type(value: &str) -> bool {
-    let mut segments = value.split('.');
-    let first = segments.next().unwrap_or_default();
-    let remaining = segments.collect::<Vec<_>>();
-    let valid_first = first != "conformance"
-        && first.bytes().enumerate().all(|(index, byte)| {
-            (index == 0 && byte.is_ascii_lowercase()) || (index > 0 && (byte.is_ascii_lowercase() || byte.is_ascii_digit()))
-        });
-    let valid_remaining = !remaining.is_empty()
-        && remaining.iter().all(|segment| {
-            !segment.is_empty()
-                && segment
-                    .bytes()
-                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-'))
-        });
-    !first.is_empty() && valid_first && valid_remaining
-}
-
-fn parse_attributes(value: Option<&Value>, path: &Path, location: &str, issues: &mut Vec<ValidationIssue>) -> BTreeMap<String, AnyValue> {
-    let mut result = BTreeMap::new();
-    let Some(value) = value.filter(|value| !value.is_null()) else {
-        return result;
-    };
-    let Some(attributes) = value.as_array() else {
-        issue(
-            issues,
-            located(path, &format!("{location}.attributes")),
-            "attributes must be an array",
-        );
-        return result;
-    };
-    for (index, attribute) in attributes.iter().enumerate() {
-        let item_location = format!("{location}.attributes[{index}]");
-        let Some(attribute) = attribute.as_object() else {
-            issue(issues, located(path, &item_location), "attribute must be an object");
-            continue;
-        };
-        let Some(key) = json_field(attribute, "key").and_then(Value::as_str) else {
-            issue(issues, located(path, &item_location), "attribute key must be a string");
-            continue;
-        };
-        if result.contains_key(key) {
-            issue(issues, located(path, location), format!("duplicate attribute key '{key}'"));
-            continue;
-        }
-        let Some(raw_value) = json_field(attribute, "value") else {
-            issue(
-                issues,
-                located(path, &format!("{location}.{key}")),
-                "attribute value must be an AnyValue",
-            );
-            continue;
-        };
-        if let Some(value) = parse_any_value(raw_value, path, &format!("{location}.{key}"), issues) {
-            result.insert(key.to_string(), value);
-        }
-    }
-    result
-}
-
-fn parse_any_value(value: &Value, path: &Path, location: &str, issues: &mut Vec<ValidationIssue>) -> Option<AnyValue> {
-    let Some(value) = value.as_object() else {
-        issue(issues, located(path, location), "AnyValue must be an object");
-        return None;
-    };
-    let selected = ANY_VALUE_KEYS
-        .iter()
-        .filter(|key| json_field(value, key).is_some())
-        .copied()
-        .collect::<Vec<_>>();
-    if selected.len() != 1 || value.len() != 1 {
-        issue(
-            issues,
-            located(path, location),
-            "AnyValue must select exactly one concrete value variant",
-        );
-        return None;
-    }
-    let raw = json_field(value, selected[0]).expect("selected AnyValue field");
-    match selected[0] {
-        "stringValue" => raw.as_str().map(|value| AnyValue::String(value.to_string())).or_else(|| {
-            issue(issues, located(path, location), "stringValue must be a string");
-            None
-        }),
-        "boolValue" => raw.as_bool().map(AnyValue::Bool).or_else(|| {
-            issue(issues, located(path, location), "boolValue must be a boolean");
-            None
-        }),
-        "intValue" => otlp::parse_i64(raw).map(AnyValue::Int).or_else(|| {
-            issue(
-                issues,
-                located(path, location),
-                "intValue must contain an OTLP int64 JSON number or numeric string",
-            );
-            None
-        }),
-        "doubleValue" => parse_double(raw, path, location, issues).map(AnyValue::Double),
-        "bytesValue" => raw.as_str().and_then(otlp::decode_base64).map(AnyValue::Bytes).or_else(|| {
-            issue(issues, located(path, location), "bytesValue must be valid base64");
-            None
-        }),
-        "arrayValue" => {
-            let Some(array) = raw.as_object() else {
-                issue(issues, located(path, location), "arrayValue must be an object");
-                return None;
-            };
-            let values = optional_array(array, "values", path, location, issues)?;
-            let mut parsed = Vec::new();
-            for (index, item) in values.iter().enumerate() {
-                if let Some(item) = parse_any_value(item, path, &format!("{location}[{index}]"), issues) {
-                    parsed.push(item);
-                }
-            }
-            Some(AnyValue::Array(parsed))
-        }
-        "kvlistValue" => {
-            let Some(kvlist) = raw.as_object() else {
-                issue(issues, located(path, location), "kvlistValue must be an object");
-                return None;
-            };
-            let values = optional_array(kvlist, "values", path, location, issues)?;
-            let mut parsed = BTreeMap::new();
-            for (index, item) in values.iter().enumerate() {
-                let item_location = format!("{location}.{index}");
-                let Some(item) = item.as_object() else {
-                    issue(issues, located(path, &item_location), "kvlist item must be an object");
-                    continue;
-                };
-                let Some(key) = json_field(item, "key").and_then(Value::as_str) else {
-                    issue(issues, located(path, &item_location), "kvlist item must contain a string key");
-                    continue;
-                };
-                if parsed.contains_key(key) {
-                    issue(issues, located(path, location), format!("duplicate kvlist key '{key}'"));
-                    continue;
-                }
-                let Some(child) = json_field(item, "value") else {
-                    issue(issues, located(path, &item_location), "kvlist item must contain an AnyValue");
-                    continue;
-                };
-                if let Some(child) = parse_any_value(child, path, &format!("{location}.{key}"), issues) {
-                    parsed.insert(key.to_string(), child);
-                }
-            }
-            Some(AnyValue::KvList(parsed))
-        }
-        _ => unreachable!(),
-    }
-}
-
-fn parse_double(value: &Value, path: &Path, location: &str, issues: &mut Vec<ValidationIssue>) -> Option<F64Value> {
-    match otlp::parse_double(value) {
-        Some(ParsedDouble::Finite(value)) => Some(F64Value::Finite(value.to_bits())),
-        Some(ParsedDouble::NaN) => Some(F64Value::NaN),
-        Some(ParsedDouble::Infinity) => Some(F64Value::Infinity),
-        Some(ParsedDouble::NegativeInfinity) => Some(F64Value::NegativeInfinity),
-        None => {
-            issue(
-                issues,
-                located(path, location),
-                "doubleValue must be an OTLP number or numeric/symbolic string",
-            );
-            None
-        }
-    }
-}
-
-fn array_field<'a>(
-    object: &'a Map<String, Value>,
-    key: &str,
-    path: &Path,
-    location: &str,
-    issues: &mut Vec<ValidationIssue>,
-) -> &'a [Value] {
-    match json_field(object, key) {
-        None | Some(Value::Null) => &[],
-        Some(Value::Array(values)) => values,
-        Some(_) => {
-            issue(
-                issues,
-                located(path, &format!("{location}.{key}")),
-                format!("{key} must be an array"),
-            );
-            &[]
-        }
-    }
-}
-
-fn optional_array<'a>(
-    object: &'a Map<String, Value>,
-    key: &str,
-    path: &Path,
-    location: &str,
-    issues: &mut Vec<ValidationIssue>,
-) -> Option<&'a [Value]> {
-    match json_field(object, key) {
-        None | Some(Value::Null) => Some(&[]),
-        Some(Value::Array(values)) => Some(values),
-        Some(_) => {
-            issue(
-                issues,
-                located(path, location),
-                format!("{} must contain a values array", if key == "values" { "value" } else { key }),
-            );
-            None
-        }
-    }
-}
-
-fn json_field<'a>(object: &'a Map<String, Value>, key: &str) -> Option<&'a Value> {
-    object.get(key).or_else(|| {
-        let snake_case = key.chars().fold(String::new(), |mut result, character| {
-            if character.is_ascii_uppercase() {
-                result.push('_');
-                result.push(character.to_ascii_lowercase());
-            } else {
-                result.push(character);
-            }
-            result
-        });
-        object.get(&snake_case)
-    })
-}
-
-fn string_field(object: &Map<String, Value>, key: &str, path: &Path, location: &str, issues: &mut Vec<ValidationIssue>) -> Option<String> {
-    if let Some(value) = json_field(object, key).and_then(Value::as_str) {
-        Some(value.to_string())
-    } else {
-        issue(
-            issues,
-            located(path, &format!("{location}.{key}")),
-            format!("{key} must be a string"),
-        );
-        None
-    }
-}
-
-fn optional_string_field(
-    object: &Map<String, Value>,
-    key: &str,
-    path: &Path,
-    location: &str,
-    issues: &mut Vec<ValidationIssue>,
-) -> Option<String> {
-    match json_field(object, key) {
-        None | Some(Value::Null) => None,
-        Some(Value::String(value)) => Some(value.clone()),
-        Some(_) => {
-            issue(
-                issues,
-                located(path, &format!("{location}.{key}")),
-                format!("{key} must be a string"),
-            );
-            None
-        }
-    }
-}
-
-fn hex_id_field(object: &Map<String, Value>, key: &str, path: &Path, location: &str, issues: &mut Vec<ValidationIssue>) -> Option<String> {
-    let value = string_field(object, key, path, location, issues)?;
-    otlp::normalize_hex(&value).or_else(|| {
-        issue(
-            issues,
-            located(path, &format!("{location}.{key}")),
-            format!("{key} must use the OTLP hexadecimal bytes mapping"),
-        );
-        None
-    })
-}
-
-fn optional_hex_id_field(
-    object: &Map<String, Value>,
-    key: &str,
-    path: &Path,
-    location: &str,
-    issues: &mut Vec<ValidationIssue>,
-) -> Option<String> {
-    let value = optional_string_field(object, key, path, location, issues)?;
-    otlp::normalize_hex(&value).or_else(|| {
-        issue(
-            issues,
-            located(path, &format!("{location}.{key}")),
-            format!("{key} must use the OTLP hexadecimal bytes mapping"),
-        );
-        None
-    })
-}
-
-fn time_field(object: &Map<String, Value>, key: &str, path: &Path, location: &str, issues: &mut Vec<ValidationIssue>) -> Option<u128> {
-    let value = json_field(object, key)?;
-    if value.is_null() {
-        return None;
-    }
-    let parsed = otlp::parse_u64(value).map(u128::from);
-    if parsed.is_none() {
-        issue(
-            issues,
-            located(path, &format!("{location}.{key}")),
-            format!("{key} must be an unsigned decimal integer"),
-        );
-    }
-    parsed
-}
-
-fn validate_zero_count(object: &Map<String, Value>, key: &str, path: &Path, location: &str, issues: &mut Vec<ValidationIssue>) {
-    let Some(value) = json_field(object, key).filter(|value| !value.is_null()) else {
-        return;
-    };
-    let parsed = otlp::parse_u32(value);
-    require(
-        parsed == Some(0),
-        &located(path, location),
-        &format!("{key} must be a valid uint32 zero"),
-        issues,
-    );
-}
-
-#[derive(Clone, Copy)]
-enum AttributeType {
-    String,
-    Int,
-}
-
-fn reject_unknown_conformance_attributes(
-    attributes: &BTreeMap<String, AnyValue>,
-    allowed: &[&str],
-    location: &str,
-    issues: &mut Vec<ValidationIssue>,
-) {
-    for key in attributes.keys().filter(|key| key.starts_with("conformance.")) {
-        if !allowed.contains(&key.as_str()) {
-            issue(
-                issues,
-                location.to_string(),
-                format!("undeclared CTSC attribute '{key}' is not allowed in this scope"),
-            );
-        }
-    }
-}
-
-fn validate_optional_attribute_type(
-    attributes: &BTreeMap<String, AnyValue>,
-    key: &str,
-    expected: AttributeType,
-    location: &str,
-    issues: &mut Vec<ValidationIssue>,
-) {
-    let Some(value) = attributes.get(key) else {
-        return;
-    };
-    let valid = match expected {
-        AttributeType::String => matches!(value, AnyValue::String(_)),
-        AttributeType::Int => matches!(value, AnyValue::Int(_)),
-    };
-    if !valid {
-        let variant = match expected {
-            AttributeType::String => "stringValue",
-            AttributeType::Int => "intValue",
-        };
-        issue(issues, location.to_string(), format!("attribute '{key}' must use {variant}"));
-    }
-}
-
-fn require_string_attribute<'a>(
-    attributes: &'a BTreeMap<String, AnyValue>,
-    key: &str,
-    _path: &Path,
-    location: &str,
-    issues: &mut Vec<ValidationIssue>,
-) -> Option<&'a str> {
-    match attributes.get(key) {
-        Some(AnyValue::String(value)) => Some(value),
-        Some(_) => {
-            issue(issues, location.to_string(), format!("attribute '{key}' must use stringValue"));
-            None
-        }
-        None => {
-            issue(issues, location.to_string(), format!("missing string attribute '{key}'"));
-            None
-        }
-    }
-}
-
-fn is_hex_id(value: &str, length: usize) -> bool {
-    value.len() == length
-        && value.bytes().any(|byte| byte != b'0')
-        && value.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-}
-
-fn require(condition: bool, location: &str, message: &str, issues: &mut Vec<ValidationIssue>) {
-    if !condition {
-        issue(issues, location.to_string(), message);
     }
 }

@@ -1,3 +1,5 @@
+//! Regression tests for resolved CTSC review findings.
+
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 use specgate_ctsc::validation::{ValidationReport, validate_registry, validate_trace};
@@ -462,6 +464,15 @@ fn digest(bytes: &[u8]) -> String {
     format!("sha256:{:x}", Sha256::digest(bytes))
 }
 
+fn file_uri(path: &Path) -> String {
+    let path = path.to_string_lossy().replace('\\', "/").replace(' ', "%20");
+    if path.starts_with('/') {
+        format!("file://{path}")
+    } else {
+        format!("file:///{path}")
+    }
+}
+
 #[test]
 fn registry_imports_resolve_declared_candidates_by_identity_not_hint_path() {
     let scratch = scratch("registry-resolution");
@@ -471,7 +482,7 @@ fn registry_imports_resolve_declared_candidates_by_identity_not_hint_path() {
 
     let hint_path = scratch.join("wrong hint.registry.json");
     write_json(&hint_path, &registry_document("urn:registry:hint", "example.hint"));
-    let hint_uri = url::Url::from_file_path(&hint_path).expect("file URL").to_string();
+    let hint_uri = file_uri(&hint_path);
 
     let root_path = scratch.join("root.registry.json");
     let mut root = registry_document("urn:registry:root", "example.root");
@@ -544,7 +555,7 @@ fn standard_percent_encoded_file_uris_resolve_cross_platform() {
     let candidate_path = scratch.join("dependency registry.json");
     let candidate = registry_document("urn:registry:file-dependency", "example.file-dependency");
     let candidate_digest = digest(&write_json(&candidate_path, &candidate));
-    let uri = url::Url::from_file_path(&candidate_path).expect("file URL").to_string();
+    let uri = file_uri(&candidate_path);
     assert!(uri.starts_with("file:///"), "{uri}");
     assert!(uri.contains("%20"), "{uri}");
 

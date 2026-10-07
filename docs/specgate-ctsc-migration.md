@@ -23,7 +23,8 @@ reference target
 ## Retained architecture
 
 - `specgate-runtime`: native inputs, observations, result/empty/error/fault
-  completion, deterministic sidecars, and link-time metadata.
+  completion, explicit fallible operation/setup finalization, deterministic
+  cumulative sidecars, and link-time metadata.
 - `specgate`: the sole published Rust annotation facade.
 - `specgate-discovery`: one strict binding resolver, Rust link-time discovery,
   C# compiled-assembly reflection, raw native invocation metadata, normalized
@@ -33,9 +34,36 @@ reference target
   deterministic IDs, and strict differential comparison.
 - `specgate-cli`: `discover`, `capture`, `replay`, `validate`, and `compare`.
 
+Registry import hints use the approved `templated_uri` dependency for authority
+validation while retaining a file-specific adapter for CTSC's relative `file:`
+form. Resolution remains local-only and preserves the existing percent-decoding,
+platform path, and diagnostic behavior. See
+[the ratified decision](decisions/templated-uri-for-registry-imports.md).
+
+Rust exposes `ComponentId`, `OperationName`, and `TargetName` as unrestricted
+semantic string identities. The public capture library API accepts one owned
+`CaptureRequest`, whose constructor validates that its `PathBuf` filesystem
+inputs are UTF-8 representable, and returns `Result<CaptureReport, CaptureError>`. Capture failures retain actionable text
+through an opaque `ohno` error. Machine-readable capture, discover, and replay
+failure stages are separate protocol data types whose established CTSC wire
+names remain unchanged. The CLI syntax, formatting, and exit codes remain
+unchanged. See [the capture API decision](decisions/rust-semantic-identities-and-capture-api.md)
+and [the opaque-error decision](decisions/opaque-rust-errors.md).
+
 Rust and C# registry output is byte-identical for the stateless, rich-type, and
 setup-folding fixtures. Raw language-specific invocation metadata remains
 separate from the language-neutral CTSC registry.
+
+Environment-driven Rust capture closes each top-level operation in memory and
+then atomically persists the complete capture-so-far. Persistence failures
+terminalize the session and carry a hidden runtime/facade marker that the parent
+CLI reports as an execution failure rather than skipping as an ordinary failed
+test. Generated code explicitly completes a target unwind as the existing fault
+and then resumes the original panic payload. Operation and deferred-setup
+destructors perform no I/O, panic, or stderr output; manual sessions still end
+through `finish_native_capture`. There is no crash-durable or partial-output
+guarantee. See
+[the ratified decision](decisions/native-capture-finalization.md).
 
 Discovery, capture, and replay scratch work uses invocation-unique
 operating-system cache directories. Generated runners use the exact

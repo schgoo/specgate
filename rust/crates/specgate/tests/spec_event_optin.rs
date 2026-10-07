@@ -15,7 +15,7 @@ specgate::spec_component!("test.spec_event_optin");
 struct Mixed {
     #[spec_event]
     visible: i32,
-    #[allow(dead_code)]
+    #[expect(dead_code, reason = "the test verifies that untagged internal fields are excluded")]
     internal: i32,
 }
 

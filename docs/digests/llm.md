@@ -17,7 +17,8 @@ Rust.
 ## Ownership boundaries
 
 - `specgate-runtime` owns native capture, semantic values, and link-time
-  operation and type metadata.
+  operation and type metadata. Operation and setup finalization is explicit and
+  consuming; destructors perform only infallible in-memory cleanup.
 - `specgate-annotations-macros` instruments operation boundaries and emits
   setup and type metadata.
 - `specgate` is the sole Rust annotation and runtime facade.
@@ -26,7 +27,14 @@ Rust.
   normalization and setup folding.
 - `specgate-ctsc` owns registry and trace encoding, digest and linkage
   verification, replay models, validators, and strict comparison.
-- `specgate-cli` exposes the product commands.
+- `specgate-cli` exposes the product commands. Its Rust capture API takes an
+  owned, validated `CaptureRequest` with `PathBuf` and semantic identity fields
+  and returns a typed `CaptureError`; non-Unicode request paths are rejected and
+  the CLI surface remains unchanged.
+- Registry import URI handling depends on crates.io `templated_uri` 0.6 without
+  default features. Its HTTP-oriented `Uri` parser is not used for CTSC file
+  hints; a dedicated adapter validates authorities and preserves relative
+  `file:` resolution, percent decoding, platform paths, and diagnostics.
 
 ## Invariants
 
@@ -58,6 +66,15 @@ Rust.
   overrides are identity-preserving assertions, not dependency substitutions.
 - Async operations remain discoverable, but native capture rejects them before
   polling while capture state is thread-local.
+- Environment-driven capture atomically persists the cumulative scenario after
+  each successfully completed top-level operation. Persistence failure
+  terminalizes the session and is promoted by a hidden runtime/facade marker to
+  the independent CTSC `CaptureErrorKind` value `Execution`; the Rust error
+  remains opaque. Ordinary failed tests remain skippable outside strict golden
+  capture. Generated operations explicitly finalize fault boundaries and
+  resume the original target panic; destructors never persist. Manual sessions
+  use `finish_native_capture`, and no crash-durable or partial-output guarantee
+  is made.
 - Observation declarations and configurable comparison profiles are not
   implemented.
 

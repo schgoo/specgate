@@ -12,10 +12,12 @@ operations/setups/types, and exercise behavior through ordinary tests.
 `specgate capture` records those real invocations as deterministic CTSC
 reference traces; `specgate replay` invokes a candidate from the captured
 semantic inputs. Async operations remain discoverable but are not natively
-captured until capture context becomes task-safe.
+captured until capture context becomes task-safe. `ComponentId`,
+`OperationName`, and `TargetName` distinguish semantic identities while
+retaining transparent CTSC string projection and unrestricted string input.
 
 ```rust
-use specgate::*;
+use specgate::{spec_component, spec_operation};
 
 spec_component!("example.math");
 
