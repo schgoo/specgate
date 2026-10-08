@@ -89,38 +89,43 @@ mod cases {
         assert_eq!(
             error_category(
                 "operation 'fixture.duplicate_identity::render' is declared 2 times; operation identity must be unique within a component"
-            ),
+            )
+            .as_str(),
             "duplicate-operation-identity"
         );
         assert_eq!(
             error_category(
                 "setup 'make_counter' for 'fixture.missing_operation::increment' has no operation to construct; annotate the operation or remove the setup"
-            ),
+            )
+            .as_str(),
             "orphan-setup"
         );
         assert_eq!(
             error_category(
                 "operation 'fixture.missing_setup::increment' is a method with no receiver setup; annotate a #[spec_setup(\"increment\")] producer for its receiver"
-            ),
+            )
+            .as_str(),
             "method-missing-setup"
         );
         assert_eq!(
             error_category(
                 "operation 'fixture.private_operation::secret' is declared on private function 'secret'; discovery exposes only public operations"
-            ),
+            )
+            .as_str(),
             "private-operation"
         );
         assert_eq!(
             error_category(
                 "operation 'fixture.value::echo' output type 'value' is the dynamic runtime value; CTSC registries require declared semantic types"
-            ),
+            )
+            .as_str(),
             "dynamic-value-type"
         );
         assert_eq!(
-            error_category("referenced type 'Gadget' has no registered component owner"),
+            error_category("referenced type 'Gadget' has no registered component owner").as_str(),
             "unresolved-type"
         );
-        assert_eq!(error_category("something else entirely"), "unclassified");
+        assert_eq!(error_category("something else entirely").as_str(), "unclassified");
     }
 
     #[test]
@@ -434,7 +439,7 @@ mod cases {
         let bytes = error_json(ErrorInput {
             id: "negative/private-operation",
             phase: Phase::Discover,
-            category: "private-operation",
+            category: ErrorCategory::Private,
             component: "fixture.private_operation",
             detail: &serde_json::json!({ "message": "operation 'fixture.private_operation::secret' is not public" }),
         });

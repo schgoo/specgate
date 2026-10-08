@@ -136,9 +136,9 @@ pub struct ConfigBuilder {
     config: Config,
 }
 /// Default deterministic capture clock origin.
-const DEFAULT_START_TIME_UNIX_NANO: i64 = 0;
+const DEFAULT_START_NS: i64 = 0;
 /// Default deterministic capture clock increment.
-const DEFAULT_CLOCK_STEP_UNIX_NANO: i64 = 1;
+const DEFAULT_STEP_NS: i64 = 1;
 impl Config {
     /// Start a builder with required semantic and span identities.
     #[must_use]
@@ -153,8 +153,8 @@ impl Config {
                 operation_ids: Vec::new(),
                 // Capture clocks start at the Unix epoch and advance one nanosecond by
                 // default; changing these protocol defaults alters deterministic bytes.
-                start_ns: DEFAULT_START_TIME_UNIX_NANO,
-                step_ns: DEFAULT_CLOCK_STEP_UNIX_NANO,
+                start_ns: DEFAULT_START_NS,
+                step_ns: DEFAULT_STEP_NS,
             },
         }
     }

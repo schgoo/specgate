@@ -105,3 +105,22 @@ string_identity!(RegistryName, "A Cargo registry name or index URL.");
 string_identity!(ModulePath, "A native module path.");
 string_identity!(FunctionName, "A native function or method name.");
 string_identity!(KindName, "A raw producer type-kind name.");
+
+#[cfg(test)]
+mod tests {
+    use super::ComponentId;
+    use std::borrow::Borrow;
+
+    #[test]
+    fn identity_conversions() {
+        let identity = ComponentId::from(String::from("example.orders"));
+
+        assert_eq!(identity.as_str(), "example.orders");
+        assert_eq!(identity.as_ref(), "example.orders");
+        assert_eq!(Borrow::<str>::borrow(&identity), "example.orders");
+        assert_eq!(&*identity, "example.orders");
+        assert_eq!(identity.to_string(), "example.orders");
+        assert_eq!(identity, "example.orders");
+        assert_eq!(identity.clone().into_string(), "example.orders");
+    }
+}

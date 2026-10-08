@@ -798,7 +798,8 @@ mod tests {
                     name: RawName::from(RESULT),
                     attributes: BTreeMap::from([(RESULT_ATTR.into(), AnyValue::String("done".into()))]),
                 },
-            ],
+            ]
+            .into_boxed_slice(),
             resource_attributes: BTreeMap::from([
                 (REGISTRY_ATTR.into(), AnyValue::String("registry".into())),
                 (REGISTRY_VERSION_ATTR.into(), AnyValue::String("1".into())),
@@ -838,7 +839,7 @@ mod tests {
             },
         ] {
             let mut variant = span.clone();
-            variant.events = vec![event];
+            variant.events = vec![event].into_boxed_slice();
             issues.clear();
             check_linked(&TraceDocument { spans: vec![variant] }, &registry, &mut issues);
             assert!(issues.is_empty(), "{issues:?}");

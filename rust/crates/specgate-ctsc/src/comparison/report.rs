@@ -144,7 +144,7 @@ pub struct ReportPaths {
 
 /// Chainable construction for externally produced comparison reports.
 ///
-/// `equivalent` is derived during [`ReportBuilder::build`]: it is true only
+/// `equivalent` is derived during [`ComparisonReportBuilder::build`]: it is true only
 /// when validation failures, policy errors, and mismatches are all empty.
 ///
 /// # Examples
@@ -158,7 +158,7 @@ pub struct ReportPaths {
 /// ```
 #[derive(Debug)]
 #[must_use]
-pub struct ReportBuilder {
+pub struct ComparisonReportBuilder {
     paths: ReportPaths,
     validation_failures: Vec<ValidationDiagnostic>,
     errors: Vec<ComparisonDiagnostic>,
@@ -167,8 +167,8 @@ pub struct ReportBuilder {
 
 impl ComparisonReport {
     /// Begin a report with required artifact paths and empty diagnostics.
-    pub fn builder(paths: impl Into<ReportPaths>) -> ReportBuilder {
-        ReportBuilder {
+    pub fn builder(paths: impl Into<ReportPaths>) -> ComparisonReportBuilder {
+        ComparisonReportBuilder {
             paths: paths.into(),
             validation_failures: Vec::new(),
             errors: Vec::new(),
@@ -177,7 +177,7 @@ impl ComparisonReport {
     }
 }
 
-impl ReportBuilder {
+impl ComparisonReportBuilder {
     /// Set validation failures.
     pub fn validation_failures(mut self, value: Vec<ValidationDiagnostic>) -> Self {
         self.validation_failures = value;
