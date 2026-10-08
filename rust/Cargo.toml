@@ -2,6 +2,7 @@
 members = [
     "crates/specgate-runtime",
     "crates/specgate-annotations-macros",
+    "crates/specgate-annotations-macros-impl",
     "crates/specgate-discovery",
     "crates/specgate",
     "crates/specgate-cli",
@@ -22,6 +23,7 @@ rust-version = "1.93.0"
 [workspace.dependencies]
 base64 = "0.22"
 percent-encoding = "2.3"
+semver = "1.0.27"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 serde_yaml = "0.9.34"
@@ -30,20 +32,30 @@ quote = "1.0.45"
 proc-macro2 = "1.0.106"
 proc-macro-crate = "3.4"
 linkme = "0.3"
+ohno = "0.3.2"
 sha2 = "0.10"
+rustc-hash = "2"
 tempfile = "3"
 toml = "0.9"
-url = "2.5"
+tracing = "0.1"
+templated_uri = { version = "0.6.0", default-features = false }
 specgate = { path = "crates/specgate", version = "0.6.0" }
 specgate-annotations-macros = { path = "crates/specgate-annotations-macros", version = "0.6.0" }
+specgate-annotations-macros-impl = { path = "crates/specgate-annotations-macros-impl", version = "0.6.0" }
 specgate-runtime = { path = "crates/specgate-runtime", version = "0.6.0" }
 specgate-discovery = { path = "crates/specgate-discovery", version = "0.6.0" }
 specgate-ctsc = { path = "crates/specgate-ctsc", version = "0.6.0" }
+specgate-cli = { path = "crates/specgate-cli", version = "0.6.0" }
 
 # Dependencies are fetched from crates.io normally.
 
 [workspace.lints.rust]
+ambiguous_negative_literals = "warn"
+exported_private_dependencies = "warn"
+missing_copy_implementations = "warn"
 missing_debug_implementations = "warn"
+missing_docs = "warn"
+non_camel_case_types = "warn"
 redundant_imports = "warn"
 redundant_lifetimes = "warn"
 trivial_numeric_casts = "warn"
@@ -61,16 +73,46 @@ correctness = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 perf = { level = "warn", priority = -1 }
 style = { level = "warn", priority = -1 }
+suspicious = { level = "warn", priority = -1 }
+
+# API guideline lints requested explicitly by cargo-evaluate.
+cargo_common_metadata = "warn"
+exhaustive_enums = "warn"
+exhaustive_structs = "warn"
+fn_params_excessive_bools = "warn"
+missing_errors_doc = "warn"
+missing_panics_doc = "warn"
+missing_safety_doc = "warn"
+question_mark = "warn"
+redundant_feature_names = "warn"
+suspicious_arithmetic_impl = "warn"
+suspicious_op_assign_impl = "warn"
+too_long_first_doc_paragraph = "warn"
+upper_case_acronyms = "warn"
+wrong_self_convention = "warn"
 
 # Restriction lints worth enabling
+allow_attributes_without_reason = "warn"
+as_pointer_underscore = "warn"
+assertions_on_result_states = "warn"
 clone_on_ref_ptr = "warn"
 dbg_macro = "deny"
+deref_by_slicing = "warn"
+disallowed_script_idents = "warn"
 empty_drop = "warn"
 empty_enum_variants_with_brackets = "warn"
 empty_structs_with_brackets = "warn"
+fn_to_numeric_cast_any = "warn"
+if_then_some_else_none = "warn"
 map_err_ignore = "warn"
 redundant_type_annotations = "warn"
+renamed_function_params = "warn"
 semicolon_outside_block = "warn"
+undocumented_unsafe_blocks = "warn"
+unnecessary_safety_comment = "warn"
+unnecessary_safety_doc = "warn"
+unneeded_field_pattern = "warn"
+unused_result_ok = "warn"
 
 # Banned-API mechanism — configured in clippy.toml (disallowed-methods /
 # disallowed-types). Denied here so a banned call/type is a hard error under

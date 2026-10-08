@@ -1,3 +1,5 @@
+//! CLI validation and comparison integration tests.
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};

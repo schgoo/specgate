@@ -1,10 +1,133 @@
 # cargo-evaluate configuration for the SpecGate workspace.
 #
-# `just evaluate` runs the deterministic and semantic lint packs. It is not yet
-# part of `just check`, because the current workspace baseline still reports
-# findings. Scope any genuinely-necessary exception as narrowly as possible —
-# prefer an in-source `#[cfg_attr(false, allow(evaluate::<rule>))]` marker on the
-# specific item over a workspace-wide entry here, and always record why.
+# `just evaluate` runs the deterministic and semantic lint packs. Exceptions
+# are exact rule/file pairs retained only where a ratified design or evaluator
+# limitation prevents a source fix. cargo-evaluate 0.23 has no line, item, or
+# span selector, so each exception necessarily covers one complete file.
 
-[config]
-disabled = []
+[lints]
+
+[[config.allow]]
+rule = "m_avoid_statics"
+file = "crates/specgate-annotations-macros-impl/src/event.rs"
+reason = "SpecEvent derives must emit hygienic linkme registrations; candidate-rooted dependency resolution enforces one specgate-runtime package identity."
+
+[[config.allow]]
+rule = "m_avoid_statics"
+file = "crates/specgate-runtime/src/capture.rs"
+reason = "Per-run operation capture uses a Send synchronized collector carried by instrumented futures; only ambient poll installation and setup staging remain thread-local, and candidate package identity prevents duplicate runtime state."
+
+[[config.allow]]
+rule = "m_avoid_statics"
+file = "crates/specgate-runtime/src/capture/setup.rs"
+reason = "Pending setup inputs deliberately remain thread-local because async setup is unsupported and rejected; operation futures use the separate synchronized collector, and candidate package identity prevents duplicate runtime state."
+
+[[config.allow]]
+rule = "m_avoid_statics"
+file = "crates/specgate-runtime/src/registry.rs"
+reason = "Link-time discovery requires linkme distributed slices, and candidate-rooted dependency resolution enforces one runtime package identity."
+
+[[config.allow]]
+rule = "m_dont_leak_types"
+file = "crates/specgate-ctsc/src/capture.rs"
+reason = "Public CTSC capture types intentionally implement serde as the stable capture protocol; feature-gating them would break required format interoperability."
+
+[[config.allow]]
+rule = "m_dont_leak_types"
+file = "crates/specgate-runtime/src/lib.rs"
+reason = "Hidden macro plumbing re-exports linkme so expansions use the consumer's exact instance without requiring users to depend on linkme directly."
+
+[[config.allow]]
+rule = "m_errors_canonical_structs"
+file = "crates/specgate-annotations-macros-impl/src/event.rs"
+reason = "The unpublished proc-macro implementation boundary returns syn::Error directly to preserve source spans and native compiler diagnostics."
+
+[[config.allow]]
+rule = "m_errors_canonical_structs"
+file = "crates/specgate-annotations-macros-impl/src/operation.rs"
+reason = "The unpublished proc-macro implementation boundary returns syn::Error directly to preserve source spans and native compiler diagnostics."
+
+[[config.allow]]
+rule = "m_errors_canonical_structs"
+file = "crates/specgate-cli/src/replay/error.rs"
+reason = "The ratified opaque-error policy reports context through Display and retains causes and backtraces through std::error::Error and ohno::ErrorExt rather than rendering internal state."
+
+[[config.allow]]
+rule = "m_errors_canonical_structs"
+file = "crates/specgate-ctsc/src/comparison/loading.rs"
+reason = "The ratified opaque-error policy deliberately keeps document paths and operation categories out of the public LoadError API; Display and the source chain retain reporting context."
+
+[[config.allow]]
+rule = "m_macro_main_crate"
+file = "crates/specgate-annotations-macros-impl/src/event.rs"
+reason = "Renamed specgate dependencies are an explicit compatibility requirement, so expansions resolve the facade name with proc-macro-crate."
+
+[[config.allow]]
+rule = "m_macro_main_crate"
+file = "crates/specgate-annotations-macros-impl/src/lib.rs"
+reason = "Renamed specgate dependencies are an explicit compatibility requirement, so expansions resolve the facade name with proc-macro-crate."
+
+[[config.allow]]
+rule = "m_macro_main_crate"
+file = "crates/specgate-annotations-macros-impl/src/operation.rs"
+reason = "Renamed specgate dependencies are an explicit compatibility requirement, so expansions resolve the facade name with proc-macro-crate."
+
+[[config.allow]]
+rule = "m_macro_main_crate"
+file = "crates/specgate-annotations-macros-impl/src/setup.rs"
+reason = "Renamed specgate dependencies are an explicit compatibility requirement, so expansions resolve the facade name with proc-macro-crate."
+
+[[config.allow]]
+rule = "m_proc_implied_items"
+file = "crates/specgate-annotations-macros-impl/src/lib.rs"
+reason = "Stable hashed identifiers provide collision-resistant names for the hidden link-time metadata items required by discovery."
+
+[[config.allow]]
+rule = "m_proc_implied_items"
+file = "crates/specgate-annotations-macros-impl/src/operation.rs"
+reason = "Operation attributes require hygienically scoped linkme registration metadata so discovery can inventory annotated operation boundaries."
+
+[[config.allow]]
+rule = "m_public_display"
+file = "crates/specgate-cli/src/capture_failure.rs"
+reason = "False positive: #[ohno::error] and #[display] generate the canonical Display implementation that source-only analysis does not expand."
+
+[[config.allow]]
+rule = "m_public_display"
+file = "crates/specgate-cli/src/discover/failure.rs"
+reason = "False positive: #[ohno::error] and #[display] generate the canonical Display implementation that source-only analysis does not expand."
+
+[[config.allow]]
+rule = "m_public_display"
+file = "crates/specgate-cli/src/replay/error.rs"
+reason = "False positive: #[ohno::error] and #[display] generate the canonical Display implementation that source-only analysis does not expand."
+
+[[config.allow]]
+rule = "m_public_display"
+file = "crates/specgate-ctsc/src/capture/error.rs"
+reason = "False positive: #[ohno::error] and #[display] generate the canonical Display implementation that source-only analysis does not expand."
+
+[[config.allow]]
+rule = "m_public_display"
+file = "crates/specgate-ctsc/src/comparison/loading.rs"
+reason = "False positive: #[ohno::error] and #[display] generate the canonical Display implementation that source-only analysis does not expand."
+
+[[config.allow]]
+rule = "m_public_display"
+file = "crates/specgate-ctsc/src/registry/error.rs"
+reason = "False positive: #[ohno::error] and #[display] generate the canonical Display implementation that source-only analysis does not expand."
+
+[[config.allow]]
+rule = "m_public_display"
+file = "crates/specgate-ctsc/src/replay/error.rs"
+reason = "False positive: #[ohno::error] and #[display] generate the canonical Display implementation that source-only analysis does not expand."
+
+[[config.allow]]
+rule = "m_public_display"
+file = "crates/specgate-discovery/src/error.rs"
+reason = "False positive: #[ohno::error] and #[display] generate the canonical Display implementation that source-only analysis does not expand."
+
+[[config.allow]]
+rule = "m_public_display"
+file = "crates/specgate-runtime/src/lib.rs"
+reason = "False positive: #[ohno::error] and #[display] generate the canonical Display implementation that source-only analysis does not expand."

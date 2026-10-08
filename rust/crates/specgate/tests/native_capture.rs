@@ -1,3 +1,5 @@
+//! Native capture integration tests for synchronous and asynchronous operations.
+
 use specgate::{SpecEvent, ToNativeValue, Value, spec_component, spec_operation, spec_trace};
 
 spec_component!("fixture.macro_default");
@@ -45,7 +47,7 @@ async fn async_traced(value: i32) -> i32 {
 
 /// Suspends once, probes the ambient session, then calls a nested operation.
 ///
-/// The `start_native_capture` probe is the point: a resumed future must find
+/// The `start` probe is the point: a resumed future must find
 /// the collector handle already installed in the ambient slot. That is exactly
 /// the short-circuit `activate_native_capture_from_environment` relies on, so a
 /// thread that resumes a migrated future cannot start a second session writing
@@ -53,9 +55,9 @@ async fn async_traced(value: i32) -> i32 {
 #[spec_operation("async_nests")]
 async fn async_nests(value: i32) -> i32 {
     PendingOnce::default().await;
-    let rejected = specgate::__rt::start_native_capture(config(&[]))
-        .expect_err("a resumed future must find the session already installed in the ambient slot");
-    spec_trace!("ambient_session", rejected);
+    let rejected =
+        specgate::__rt::start(config(&[])).expect_err("a resumed future must find the session already installed in the ambient slot");
+    spec_trace!("ambient_session", rejected.to_string());
     inner(value)
 }
 
@@ -76,12 +78,12 @@ struct PendingOnce {
 impl Future for PendingOnce {
     type Output = ();
 
-    fn poll(mut self: std::pin::Pin<&mut Self>, context: &mut std::task::Context<'_>) -> std::task::Poll<()> {
+    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<()> {
         if self.polled {
             std::task::Poll::Ready(())
         } else {
             self.polled = true;
-            context.waker().wake_by_ref();
+            cx.waker().wake_by_ref();
             std::task::Poll::Pending
         }
     }
@@ -113,35 +115,42 @@ struct OptionalRecord {
     values: Vec<Option<String>>,
 }
 
-fn config(operation_span_ids: &[&str]) -> specgate::__rt::NativeCaptureConfig {
-    specgate::__rt::NativeCaptureConfig {
+fn config(operation_span_ids: &[&str]) -> specgate::__rt::Config {
+    specgate::__rt::Config::builder(specgate::__rt::ConfigDeps {
         scenario_name: "macro".to_string(),
-        trace_id: "33333333333333333333333333333333".to_string(),
-        run_span_id: "3333333333333301".to_string(),
-        scenario_span_id: "3333333333333302".to_string(),
-        operation_span_ids: operation_span_ids.iter().map(|id| (*id).to_string()).collect(),
-        start_time_unix_nano: 3_000,
-        clock_step_unix_nano: 10,
-    }
+        trace_id: specgate::__rt::TraceId::parse("33333333333333333333333333333333").unwrap(),
+        run_id: specgate::__rt::SpanId::parse("3333333333333301").unwrap(),
+        scenario_id: specgate::__rt::SpanId::parse("3333333333333302").unwrap(),
+    })
+    .operation_ids(
+        operation_span_ids
+            .iter()
+            .map(|id| specgate::__rt::SpanId::parse(id).unwrap())
+            .collect::<Vec<_>>(),
+    )
+    .start_time(3_000)
+    .clock_step(10)
+    .build()
+    .unwrap()
 }
 
 #[test]
 fn operation_macro_captures_components_nesting_results_and_observations() {
-    specgate::__rt::start_native_capture(config(&["3333333333333303", "3333333333333304"])).unwrap();
+    specgate::__rt::start(config(&["3333333333333303", "3333333333333304"])).unwrap();
 
     assert_eq!(outer(2), 7);
 
-    let capture = specgate::__rt::finish_native_capture().unwrap();
+    let capture = specgate::__rt::finish().unwrap();
     assert_eq!(capture.operations[0].component_id, "fixture.macro_default");
     assert_eq!(capture.operations[0].operation_name, "outer");
     assert_eq!(capture.operations[1].component_id, "fixture.macro_override");
-    assert_eq!(capture.operations[1].parent_span_id, capture.operations[0].span_id);
+    assert_eq!(capture.operations[1].parent_id, capture.operations[0].span_id);
     assert_eq!(capture.operations[0].inputs["value"], Value::Integer(2));
     assert_eq!(capture.operations[1].inputs["value"], Value::Integer(3));
     assert_eq!(capture.operations[1].observations[0].name, "seen");
     assert!(matches!(
         capture.operations[0].completion,
-        Some(specgate::__rt::NativeCompletion::Result {
+        Some(specgate::__rt::Completion::Result {
             value: Value::Integer(7),
             ..
         })
@@ -152,30 +161,30 @@ fn operation_macro_captures_components_nesting_results_and_observations() {
 fn operation_macro_is_compatible_without_capture_and_completes_unit_spans() {
     assert_eq!(outer(2), 7);
 
-    specgate::__rt::start_native_capture(config(&["3333333333333303"])).unwrap();
+    specgate::__rt::start(config(&["3333333333333303"])).unwrap();
     unit();
-    let capture = specgate::__rt::finish_native_capture().unwrap();
-    assert_eq!(capture.operations[0].status, specgate::__rt::NativeStatus::Ok);
+    let capture = specgate::__rt::finish().unwrap();
+    assert_eq!(capture.operations[0].status, specgate::__rt::Status::Ok);
     assert!(capture.operations[0].completion.is_none());
 }
 
 #[test]
 fn operation_macro_captures_native_optional_values() {
     for (input, native_variant) in [(Some("alice".to_string()), "Some"), (None, "None")] {
-        specgate::__rt::start_native_capture(config(&["3333333333333303"])).unwrap();
+        specgate::__rt::start(config(&["3333333333333303"])).unwrap();
         assert_eq!(optional(input.clone()), input);
 
-        let capture = specgate::__rt::finish_native_capture().unwrap();
+        let capture = specgate::__rt::finish().unwrap();
         let Value::Map(native_input) = &capture.operations[0].inputs["value"] else {
             panic!("native optional input must be a kvlist");
         };
         assert_eq!(native_input.len(), 1);
         assert!(native_input.contains_key(native_variant));
         match (&input, &capture.operations[0].completion) {
-            (Some(_), Some(specgate::__rt::NativeCompletion::Result { value, .. })) => {
+            (Some(_), Some(specgate::__rt::Completion::Result { value, .. })) => {
                 assert_eq!(value, native_input.get("Some").unwrap());
             }
-            (None, Some(specgate::__rt::NativeCompletion::Empty { .. })) => {}
+            (None, Some(specgate::__rt::Completion::Empty { .. })) => {}
             _ => panic!("unexpected optional completion"),
         }
     }
@@ -217,18 +226,18 @@ fn async_operation_records_from_first_poll_through_completion() {
     use std::future::Future;
     use std::task::{Context, Poll, Waker};
 
-    specgate::__rt::start_native_capture(config(&[])).unwrap();
+    specgate::__rt::start(config(&[])).unwrap();
     drop(async_value(2));
     assert!(
-        specgate::__rt::finish_native_capture().unwrap().operations.is_empty(),
+        specgate::__rt::finish().unwrap().operations.is_empty(),
         "constructing a future must not open an operation scope"
     );
 
     let mut context = Context::from_waker(Waker::noop());
-    specgate::__rt::start_native_capture(config(&[])).unwrap();
+    specgate::__rt::start(config(&[])).unwrap();
     let mut captured = Box::pin(async_value(2));
     assert_eq!(captured.as_mut().poll(&mut context), Poll::Ready(4));
-    let capture = specgate::__rt::finish_native_capture().unwrap();
+    let capture = specgate::__rt::finish().unwrap();
     assert_eq!(capture.operations.len(), 1);
     assert_eq!(capture.operations[0].operation_name, "async_value");
     assert_eq!(
@@ -237,7 +246,7 @@ fn async_operation_records_from_first_poll_through_completion() {
     );
     assert!(matches!(
         capture.operations[0].completion,
-        Some(specgate::__rt::NativeCompletion::Result {
+        Some(specgate::__rt::Completion::Result {
             value: Value::Integer(4),
             ..
         })
@@ -255,13 +264,13 @@ fn async_operation_records_from_first_poll_through_completion() {
 /// behavior. The reason that test existed — so a future change could not
 /// silently record a *wrong* trace — is kept by asserting the trace is right:
 /// distinct span IDs, both parented to the scenario, both `Ok`, both results
-/// correct, and no residual outstanding scope at `finish_native_capture`.
+/// correct, and no residual outstanding scope at `finish`.
 #[test]
 fn concurrently_interleaved_operations_record_correct_traces() {
     use std::future::Future;
     use std::task::{Context, Poll, Waker};
 
-    specgate::__rt::start_native_capture(config(&[])).unwrap();
+    specgate::__rt::start(config(&[])).unwrap();
     let mut context = Context::from_waker(Waker::noop());
     let mut first = Box::pin(async_suspends(2));
     let mut second = Box::pin(async_suspends(3));
@@ -271,20 +280,20 @@ fn concurrently_interleaved_operations_record_correct_traces() {
     assert_eq!(first.as_mut().poll(&mut context), Poll::Ready(4));
     assert_eq!(second.as_mut().poll(&mut context), Poll::Ready(6));
 
-    let capture = specgate::__rt::finish_native_capture().unwrap();
+    let capture = specgate::__rt::finish().unwrap();
     assert_eq!(capture.operations.len(), 2);
     assert_ne!(capture.operations[0].span_id, capture.operations[1].span_id);
     for (operation, expected) in capture.operations.iter().zip([2, 3]) {
         assert_eq!(operation.operation_name, "async_suspends");
-        assert_eq!(operation.status, specgate::__rt::NativeStatus::Ok);
+        assert_eq!(operation.status, specgate::__rt::Status::Ok);
         assert_eq!(
-            operation.parent_span_id, "3333333333333302",
+            operation.parent_id, "3333333333333302",
             "neither operation nests inside the other; both are children of the scenario"
         );
         assert_eq!(operation.inputs["value"], Value::Integer(expected));
         assert!(matches!(
             operation.completion,
-            Some(specgate::__rt::NativeCompletion::Result { value: Value::Integer(result), .. })
+            Some(specgate::__rt::Completion::Result { value: Value::Integer(result), .. })
                 if result == expected * 2
         ));
     }
@@ -316,27 +325,31 @@ fn block_on<F: Future>(future: F) -> F::Output {
 /// a time, so the recording order is fully determined.
 #[test]
 fn migrated_future_records_observations_under_its_construction_parent() {
-    specgate::__rt::start_native_capture(config(&[])).unwrap();
-    let mut outer = specgate::__rt::begin_native_operation("fixture.macro_default", "outer").unwrap();
-    outer.record_input("value", Value::Integer(2)).unwrap();
+    specgate::__rt::start(config(&[])).unwrap();
+    let mut outer = specgate::__rt::begin_operation(
+        specgate::__rt::ComponentId::from("fixture.macro_default"),
+        specgate::__rt::OperationName::from("outer"),
+    )
+    .unwrap();
+    outer.input("value", Value::Integer(2)).unwrap();
 
     let migrating = async_traced(2);
     let worker = std::thread::spawn(move || block_on(migrating));
     assert_eq!(worker.join().unwrap(), 4);
 
-    outer.complete_result(Value::Integer(4)).unwrap();
-    let capture = specgate::__rt::finish_native_capture().unwrap();
+    outer.result(Value::Integer(4)).unwrap();
+    let capture = specgate::__rt::finish().unwrap();
 
     assert_eq!(capture.operations.len(), 2);
     assert_eq!(capture.operations[1].operation_name, "async_traced");
     assert_eq!(
-        capture.operations[1].parent_span_id, capture.operations[0].span_id,
+        capture.operations[1].parent_id, capture.operations[0].span_id,
         "the migrated operation keeps the parent it was constructed under"
     );
     assert_eq!(capture.operations[1].observations.len(), 1);
     assert_eq!(capture.operations[1].observations[0].name, "seen");
     assert_eq!(capture.operations[1].observations[0].value, Value::Integer(2));
-    assert_eq!(capture.operations[1].status, specgate::__rt::NativeStatus::Ok);
+    assert_eq!(capture.operations[1].status, specgate::__rt::Status::Ok);
 }
 
 /// A nested operation reached from inside a migrated future is parented to the
@@ -349,15 +362,19 @@ fn migrated_future_records_observations_under_its_construction_parent() {
 /// condition that short-circuits that activation.
 #[test]
 fn nested_operation_inside_a_migrated_future_is_parented_and_starts_no_second_session() {
-    specgate::__rt::start_native_capture(config(&[])).unwrap();
-    let mut outer = specgate::__rt::begin_native_operation("fixture.macro_default", "outer").unwrap();
+    specgate::__rt::start(config(&[])).unwrap();
+    let outer = specgate::__rt::begin_operation(
+        specgate::__rt::ComponentId::from("fixture.macro_default"),
+        specgate::__rt::OperationName::from("outer"),
+    )
+    .unwrap();
 
     let migrating = async_nests(2);
     let worker = std::thread::spawn(move || block_on(migrating));
     assert_eq!(worker.join().unwrap(), 4);
 
-    outer.complete_result(Value::Integer(4)).unwrap();
-    let capture = specgate::__rt::finish_native_capture().unwrap();
+    outer.result(Value::Integer(4)).unwrap();
+    let capture = specgate::__rt::finish().unwrap();
 
     assert_eq!(
         capture
@@ -368,9 +385,9 @@ fn nested_operation_inside_a_migrated_future_is_parented_and_starts_no_second_se
         ["outer", "async_nests", "inner"],
         "one session recorded all three operations"
     );
-    assert_eq!(capture.operations[1].parent_span_id, capture.operations[0].span_id);
+    assert_eq!(capture.operations[1].parent_id, capture.operations[0].span_id);
     assert_eq!(
-        capture.operations[2].parent_span_id, capture.operations[1].span_id,
+        capture.operations[2].parent_id, capture.operations[1].span_id,
         "the nested operation is parented to the migrated async operation"
     );
     assert_eq!(capture.operations[2].component_id, "fixture.macro_override");
@@ -391,16 +408,20 @@ fn nested_operation_inside_a_migrated_future_is_parented_and_starts_no_second_se
 /// verified only by reading the code.
 #[test]
 fn a_panicking_poll_restores_the_ambient_slot_on_the_resuming_thread() {
-    specgate::__rt::start_native_capture(config(&[])).unwrap();
-    let mut outer = specgate::__rt::begin_native_operation("fixture.macro_default", "outer").unwrap();
+    specgate::__rt::start(config(&[])).unwrap();
+    let outer = specgate::__rt::begin_operation(
+        specgate::__rt::ComponentId::from("fixture.macro_default"),
+        specgate::__rt::OperationName::from("outer"),
+    )
+    .unwrap();
 
     let migrating = async_panics(2);
     let worker = std::thread::spawn(move || {
         let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || block_on(migrating)));
         // The borrowed handle must be gone: starting a session here can only
         // succeed if this thread's slot is empty again.
-        let restored = specgate::__rt::start_native_capture(config(&[]));
-        let probe = specgate::__rt::finish_native_capture();
+        let restored = specgate::__rt::start(config(&[]));
+        let probe = specgate::__rt::finish();
         (unwound.is_err(), restored, probe)
     });
 
@@ -409,16 +430,16 @@ fn a_panicking_poll_restores_the_ambient_slot_on_the_resuming_thread() {
     restored.expect("the unwinding poll restored the resuming thread's ambient slot");
     probe.expect("the probe session on the resuming thread is independent and finishes clean");
 
-    outer.complete_result(Value::Integer(0)).unwrap();
-    let capture = specgate::__rt::finish_native_capture().unwrap();
+    outer.result(Value::Integer(0)).unwrap();
+    let capture = specgate::__rt::finish().unwrap();
 
     assert_eq!(capture.operations.len(), 2);
     assert_eq!(capture.operations[1].operation_name, "async_panics");
-    assert_eq!(capture.operations[1].status, specgate::__rt::NativeStatus::Error);
+    assert_eq!(capture.operations[1].status, specgate::__rt::Status::Error);
     assert!(
         matches!(
             &capture.operations[1].completion,
-            Some(specgate::__rt::NativeCompletion::Fault { fault_type, .. })
+            Some(specgate::__rt::Completion::Fault { fault_type, .. })
                 if fault_type == "specgate.unexpected_target_fault"
         ),
         "the unwound operation is recorded as a target fault, not silently dropped"
@@ -427,42 +448,42 @@ fn a_panicking_poll_restores_the_ambient_slot_on_the_resuming_thread() {
 
 #[test]
 fn unit_result_and_optional_unit_use_consistent_ctsc_completion() {
-    specgate::__rt::start_native_capture(config(&[])).unwrap();
+    specgate::__rt::start(config(&[])).unwrap();
     assert_eq!(result_unit(false), Ok(()));
-    let capture = specgate::__rt::finish_native_capture().unwrap();
+    let capture = specgate::__rt::finish().unwrap();
     assert!(capture.operations[0].completion.is_none());
 
-    specgate::__rt::start_native_capture(config(&[])).unwrap();
+    specgate::__rt::start(config(&[])).unwrap();
     assert_eq!(result_unit(true), Err("failed".to_string()));
-    let capture = specgate::__rt::finish_native_capture().unwrap();
+    let capture = specgate::__rt::finish().unwrap();
     assert!(matches!(
         capture.operations[0].completion,
-        Some(specgate::__rt::NativeCompletion::Error {
+        Some(specgate::__rt::Completion::Error {
             value: Some(Value::String(_)),
             ..
         })
     ));
 
     for present in [true, false] {
-        specgate::__rt::start_native_capture(config(&[])).unwrap();
+        specgate::__rt::start(config(&[])).unwrap();
         assert_eq!(option_unit(present), present.then_some(()));
-        let capture = specgate::__rt::finish_native_capture().unwrap();
+        let capture = specgate::__rt::finish().unwrap();
         assert!(matches!(
             capture.operations[0].completion,
-            Some(specgate::__rt::NativeCompletion::Result { value: Value::Map(_), .. })
+            Some(specgate::__rt::Completion::Result { value: Value::Map(_), .. })
         ));
     }
 
-    specgate::__rt::start_native_capture(config(&[])).unwrap();
+    specgate::__rt::start(config(&[])).unwrap();
     assert_eq!(result_error_unit(true), Err(()));
-    let capture = specgate::__rt::finish_native_capture().unwrap();
+    let capture = specgate::__rt::finish().unwrap();
     assert!(matches!(
         capture.operations[0].completion,
-        Some(specgate::__rt::NativeCompletion::Error { value: None, .. })
+        Some(specgate::__rt::Completion::Error { value: None, .. })
     ));
 
-    specgate::__rt::start_native_capture(config(&[])).unwrap();
+    specgate::__rt::start(config(&[])).unwrap();
     assert_eq!(result_both_unit(false), Ok(()));
-    let capture = specgate::__rt::finish_native_capture().unwrap();
+    let capture = specgate::__rt::finish().unwrap();
     assert!(capture.operations[0].completion.is_none());
 }

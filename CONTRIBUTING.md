@@ -79,6 +79,15 @@ Run `just package-smoke` for release changes; it packages all six retained crate
 installs the packaged CLI, and exercises registry-dependency
 discover/capture/replay.
 
+`cargo-evaluate` is an internal local review tool and is not part of
+`just check` or GitHub-hosted CI. After installing `cargo-evaluate 0.23.0`, use
+`just evaluate-offline` for the fast deterministic rules, `just
+evaluate-cached` for quiet cache-aware semantic review with an authenticated
+Copilot CLI, and `just evaluate` for the same complete audit with console
+findings. The evaluator reuses entries only while both file context and rule
+definition hashes match. Exact justified exceptions live in
+`rust/evaluate.toml`.
+
 Use Conventional Commits and keep changes scoped. The changelog is generated
 from commit subjects, so the subject is the entry a reader sees.
 

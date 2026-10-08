@@ -11,12 +11,12 @@ Add `specgate` to an implementation crate, declare a component, annotate
 operations/setups/types, and exercise behavior through ordinary tests.
 `specgate capture` records those real invocations as deterministic CTSC
 reference traces; `specgate replay` invokes a candidate from the captured
-semantic inputs. An async operation records from its first poll under the
-operation that constructed its future, so it survives migration to another
-executor thread; an async setup is not yet instrumented.
+semantic inputs. Async operations open at first poll and preserve their construction parent across executor-thread migration and same-thread interleaving. Async setups remain unsupported. `ComponentId`,
+`OperationName`, and `TargetName` distinguish semantic identities while
+retaining transparent CTSC string projection and unrestricted string input.
 
 ```rust
-use specgate::*;
+use specgate::{spec_component, spec_operation};
 
 spec_component!("example.math");
 

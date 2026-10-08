@@ -17,7 +17,8 @@ Rust.
 ## Ownership boundaries
 
 - `specgate-runtime` owns native capture, semantic values, and link-time
-  operation and type metadata.
+  operation and type metadata. Operation and setup finalization is explicit and
+  consuming; destructors perform only infallible in-memory cleanup.
 - `specgate-annotations-macros` instruments operation boundaries and emits
   setup and type metadata.
 - `specgate` is the sole Rust annotation and runtime facade.
@@ -26,7 +27,14 @@ Rust.
   normalization and setup folding.
 - `specgate-ctsc` owns registry and trace encoding, digest and linkage
   verification, replay models, validators, and strict comparison.
-- `specgate-cli` exposes the product commands.
+- `specgate-cli` exposes the product commands. Its Rust capture API takes an
+  owned, validated `CaptureRequest` with `PathBuf` and semantic identity fields
+  and returns a typed `CaptureError`; non-Unicode request paths are rejected and
+  the CLI surface remains unchanged.
+- Registry import URI handling depends on crates.io `templated_uri` 0.6 without
+  default features. Its HTTP-oriented `Uri` parser is not used for CTSC file
+  hints; a dedicated adapter validates authorities and preserves relative
+  `file:` resolution, percent decoding, platform paths, and diagnostics.
 
 ## Invariants
 
@@ -63,25 +71,30 @@ Rust.
   package through candidate-rooted `cargo metadata`. Runtime path and version
   overrides are identity-preserving assertions, not dependency substitutions.
 - An `#[spec_operation] async fn` is captured. The macro rewrites it into a
-  `fn` returning `impl Future`, which captures the caller's operation at
-  construction and re-installs it around every poll; recording still begins at
-  first poll, and the scope is held across every `.await` in the body. A future
-  that migrates to another executor thread records under the operation that
-  constructed it and does not start a second session there, and two
-  instrumented operations interleaved on one thread both record complete,
-  correctly parented spans. Not covered: a future abandoned while still
-  `Pending`, which fails closed rather than recording a wrong trace; and an
-  operation first reached on a raw `std::thread::spawn`ed thread, which is a
-  separate roadmap slice.
-- Operation recording is behind a per-run `Send` collector handle, but
-  setup-input staging (`PENDING_SETUP_INPUTS`) is still a bare thread-local and
-  is the last thread-affine piece of capture state. Async `#[spec_setup]` is
-  uninstrumented, and instrumenting it requires moving that staging into the
-  collector first.
-- An abandoned async operation's trace representation is decided but not yet
-  implemented: `conformance.abandoned`, `UNSET` status, no status propagation
-  to containing spans. See
-  [`abandonment-terminal-state`](../decisions/abandonment-terminal-state.md).
+  `fn` returning `impl Future`: it captures the caller's collector and parent
+  operation at construction, opens its span on first poll, and reinstalls that
+  context around every poll. Migrated futures therefore remain children of
+  their construction parent, while interleaved siblings complete independently
+  and retain correct parentage.
+- Operation recording uses a synchronized, per-run `Send` collector. Setup
+  input staging remains thread-local, so async `#[spec_setup]` is unsupported
+  and rejected before capture; setup staging itself has no async support.
+  Raw-thread-first/process-global activation is also unsupported.
+- Abandonment while an async operation is still `Pending` is not implemented.
+  Its terminal representation is decided (`conformance.abandoned`, `UNSET`, no
+  containing-span status propagation) but remains a future slice; capture fails
+  closed rather than inventing a completed trace.
+- Environment-driven capture atomically persists the cumulative provisional
+  scenario after declared inputs and after every operation close. Outstanding
+  operations are projected as target-observed `incomplete_capture` faults from
+  a clone, without advancing the live logical clock. Persistence failure
+  terminalizes the session and is promoted through a hidden marker to the
+  independent CTSC `CaptureErrorKind::Execution`; Rust errors remain opaque.
+  Generated operations explicitly finalize completion/fault boundaries and
+  resume target panics; destructors never perform I/O. Manual sessions use
+  `finish_native_capture`; no crash-durable or partial-output guarantee is made.
+- Rust registry and capture APIs use semantic component/operation identities;
+  capture requests own validated paths and reject non-Unicode request paths.
 - Observation declarations and configurable comparison profiles are not
   implemented.
 

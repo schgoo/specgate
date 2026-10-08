@@ -11,11 +11,22 @@ keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
 
+[features]
+test-util = []
+
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 linkme = { workspace = true }
 tempfile = { workspace = true }
+ohno = { workspace = true }
+tracing = { workspace = true }
 
 [lints]
 workspace = true
+
+
+[[bench]]
+name = "native_capture"
+harness = false
+required-features = ["test-util"]
