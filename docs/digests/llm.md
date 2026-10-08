@@ -80,10 +80,11 @@ Rust.
   input staging remains thread-local, so async `#[spec_setup]` is unsupported
   and rejected before capture; setup staging itself has no async support.
   Raw-thread-first/process-global activation is also unsupported.
-- Abandonment while an async operation is still `Pending` is not implemented.
-  Its terminal representation is decided (`conformance.abandoned`, `UNSET`, no
-  containing-span status propagation) but remains a future slice; capture fails
-  closed rather than inventing a completed trace.
+- Abandonment while an async operation is still `Pending` is implemented: the
+  span records `conformance.abandoned` with `UNSET` status, which is neither a
+  completion nor a fault and does not propagate to containing spans. A drop
+  during an unrelated unwind is still recorded as a fault, because
+  `std::thread::panicking()` is checked before abandonment.
 - Environment-driven capture atomically persists the cumulative provisional
   scenario after declared inputs and after every operation close. Outstanding
   operations are projected as target-observed `incomplete_capture` faults from

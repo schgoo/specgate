@@ -208,8 +208,14 @@ the Rust and C# registries still differ in exactly the declared ways.
   construction, re-installs it around every poll, begins recording at first
   poll, and holds the scope across the body's awaits. A migrated future records
   under the operation that built it and starts no second session on the
-  resuming thread, and interleaved operations both record complete spans. Not
-  covered: futures abandoned while still `Pending`, and operations first
+  resuming thread, and interleaved operations both record complete spans. An
+  async operation dropped while still `Pending` records
+  `conformance.abandoned` with `UNSET` status, which does not propagate to the
+  containing spans; a future abandoned on a thread that is already unwinding
+  for an unrelated reason is recorded as `specgate.unexpected_target_fault`
+  instead, because `std::thread::panicking()` is checked first so that a
+  genuinely panicking async body is never downgraded to merely abandoned. Not
+  covered: operations first
   reached on a raw `std::thread::spawn`ed thread. An async setup is not
   instrumented at all, so capture rejects
   the whole component up front rather than encoding a bundle without its
@@ -221,7 +227,10 @@ the Rust and C# registries still differ in exactly the declared ways.
 - Differential comparison currently implements the fixed
   `ctsc.strict/0.1.0` policy. Multiple-run selection, overlapping sequential
   children, and duplicate parallel branch identities are rejected as
-  unsupported or ambiguous, as permitted by the policy.
+  unsupported or ambiguous, as permitted by the policy. `ctsc.strict/0.1.0` has
+  no abandonment-specific handling beyond generic event matching: an abandoned
+  operation differs from a completed one only because event names must match
+  and a missing or additional event is a mismatch.
 - Replay validates nested operations as observed behavior but invokes only
   top-level reference operations.
 - `spec_trace!` observations are captured but never declared, because discovery

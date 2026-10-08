@@ -79,7 +79,7 @@ execution.
 ## Consequences
 
 Required: the completion-tracking hole in trace validation is fixed as its own
-separate change — `trace.md` §7.3 and §7.6 make unit completion a status with
+separate change — `trace.md` §7.3 and §7.7 make unit completion a status with
 no emitted event, and `validation/trace.rs` currently requires at most one
 completion but never at least one, so an unfinished span validates clean.
 
