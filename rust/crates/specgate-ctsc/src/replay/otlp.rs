@@ -19,7 +19,7 @@ struct SpanRef<'a> {
 struct ScenarioRef<'a> {
     trace_id: &'a str,
     span_id: &'a str,
-    name: String,
+    name: ScenarioName,
     index: ScenarioIndex,
     position: usize,
 }
@@ -118,6 +118,7 @@ pub(super) fn decode_scenarios(
             format!("scenario span '{}'", span_ref.span.span_id),
         )?
         .to_string();
+        let name = ScenarioName::try_new(name)?;
         let index = require_integer(&attributes, SCENARIO_INDEX, format!("scenario span '{}'", span_ref.span.span_id))?;
         let index = ScenarioIndex::new(index).ok_or_else(|| format!("scenario '{name}' has negative index {index}"))?;
         scenario_refs.push(ScenarioRef {
@@ -196,7 +197,7 @@ pub(super) fn decode_scenarios(
             })
             .collect();
         scenarios.push(Scenario {
-            name: ScenarioName::try_new(scenario.name)?,
+            name: scenario.name,
             index: scenario.index,
             operations,
         });
@@ -207,12 +208,12 @@ pub(super) fn decode_scenarios(
 fn decode_operation(span: &Span, registry: &Registry) -> Result<Operation, error::Error> {
     let location = format!("operation span '{}'", span.span_id);
     let attributes = attribute_map(&span.attributes, &location)?;
-    let component_id = require_string(&attributes, COMPONENT_ID, None, &location)?.to_string();
-    let operation_name = require_string(&attributes, OPERATION_NAME, None, &location)?.to_string();
+    let component_id = ComponentId::try_new(require_string(&attributes, COMPONENT_ID, None, &location)?)?;
+    let operation_name = OperationName::try_new(require_string(&attributes, OPERATION_NAME, None, &location)?)?;
     let declaration = registry
         .operations
         .iter()
-        .find(|operation| operation.component_id().as_str() == component_id && operation.name().as_str() == operation_name)
+        .find(|operation| component_id == operation.component_id().as_str() && operation_name == operation.name().as_str())
         .ok_or_else(|| format!("reference {location} names unknown operation '{component_id}::{operation_name}'"))?;
     let input_value = attributes
         .get(OPERATION_INPUTS)
@@ -331,8 +332,8 @@ fn decode_operation(span: &Span, registry: &Registry) -> Result<Operation, error
     }
 
     Ok(Operation {
-        component_id: ComponentId::try_new(component_id)?,
-        operation_name: OperationName::try_new(operation_name)?,
+        component_id,
+        operation_name,
         inputs,
         output: declaration.output().cloned(),
     })

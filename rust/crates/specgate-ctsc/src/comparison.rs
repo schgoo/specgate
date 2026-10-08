@@ -28,7 +28,7 @@ pub use engine::compare_with;
 pub(crate) use engine::{compare_bytes, compare_paths};
 pub use loading::{DocumentReader, LoadError, SystemReader};
 pub use report::{
-    ComparisonDiagnostic, ComparisonMismatch, ComparisonReport, DiagnosticLocation, DiagnosticText, ReportBuilder, ReportPaths,
+    ComparisonDiagnostic, ComparisonMismatch, ComparisonReport, ComparisonReportBuilder, DiagnosticLocation, DiagnosticText, ReportPaths,
     SemanticPath, SemanticValue, ValidationDiagnostic,
 };
 

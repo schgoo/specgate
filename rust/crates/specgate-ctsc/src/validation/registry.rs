@@ -740,6 +740,65 @@ mod uri_tests {
         }
     }
 
+    #[cfg(test)]
+    mod loading_tests {
+        use crate::comparison::{DocumentReader, LoadError};
+        use crate::validation::registry::load_reader;
+        use crate::validation::{Loaded, RegistrySet};
+        use std::path::{Path, PathBuf};
+
+        struct MemoryReader {
+            bytes: Vec<u8>,
+        }
+
+        impl DocumentReader for MemoryReader {
+            fn read(&self, _path: &Path) -> Result<Vec<u8>, LoadError> {
+                Ok(self.bytes.clone())
+            }
+
+            fn canonicalize(&self, path: &Path) -> Result<PathBuf, LoadError> {
+                Ok(path.to_path_buf())
+            }
+        }
+
+        fn load(json: &str) -> Loaded<RegistrySet> {
+            load_reader(
+                Path::new("registry.ctsc.json"),
+                &[] as &[&Path],
+                &MemoryReader {
+                    bytes: json.as_bytes().to_vec(),
+                },
+            )
+        }
+
+        #[test]
+        fn injected_reader_loads_a_valid_registry() {
+            let loaded = load(
+                r#"{"format":"ctsc.registry","formatVersion":"0.2.0","registryId":"urn:ctsc:registry:test","version":"0.1.0","components":[{"id":"test.component","operations":[{"name":"run","inputs":[],"observations":[],"outcomes":{}}],"types":[]}]}"#,
+            );
+
+            assert!(loaded.issues.is_empty());
+            let registry = loaded.value.expect("valid registry");
+            assert_eq!(registry.root_id.as_str(), "urn:ctsc:registry:test");
+            assert!(registry.components.contains_key("test.component"));
+        }
+
+        #[test]
+        fn semantic_validation_reports_unknown_named_types() {
+            let loaded = load(
+                r#"{"format":"ctsc.registry","formatVersion":"0.2.0","registryId":"urn:ctsc:registry:test","version":"0.1.0","components":[{"id":"test.component","operations":[{"name":"run","inputs":[],"observations":[],"outcomes":{"result":{"kind":"named","name":"Missing"}}}],"types":[]}]}"#,
+            );
+
+            assert!(loaded.value.is_some());
+            assert_eq!(loaded.issues.len(), 1);
+            assert_eq!(
+                loaded.issues[0].location,
+                "registry.ctsc.json:$.components[0].operations[0].outcomes.result"
+            );
+            assert_eq!(loaded.issues[0].message, "unknown named type 'Missing'");
+        }
+    }
+
     #[test]
     fn uri_diagnostics() {
         for uri in ["file:import.json?version=1", "file:import.json#section"] {

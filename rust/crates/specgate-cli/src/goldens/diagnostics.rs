@@ -15,6 +15,33 @@ const MISSING_OWNER: &str = "has no registered component owner";
 const UNKNOWN_TYPE: &str = "unknown named type";
 
 #[derive(Clone, Copy)]
+pub(super) enum ErrorCategory {
+    Duplicate,
+    Orphan,
+    MissingSetup,
+    Private,
+    Dynamic,
+    Unresolved,
+    Other,
+    Compile,
+}
+
+impl ErrorCategory {
+    pub(super) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Duplicate => "duplicate-operation-identity",
+            Self::Orphan => "orphan-setup",
+            Self::MissingSetup => "method-missing-setup",
+            Self::Private => "private-operation",
+            Self::Dynamic => "dynamic-value-type",
+            Self::Unresolved => "unresolved-type",
+            Self::Other => "unclassified",
+            Self::Compile => "compile-error",
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
 struct NegativeOperations {
     inner: OperationMode,
 }
@@ -105,25 +132,25 @@ impl NegativeOperations {
 }
 
 /// Classify a normalized discovery diagnostic into a stable golden category.
-pub(super) fn error_category(message: impl AsRef<str>) -> &'static str {
+pub(super) fn error_category(message: impl AsRef<str>) -> ErrorCategory {
     let message = message.as_ref();
     // These fragments are the stable diagnostic contracts emitted by
     // discovery. Changing their wording requires coordinated golden-category
     // updates or affected failures become deliberately "unclassified".
     if message.contains(DUPLICATE_OPERATION) {
-        "duplicate-operation-identity"
+        ErrorCategory::Duplicate
     } else if message.contains(ORPHAN_SETUP) {
-        "orphan-setup"
+        ErrorCategory::Orphan
     } else if message.contains(MISSING_RECEIVER) {
-        "method-missing-setup"
+        ErrorCategory::MissingSetup
     } else if message.contains(PRIVATE_OPERATION) {
-        "private-operation"
+        ErrorCategory::Private
     } else if message.contains(DYNAMIC_VALUE) {
-        "dynamic-value-type"
+        ErrorCategory::Dynamic
     } else if message.contains(MISSING_OWNER) || message.contains(UNKNOWN_TYPE) {
-        "unresolved-type"
+        ErrorCategory::Unresolved
     } else {
-        "unclassified"
+        ErrorCategory::Other
     }
 }
 
@@ -132,7 +159,7 @@ pub(super) fn error_category(message: impl AsRef<str>) -> &'static str {
 pub(super) struct ErrorInput<'a> {
     pub(super) id: &'a str,
     pub(super) phase: Phase,
-    pub(super) category: &'a str,
+    pub(super) category: ErrorCategory,
     pub(super) component: &'a str,
     pub(super) detail: &'a serde_json::Value,
 }
@@ -145,7 +172,7 @@ pub(super) fn error_json(input: ErrorInput<'_>) -> Vec<u8> {
         "case": input.id,
         "phase": input.phase,
         "outcome": "failure",
-        "category": input.category,
+        "category": input.category.as_str(),
         "component": input.component,
         "detail": input.detail,
     });
@@ -153,6 +180,12 @@ pub(super) fn error_json(input: ErrorInput<'_>) -> Vec<u8> {
 }
 
 /// Generate every discovery and build negative declared by the matrix.
+///
+/// # Errors
+///
+/// Returns an error when matrix declarations are incomplete, discovery or
+/// building fails unexpectedly, compiler diagnostics cannot be attributed to
+/// the declared sources, or generated artifacts cannot be written.
 pub(super) fn generate_negatives(
     root: impl AsRef<Path>,
     matrix: &Matrix,
@@ -286,13 +319,21 @@ fn generate_with(
                 row.id
             )));
         }
-        let intentional = intentional_sources(row);
+        let intentional = intentional_sources(row)?;
         let rejection = compile_errors(String::from_utf8_lossy(&output.stdout), &intentional)
             .map_err(|source| GoldenError::wrap(format!("{}: compiler diagnostic attribution failed", row.id), source))?;
+        let category = language.expect_category.as_deref().unwrap_or(ErrorCategory::Compile.as_str());
+        if category != ErrorCategory::Compile.as_str() {
+            return Err(GoldenError::message(format!(
+                "{}: build-negative expectCategory must be '{}', found '{category}'",
+                row.id,
+                ErrorCategory::Compile.as_str()
+            )));
+        }
         let bytes = error_json(ErrorInput {
             id: &row.id,
             phase: Phase::Build,
-            category: language.expect_category.as_deref().unwrap_or("compile-error"),
+            category: ErrorCategory::Compile,
             component: row.component.as_deref().unwrap_or_default(),
             detail: &serde_json::json!({
                 "feature": feature,
@@ -364,13 +405,18 @@ mod operation_tests {
 /// The sources a row declares as the intentional fault, as repository-relative
 /// forward-slash paths. Their existence is already guaranteed by the matrix
 /// source-coverage check.
-pub(super) fn intentional_sources(row: &Row) -> BTreeSet<RepoPath> {
-    assert!(
-        !row.sources.is_empty(),
-        "{}: a build negative must declare the source that fails to compile",
-        row.id
-    );
-    row.sources.iter().cloned().collect()
+///
+/// # Errors
+///
+/// Returns an error when the row declares no intentional source.
+pub(super) fn intentional_sources(row: &Row) -> Result<BTreeSet<RepoPath>, GoldenError> {
+    if row.sources.is_empty() {
+        return Err(GoldenError::message(format!(
+            "{}: a build negative must declare the source that fails to compile",
+            row.id
+        )));
+    }
+    Ok(row.sources.iter().cloned().collect())
 }
 
 /// The stable part of a compiler rejection: which intentional source it blamed
@@ -392,6 +438,11 @@ pub(super) struct CompilerRejection {
 /// diagnostic codes are returned: rendered diagnostics carry absolute paths,
 /// line numbers, and toolchain-specific wording, none of which belong in a
 /// checked-in golden.
+///
+/// # Errors
+///
+/// Returns an error when the build emitted no compiler error, an error has no
+/// primary span, or any primary span lies outside the declared sources.
 pub(super) fn compile_errors(cargo_stdout: impl AsRef<str>, intentional: &BTreeSet<RepoPath>) -> Result<CompilerRejection, CompileError> {
     let cargo_stdout = cargo_stdout.as_ref();
     let mut sources = BTreeSet::new();

@@ -29,7 +29,8 @@ impl FailureContext {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
+    #[cfg_attr(all(feature = "test-util", not(test)), expect(dead_code, reason = "feature-enabled test helper"))]
     pub(crate) fn diagnostic(&self) -> &str {
         &self.diagnostic
     }

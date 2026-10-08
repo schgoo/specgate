@@ -566,7 +566,7 @@ pub fn reject_async(component_id: impl AsRef<str>, operation_name: impl AsRef<st
 /// # Errors
 ///
 /// Returns prior recorded scope errors, unused deterministic operation IDs,
-/// and logical clock overflow.
+/// logical clock overflow, and sidecar persistence failures.
 ///
 /// # Panics
 /// Panics when no native capture session is active or operation scopes remain open.
@@ -660,12 +660,29 @@ impl Environment {
             EnvironmentBackend::Fake(values) => values.get(name).cloned(),
         }
     }
+
+    const fn is_real(&self) -> bool {
+        matches!(self.backend, EnvironmentBackend::Real)
+    }
 }
 thread_local! {
     static CAPTURE_ENVIRONMENT: RefCell<Environment> = RefCell::new(Environment::default());
+    static REAL_ENV_CHECKED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 fn env_var(name: impl AsRef<std::ffi::OsStr>) -> Option<std::ffi::OsString> {
     CAPTURE_ENVIRONMENT.with(|environment| environment.borrow().var_os(name))
+}
+fn capture_env_var() -> Option<std::ffi::OsString> {
+    CAPTURE_ENVIRONMENT.with(|environment| {
+        let environment = environment.borrow();
+        if environment.is_real() {
+            if REAL_ENV_CHECKED.with(std::cell::Cell::get) {
+                return None;
+            }
+            REAL_ENV_CHECKED.with(|checked| checked.set(true));
+        }
+        environment.var_os(ENV_KEY)
+    })
 }
 #[cfg(feature = "test-util")]
 pub mod test_util {
@@ -673,7 +690,9 @@ pub mod test_util {
     //! Values affect lazy native-capture activation on the calling thread only.
     pub use super::io::persistence_stage::PersistenceStage;
 
-    use super::{BTreeMap, CAPTURE_ENVIRONMENT, Config, Environment, EnvironmentBackend, FakeFs, FileSystem, PathBuf, start_with};
+    use super::{
+        BTreeMap, CAPTURE_ENVIRONMENT, Config, Environment, EnvironmentBackend, FakeFs, FileSystem, PathBuf, REAL_ENV_CHECKED, start_with,
+    };
     pub use crate::generated::Output;
     use std::ffi::{OsStr, OsString};
     use std::sync::{Arc, Mutex};
@@ -737,10 +756,12 @@ pub mod test_util {
                 backend: EnvironmentBackend::Fake(values.into_iter().collect::<BTreeMap<_, _>>()),
             };
         });
+        REAL_ENV_CHECKED.with(|checked| checked.set(false));
     }
     /// Restore access to the process environment on this thread.
     pub fn reset_environment() {
         CAPTURE_ENVIRONMENT.with(|environment| *environment.borrow_mut() = Environment::default());
+        REAL_ENV_CHECKED.with(|checked| checked.set(false));
     }
     /// Convenience key conversion for callers assembling deterministic values.
     #[must_use]
@@ -753,7 +774,7 @@ fn activate_env() -> Result<(), CaptureError> {
     if SESSION.with(|slot| slot.borrow().is_some()) {
         return Ok(());
     }
-    let Some(encoded) = env_var(ENV_KEY) else {
+    let Some(encoded) = capture_env_var() else {
         return Ok(());
     };
     if encoded.is_empty() {

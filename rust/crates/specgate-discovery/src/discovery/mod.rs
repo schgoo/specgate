@@ -136,7 +136,8 @@ pub fn discover_batch(
 ///
 /// # Errors
 ///
-/// Returns build, reflection, or registry parse errors.
+/// Returns build, reflection, or registry parse errors. C# discovery also
+/// returns an error when no non-empty component is requested.
 ///
 /// # Testing
 ///

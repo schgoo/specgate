@@ -10,14 +10,14 @@ use std::sync::{Arc, Mutex};
 /// How many times a sidecar replacement is retried before it is reported.
 ///
 /// One scenario rewrites its sidecar after every top-level operation to preserve
-/// crash recovery after each semantic completion. The same destination can
-/// therefore be replaced many times. On Windows a replacement transiently
-/// fails with "access is denied" whenever another process — a virus scanner or
-/// search indexer — still holds the file it just
-/// saw appear. Retrying is not papering over a race in the capture itself: the
-/// serialized bytes are already complete and durable, and only the final rename
-/// is retried. Twelve attempts with the linear delay below wait at most 660 ms,
-/// enough to outlast short scanner locks without hiding a persistent failure.
+/// completed artifacts without requiring a libtest process-exit hook. The same
+/// destination can therefore be replaced many times. On Windows a replacement
+/// transiently fails with "access is denied" whenever another process — a virus
+/// scanner or search indexer — still holds the file it just saw appear.
+/// Retrying is not papering over a race in the capture itself: the serialized
+/// bytes are already complete and durable, and only the final rename is retried.
+/// Twelve attempts with the linear delay below wait at most 660 ms, enough to
+/// outlast short scanner locks without hiding a persistent failure.
 const PERSIST_ATTEMPTS: u32 = 12;
 // A 10 ms linear base yields delays from 10 through 110 ms before the final
 // attempt, balancing scanner tolerance against capture-test latency.
@@ -112,7 +112,8 @@ impl FileSystem {
         )
     }
 
-    fn create_dir_all(&self, path: &Path) -> std::io::Result<()> {
+    fn create_dir_all(&self, path: impl AsRef<Path>) -> std::io::Result<()> {
+        let path = path.as_ref();
         match &self.backend {
             FsBackend::Real => std::fs::create_dir_all(path),
             #[cfg(any(test, feature = "test-util"))]
@@ -123,7 +124,8 @@ impl FileSystem {
         }
     }
 
-    fn create_temp(&self, parent: &Path) -> std::io::Result<PendingFile> {
+    fn create_temp(&self, parent: impl AsRef<Path>) -> std::io::Result<PendingFile> {
+        let parent = parent.as_ref();
         match &self.backend {
             FsBackend::Real => tempfile::NamedTempFile::new_in(parent).map(PendingFile::Real),
             #[cfg(any(test, feature = "test-util"))]
@@ -201,7 +203,8 @@ impl PendingFile {
         }
     }
 
-    fn replace(self, path: &Path) -> Result<(), ReplaceError> {
+    fn replace(self, path: impl AsRef<Path>) -> Result<(), ReplaceError> {
+        let path = path.as_ref();
         match self {
             Self::Real(file) => file.persist(path).map(|_persisted| ()).map_err(|rejected| ReplaceError {
                 file: Self::Real(rejected.file),
@@ -270,7 +273,8 @@ impl FakeFs {
         Ok(())
     }
 
-    fn replace(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+    fn replace(&mut self, bytes: impl AsRef<[u8]>) -> std::io::Result<()> {
+        let bytes = bytes.as_ref();
         self.calls.push(PersistenceStage::Replace);
         if self.fail_stage == Some(PersistenceStage::Replace) || self.replace_failures > 0 {
             self.replace_failures = self.replace_failures.saturating_sub(1);

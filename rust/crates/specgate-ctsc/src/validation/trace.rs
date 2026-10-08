@@ -151,6 +151,10 @@ pub(crate) fn load_trace(path: impl AsRef<Path>) -> Loaded<TraceDocument> {
     load_from(path.as_ref(), &crate::comparison::SystemReader::system())
 }
 
+/// Load and validate one trace through an injected document reader.
+///
+/// This is the testability seam for filesystem and read failures. It collects
+/// all parse and semantic issues in the same form as [`load_trace`].
 pub(crate) fn load_from(path: impl AsRef<Path>, reader: &impl crate::comparison::DocumentReader) -> Loaded<TraceDocument> {
     let path = path.as_ref();
     let mut issues = Vec::new();
@@ -411,7 +415,7 @@ fn parse_span(
         start_time,
         end_time,
         attributes,
-        events,
+        events: events.into_boxed_slice(),
         status_error,
         resource_attributes,
         location: located(path, location),
