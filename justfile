@@ -26,12 +26,20 @@ format:
 deny:
     cd rust && cargo deny check licenses
 
-# Deterministic + semantic lint packs. Rule exceptions belong in
-# rust/evaluate.toml with a justification, never silenced ad hoc. Not yet wired
-# into `check`, because the current workspace baseline still reports findings.
-# Run cargo-evaluate over the product workspace.
+# cargo-evaluate is an internal, authenticated local review tool and is not
+# installed on GitHub-hosted runners. Rule exceptions belong in
+# rust/evaluate.toml with a justification, never silenced ad hoc.
+# Run deterministic and semantic lint packs over the product workspace.
 evaluate:
     cd rust && cargo evaluate
+
+# Run the complete evaluator quietly, reusing every valid file/rule cache entry.
+evaluate-cached:
+    cd rust && cargo evaluate --quiet
+
+# Run the fast, reproducible subset without invoking the semantic provider.
+evaluate-offline:
+    cd rust && cargo evaluate --quiet -Z offline
 
 readme:
     cd rust && cargo doc2readme -p specgate-runtime --lib --template crates/README.j2 --out crates/specgate-runtime/README.md
