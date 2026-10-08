@@ -377,6 +377,51 @@ fn unit_result_and_optional_unit_traces_pass_linked_validation() {
     validate_generated_linked_documents("unit-results", &trace.otlp_json, &registry.registry_json);
 }
 
+/// An abandoned operation encodes to OTLP that passes trace *and* linked
+/// validation against a registry that declares a result outcome.
+///
+/// The declared result is the point: abandonment satisfies no outcome, so the
+/// linked validator must permit a span that owes a result and never produced
+/// one. Validating only against a unit-outcome operation would pass for the
+/// wrong reason.
+#[test]
+fn an_abandoned_operation_passes_trace_and_linked_validation() {
+    let registry_id = "urn:ctsc:registry:fixture.abandon:1";
+    let registry_version = "1.0.0";
+    let registry = encode_schema_registry_result(
+        registry_id.to_string(),
+        registry_version.to_string(),
+        r#"{
+            "component":"fixture.abandon",
+            "dependencies":[],
+            "dependency_types":[],
+            "operations":[
+                {
+                    "name":"query",
+                    "is_async":true,
+                    "inputs":[{"name":"value","ty":"i32"}],
+                    "output":"i32",
+                    "empty":false,
+                    "errors":[],
+                    "setups":[]
+                }
+            ],
+            "types":[]
+        }"#,
+    )
+    .unwrap();
+    let digest = format!("sha256:{:x}", Sha256::digest(registry.registry_json.as_bytes()));
+    let captures = [abandoned_capture("abandoned")];
+    let trace =
+        encode_native_captures_otlp_result(&captures, "0.6.0", "rust-reference", "rust", registry_id, registry_version, &digest).unwrap();
+    let operation =
+        serde_json::from_str::<serde_json::Value>(&trace.otlp_json).unwrap()["resourceSpans"][0]["scopeSpans"][0]["spans"][2].clone();
+    assert_eq!(operation["name"], "conformance.operation");
+    assert_eq!(operation["events"][0]["name"], "conformance.abandoned");
+    assert_eq!(operation["status"]["code"], 0, "an abandoned operation span encodes OTLP UNSET");
+    validate_generated_linked_documents("abandoned", &trace.otlp_json, &registry.registry_json);
+}
+
 #[test]
 fn annotated_tuple_variants_pass_linked_validation() {
     let raw_registry = Registry::parse(specgate::__rt::discovery().to_string()).unwrap();
@@ -564,6 +609,35 @@ fn unit_error_capture(label: &str, fail: bool) -> Capture {
         operation.result(Value::Integer(7)).unwrap();
     }
     finish().unwrap()
+}
+
+/// Record one operation that is polled once, observes `Pending`, and is then
+/// dropped — the minimal deterministic shape of abandonment.
+fn abandoned_capture(label: &str) -> Capture {
+    use std::task::{Context, Poll, Waker};
+
+    start(capture_config(label)).unwrap();
+    let mut context = Context::from_waker(Waker::noop());
+    let mut abandoned = Box::pin(abandonable_query(2));
+    assert_eq!(abandoned.as_mut().poll(&mut context), Poll::Pending);
+    drop(abandoned);
+    finish().unwrap()
+}
+
+#[spec_operation("query", spec = "fixture.abandon")]
+async fn abandonable_query(value: i32) -> i32 {
+    SuspendForever.await
+}
+
+/// Never resolves, so the operation can only end by being dropped.
+struct SuspendForever;
+
+impl Future for SuspendForever {
+    type Output = i32;
+
+    fn poll(self: std::pin::Pin<&mut Self>, _context: &mut std::task::Context<'_>) -> std::task::Poll<i32> {
+        std::task::Poll::Pending
+    }
 }
 
 fn capture_config(label: &str) -> Config {

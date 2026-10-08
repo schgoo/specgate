@@ -1,4 +1,4 @@
-# CTSC Comparison 0.2
+# CTSC Comparison 0.3
 
 **Status:** Draft
 
@@ -42,6 +42,7 @@ Comparison policies operate on the following CTSC semantics:
 - event-array order;
 - observations and their values;
 - unit, result, empty, and declared-error completion;
+- abandonment, recorded when an operation stopped without reaching an outcome;
 - target and supervisor faults;
 - concrete OTLP `AnyValue` structures;
 - registry record, tagged-union, tuple, set, map, and numeric types;
@@ -70,6 +71,7 @@ A policy MUST define:
 | Collections | Does the policy preserve or explicitly relax declared list, tuple, set, and map semantics? |
 | Floating point | Exact, absolute tolerance, relative tolerance, or another policy? |
 | Faults | Which fault fields participate in equality? |
+| Abandonment | Does an operation abandoned in one run and not the other count as a difference? |
 | Parallel regions | How are unordered branches paired? |
 | Timing | Are timestamps or durations compared? |
 | Resources and scopes | Which resource/scope attributes participate? |
@@ -103,7 +105,7 @@ A semantic mismatch location SHOULD include:
 - event or child-span position;
 - expected and actual semantic values.
 
-Diagnostic wording and serialization format are not defined by CTSC 0.2.
+Diagnostic wording and serialization format are not defined by CTSC 0.3.
 
 ## 7. CTSC Strict reference policy
 
@@ -150,9 +152,18 @@ Missing, additional, or reordered events are mismatches.
 
 ### 7.5 Completion
 
-Unit, result, empty, declared error, and fault are distinct termination states.
+Unit, result, empty, declared error, abandonment, and fault are distinct
+termination states.
 
 Results and declared errors compare their values.
+
+Abandonment carries no attributes, so it compares by presence alone. Under a
+policy that pairs it strictly — including `ctsc.strict/0.1.0`, by §7.4 — an
+abandoned operation pairs only with an abandoned operation, and an operation
+abandoned in one run but completed in the other is a difference. A policy that
+tolerates nondeterministic abandonment, such as a race whose losing branch
+varies between runs, declares that relaxation under the Abandonment dimension
+in §4.
 
 ### 7.6 Values
 

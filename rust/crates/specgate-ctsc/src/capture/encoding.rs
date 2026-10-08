@@ -5,9 +5,9 @@ use super::otlp::{
     Span, SpanEvent, SpanId as WireSpanId, SpanKind, SpanStatus, StatusCode, TraceId as WireTraceId, UnixNanos,
 };
 use super::{
-    BTreeMap, Capture, Completion, EMPTY_EVENT, ERROR_EVENT, Encoding, FAULT_EVENT, ID_HEX_WIDTH, KIND_INTERNAL, Metadata, OBS_EVENT,
-    OPERATION_NAME, Operation, RESULT_EVENT, RUN_NAME, SCENARIO_NAME, SCOPE_NAME, STATUS_ERROR, STATUS_OK, Status, TOOL_NAME, Value,
-    attribute, candidate, ctsc, error, reference, run, time,
+    ABANDONED_EVENT, BTreeMap, Capture, Completion, EMPTY_EVENT, ERROR_EVENT, Encoding, FAULT_EVENT, ID_HEX_WIDTH, KIND_INTERNAL, Metadata,
+    OBS_EVENT, OPERATION_NAME, Operation, RESULT_EVENT, RUN_NAME, SCENARIO_NAME, SCOPE_NAME, STATUS_ERROR, STATUS_OK, STATUS_UNSET, Status,
+    TOOL_NAME, Value, attribute, candidate, ctsc, error, reference, run, time,
 };
 
 // A one-nanosecond gap makes adjacent deterministic scenario intervals unambiguously sequential.
@@ -347,6 +347,13 @@ fn operation_span(trace_id: impl AsRef<str>, operation: &Operation, placement: P
                     string_attribute(attribute::FAULT_OBSERVER, observer.clone()),
                 ],
             },
+            Completion::Abandoned { order, time_ns } => SpanEvent {
+                order: *order,
+                time_ns: UnixNanos::try_from(offset_time(*time_ns, offset)?.to_string().into_boxed_str())
+                    .expect("capture values must satisfy OTLP wire constraints"),
+                name: ABANDONED_EVENT,
+                attributes: Vec::new(),
+            },
         });
     }
     events.sort_by_key(|event| event.order);
@@ -387,6 +394,7 @@ fn operation_span(trace_id: impl AsRef<str>, operation: &Operation, placement: P
 
 const fn status_code(status: Status) -> i32 {
     match status {
+        Status::Unset => STATUS_UNSET,
         Status::Ok => STATUS_OK,
         Status::Error => STATUS_ERROR,
     }

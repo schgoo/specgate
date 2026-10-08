@@ -1,11 +1,11 @@
 //! OTLP span linkage validation and replay scenario assembly.
 
 use super::{
-    BTreeMap, COMPONENT_ID, CTSC_VERSION, ComponentId, EMPTY_EVENT, ERROR_EVENT, ERROR_NAME, ERROR_VALUE, FAULT_EVENT, Input, OBS_EVENT,
-    OBS_NAME, OPERATION_INPUTS, OPERATION_NAME, OPERATION_SPAN, Operation, OperationName, PARALLEL_SPAN, REGISTRY_DIGEST, REGISTRY_ID,
-    REGISTRY_VERSION, RESULT_EVENT, RESULT_VALUE, RUN_SPAN, Registry, SCENARIO_INDEX, SCENARIO_NAME, SCENARIO_SPAN, SPAN_WIDTH, Scenario,
-    ScenarioIndex, ScenarioName, TARGET_LANGUAGE, TARGET_NAME, TOOL_NAME, TOOL_VERSION_KEY, TRACE_WIDTH, Type, VERSION_KEY,
-    ValidatedManifest, Value, error,
+    ABANDONED_EVENT, BTreeMap, COMPONENT_ID, CTSC_VERSION, ComponentId, EMPTY_EVENT, ERROR_EVENT, ERROR_NAME, ERROR_VALUE, FAULT_EVENT,
+    Input, OBS_EVENT, OBS_NAME, OPERATION_INPUTS, OPERATION_NAME, OPERATION_SPAN, Operation, OperationName, PARALLEL_SPAN, REGISTRY_DIGEST,
+    REGISTRY_ID, REGISTRY_VERSION, RESULT_EVENT, RESULT_VALUE, RUN_SPAN, Registry, SCENARIO_INDEX, SCENARIO_NAME, SCENARIO_SPAN,
+    SPAN_WIDTH, Scenario, ScenarioIndex, ScenarioName, TARGET_LANGUAGE, TARGET_NAME, TOOL_NAME, TOOL_VERSION_KEY, TRACE_WIDTH, Type,
+    VERSION_KEY, ValidatedManifest, Value, error,
 };
 mod wire;
 pub(super) use wire::OtlpDoc as Document;
@@ -261,6 +261,7 @@ fn decode_operation(span: &Span, registry: &Registry) -> Result<Operation, error
     let mut empty_count = 0_usize;
     let mut error_count = 0_usize;
     let mut has_fault = false;
+    let mut has_abandoned = false;
     let mut event_attributes = BTreeMap::new();
     for event in &span.events {
         match event.name.as_ref() {
@@ -285,6 +286,15 @@ fn decode_operation(span: &Span, registry: &Registry) -> Result<Operation, error
                 return Err(format!("reference {location} contains unsupported observation '{name}' in the first replay slice").into());
             }
             FAULT_EVENT => has_fault = true,
+            // Abandonment is terminal and carries no outcome, exactly like a
+            // fault from this decoder's point of view. Counting it is what keeps
+            // a result-bearing operation that was abandoned from tripping the
+            // "no result or fault" check below. This is classification only: it
+            // does not decide whether an abandoned reference is replayable:
+            // abandonment is only reachable for async operations, and the
+            // planner already rejects every async candidate before invocation,
+            // so no abandoned reference reaches the invoker.
+            ABANDONED_EVENT => has_abandoned = true,
             EMPTY_EVENT => {
                 empty_count += 1;
                 if !declaration.empty() {
@@ -319,7 +329,7 @@ fn decode_operation(span: &Span, registry: &Registry) -> Result<Operation, error
             other => return Err(format!("reference {location} contains unsupported CTSC event '{other}'").into()),
         }
     }
-    let terminal_count = result_count + empty_count + error_count + usize::from(has_fault);
+    let terminal_count = result_count + empty_count + error_count + usize::from(has_fault) + usize::from(has_abandoned);
     if terminal_count > 1 {
         return Err(format!("reference {location} contains multiple terminal events").into());
     }

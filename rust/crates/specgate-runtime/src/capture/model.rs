@@ -253,8 +253,11 @@ pub struct SpanBoundary {
 /// Terminal status for a native span.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[expect(clippy::exhaustive_enums, reason = "CTSC span status is a closed two-state protocol")]
+#[expect(clippy::exhaustive_enums, reason = "CTSC span status is the closed OTLP unset/ok/error protocol")]
 pub enum Status {
+    /// Neither success nor failure: the operation stopped without reaching an
+    /// outcome. Encoded as OTLP `UNSET`.
+    Unset,
     /// Successful completion.
     Ok,
     /// Error or fault completion.
@@ -330,6 +333,16 @@ pub enum Completion {
         message: String,
         /// Fault observer identity.
         observer: String,
+    },
+    /// The operation stopped for good without reaching any outcome, because the
+    /// future carrying it was dropped before it resolved. Carries no payload:
+    /// there is nothing to report beyond "this stopped".
+    Abandoned {
+        /// Stable event order.
+        order: u64,
+        /// Completion timestamp in Unix nanoseconds.
+        #[serde(rename = "time_unix_nano")]
+        time_ns: i64,
     },
 }
 
@@ -482,12 +495,18 @@ impl SpanBuilder {
         if self.span.end_ns < self.span.start_ns {
             return Err("native operation end timestamp precedes its start timestamp".to_string().into());
         }
-        let completion_is_error = match self.span.completion.as_ref() {
-            Some(Completion::Error { .. } | Completion::Fault { .. }) => true,
-            Some(Completion::Result { .. } | Completion::Empty { .. }) => false,
+        // Each completion channel implies exactly one status. Abandonment is
+        // neither a success nor a failure — the operation reached no outcome —
+        // so `Unset` is the only truthful status for it. The match is
+        // exhaustive on purpose: a new completion channel must state which
+        // status it implies rather than inherit one by fall-through.
+        let implied_status = match self.span.completion.as_ref() {
+            Some(Completion::Error { .. } | Completion::Fault { .. }) => Status::Error,
+            Some(Completion::Result { .. } | Completion::Empty { .. }) => Status::Ok,
+            Some(Completion::Abandoned { .. }) => Status::Unset,
             None => return Err("native operation span requires a terminal completion".to_string().into()),
         };
-        if completion_is_error != (self.span.status == Status::Error) {
+        if implied_status != self.span.status {
             return Err("native operation status disagrees with its completion kind".to_string().into());
         }
         Ok(self.span)

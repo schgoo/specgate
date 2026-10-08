@@ -295,15 +295,58 @@ and the fault MUST be emitted on the unfinished `conformance.operation` span
 itself — never on a scenario or run span. The containing-span `ERROR` status
 rule above applies unchanged.
 
-Unit completion emits no completion event — see §7.6 — so without this fault an
+Unit completion emits no completion event — see §7.7 — so without this fault an
 unfinished unit-outcome operation is indistinguishable from a completed one.
 Emitting the fault on the operation span preserves which operation was
 outstanding, which a supervisor cannot supply.
 
+`incomplete_capture` and abandonment (§7.6) describe different situations and
+MUST NOT be conflated. `incomplete_capture` says the recording ended while the
+operation was still outstanding — the producer does not know what happened to
+it. Abandonment says the producer knows the operation stopped for good and will
+never resume.
+
 Native failure names MAY be preserved in
 `conformance.fault.native_type`. CTSC defines no stack-trace field.
 
-### 7.6 Operation termination
+### 7.6 Abandonment
+
+```text
+event.name = "conformance.abandoned"
+```
+
+Abandonment records that an operation stopped for good without reaching any
+outcome. It takes no attributes.
+
+It is neither a fault nor a completion outcome. Nothing went wrong and no
+contract was satisfied: the work was dropped. The canonical case is an
+asynchronous operation whose future is discarded before it resolves, such as the
+losing branch of a race.
+
+`conformance.abandoned` MUST belong to a `conformance.operation` span. It MUST
+NOT appear on a run, scenario, or parallel span. The only producer mechanism
+defined for it is discarding an in-flight operation, which is always an
+operation-scoped event; supervisor-observed abandonment is deliberately not
+defined. A later revision MAY widen this rule, which is backward compatible,
+whereas narrowing it later would invalidate existing artifacts.
+
+The operation span MUST have `UNSET` status. The operation neither succeeded nor
+failed, so neither `OK` nor `ERROR` is truthful.
+
+Abandonment is terminal. It counts as a completion or failure event for §7.7's
+single-termination rules and for the unfinished-operation rule: an operation
+carrying `conformance.abandoned` MUST NOT also carry a result, empty, declared
+error, or target fault event, and MUST NOT emit further events afterwards.
+
+Abandonment MUST NOT propagate. A scenario or run containing an abandoned
+operation keeps whatever status its own termination earned; an abandoned child
+does not make its ancestors fail.
+
+Because abandonment satisfies no outcome, the operation's registry `outcomes`
+declaration imposes no obligation on an abandoned span. In particular, an
+operation that declares a result outcome may be abandoned without emitting one.
+
+### 7.7 Operation termination
 
 An operation completing through its contract has exactly one completion state:
 
@@ -322,12 +365,18 @@ An unexpected caught failure emits `conformance.fault` instead of a completion
 event. When the target cannot report termination, the supervisor emits a fault
 on the nearest surviving scenario or run span.
 
+An operation that stops without reaching any of these states emits
+`conformance.abandoned` instead — see §7.6. Like a fault, it is a termination
+but not a contractual completion; unlike a fault, it reports no failure.
+
 Observations may precede completion or failure.
 
 Successful unit, result, and empty operations SHOULD have `OK` status. Declared
-errors and faults MUST have `ERROR` status.
+errors and faults MUST have `ERROR` status. Abandoned operations MUST have
+`UNSET` status, and an abandoned operation does not change the status of its
+containing scenario or run.
 
-### 7.7 Event order
+### 7.8 Event order
 
 Entries in a span's OTLP `events` array are in emission order. Producers and
 transformations claiming CTSC compatibility MUST preserve that order.

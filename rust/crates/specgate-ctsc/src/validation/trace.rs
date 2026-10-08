@@ -117,6 +117,7 @@ enum EventRole {
     Empty,
     Error,
     Fault,
+    Abandoned,
     Other,
 }
 impl EventRole {
@@ -127,11 +128,12 @@ impl EventRole {
             "conformance.empty" => Self::Empty,
             "conformance.error" => Self::Error,
             "conformance.fault" => Self::Fault,
+            "conformance.abandoned" => Self::Abandoned,
             _ => Self::Other,
         }
     }
     fn operation_only(self) -> bool {
-        matches!(self, Self::Observation | Self::Result | Self::Empty | Self::Error)
+        matches!(self, Self::Observation | Self::Result | Self::Empty | Self::Error | Self::Abandoned)
     }
 }
 
@@ -679,6 +681,17 @@ fn validate_events(span: &TraceSpan, path: impl AsRef<Path>, issues: &mut Vec<Va
                     check_attr(&event.attributes, key, AttributeType::Int, &location, issues);
                 }
             }
+            EventRole::Abandoned => {
+                // Abandonment is terminal: the operation stopped for good without
+                // reaching an outcome. Counting it with the other non-result
+                // terminals is what makes the "at most one non-result
+                // completion/failure" rule reject an abandoned span that also
+                // claims a result, and setting `terminated` is what keeps it out
+                // of the unit-completion rule below.
+                reject_attrs(&event.attributes, [], &location, issues);
+                failure_count += 1;
+                terminated = true;
+            }
             EventRole::Other => {}
         }
     }
@@ -710,6 +723,18 @@ fn validate_events(span: &TraceSpan, path: impl AsRef<Path>, issues: &mut Vec<Va
                 span.status == SpanStatus::Error,
                 &span.location,
                 "declared error and fault operations must have ERROR status",
+                issues,
+            );
+        }
+        if span
+            .events
+            .iter()
+            .any(|event| EventRole::parse(event.name.as_str()) == EventRole::Abandoned)
+        {
+            require(
+                span.status == SpanStatus::Unset,
+                &span.location,
+                "abandoned operations must have UNSET status",
                 issues,
             );
         }

@@ -135,12 +135,13 @@ pub(crate) const CTSC_SPANS: [&str; 4] = [
     "conformance.parallel",
 ];
 /// Closed set of semantic CTSC event names.
-pub(crate) const CTSC_EVENTS: [&str; 5] = [
+pub(crate) const CTSC_EVENTS: [&str; 6] = [
     "conformance.observation",
     "conformance.result",
     "conformance.empty",
     "conformance.error",
     "conformance.fault",
+    "conformance.abandoned",
 ];
 
 fn deserialize_present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>

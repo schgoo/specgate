@@ -1,0 +1,26 @@
+{
+  "format": "ctsc.registry",
+  "formatVersion": "0.3.0",
+  "registryId": "urn:ctsc:registry:example.search:1",
+  "version": "1.0.0",
+  "description": "Search component whose result-returning operation may be abandoned.",
+  "components": [
+    {
+      "id": "example.search",
+      "operations": [
+        {
+          "name": "query",
+          "inputs": [],
+          "observations": [],
+          "outcomes": {
+            "result": {
+              "kind": "primitive",
+              "name": "i64"
+            }
+          }
+        }
+      ],
+      "types": []
+    }
+  ]
+}

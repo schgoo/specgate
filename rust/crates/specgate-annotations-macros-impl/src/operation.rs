@@ -16,6 +16,32 @@ use super::{
 /// cause collisions with metadata emitted by other annotation kinds.
 const METADATA_NAMESPACE: &str = "OPERATION";
 
+/// Build the scope-opening fragment for an operation body.
+///
+/// `abandonable` selects the async entry point, which permits a dropped,
+/// never-resolved future to record abandonment instead of poisoning the
+/// session. A synchronous body cannot stop part-way without unwinding, so it
+/// keeps the strict entry point.
+fn begin_fragment(rt: &TokenStream2, component: &TokenStream2, name: &str, abandonable: bool) -> TokenStream2 {
+    let begin = if abandonable {
+        quote!(begin_async_operation)
+    } else {
+        quote!(begin_operation)
+    };
+    quote! {
+        let mut __sg_scope = match #rt::#begin(
+            #rt::ComponentId::from(#component),
+            #rt::OperationName::from(#name),
+        ) {
+            ::std::result::Result::Ok(scope) => scope,
+            ::std::result::Result::Err(error) => {
+                #rt::report_error(#rt::Stage::OperationBegin, &error);
+                #rt::OperationScope::inactive()
+            }
+        };
+    }
+}
+
 fn async_completion(rt: &TokenStream2, kind: ReturnKind) -> TokenStream2 {
     match kind {
         ReturnKind::Unit => quote!(#rt::report_completion(__sg_scope.unit());),
@@ -88,18 +114,8 @@ pub fn expand_operation(attribute: TokenStream2, item: TokenStream2) -> syn::Res
     let body = function.block.clone();
     let rt = runtime();
     let component = component(owner.as_deref());
-    let begin = quote! {
-        let mut __sg_scope = match #rt::begin_operation(
-            #rt::ComponentId::from(#component),
-            #rt::OperationName::from(#name),
-        ) {
-            ::std::result::Result::Ok(scope) => scope,
-            ::std::result::Result::Err(error) => {
-                #rt::report_error(#rt::Stage::OperationBegin, &error);
-                #rt::OperationScope::inactive()
-            }
-        };
-    };
+    let begin = begin_fragment(&rt, &component, &name, false);
+    let begin_async = begin_fragment(&rt, &component, &name, true);
     let input_records = params
         .iter()
         .filter(|(_ident, ty, _name)| !is_mut_ref(ty))
@@ -129,7 +145,7 @@ pub fn expand_operation(attribute: TokenStream2, item: TokenStream2) -> syn::Res
         parse_quote!({
             let __sg_context = #rt::capture_async_context();
             #rt::instrument_async_operation(__sg_context, async move {
-                #begin
+                #begin_async
                 #(#input_records)*
                 if let ::std::result::Result::Err(error) = __sg_scope.inputs_recorded() {
                     #rt::report_error(#rt::Stage::OperationInput, &error);

@@ -48,6 +48,7 @@ const RESULT_VALUE: &str = "conformance.result.value";
 const OBS_EVENT: &str = "conformance.observation";
 const OBS_NAME: &str = "conformance.observation.name";
 const FAULT_EVENT: &str = "conformance.fault";
+const ABANDONED_EVENT: &str = "conformance.abandoned";
 const EMPTY_EVENT: &str = "conformance.empty";
 pub mod model;
 use model::{
