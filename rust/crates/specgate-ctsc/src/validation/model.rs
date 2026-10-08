@@ -121,10 +121,12 @@ impl PartialEq<String> for RawName {
     }
 }
 
-// These identifiers are defined by the CTSC 0.2 Registry and Trace Core
-// contracts. Producers and validators must update them together.
-/// Registry and trace contract version accepted by this validator.
-pub(crate) const CTSC_VERSION: &str = "0.2.0";
+// These identifiers are defined by the CTSC Registry and Trace Core contracts.
+// Producers and validators must update them together, which is why the version
+// itself is read from the crate root rather than copied here: an encoded
+// artifact and the validator that checks it cannot disagree about the version
+// this build speaks.
+pub(crate) use crate::CTSC_VERSION;
 /// Closed set of semantic CTSC span names.
 pub(crate) const CTSC_SPANS: [&str; 4] = [
     "conformance.run",

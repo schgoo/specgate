@@ -476,7 +476,7 @@ fn identity_mismatches_do_not_reuse_reference_types_for_candidate_payloads() {
     let registry_id = "urn:registry:comparison-identities";
     let registry = serde_json::json!({
         "format":"ctsc.registry",
-        "formatVersion":"0.2.0",
+        "formatVersion":"0.3.0",
         "registryId":registry_id,
         "version":"1.0.0",
         "components":[{
@@ -639,7 +639,7 @@ fn linked_trace(
     serde_json::json!({
         "resourceSpans":[{
             "resource":{"attributes":[
-                {"key":"conformance.version","value":{"stringValue":"0.2.0"}},
+                {"key":"conformance.version","value":{"stringValue":"0.3.0"}},
                 {"key":"conformance.tool.name","value":{"stringValue":"test"}},
                 {"key":"conformance.tool.version","value":{"stringValue":"1.0.0"}},
                 {"key":"conformance.target.name","value":{"stringValue":"test"}},

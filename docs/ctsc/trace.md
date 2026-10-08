@@ -1,4 +1,4 @@
-# CTSC Trace 0.2
+# CTSC Trace 0.3
 
 **Status:** Draft
 
@@ -65,7 +65,7 @@ Every resource containing CTSC spans MUST include:
 
 | Attribute | Type | Meaning |
 |---|---|---|
-| `conformance.version` | string | CTSC trace version (`0.2.0`) |
+| `conformance.version` | string | CTSC trace version (`0.3.0`) |
 | `conformance.tool.name` | string | Producing tool |
 | `conformance.tool.version` | string | Producing tool version |
 | `conformance.target.name` | string | Target label within the run |
@@ -94,7 +94,7 @@ context crosses a textual carrier. CTSC does not mandate the carrier.
 
 Failure to propagate context produces malformed CTSC hierarchy.
 
-OTLP span links MAY be preserved as non-CTSC telemetry. CTSC 0.2 does not use
+OTLP span links MAY be preserved as non-CTSC telemetry. CTSC 0.3 does not use
 links to establish hierarchy, ordering, or conformance semantics.
 
 ## 6. Spans

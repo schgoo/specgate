@@ -45,9 +45,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 // CTSC Trace Core version and schema URL; changing either changes wire compatibility.
+// Both are re-exports of the crate-root definition so the encoder cannot emit a
+// version the validators in this crate do not accept.
 mod ctsc {
-    pub(super) const VERSION: &str = "0.2.0";
-    pub(super) const SCHEMA: &str = "https://specgate.dev/ctsc/schema/0.2.0";
+    pub(super) use crate::{CTSC_SCHEMA_URL as SCHEMA, CTSC_VERSION as VERSION};
 }
 // Deterministic reference/replay identity ranges keep independently encoded evidence disjoint.
 mod reference {

@@ -25,6 +25,7 @@ except ImportError as error:
     ) from error
 
 
+CTSC_VERSION = "0.3.0"
 CTSC_SPANS = {
     "conformance.run",
     "conformance.scenario",
@@ -194,7 +195,7 @@ def unique_names(
 
 
 def ascending_component_order(components: Any, validator: Validator) -> None:
-    """Registry 0.2 section 3.1: components are ordered by ascending id.
+    """Registry 0.3 section 3.1: components are ordered by ascending id.
 
     Python compares ``str`` by Unicode code point, which is exactly the
     comparison the contract specifies.
@@ -798,7 +799,7 @@ def load_registry_document(
     visiting.add(path)
     try:
         document = load_json(path)
-        schema = load_json(Path(__file__).with_name("ctsc-registry-0.2.schema.json"))
+        schema = load_json(Path(__file__).with_name("ctsc-registry.schema.json"))
         jsonschema.Draft202012Validator.check_schema(schema)
         schema_errors = list(jsonschema.Draft202012Validator(schema).iter_errors(document))
         for error in schema_errors:
@@ -1082,9 +1083,9 @@ def validate_trace(path: Path) -> tuple[list[dict[str, Any]], Validator]:
                 )
                 if key == "conformance.version" and actual is not None:
                     validator.require(
-                        actual == "0.2.0",
+                        actual == CTSC_VERSION,
                         resource_location,
-                        "conformance.version must be '0.2.0'",
+                        f"conformance.version must be '{CTSC_VERSION}'",
                     )
             spans.extend(
                 (span, resource_attributes, span_location)

@@ -431,7 +431,7 @@ mod tests {
         assert!(!first.contains('\n'), "registry JSON must be compact");
         let document: serde_json::Value = serde_json::from_str(&first).unwrap();
         assert_eq!(document["format"], "ctsc.registry");
-        assert_eq!(document["formatVersion"], "0.2.0");
+        assert_eq!(document["formatVersion"], "0.3.0");
     }
 
     #[test]
