@@ -20,18 +20,21 @@ mod tests {
 
     #[test]
     fn umbrella_facade_captures() {
-        sg::__rt::start_native_capture(sg::__rt::NativeCaptureConfig {
-            scenario_name: "umbrella".to_string(),
-            trace_id: "77777777777777777777777777777777".to_string(),
-            run_span_id: "7777777777777701".to_string(),
-            scenario_span_id: "7777777777777702".to_string(),
-            operation_span_ids: Vec::new(),
-            start_time_unix_nano: 1,
-            clock_step_unix_nano: 1,
-        })
+        sg::__rt::start(
+            sg::__rt::Config::builder(sg::__rt::ConfigDeps {
+                scenario_name: "umbrella".to_string(),
+                trace_id: sg::__rt::TraceId::try_from("77777777777777777777777777777777").unwrap(),
+                run_id: sg::__rt::SpanId::try_from("7777777777777701").unwrap(),
+                scenario_id: sg::__rt::SpanId::try_from("7777777777777702").unwrap(),
+            })
+            .start_time(1)
+            .clock_step(1)
+            .build()
+            .unwrap(),
+        )
         .unwrap();
         assert_eq!(double(2), 4);
-        let capture = sg::__rt::finish_native_capture().unwrap();
+        let capture = sg::__rt::finish().unwrap();
         assert_eq!(
             capture.operations[0].component_id,
             "fixture.facade_umbrella"

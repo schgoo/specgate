@@ -1,4 +1,6 @@
-use specgate_ctsc::validation::{validate_linked, validate_registry, validate_trace};
+//! Native capture encoding and validation integration tests.
+
+use specgate_ctsc::validation::{DocumentBytes, bytes, validate_linked, validate_registry, validate_trace};
 use std::path::{Path, PathBuf};
 
 fn corpus() -> PathBuf {
@@ -70,6 +72,7 @@ fn native_linked_validator_classifies_entire_corpus() {
         {
             continue;
         }
+
         let registry = path.parent().expect("fixture directory").join("registry.json");
         let report = validate_linked(&path, &registry, &[]);
         assert!(report.valid, "{}: {:#?}", path.display(), report.issues);
@@ -97,4 +100,24 @@ fn native_linked_validator_classifies_entire_corpus() {
         let report = validate_linked(&path, &registry, &[]);
         assert!(!report.valid, "{} unexpectedly passed", path.display());
     }
+}
+
+#[test]
+fn byte_and_path_validation_reports_are_identical() {
+    let registry_path = corpus().join("linked").join("valid").join("registry.json");
+    let trace_path = corpus().join("linked").join("valid").join("trace.otlp.json");
+    let registry = std::fs::read(&registry_path).expect("registry fixture");
+    let trace = std::fs::read(&trace_path).expect("trace fixture");
+    let registry_document = DocumentBytes::new(&registry_path, &registry);
+    let trace_document = DocumentBytes::new(&trace_path, &trace);
+
+    assert_eq!(
+        bytes::validate_registry(registry_document, []),
+        validate_registry(&registry_path, &[])
+    );
+    assert_eq!(bytes::validate_trace(trace_document), validate_trace(&trace_path));
+    assert_eq!(
+        bytes::validate_linked(trace_document, registry_document, []),
+        validate_linked(&trace_path, &registry_path, &[])
+    );
 }

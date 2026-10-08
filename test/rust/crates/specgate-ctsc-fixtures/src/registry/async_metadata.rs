@@ -21,10 +21,12 @@ fn runtime_specific_async_operations_capture_under_their_own_runtime() {
     ] {
         let operation = specgate::__rt::SPECGATE_OPS
             .iter()
-            .find(|operation| operation.component == component && operation.name == name)
+            .find(|operation| {
+                operation.component().as_str() == component && operation.name().as_str() == name
+            })
             .unwrap_or_else(|| panic!("missing async metadata for {component}::{name}"));
-        assert!(operation.is_async);
-        assert!(!operation.is_setup);
+        assert!(operation.is_async());
+        assert!(!operation.is_setup());
     }
 
     assert_eq!(smol::block_on(smol_delay()), "smol done");

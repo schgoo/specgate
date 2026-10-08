@@ -10,19 +10,23 @@ keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
 
+[features]
+test-util = []
+
 [dependencies]
 base64 = { workspace = true }
 percent-encoding = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+ohno = { workspace = true }
 sha2 = { workspace = true }
-specgate-runtime = { workspace = true }
-url = { workspace = true }
+templated_uri = { workspace = true }
 
 [dev-dependencies]
+specgate-runtime = { workspace = true }
 sha2 = { workspace = true }
 specgate = { workspace = true }
-specgate-discovery = { workspace = true }
+specgate-discovery = { workspace = true, features = ["serde"] }
 
 [lints]
 workspace = true

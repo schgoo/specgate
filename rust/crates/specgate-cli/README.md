@@ -27,9 +27,29 @@ statically links its top-level semantic inputs to a Rust candidate, and
 emits an independent deterministic CTSC trace. `validate` provides native
 CTSC 0.2 Registry, Trace Core, Linked, and capture-bundle validation.
 `compare` applies deterministic `ctsc.strict/0.1.0` semantics. No command
-reads `.spec.yaml` or invokes Python.
+reads `.spec.yaml` or invokes Python. The library capture entry point accepts
+one owned [`CaptureRequest`][__link0], constructed with a validated builder, and
+returns `Result<CaptureReport, CaptureError>`.
+
+## Examples
+
+```rust
+use specgate_cli::{CapturePaths, CaptureRequest, capture};
+
+let request = CaptureRequest::builder(CapturePaths {
+    binding: "binding.yaml".into(),
+    out: "capture".into(),
+})
+    .component("example.math")
+    .build()?;
+let report = capture(request)?;
+println!("registry: {}", report.registry_path.display());
+```
 
 
 ---
 
 Part of the [SpecGate](https://github.com/schgoo/specgate) project.
+
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQbJSusbBjLO7EbSlASCvKRTqwbmd2gsLYkxMobU3WiDiuhvKthYvRhcoQb4GvBxa0gqAQbspVZLx_5jEcboeIRckwX8rcbhGCVVqvHzx1hZIGDbHNwZWNnYXRlLWNsaWUwLjYuMGxzcGVjZ2F0ZV9jbGk
+ [__link0]: https://docs.rs/specgate-cli/0.6.0/specgate_cli/?search=CaptureRequest

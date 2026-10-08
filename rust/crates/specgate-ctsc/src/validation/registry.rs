@@ -1,41 +1,122 @@
 use super::model::{
-    CTSC_VERSION, NamedType, RegistryComponent, RegistryDocument, RegistryOperation, RegistrySet, ResolvedComponent, TypeRef,
+    CTSC_VERSION, NamedType, RawText, RegistryComponent, RegistryDocument, RegistryOperation, RegistrySet, ResolvedComponent, TypeRef,
 };
-use super::{Loaded, ValidationIssue, is_digest, issue, located, read_bytes, sha256_digest};
-use percent_encoding::percent_decode_str;
+use super::{DocumentBytes, Loaded, ValidationIssue, is_digest, issue, located, sha256_digest};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use url::Url;
 
+mod shape;
+mod uri;
+use shape::{document_uses, validate_shape};
+use uri::resolve_uri;
+
+// Normative reserved extension namespace; changing it changes accepted registry compatibility.
+const RESERVED_NAMESPACE: &str = "conformance.";
+// Normative CTSC registry discriminator; changing it changes accepted registry compatibility.
 const REGISTRY_FORMAT: &str = "ctsc.registry";
 
 #[derive(Debug)]
 struct RegistryFile {
     path: PathBuf,
-    digest: String,
+    digest: RawText,
     document: RegistryDocument,
 }
 
-pub(crate) fn load_registry_set(root: &Path, explicit_imports: &[PathBuf]) -> Loaded<RegistrySet> {
+struct Filesystem<'a> {
+    inner: FilesystemInner<'a>,
+}
+
+enum FilesystemInner<'a> {
+    Real,
+    Memory(BTreeMap<PathBuf, Vec<u8>>),
+    Reader(&'a dyn crate::comparison::DocumentReader),
+}
+
+impl Filesystem<'_> {
+    fn real() -> Self {
+        Self {
+            inner: FilesystemInner::Real,
+        }
+    }
+
+    fn from_documents(root: DocumentBytes<'_>, explicit_imports: &[DocumentBytes<'_>]) -> Self {
+        let files = std::iter::once(root)
+            .chain(explicit_imports.iter().copied())
+            .map(|document| (document.path.to_path_buf(), document.bytes.to_vec()))
+            .collect();
+        Self {
+            inner: FilesystemInner::Memory(files),
+        }
+    }
+
+    fn from_reader(reader: &dyn crate::comparison::DocumentReader) -> Filesystem<'_> {
+        Filesystem {
+            inner: FilesystemInner::Reader(reader),
+        }
+    }
+
+    fn canonicalize(&self, path: &Path) -> Result<PathBuf, crate::comparison::LoadError> {
+        match &self.inner {
+            FilesystemInner::Real => crate::comparison::SystemReader::system().canonicalize(path),
+            FilesystemInner::Memory(_) => Ok(path.to_path_buf()),
+            FilesystemInner::Reader(reader) => reader.canonicalize(path),
+        }
+    }
+
+    fn read(&self, path: &Path) -> Result<Vec<u8>, crate::comparison::LoadError> {
+        match &self.inner {
+            FilesystemInner::Real => crate::comparison::SystemReader::system().read(path),
+            FilesystemInner::Memory(files) => files
+                .get(path)
+                .cloned()
+                .ok_or_else(|| crate::comparison::LoadError::reading(path, std::io::ErrorKind::NotFound.into())),
+            FilesystemInner::Reader(reader) => reader.read(path),
+        }
+    }
+}
+
+pub(crate) fn load_set<P: AsRef<Path>>(root: impl AsRef<Path>, explicit_imports: &[P]) -> Loaded<RegistrySet> {
+    load_fs(root.as_ref(), explicit_imports, &Filesystem::real())
+}
+
+pub(crate) fn load_reader<P: AsRef<Path>>(
+    root: impl AsRef<Path>,
+    explicit_imports: &[P],
+    reader: &impl crate::comparison::DocumentReader,
+) -> Loaded<RegistrySet> {
+    load_fs(root.as_ref(), explicit_imports, &Filesystem::from_reader(reader))
+}
+
+pub(crate) fn load_bytes(root: DocumentBytes<'_>, explicit_imports: &[DocumentBytes<'_>]) -> Loaded<RegistrySet> {
+    let filesystem = Filesystem::from_documents(root, explicit_imports);
+    let import_paths = explicit_imports
+        .iter()
+        .map(|document| document.path.to_path_buf())
+        .collect::<Vec<_>>();
+    load_fs(root.path, &import_paths, &filesystem)
+}
+
+fn load_fs<P: AsRef<Path>>(root: &Path, explicit_imports: &[P], filesystem: &Filesystem<'_>) -> Loaded<RegistrySet> {
     let mut issues = Vec::new();
-    let root = canonical_or_original(root);
-    let mut inputs = vec![root.clone()];
-    inputs.extend(explicit_imports.iter().map(|path| canonical_or_original(path)));
+    let root = canonicalize(root, filesystem);
+    let mut inputs = Vec::with_capacity(explicit_imports.len().saturating_add(1));
+    inputs.push(root.clone());
+    inputs.extend(explicit_imports.iter().map(|path| canonicalize(path.as_ref(), filesystem)));
     let mut explicit_seen = BTreeSet::new();
     for path in &inputs {
         if !explicit_seen.insert(path.clone()) {
-            issue(&mut issues, located(path, "$"), "duplicate registry input path");
+            issue(located(path, "$"), "duplicate registry input path", &mut issues);
         }
     }
 
     let mut files_by_path = BTreeMap::<PathBuf, RegistryFile>::new();
-    let mut paths_by_id = BTreeMap::<String, Vec<PathBuf>>::new();
+    let mut paths_by_id = BTreeMap::<RawText, Vec<PathBuf>>::new();
     for path in inputs {
         if files_by_path.contains_key(&path) {
             continue;
         }
-        if let Some(file) = load_registry_file(&path, true, &mut issues) {
+        if let Some(file) = load_file(&path, true, filesystem, &mut issues) {
             insert_candidate(file, &mut files_by_path, &mut paths_by_id, &mut issues);
         }
     }
@@ -50,41 +131,47 @@ pub(crate) fn load_registry_set(root: &Path, explicit_imports: &[PathBuf]) -> Lo
     while cursor < pending.len() {
         let path = pending[cursor].clone();
         cursor += 1;
-        let document = files_by_path[&path].document.clone();
+        let document = files_by_path
+            .get(&path)
+            .expect("pending registry path must have a loaded file")
+            .document
+            .clone();
         for (index, import) in document.imports.iter().enumerate() {
             let location = format!("$.imports[{index}]");
-            let used = registry_import_is_used(&document, &import.registry_id);
+            let used = document_uses(&document, import.registry_id.as_str());
             if let Some(uri) = import.uri.as_deref() {
-                match resolve_file_uri(&path, uri) {
+                match resolve_uri(&path, uri, filesystem) {
                     Ok(Some(candidate_path)) if !files_by_path.contains_key(&candidate_path) => {
-                        if let Some(file) = load_registry_file(&candidate_path, false, &mut issues) {
+                        if let Some(file) = load_file(&candidate_path, false, filesystem, &mut issues) {
                             insert_candidate(file, &mut files_by_path, &mut paths_by_id, &mut issues);
                         }
                     }
                     Ok(_) => {}
-                    Err(message) => issue(&mut issues, located(&path, &format!("{location}.uri")), message),
+                    Err(error) => issue(located(&path, format!("{location}.uri")), error.to_string(), &mut issues),
                 }
             }
-            let candidates = paths_by_id.get(&import.registry_id).cloned().unwrap_or_default();
+            let candidates = paths_by_id.get(import.registry_id.as_str()).cloned().unwrap_or_default();
             let Some(candidate_path) = candidates.first() else {
                 if used {
                     issue(
-                        &mut issues,
                         located(&path, &location),
                         format!("unresolved import '{}'; supply --import or a local file: URI", import.registry_id),
+                        &mut issues,
                     );
                 }
                 continue;
             };
             if candidates.len() != 1 {
                 issue(
-                    &mut issues,
                     located(&path, &location),
                     format!("import '{}' has ambiguous candidate registry files", import.registry_id),
+                    &mut issues,
                 );
                 continue;
             }
-            let candidate = &files_by_path[candidate_path];
+            let candidate = files_by_path
+                .get(candidate_path)
+                .expect("registry ID index must reference a loaded file");
             let version_matches = candidate.document.version == import.version;
             let digest_matches = candidate.digest == import.digest;
             require(
@@ -110,18 +197,18 @@ pub(crate) fn load_registry_set(root: &Path, explicit_imports: &[PathBuf]) -> Lo
     let documents = selected_paths
         .iter()
         .map(|path| {
-            let file = &files_by_path[path];
+            let file = files_by_path.get(path).expect("selected registry path must have a loaded file");
             (file.document.registry_id.clone(), file.document.clone())
         })
         .collect::<BTreeMap<_, _>>();
     let document_paths = selected_paths
         .iter()
         .map(|path| {
-            let file = &files_by_path[path];
+            let file = files_by_path.get(path).expect("selected registry path must have a loaded file");
             (file.document.registry_id.clone(), file.path.clone())
         })
         .collect::<BTreeMap<_, _>>();
-    validate_import_cycles(&documents, &document_paths, &mut issues);
+    validate_cycles(&documents, &document_paths, &mut issues);
     validate_semantics(&documents, &document_paths, &mut issues);
 
     let mut components = BTreeMap::new();
@@ -135,17 +222,18 @@ pub(crate) fn load_registry_set(root: &Path, explicit_imports: &[PathBuf]) -> Lo
                 },
             ) {
                 issue(
-                    &mut issues,
                     located(&root, "$.components"),
                     format!(
                         "component ID '{}' exists in both '{}' and '{}'",
                         component.id, existing.registry_id, registry_id
                     ),
+                    &mut issues,
                 );
             }
         }
     }
-    let root_file = &files_by_path[&root];
+    let root_file = files_by_path.get(&root).expect("validated root registry must have a loaded file");
+    issues.shrink_to_fit();
     Loaded {
         value: Some(RegistrySet {
             root_id: root_file.document.registry_id.clone(),
@@ -157,26 +245,26 @@ pub(crate) fn load_registry_set(root: &Path, explicit_imports: &[PathBuf]) -> Lo
     }
 }
 
-fn load_registry_file(path: &Path, report_read_error: bool, issues: &mut Vec<ValidationIssue>) -> Option<RegistryFile> {
-    let bytes = if report_read_error {
-        read_bytes(path, issues)?
-    } else {
-        match std::fs::read(path) {
-            Ok(bytes) => bytes,
-            Err(_) => return None,
+fn load_file(path: &Path, report_read_error: bool, filesystem: &Filesystem, issues: &mut Vec<ValidationIssue>) -> Option<RegistryFile> {
+    let bytes = match filesystem.read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if report_read_error => {
+            issue(located(path, "$"), format!("failed to read file: {error}"), issues);
+            return None;
         }
+        Err(_) => return None,
     };
     let document = match serde_json::from_slice::<RegistryDocument>(&bytes) {
         Ok(document) => document,
         Err(error) => {
-            issue(issues, located(path, "$"), format!("invalid CTSC registry JSON: {error}"));
+            issue(located(path, "$"), format!("invalid CTSC registry JSON: {error}"), issues);
             return None;
         }
     };
     validate_shape(&document, path, issues);
     Some(RegistryFile {
         path: path.to_path_buf(),
-        digest: sha256_digest(&bytes),
+        digest: RawText::from(sha256_digest(&bytes)),
         document,
     })
 }
@@ -184,13 +272,12 @@ fn load_registry_file(path: &Path, report_read_error: bool, issues: &mut Vec<Val
 fn insert_candidate(
     file: RegistryFile,
     files_by_path: &mut BTreeMap<PathBuf, RegistryFile>,
-    paths_by_id: &mut BTreeMap<String, Vec<PathBuf>>,
+    paths_by_id: &mut BTreeMap<RawText, Vec<PathBuf>>,
     issues: &mut Vec<ValidationIssue>,
 ) {
     let paths = paths_by_id.entry(file.document.registry_id.clone()).or_default();
     if let Some(existing) = paths.first() {
         issue(
-            issues,
             located(&file.path, "$.registryId"),
             format!(
                 "registry ID '{}' has ambiguous candidates {} and {}",
@@ -198,35 +285,36 @@ fn insert_candidate(
                 existing.display(),
                 file.path.display()
             ),
+            issues,
         );
     }
     paths.push(file.path.clone());
     files_by_path.insert(file.path.clone(), file);
 }
 
-fn validate_import_cycles(
-    documents: &BTreeMap<String, RegistryDocument>,
-    paths: &BTreeMap<String, PathBuf>,
-    issues: &mut Vec<ValidationIssue>,
-) {
+fn validate_cycles(documents: &BTreeMap<RawText, RegistryDocument>, paths: &BTreeMap<RawText, PathBuf>, issues: &mut Vec<ValidationIssue>) {
     fn visit<'a>(
         registry_id: &'a str,
-        documents: &'a BTreeMap<String, RegistryDocument>,
+        documents: &'a BTreeMap<RawText, RegistryDocument>,
         visiting: &mut Vec<&'a str>,
         visited: &mut BTreeSet<&'a str>,
-        paths: &BTreeMap<String, PathBuf>,
+        paths: &BTreeMap<RawText, PathBuf>,
         issues: &mut Vec<ValidationIssue>,
     ) {
         if visited.contains(registry_id) {
             return;
         }
         if let Some(position) = visiting.iter().position(|item| *item == registry_id) {
-            let mut cycle = visiting[position..].to_vec();
+            let mut cycle = Vec::with_capacity(visiting.len() - position + 1);
+            cycle.extend_from_slice(&visiting[position..]);
             cycle.push(registry_id);
             issue(
-                issues,
-                located(&paths[registry_id], "$.imports"),
+                located(
+                    paths.get(registry_id).expect("registry document must have a source path"),
+                    "$.imports",
+                ),
                 format!("registry import cycle: {}", cycle.join(" -> ")),
+                issues,
             );
             return;
         }
@@ -234,7 +322,7 @@ fn validate_import_cycles(
         if let Some(document) = documents.get(registry_id) {
             for imported in &document.imports {
                 if documents.contains_key(&imported.registry_id) {
-                    visit(&imported.registry_id, documents, visiting, visited, paths, issues);
+                    visit(imported.registry_id.as_str(), documents, visiting, visited, paths, issues);
                 }
             }
         }
@@ -243,424 +331,34 @@ fn validate_import_cycles(
     }
 
     let mut visited = BTreeSet::new();
+    let mut visiting = Vec::with_capacity(documents.len());
     for registry_id in documents.keys() {
-        visit(registry_id, documents, &mut Vec::new(), &mut visited, paths, issues);
-    }
-}
-
-fn validate_shape(document: &RegistryDocument, path: &Path, issues: &mut Vec<ValidationIssue>) {
-    require(
-        document.format == REGISTRY_FORMAT,
-        path,
-        "$.format",
-        "format must be 'ctsc.registry'",
-        issues,
-    );
-    require(
-        document.format_version == CTSC_VERSION,
-        path,
-        "$.formatVersion",
-        "formatVersion must be '0.2.0'",
-        issues,
-    );
-    require(
-        !document.registry_id.is_empty(),
-        path,
-        "$.registryId",
-        "registryId must not be empty",
-        issues,
-    );
-    require(!document.version.is_empty(), path, "$.version", "version must not be empty", issues);
-    require(
-        !document.components.is_empty(),
-        path,
-        "$.components",
-        "components must contain at least one component",
-        issues,
-    );
-    validate_extensions(&document.extensions, path, "$.extensions", issues);
-
-    unique(
-        document.imports.iter().map(|item| item.registry_id.as_str()),
-        path,
-        "$.imports",
-        "registryId",
-        issues,
-    );
-    for (index, import) in document.imports.iter().enumerate() {
-        let location = format!("$.imports[{index}]");
-        require(
-            !import.registry_id.is_empty(),
-            path,
-            &format!("{location}.registryId"),
-            "registryId must not be empty",
-            issues,
-        );
-        require(
-            !import.version.is_empty(),
-            path,
-            &format!("{location}.version"),
-            "version must not be empty",
-            issues,
-        );
-        require(
-            is_digest(&import.digest),
-            path,
-            &format!("{location}.digest"),
-            "digest must be 'sha256:' followed by 64 lowercase hexadecimal characters",
-            issues,
-        );
-        if import.uri.as_ref().is_some_and(String::is_empty) {
-            issue(&mut *issues, located(path, &format!("{location}.uri")), "uri must not be empty");
-        }
-    }
-
-    unique(
-        document.components.iter().map(|item| item.id.as_str()),
-        path,
-        "$.components",
-        "id",
-        issues,
-    );
-    // Registry 0.2 §3.1 orders components by ascending id, compared as a
-    // sequence of Unicode code points. Rust `str` comparison is byte-wise over
-    // UTF-8, and UTF-8 byte order is identical to code-point order, so this is
-    // exactly the comparison the contract specifies.
-    if let Some(out_of_order) = document
-        .components
-        .windows(2)
-        .find(|pair| pair[0].id > pair[1].id)
-        .map(|pair| pair[1].id.as_str())
-    {
-        issue(
-            &mut *issues,
-            located(path, "$.components"),
-            format!("component id '{out_of_order}' is out of ascending id order"),
-        );
-    }
-    for (component_index, component) in document.components.iter().enumerate() {
-        let location = format!("$.components[{component_index}]");
-        require(
-            !component.id.is_empty(),
-            path,
-            &format!("{location}.id"),
-            "component id must not be empty",
-            issues,
-        );
-        unique(
-            component.dependencies.iter().map(|item| item.component_id.as_str()),
-            path,
-            &format!("{location}.dependencies"),
-            "componentId",
-            issues,
-        );
-        for (dependency_index, dependency) in component.dependencies.iter().enumerate() {
-            let dependency_location = format!("{location}.dependencies[{dependency_index}]");
-            require(
-                !dependency.component_id.is_empty(),
-                path,
-                &format!("{dependency_location}.componentId"),
-                "componentId must not be empty",
-                issues,
-            );
-            if dependency.registry_id.as_ref().is_some_and(String::is_empty) {
-                issue(
-                    issues,
-                    located(path, &format!("{dependency_location}.registryId")),
-                    "registryId must not be empty",
-                );
-            }
-        }
-        validate_extensions(&component.extensions, path, &format!("{location}.extensions"), issues);
-        unique(
-            component.operations.iter().map(|item| item.name.as_str()),
-            path,
-            &format!("{location}.operations"),
-            "name",
-            issues,
-        );
-        unique(
-            component.types.iter().map(NamedType::name),
-            path,
-            &format!("{location}.types"),
-            "name",
-            issues,
-        );
-        for (operation_index, operation) in component.operations.iter().enumerate() {
-            validate_operation(operation, path, &format!("{location}.operations[{operation_index}]"), issues);
-        }
-        for (type_index, named_type) in component.types.iter().enumerate() {
-            validate_named_type(named_type, path, &format!("{location}.types[{type_index}]"), issues);
-        }
-    }
-}
-
-fn validate_operation(operation: &RegistryOperation, path: &Path, location: &str, issues: &mut Vec<ValidationIssue>) {
-    require(
-        !operation.name.is_empty(),
-        path,
-        &format!("{location}.name"),
-        "operation name must not be empty",
-        issues,
-    );
-    validate_extensions(&operation.extensions, path, &format!("{location}.extensions"), issues);
-    for (label, values) in [
-        ("inputs", operation.inputs.as_slice()),
-        ("observations", operation.observations.as_slice()),
-    ] {
-        unique(
-            values.iter().map(|item| item.name.as_str()),
-            path,
-            &format!("{location}.{label}"),
-            "name",
-            issues,
-        );
-        for (index, value) in values.iter().enumerate() {
-            require(
-                !value.name.is_empty(),
-                path,
-                &format!("{location}.{label}[{index}].name"),
-                "name must not be empty",
-                issues,
-            );
-            validate_type_shape(&value.value_type, path, &format!("{location}.{label}[{index}].type"), issues);
-        }
-    }
-    unique(
-        operation.outcomes.errors.iter().map(|item| item.name.as_str()),
-        path,
-        &format!("{location}.outcomes.errors"),
-        "name",
-        issues,
-    );
-    if operation.outcomes.empty && operation.outcomes.result.is_none() {
-        issue(
-            issues,
-            located(path, &format!("{location}.outcomes.empty")),
-            "empty: true requires a result outcome",
-        );
-    }
-    if let Some(result) = &operation.outcomes.result {
-        if matches!(result, TypeRef::Primitive { name } if name == "unit") {
-            issue(
-                issues,
-                located(path, &format!("{location}.outcomes.result")),
-                "result type must not be primitive unit",
-            );
-        }
-        validate_type_shape(result, path, &format!("{location}.outcomes.result"), issues);
-    }
-    for (index, error) in operation.outcomes.errors.iter().enumerate() {
-        require(
-            !error.name.is_empty(),
-            path,
-            &format!("{location}.outcomes.errors[{index}].name"),
-            "error name must not be empty",
-            issues,
-        );
-        if let Some(value_type) = &error.value_type {
-            validate_type_shape(value_type, path, &format!("{location}.outcomes.errors[{index}].type"), issues);
-        }
-    }
-}
-
-fn validate_named_type(named_type: &NamedType, path: &Path, location: &str, issues: &mut Vec<ValidationIssue>) {
-    require(
-        !named_type.name().is_empty(),
-        path,
-        &format!("{location}.name"),
-        "type name must not be empty",
-        issues,
-    );
-    match named_type {
-        NamedType::Record { fields, extensions, .. } => {
-            validate_extensions(extensions, path, &format!("{location}.extensions"), issues);
-            validate_named_values(fields, path, &format!("{location}.fields"), issues);
-        }
-        NamedType::TaggedUnion { variants, extensions, .. } => {
-            validate_extensions(extensions, path, &format!("{location}.extensions"), issues);
-            require(
-                !variants.is_empty(),
-                path,
-                &format!("{location}.variants"),
-                "tagged union must contain at least one variant",
-                issues,
-            );
-            validate_variants(variants, path, &format!("{location}.variants"), issues);
-        }
-    }
-}
-
-fn validate_named_values(values: &[super::model::NamedValue], path: &Path, location: &str, issues: &mut Vec<ValidationIssue>) {
-    unique(values.iter().map(|item| item.name.as_str()), path, location, "name", issues);
-    for (index, value) in values.iter().enumerate() {
-        require(
-            !value.name.is_empty(),
-            path,
-            &format!("{location}[{index}].name"),
-            "name must not be empty",
-            issues,
-        );
-        validate_type_shape(&value.value_type, path, &format!("{location}[{index}].type"), issues);
-    }
-}
-
-fn validate_variants(variants: &[super::model::Variant], path: &Path, location: &str, issues: &mut Vec<ValidationIssue>) {
-    unique(variants.iter().map(|item| item.name.as_str()), path, location, "name", issues);
-    for (index, variant) in variants.iter().enumerate() {
-        require(
-            !variant.name.is_empty(),
-            path,
-            &format!("{location}[{index}].name"),
-            "name must not be empty",
-            issues,
-        );
-        if let Some(payload) = &variant.payload {
-            validate_type_shape(payload, path, &format!("{location}[{index}].payload"), issues);
-        }
-    }
-}
-
-fn validate_type_shape(value_type: &TypeRef, path: &Path, location: &str, issues: &mut Vec<ValidationIssue>) {
-    match value_type {
-        TypeRef::Primitive { name } => {
-            const PRIMITIVES: [&str; 10] = ["unit", "string", "bool", "i32", "i64", "u32", "u64", "f32", "f64", "bytes"];
-            require(
-                PRIMITIVES.contains(&name.as_str()),
-                path,
-                &format!("{location}.name"),
-                "unknown primitive type",
-                issues,
-            );
-        }
-        TypeRef::Named {
-            name,
-            component_id,
-            registry_id,
-        } => {
-            require(
-                !name.is_empty(),
-                path,
-                &format!("{location}.name"),
-                "type name must not be empty",
-                issues,
-            );
-            if component_id.as_ref().is_some_and(String::is_empty) {
-                issue(
-                    issues,
-                    located(path, &format!("{location}.componentId")),
-                    "componentId must not be empty",
-                );
-            }
-            if registry_id.as_ref().is_some_and(String::is_empty) {
-                issue(
-                    issues,
-                    located(path, &format!("{location}.registryId")),
-                    "registryId must not be empty",
-                );
-            }
-            if registry_id.is_some() && component_id.is_none() {
-                issue(
-                    issues,
-                    located(path, location),
-                    "registryId requires componentId on a named type reference",
-                );
-            }
-        }
-        TypeRef::List { items } | TypeRef::Set { items } => {
-            validate_type_shape(items, path, &format!("{location}.items"), issues);
-        }
-        TypeRef::Map { keys, values } => {
-            validate_type_shape(keys, path, &format!("{location}.keys"), issues);
-            validate_type_shape(values, path, &format!("{location}.values"), issues);
-        }
-        TypeRef::Tuple { items } => {
-            for (index, item) in items.iter().enumerate() {
-                validate_type_shape(item, path, &format!("{location}.items[{index}]"), issues);
-            }
-        }
-        TypeRef::Record { fields } => validate_named_values(fields, path, &format!("{location}.fields"), issues),
-        TypeRef::Optional { value } => validate_type_shape(value, path, &format!("{location}.value"), issues),
-        TypeRef::TaggedUnion { variants } => {
-            require(
-                !variants.is_empty(),
-                path,
-                &format!("{location}.variants"),
-                "tagged union must contain at least one variant",
-                issues,
-            );
-            validate_variants(variants, path, &format!("{location}.variants"), issues);
-        }
-    }
-}
-
-fn registry_import_is_used(document: &RegistryDocument, registry_id: &str) -> bool {
-    document.components.iter().any(|component| {
-        component
-            .dependencies
-            .iter()
-            .any(|dependency| dependency.registry_id.as_deref() == Some(registry_id))
-            || component.operations.iter().any(|operation| {
-                operation
-                    .inputs
-                    .iter()
-                    .chain(&operation.observations)
-                    .any(|value| type_uses_registry(&value.value_type, registry_id))
-                    || operation
-                        .outcomes
-                        .result
-                        .as_ref()
-                        .is_some_and(|value| type_uses_registry(value, registry_id))
-                    || operation
-                        .outcomes
-                        .errors
-                        .iter()
-                        .filter_map(|error| error.value_type.as_ref())
-                        .any(|value| type_uses_registry(value, registry_id))
-            })
-            || component
-                .types
-                .iter()
-                .any(|named_type| type_uses_registry(&named_type.as_type(), registry_id))
-    })
-}
-
-fn type_uses_registry(value_type: &TypeRef, registry_id: &str) -> bool {
-    match value_type {
-        TypeRef::Named {
-            registry_id: referenced, ..
-        } => referenced.as_deref() == Some(registry_id),
-        TypeRef::List { items } | TypeRef::Set { items } => type_uses_registry(items, registry_id),
-        TypeRef::Map { keys, values } => type_uses_registry(keys, registry_id) || type_uses_registry(values, registry_id),
-        TypeRef::Tuple { items } => items.iter().any(|item| type_uses_registry(item, registry_id)),
-        TypeRef::Record { fields } => fields.iter().any(|field| type_uses_registry(&field.value_type, registry_id)),
-        TypeRef::Optional { value } => type_uses_registry(value, registry_id),
-        TypeRef::TaggedUnion { variants } => variants
-            .iter()
-            .filter_map(|variant| variant.payload.as_ref())
-            .any(|payload| type_uses_registry(payload, registry_id)),
-        TypeRef::Primitive { .. } => false,
+        visiting.clear();
+        visit(registry_id, documents, &mut visiting, &mut visited, paths, issues);
     }
 }
 
 fn validate_semantics(
-    documents: &BTreeMap<String, RegistryDocument>,
-    paths: &BTreeMap<String, PathBuf>,
+    documents: &BTreeMap<RawText, RegistryDocument>,
+    paths: &BTreeMap<RawText, PathBuf>,
     issues: &mut Vec<ValidationIssue>,
 ) {
     let mut component_owners = BTreeMap::new();
     for (registry_id, document) in documents {
         for component in &document.components {
             if let Some(existing) = component_owners.insert(component.id.as_str(), registry_id.as_str())
-                && existing != registry_id
+                && existing != registry_id.as_str()
             {
                 issue(
-                    issues,
-                    located(&paths[registry_id], "$.components"),
+                    located(
+                        paths.get(registry_id).expect("registry document must have a source path"),
+                        "$.components",
+                    ),
                     format!(
                         "component ID '{}' exists in both '{}' and '{}'",
                         component.id, existing, registry_id
                     ),
+                    issues,
                 );
             }
         }
@@ -677,10 +375,10 @@ fn validate_semantics(
             for (dependency_index, dependency) in component.dependencies.iter().enumerate() {
                 let location = format!("{base}.dependencies[{dependency_index}]");
                 let target_registry = dependency.registry_id.as_deref().unwrap_or(registry_id);
-                if target_registry != registry_id {
+                if target_registry != registry_id.as_str() {
                     require(
                         document.imports.iter().any(|import| import.registry_id == target_registry),
-                        &paths[registry_id],
+                        paths.get(registry_id).expect("registry document must have a source path"),
                         &location,
                         &format!("unknown imported registry '{target_registry}'"),
                         issues,
@@ -690,7 +388,7 @@ fn validate_semantics(
                     documents
                         .get(target_registry)
                         .is_some_and(|target| target.components.iter().any(|item| item.id == dependency.component_id)),
-                    &paths[registry_id],
+                    paths.get(registry_id).expect("registry document must have a source path"),
                     &location,
                     &format!(
                         "unknown dependency component '{}' in registry '{target_registry}'",
@@ -708,7 +406,7 @@ fn validate_semantics(
                         component,
                         &local_components,
                         documents,
-                        &paths[registry_id],
+                        paths.get(registry_id).expect("registry document must have a source path"),
                         &format!("{operation_location}.inputs[{index}].type"),
                         issues,
                     );
@@ -720,7 +418,7 @@ fn validate_semantics(
                         component,
                         &local_components,
                         documents,
-                        &paths[registry_id],
+                        paths.get(registry_id).expect("registry document must have a source path"),
                         &format!("{operation_location}.observations[{index}].type"),
                         issues,
                     );
@@ -732,7 +430,7 @@ fn validate_semantics(
                         component,
                         &local_components,
                         documents,
-                        &paths[registry_id],
+                        paths.get(registry_id).expect("registry document must have a source path"),
                         &format!("{operation_location}.outcomes.result"),
                         issues,
                     );
@@ -745,7 +443,7 @@ fn validate_semantics(
                             component,
                             &local_components,
                             documents,
-                            &paths[registry_id],
+                            paths.get(registry_id).expect("registry document must have a source path"),
                             &format!("{operation_location}.outcomes.errors[{index}].type"),
                             issues,
                         );
@@ -759,7 +457,7 @@ fn validate_semantics(
                     component,
                     &local_components,
                     documents,
-                    &paths[registry_id],
+                    paths.get(registry_id).expect("registry document must have a source path"),
                     &format!("{base}.types[{index}]"),
                     issues,
                 );
@@ -768,13 +466,16 @@ fn validate_semantics(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "recursive type resolution requires registry, component, path, and diagnostics context"
+)]
 fn resolve_type(
     value_type: &TypeRef,
     current_registry: &str,
     current_component: &RegistryComponent,
     local_components: &BTreeMap<&str, &RegistryComponent>,
-    documents: &BTreeMap<String, RegistryDocument>,
+    documents: &BTreeMap<RawText, RegistryDocument>,
     path: &Path,
     location: &str,
     issues: &mut Vec<ValidationIssue>,
@@ -806,7 +507,7 @@ fn resolve_type(
                     "missing matching component dependency",
                     issues,
                 );
-            } else if target_component != current_component.id {
+            } else if target_component != current_component.id.as_str() {
                 require(
                     current_component
                         .dependencies
@@ -828,9 +529,9 @@ fn resolve_type(
                 });
             let Some(target) = target else {
                 issue(
-                    issues,
                     located(path, location),
                     format!("unknown component '{target_component}' in registry '{target_registry}'"),
+                    issues,
                 );
                 return;
             };
@@ -932,64 +633,22 @@ fn resolve_type(
     }
 }
 
-fn resolve_file_uri(base: &Path, uri: &str) -> Result<Option<PathBuf>, String> {
-    let Some(raw) = uri.strip_prefix("file:") else {
-        return Ok(None);
-    };
-    let parsed = Url::parse(uri).map_err(|error| format!("invalid file URI '{uri}': {error}"))?;
-    if parsed.query().is_some() || parsed.fragment().is_some() {
-        return Err(format!("file URI must not contain a query or fragment: '{uri}'"));
-    }
-    if parsed
-        .host_str()
-        .is_some_and(|authority| !authority.is_empty() && !authority.eq_ignore_ascii_case("localhost"))
-    {
-        return Err(format!(
-            "automatic registry import resolution does not support network file URI '{uri}'; download the registry and supply its local path with --import"
-        ));
-    }
-    let decoded_path = percent_decode_str(parsed.path())
-        .decode_utf8()
-        .map_err(|error| format!("file URI path is not UTF-8: {error}"))?;
-    if decoded_path.starts_with("//") || decoded_path.starts_with(r"\\") {
-        return Err(format!(
-            "automatic registry import resolution does not support UNC or network file URI '{uri}'; download the registry and supply its local path with --import"
-        ));
-    }
-    let candidate = if raw.starts_with('/') || raw.starts_with("//") {
-        parsed
-            .to_file_path()
-            .map_err(|()| format!("file URI cannot be converted to a local path: '{uri}'"))?
-    } else {
-        let decoded = percent_decode_str(raw)
-            .decode_utf8()
-            .map_err(|error| format!("file URI path is not UTF-8: {error}"))?;
-        PathBuf::from(decoded.as_ref())
-    };
-    let candidate = if candidate.is_absolute() {
-        candidate
-    } else {
-        base.parent().unwrap_or_else(|| Path::new(".")).join(candidate)
-    };
-    Ok(Some(canonical_or_original(&candidate)))
-}
-
-fn canonical_or_original(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+fn canonicalize(path: &Path, filesystem: &Filesystem<'_>) -> PathBuf {
+    filesystem.canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 fn unique<'a>(values: impl Iterator<Item = &'a str>, path: &Path, location: &str, field: &str, issues: &mut Vec<ValidationIssue>) {
     let mut seen = BTreeSet::new();
     for value in values {
         if !seen.insert(value) {
-            issue(issues, located(path, location), format!("duplicate {field} '{value}'"));
+            issue(located(path, location), format!("duplicate {field} '{value}'"), issues);
         }
     }
 }
 
 fn require(condition: bool, path: &Path, location: &str, message: &str, issues: &mut Vec<ValidationIssue>) {
     if !condition {
-        issue(issues, located(path, location), message);
+        issue(located(path, location), message, issues);
     }
 }
 
@@ -1010,17 +669,175 @@ fn validate_extensions(extensions: &BTreeMap<String, Value>, path: &Path, locati
             });
         if first.is_empty() || !valid_first || !valid_remaining {
             issue(
-                issues,
                 located(path, location),
                 format!("extension key '{key}' must use a lowercase dotted namespace"),
+                issues,
             );
         }
-        if key.starts_with("conformance.") {
+        if key.starts_with(RESERVED_NAMESPACE) {
             issue(
-                issues,
                 located(path, location),
                 format!("extension key '{key}' must use a namespace outside conformance.*"),
+                issues,
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod uri_tests {
+    use super::{Filesystem, resolve_uri};
+    use std::path::{Path, PathBuf};
+
+    fn resolve(base: &Path, uri: &str) -> Result<Option<PathBuf>, super::uri::Error> {
+        resolve_uri(base, uri, &Filesystem::real())
+    }
+
+    #[test]
+    fn non_file_hint() {
+        assert_eq!(
+            resolve(Path::new("root.json"), "https://example.test/import.json").expect("valid URI"),
+            None
+        );
+    }
+
+    #[test]
+    fn relative_file_uri() {
+        assert_eq!(
+            resolve(Path::new("registries/root.json"), "file:dependency%20registry.json").expect("valid file URI"),
+            Some(PathBuf::from("registries/dependency registry.json"))
+        );
+    }
+
+    #[test]
+    fn absolute_file_uri() {
+        #[cfg(windows)]
+        let cases = [
+            (
+                "file:///C:/registry%20files/import.json",
+                PathBuf::from(r"C:\registry files\import.json"),
+            ),
+            (
+                "file://localhost/C:/registry%20files/import.json",
+                PathBuf::from(r"C:\registry files\import.json"),
+            ),
+        ];
+        #[cfg(not(windows))]
+        let cases = [
+            ("file:///registry%20files/import.json", PathBuf::from("/registry files/import.json")),
+            (
+                "file://localhost/registry%20files/import.json",
+                PathBuf::from("/registry files/import.json"),
+            ),
+        ];
+
+        for (uri, expected) in cases {
+            assert_eq!(
+                resolve(Path::new("root.json"), uri).expect("valid file URI"),
+                Some(expected),
+                "{uri}"
+            );
+        }
+    }
+
+    #[cfg(test)]
+    mod loading_tests {
+        use crate::comparison::{DocumentReader, LoadError};
+        use crate::validation::registry::load_reader;
+        use crate::validation::{Loaded, RegistrySet};
+        use std::path::{Path, PathBuf};
+
+        struct MemoryReader {
+            bytes: Vec<u8>,
+        }
+
+        impl DocumentReader for MemoryReader {
+            fn read(&self, _path: &Path) -> Result<Vec<u8>, LoadError> {
+                Ok(self.bytes.clone())
+            }
+
+            fn canonicalize(&self, path: &Path) -> Result<PathBuf, LoadError> {
+                Ok(path.to_path_buf())
+            }
+        }
+
+        fn load(json: &str) -> Loaded<RegistrySet> {
+            load_reader(
+                Path::new("registry.ctsc.json"),
+                &[] as &[&Path],
+                &MemoryReader {
+                    bytes: json.as_bytes().to_vec(),
+                },
+            )
+        }
+
+        #[test]
+        fn injected_reader_loads_a_valid_registry() {
+            let loaded = load(
+                r#"{"format":"ctsc.registry","formatVersion":"0.2.0","registryId":"urn:ctsc:registry:test","version":"0.1.0","components":[{"id":"test.component","operations":[{"name":"run","inputs":[],"observations":[],"outcomes":{}}],"types":[]}]}"#,
+            );
+
+            assert!(loaded.issues.is_empty());
+            let registry = loaded.value.expect("valid registry");
+            assert_eq!(registry.root_id.as_str(), "urn:ctsc:registry:test");
+            assert!(registry.components.contains_key("test.component"));
+        }
+
+        #[test]
+        fn semantic_validation_reports_unknown_named_types() {
+            let loaded = load(
+                r#"{"format":"ctsc.registry","formatVersion":"0.2.0","registryId":"urn:ctsc:registry:test","version":"0.1.0","components":[{"id":"test.component","operations":[{"name":"run","inputs":[],"observations":[],"outcomes":{"result":{"kind":"named","name":"Missing"}}}],"types":[]}]}"#,
+            );
+
+            assert!(loaded.value.is_some());
+            assert_eq!(loaded.issues.len(), 1);
+            assert_eq!(
+                loaded.issues[0].location,
+                "registry.ctsc.json:$.components[0].operations[0].outcomes.result"
+            );
+            assert_eq!(loaded.issues[0].message, "unknown named type 'Missing'");
+        }
+    }
+
+    #[test]
+    fn uri_diagnostics() {
+        for uri in ["file:import.json?version=1", "file:import.json#section"] {
+            let error = resolve(Path::new("root.json"), uri).expect_err("query or fragment");
+            assert!(error.to_string().contains("must not contain a query or fragment"), "{error}");
+        }
+
+        let error = resolve(Path::new("root.json"), "file://registry-host/share/import.json").expect_err("remote authority");
+        assert!(error.to_string().contains("network file URI"), "{error}");
+        assert!(error.to_string().contains("--import"), "{error}");
+
+        for uri in [
+            "file:////registry-host/share/import.json",
+            "file:%5C%5Cregistry-host%5Cshare%5Cimport.json",
+        ] {
+            let error = resolve(Path::new("root.json"), uri).expect_err("UNC path");
+            assert!(error.to_string().contains("UNC or network file URI"), "{error}");
+            assert!(error.to_string().contains("--import"), "{error}");
+        }
+    }
+
+    #[test]
+    fn invalid_uri() {
+        let error = resolve(Path::new("root.json"), "file://[invalid/import.json").expect_err("invalid URI");
+        assert!(error.to_string().starts_with("invalid file URI"), "{error}");
+
+        let error = resolve(Path::new("root.json"), "file:import-%FF.json").expect_err("non-UTF-8 path");
+        assert!(error.to_string().contains("file URI path is not UTF-8"), "{error}");
+    }
+
+    #[test]
+    fn read_failure() {
+        use super::load_set;
+
+        let missing = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/missing-registry.json");
+        let loaded = load_set(&missing, &[] as &[&Path]);
+        assert!(loaded.value.is_none());
+        assert_eq!(loaded.issues.len(), 1);
+        assert_eq!(loaded.issues[0].location, format!("{}:$", missing.display()));
+        assert!(loaded.issues[0].message.starts_with("failed to read file:"));
     }
 }
