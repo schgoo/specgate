@@ -261,6 +261,7 @@ fn decode_operation(span: &Span, registry: &Registry) -> Result<Operation, error
     let mut empty_count = 0_usize;
     let mut error_count = 0_usize;
     let mut has_fault = false;
+    let mut event_attributes = BTreeMap::new();
     for event in &span.events {
         match event.name.as_ref() {
             RESULT_EVENT => {
@@ -272,14 +273,14 @@ fn decode_operation(span: &Span, registry: &Registry) -> Result<Operation, error
                         declaration.name()
                     )
                 })?;
-                let event_attributes = attribute_map(&event.attributes, format!("{location} result"))?;
+                fill_attribute_map(&mut event_attributes, &event.attributes, format!("{location} result"))?;
                 let value = event_attributes
                     .get(RESULT_VALUE)
                     .ok_or_else(|| format!("reference {location} result is missing conformance.result.value"))?;
                 let _ = decode_value(value, output, format!("{location} result"))?;
             }
             OBS_EVENT => {
-                let event_attributes = attribute_map(&event.attributes, format!("{location} observation"))?;
+                fill_attribute_map(&mut event_attributes, &event.attributes, format!("{location} observation"))?;
                 let name = require_string(&event_attributes, OBS_NAME, None, format!("{location} observation"))?;
                 return Err(format!("reference {location} contains unsupported observation '{name}' in the first replay slice").into());
             }
@@ -297,8 +298,8 @@ fn decode_operation(span: &Span, registry: &Registry) -> Result<Operation, error
             }
             ERROR_EVENT => {
                 error_count += 1;
-                let attributes = attribute_map(&event.attributes, format!("{location} error"))?;
-                let name = require_string(&attributes, ERROR_NAME, None, format!("{location} error"))?;
+                fill_attribute_map(&mut event_attributes, &event.attributes, format!("{location} error"))?;
+                let name = require_string(&event_attributes, ERROR_NAME, None, format!("{location} error"))?;
                 let declared = declaration.errors().iter().find(|error| error.name == name).ok_or_else(|| {
                     format!(
                         "reference {location} emits undeclared error '{name}' for '{}::{}'",
@@ -306,7 +307,7 @@ fn decode_operation(span: &Span, registry: &Registry) -> Result<Operation, error
                         declaration.name()
                     )
                 })?;
-                match (&declared.value_type, attributes.get(ERROR_VALUE)) {
+                match (&declared.value_type, event_attributes.get(ERROR_VALUE)) {
                     (Some(value_type), Some(value)) => {
                         let _ = decode_value(value, value_type, format!("{location} error '{name}'"))?;
                     }
@@ -343,15 +344,24 @@ fn attribute_map(
     attributes: &(impl AsRef<[KeyValue]> + ?Sized),
     location: impl AsRef<str>,
 ) -> Result<BTreeMap<&str, &AnyValue>, error::Error> {
-    let attributes = attributes.as_ref();
-    let location = location.as_ref();
     let mut result = BTreeMap::new();
-    for attribute in attributes {
+    fill_attribute_map(&mut result, attributes, location)?;
+    Ok(result)
+}
+
+fn fill_attribute_map<'a>(
+    result: &mut BTreeMap<&'a str, &'a AnyValue>,
+    attributes: &'a (impl AsRef<[KeyValue]> + ?Sized),
+    location: impl AsRef<str>,
+) -> Result<(), error::Error> {
+    let location = location.as_ref();
+    result.clear();
+    for attribute in attributes.as_ref() {
         if result.insert(attribute.key.as_ref(), &attribute.value).is_some() {
             return Err(format!("{location} contains duplicate attribute '{}'", attribute.key).into());
         }
     }
-    Ok(result)
+    Ok(())
 }
 
 fn kvlist_map(list: &KeyValueList, location: impl AsRef<str>) -> Result<BTreeMap<&str, &AnyValue>, error::Error> {

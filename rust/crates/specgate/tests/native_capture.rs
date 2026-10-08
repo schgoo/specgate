@@ -78,12 +78,12 @@ struct PendingOnce {
 impl Future for PendingOnce {
     type Output = ();
 
-    fn poll(mut self: std::pin::Pin<&mut Self>, context: &mut std::task::Context<'_>) -> std::task::Poll<()> {
+    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<()> {
         if self.polled {
             std::task::Poll::Ready(())
         } else {
             self.polled = true;
-            context.waker().wake_by_ref();
+            cx.waker().wake_by_ref();
             std::task::Poll::Pending
         }
     }

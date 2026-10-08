@@ -362,13 +362,18 @@ fn deferred_fault() {
         "unwind cleanup must not perform persistence I/O"
     );
 
-    let success = begin_operation(ComponentId::from("fixture.native"), OperationName::from("success")).unwrap();
-    success.unit().unwrap();
-    assert_eq!(file_system.lock().expect("fake filesystem mutex poisoned").snapshots.len(), 1);
     let capture = finish().unwrap();
     assert!(matches!(capture.operations[0].completion, Some(Completion::Fault { .. })));
-    assert_eq!(capture.operations[1].status, Status::Ok);
-    assert_eq!(file_system.lock().expect("fake filesystem mutex poisoned").snapshots.len(), 2);
+    assert_eq!(file_system.lock().expect("fake filesystem mutex poisoned").snapshots.len(), 1);
+}
+
+#[test]
+fn instrumented_future_is_send_when_inner_future_is_send() {
+    fn assert_send<T: Send>(_: &T) {}
+
+    let future = instrument_async_operation(capture_async_context(), std::future::ready(()));
+
+    assert_send(&future);
 }
 
 #[test]

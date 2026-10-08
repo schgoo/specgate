@@ -1,6 +1,8 @@
 //! Generated-code failure reporting and parent-process protocol output.
 
 use super::*;
+#[cfg(feature = "test-util")]
+use std::sync::{Arc, Mutex};
 
 /// Parent-process capture protocol marker consumed by the `SpecGate` CLI.
 ///

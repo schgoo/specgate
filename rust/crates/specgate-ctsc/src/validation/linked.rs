@@ -740,7 +740,7 @@ mod tests {
     }
 
     fn linked_fixture() -> (RegistrySet, TraceSpan) {
-        use crate::validation::model::{RawName, RawText, RegistryComponent, ResolvedComponent, TraceEvent};
+        use crate::validation::model::{RawName, RawText, RegistryComponent, ResolvedComponent, SpanStatus, TraceEvent};
         use std::collections::BTreeMap;
 
         let component: RegistryComponent = serde_json::from_value(serde_json::json!({
@@ -777,7 +777,7 @@ mod tests {
             name: RawName::from(OP_SPAN),
             start_time: Some(1),
             end_time: Some(2),
-            status_error: false,
+            status: SpanStatus::Unset,
             attributes: BTreeMap::from([
                 (COMPONENT_ATTR.into(), AnyValue::String("demo".into())),
                 (OP_NAME_ATTR.into(), AnyValue::String("run".into())),

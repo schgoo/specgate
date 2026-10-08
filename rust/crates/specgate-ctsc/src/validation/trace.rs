@@ -411,7 +411,7 @@ fn parse_span(
         .and_then(Value::as_object)
         .and_then(|status| json_field(status, "code"))
         .map_or(SpanStatus::Unset, |code| match (code.as_i64(), code.as_str()) {
-            (Some(1), _) | (_, Some("STATUS_CODE_OK")) => SpanStatus::Ok,
+            (Some(STATUS_OK), _) | (_, Some("STATUS_CODE_OK")) => SpanStatus::Ok,
             (Some(STATUS_ERROR), _) | (_, Some("STATUS_CODE_ERROR")) => SpanStatus::Error,
             _ => SpanStatus::Unset,
         });

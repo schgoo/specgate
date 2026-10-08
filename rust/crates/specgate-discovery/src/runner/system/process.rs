@@ -148,6 +148,10 @@ impl Process {
     ///
     /// # Errors
     /// Returns process-spawn, wait, or injected fake failures.
+    ///
+    /// # Panics
+    ///
+    /// Panics if fake process state is poisoned or no fake result was queued.
     pub(crate) fn output(&self, request: &Request) -> Result<ProcessOutput, Error> {
         match &self.inner {
             ProcessKind::Real => {

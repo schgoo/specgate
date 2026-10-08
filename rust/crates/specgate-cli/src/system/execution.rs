@@ -1,7 +1,7 @@
 //! Process execution boundary.
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 #[cfg(any(test, feature = "test-util"))]
 use std::{
@@ -53,10 +53,10 @@ pub(crate) struct RequestBuilder {
 }
 impl Request {
     /// Start describing a process with its required executable.
-    pub(crate) fn builder(program: impl Into<OsString>) -> RequestBuilder {
+    pub(crate) fn builder(program: impl AsRef<OsStr>) -> RequestBuilder {
         RequestBuilder {
             request: Self {
-                program: program.into(),
+                program: program.as_ref().to_os_string(),
                 args: Vec::new(),
                 current_dir: None,
                 environment: Vec::new(),
@@ -66,28 +66,32 @@ impl Request {
 }
 impl RequestBuilder {
     /// Append one command argument.
-    pub(crate) fn arg(mut self, value: impl Into<OsString>) -> Self {
-        self.request.args.push(value.into());
+    pub(crate) fn arg(mut self, value: impl AsRef<OsStr>) -> Self {
+        self.request.args.push(value.as_ref().to_os_string());
         self
     }
     /// Append command arguments in order.
-    pub(crate) fn args(mut self, values: impl IntoIterator<Item = impl Into<OsString>>) -> Self {
-        self.request.args.extend(values.into_iter().map(Into::into));
+    pub(crate) fn args(mut self, values: impl IntoIterator<Item = impl AsRef<OsStr>>) -> Self {
+        self.request
+            .args
+            .extend(values.into_iter().map(|value| value.as_ref().to_os_string()));
         self
     }
     /// Set the child working directory.
-    pub(crate) fn current_dir(mut self, value: impl Into<PathBuf>) -> Self {
-        self.request.current_dir = Some(value.into());
+    pub(crate) fn current_dir(mut self, value: impl AsRef<Path>) -> Self {
+        self.request.current_dir = Some(value.as_ref().to_path_buf());
         self
     }
     /// Set one child environment value.
-    pub(crate) fn env(mut self, name: impl Into<OsString>, value: impl Into<OsString>) -> Self {
-        self.request.environment.push((name.into(), Some(value.into())));
+    pub(crate) fn env(mut self, name: impl AsRef<OsStr>, value: impl AsRef<OsStr>) -> Self {
+        self.request
+            .environment
+            .push((name.as_ref().to_os_string(), Some(value.as_ref().to_os_string())));
         self
     }
     /// Remove one inherited environment value.
-    pub(crate) fn env_remove(mut self, name: impl Into<OsString>) -> Self {
-        self.request.environment.push((name.into(), None));
+    pub(crate) fn env_remove(mut self, name: impl AsRef<OsStr>) -> Self {
+        self.request.environment.push((name.as_ref().to_os_string(), None));
         self
     }
     /// Finish the immutable request.

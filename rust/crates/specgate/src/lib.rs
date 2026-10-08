@@ -73,7 +73,7 @@ pub mod __rt {
     pub use specgate_runtime::capture::{
         Capture, Completion, Config, ConfigDeps, EnvConfig, Observation, OperationScope, OperationSpan, SetupProvenance, SpanBoundary,
         SpanId, Status, TraceId, begin_operation, capture_async_context, defer_setup, finish, instrument_async_operation, record_setup,
-        reject_async, start,
+        start,
     };
     pub use specgate_runtime::generated::{FAILURE_MARKER, Stage, report_completion, report_error};
     pub use specgate_runtime::registry::{

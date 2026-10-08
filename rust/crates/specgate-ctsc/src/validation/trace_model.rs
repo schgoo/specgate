@@ -59,12 +59,19 @@ pub(crate) struct TraceEvent {
 /// The lossless OTLP attribute algebra accepted at the trace boundary.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum AnyValue {
+    /// UTF-8 text from an OTLP `stringValue`.
     String(Box<str>),
+    /// Boolean data from an OTLP `boolValue`.
     Bool(bool),
+    /// Signed integer data from an OTLP `intValue`.
     Int(i64),
+    /// Finite or symbolic floating-point data from an OTLP `doubleValue`.
     Double(F64Value),
+    /// Decoded binary data from an OTLP `bytesValue`.
     Bytes(Box<[u8]>),
+    /// Ordered heterogeneous values from an OTLP `arrayValue`.
     Array(Box<[AnyValue]>),
+    /// String-keyed values from an OTLP `kvlistValue`.
     KvList(BTreeMap<String, AnyValue>),
 }
 
@@ -87,9 +94,13 @@ impl FiniteF64 {
 /// A canonical finite or symbolic non-finite CTSC floating-point value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum F64Value {
+    /// A finite binary64 value retained by its exact bit representation.
     Finite(FiniteF64),
+    /// The CTSC symbolic `NaN` representation.
     NaN,
+    /// The CTSC symbolic positive-infinity representation.
     Infinity,
+    /// The CTSC symbolic negative-infinity representation.
     NegativeInfinity,
 }
 
@@ -187,17 +198,29 @@ impl AnyValue {
 /// An orderable linked semantic value used by deterministic comparison.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum CanonicalValue {
+    /// The CTSC unit value.
     Unit,
+    /// UTF-8 text.
     String(Box<str>),
+    /// A Boolean value.
     Bool(bool),
+    /// A signed integral value normalized to the CTSC integer domain.
     Integer(i128),
+    /// A finite or symbolic floating-point value.
     Float(F64Value),
+    /// Opaque binary data.
     Bytes(Box<[u8]>),
+    /// An ordered homogeneous sequence.
     List(Box<[CanonicalValue]>),
+    /// An ordered fixed-position product.
     Tuple(Box<[CanonicalValue]>),
+    /// An unordered collection of unique values.
     Set(BTreeSet<CanonicalValue>),
+    /// An unordered collection of canonical key-value pairs.
     Map(BTreeMap<CanonicalValue, CanonicalValue>),
+    /// A named-field product keyed by field name.
     Record(BTreeMap<String, CanonicalValue>),
+    /// A named alternative and its payload.
     Variant(Box<str>, Box<CanonicalValue>),
 }
 

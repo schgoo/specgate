@@ -63,6 +63,27 @@ pub enum SchemaLookup<'a> {
 /// Rust targets link and self-report once, so every component shares registry
 /// index `0`. C# targets build and reflect once, emitting one raw document per
 /// component. Either way, the expensive toolchain work happens a single time.
+///
+/// # Examples
+///
+/// ```no_run
+/// use specgate_discovery::output::{Batch, SchemaLookup};
+///
+/// # fn inspect(batch: &Batch) {
+/// match batch.schema("example.math") {
+///     SchemaLookup::Found(schema) => println!("{}", schema.component),
+///     SchemaLookup::Missing => println!("component was not requested"),
+///     SchemaLookup::Invalid(error) => eprintln!("{error}"),
+/// }
+///
+/// if let Some(registry) = batch.registry("example.math") {
+///     println!("{registry:?}");
+/// }
+/// if let Some(document) = batch.registry_json("example.math") {
+///     println!("{document}");
+/// }
+/// # }
+/// ```
 #[derive(Debug)]
 #[expect(
     clippy::exhaustive_structs,
