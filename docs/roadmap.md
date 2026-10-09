@@ -111,7 +111,10 @@ Slice 3 landed abandonment as a terminal state
 ([`abandonment-terminal-state`](decisions/abandonment-terminal-state.md)): an
 async operation dropped before it reaches an outcome records
 `conformance.abandoned` with `UNSET` status, which is neither a fault nor a
-completion and does not propagate to its caller.
+completion and does not propagate to its caller. Two follow-ups remain from that
+slice: abandonment is never exercised under a concurrent unwind or a
+multi-threaded drop (#65), and no test pins the macro's sync/async arm selection
+to which scopes are permitted to be abandonable (#67).
 
 Raw `std::thread::spawn` is its own slice. A spawned thread finds an empty
 thread-local slot and calls `activate_native_capture_from_environment`, which
@@ -192,7 +195,8 @@ to let a row carry that code while capturing, so it remains the guard for async
 setups. `fixture.async_abandon` covers abandonment.
 
 Remaining: fixtures and rows for the cases that still fail closed — async
-setups, cross-thread migration, and concurrent interleaving.
+setups. `fixture.async_migration` and `fixture.async_interleave` already carry
+rows, so cross-thread migration and concurrent interleaving are covered.
 
 ---
 
@@ -299,7 +303,7 @@ parked until questions 1 through 3 are resolved.
 
 ## Triage needed
 
-- 26 open issues, several predating the CTSC migration and describing removed
+- 31 open issues, several predating the CTSC migration and describing removed
   subsystems. Issue #2 is the clearest case: right problem, obsolete solution.
 - Epic #48 and children #44-#47 are scoped to synchronous C# capture and need
   rescoping against MVP+1.
@@ -310,6 +314,10 @@ parked until questions 1 through 3 are resolved.
   `concurrently_interleaved_operations_fail_closed` in
   `rust/crates/specgate/tests/native_capture.rs` is the current example. Wanted,
   but it changes golden-matrix declaration semantics and needs a design pass.
+- Validator parity is hand-maintained across two implementations and only one of
+  them is gated: `docs/ctsc/validate.py` appears in no `just` recipe and lacks
+  the after-terminal-event rule the Rust validator enforces (#66). Nothing
+  detects the two drifting apart.
 - The external feature request document cites `specgate-harness` paths and a C#
   weaver and runtime that no longer exist. Its evidence and requirements remain
   valid; its citations do not.

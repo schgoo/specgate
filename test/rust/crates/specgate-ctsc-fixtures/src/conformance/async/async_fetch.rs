@@ -27,8 +27,9 @@ fn async_operation_is_discovery_valid_without_native_capture() {
 ///
 /// Deliberately a bare `block_on`: no timeout, no `select!`, no spawn, and no
 /// multi-threaded executor. A future that is polled and then dropped while
-/// still `Pending` is abandoned, and abandonment is an accepted but
-/// unimplemented terminal state (`docs/decisions/abandonment-terminal-state.md`).
+/// still `Pending` is abandoned, which is an implemented terminal state with
+/// `UNSET` status (`docs/decisions/abandonment-terminal-state.md`); this
+/// fixture pins the ordinary run-to-completion path instead.
 #[test]
 fn directly_awaited_async_operation_runs_to_completion() {
     assert_eq!(

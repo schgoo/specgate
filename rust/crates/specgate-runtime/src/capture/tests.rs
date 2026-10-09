@@ -390,6 +390,109 @@ fn unfinished_panics() {
 }
 
 #[test]
+fn top_level_abandonment_persists_terminal_sidecar() {
+    let file_system = start_sidecar(FakeFs::default());
+    let mut scope = begin_async_operation(ComponentId::from("fixture.native"), OperationName::from("work")).unwrap();
+    scope.input("value", Value::Integer(1)).unwrap();
+    scope.inputs_recorded().unwrap();
+    drop(scope);
+
+    let snapshots = file_system.lock().expect("fake filesystem mutex poisoned").snapshots.clone();
+    assert_eq!(snapshots.len(), 2, "abandonment must rewrite the provisional sidecar");
+    let provisional: Capture = serde_json::from_slice(&snapshots[0]).unwrap();
+    assert_eq!(
+        provisional.operations[0].status,
+        Status::Error,
+        "the provisional snapshot is pessimistic until the operation reaches a terminal state"
+    );
+
+    let persisted = &snapshots[1];
+    assert!(
+        !String::from_utf8(persisted.clone()).unwrap().contains("incomplete_capture"),
+        "an abandoned operation must not keep the provisional incomplete_capture fault"
+    );
+    let capture: Capture = serde_json::from_slice(persisted).unwrap();
+    assert_eq!(capture.operations.len(), 1);
+    assert_eq!(capture.operations[0].status, Status::Unset);
+    assert!(matches!(capture.operations[0].completion, Some(Completion::Abandoned { .. })));
+    assert_ne!(capture.run.status, Status::Error, "abandonment must not poison the run");
+    assert_ne!(capture.scenario.status, Status::Error, "abandonment must not poison the scenario");
+
+    finish().unwrap();
+}
+
+#[test]
+fn abandonment_persistence_failure_reports_marker() {
+    let output = generated::Output::install();
+    let file_system = start_sidecar(FakeFs {
+        fail_stage: Some(PersistenceStage::Replace),
+        ..FakeFs::default()
+    });
+    let scope = begin_async_operation(ComponentId::from("fixture.native"), OperationName::from("work")).unwrap();
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || drop(scope)));
+    assert!(outcome.is_ok(), "abandonment must not panic when persistence fails");
+
+    let records = output.records();
+    output.reset();
+    assert_eq!(records.len(), 1, "{records:?}");
+    assert!(records[0].contains(generated::FAILURE_MARKER), "{records:?}");
+    assert!(records[0].contains(&format!("{:?}", PersistenceStage::Replace)), "{records:?}");
+    assert!(!file_system.lock().expect("fake filesystem mutex poisoned").calls.is_empty());
+    assert!(
+        finish().is_err(),
+        "a failed abandonment persist must terminalize the capture session"
+    );
+}
+
+// A regression here aborts the process ("fatal runtime error: thread local
+// panicked on drop") and takes the whole specgate-runtime test binary with it
+// rather than reporting a failure against this test.
+#[test]
+fn abandonment_during_thread_local_teardown_does_not_abort() {
+    struct AbandonOnTeardown(Option<OperationScope>);
+    impl Drop for AbandonOnTeardown {
+        fn drop(&mut self) {
+            drop(self.0.take());
+        }
+    }
+    thread_local! {
+        static TEARDOWN: RefCell<Option<AbandonOnTeardown>> = const { RefCell::new(None) };
+    }
+
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        // Touch the probe thread local *before* the capture session and the
+        // protocol sink so its destructor is registered first. Destruction
+        // order is unspecified, but where it is reverse-registration this makes
+        // the probe run after `SESSION` and `PROTOCOL_OUTPUT` are destroyed.
+        TEARDOWN.with(|slot| assert!(slot.borrow().is_none()));
+        let _output = generated::Output::install();
+        let file_system = start_sidecar(FakeFs {
+            fail_stage: Some(PersistenceStage::Replace),
+            ..FakeFs::default()
+        });
+        sender.send(Arc::clone(&file_system)).unwrap();
+        let scope = begin_async_operation(ComponentId::from("fixture.native"), OperationName::from("teardown")).unwrap();
+        // The scope is now owned by a thread local, so it is abandoned during
+        // this thread's thread-local destruction rather than on a live thread.
+        // Where `PROTOCOL_OUTPUT` is already destroyed by then, the failure
+        // marker is deliberately written to real stderr instead of `_output`.
+        TEARDOWN.with(|slot| *slot.borrow_mut() = Some(AbandonOnTeardown(Some(scope))));
+    });
+    worker
+        .join()
+        .expect("abandonment during thread-local teardown must not panic or abort");
+
+    let file_system = receiver.recv().unwrap();
+    let file_system = file_system.lock().expect("fake filesystem mutex poisoned");
+    assert!(
+        file_system.calls.contains(&PersistenceStage::Replace),
+        "the teardown drop must actually reach the failing persist, not skip it"
+    );
+    assert!(file_system.snapshots.is_empty(), "the injected failure must prevent any snapshot");
+}
+
+#[test]
 fn nested_capture() {
     start(native_config(["1111111111111103"])).unwrap();
     let mut outer = begin_operation(ComponentId::from("fixture.native"), OperationName::from("outer")).unwrap();

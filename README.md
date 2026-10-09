@@ -33,7 +33,7 @@ specgate compare capture\reference.otlp.json candidate.otlp.json `
 
 `discover` supports Rust link-time metadata and C# compiled-assembly reflection.
 `capture` and `replay` currently support Rust. `validate` natively checks CTSC
-0.2 Registry, Trace Core, Linked, and capture-bundle semantics, including JSONL
+0.3 Registry, Trace Core, Linked, and capture-bundle semantics, including JSONL
 traces and local or explicit registry imports. `compare` applies the fixed
 `ctsc.strict/0.1.0` policy and reports stable semantic mismatch paths.
 Capture bundles contain
