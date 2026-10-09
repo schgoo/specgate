@@ -1,8 +1,8 @@
 //! Generated-code failure reporting and parent-process protocol output.
 
 use super::*;
-#[cfg(feature = "test-util")]
-use std::sync::{Arc, Mutex};
+#[cfg(any(test, feature = "test-util"))]
+use std::sync::{Arc, Mutex, PoisonError};
 
 /// Parent-process capture protocol marker consumed by the `SpecGate` CLI.
 ///
@@ -14,7 +14,13 @@ pub const FAILURE_MARKER: &str = "__SPECGATE_NATIVE_CAPTURE_PERSISTENCE_FAILURE_
 const FAILURE_EVENT: &str = "specgate.capture.persistence_failure";
 /// Stable error classification consumed by capture telemetry subscribers.
 const PERSISTENCE_ERROR: &str = "capture.persistence";
-/// Stable instrumentation stage attached to generated capture failures.
+/// Stable instrumentation stage attached to generated and runtime capture failures.
+///
+/// Most variants are constructed by generated instrumentation, but some
+/// lifecycle stages are driven entirely by the runtime — `OperationAbandon` is
+/// reported from `Drop` on an instrumented future, with no generated code on the
+/// stack. Treat this enum as covering every instrumented capture lifecycle
+/// failure, however it is reached.
 #[doc(hidden)]
 #[derive(Debug, Clone, Copy)]
 #[expect(
@@ -28,6 +34,8 @@ pub enum Stage {
     OperationInput,
     /// Completing an operation scope.
     OperationComplete,
+    /// Abandoning an operation scope when an instrumented future is dropped.
+    OperationAbandon,
     /// Committing setup provenance.
     SetupCommit,
     /// Recording a native observation.
@@ -42,6 +50,7 @@ impl Stage {
             Self::OperationBegin => "operation.begin",
             Self::OperationInput => "operation.input",
             Self::OperationComplete => "operation.complete",
+            Self::OperationAbandon => "operation.abandon",
             Self::SetupCommit => "setup.commit",
             Self::Observation => "observation.record",
             Self::Completion => "capture.completion",
@@ -80,7 +89,7 @@ struct ProtocolOutput {
 #[derive(Debug, Clone)]
 enum ProtocolBackend {
     Real,
-    #[cfg(feature = "test-util")]
+    #[cfg(any(test, feature = "test-util"))]
     Fake(Arc<Mutex<Vec<String>>>),
 }
 
@@ -91,7 +100,7 @@ impl ProtocolOutput {
         }
     }
 
-    #[cfg(feature = "test-util")]
+    #[cfg(any(test, feature = "test-util"))]
     fn fake(records: Arc<Mutex<Vec<String>>>) -> Self {
         Self {
             backend: ProtocolBackend::Fake(records),
@@ -105,11 +114,8 @@ impl ProtocolOutput {
                 let mut standard_error = std::io::stderr().lock();
                 let _ignored = writeln!(standard_error, "{marker}");
             }
-            #[cfg(feature = "test-util")]
-            ProtocolBackend::Fake(records) => records
-                .lock()
-                .expect("generated protocol output mutex poisoned")
-                .push(marker.to_string()),
+            #[cfg(any(test, feature = "test-util"))]
+            ProtocolBackend::Fake(records) => records.lock().unwrap_or_else(PoisonError::into_inner).push(marker.to_string()),
         }
     }
 }
@@ -118,14 +124,14 @@ thread_local! {
     static PROTOCOL_OUTPUT: RefCell<ProtocolOutput> = const { RefCell::new(ProtocolOutput::real()) };
 }
 
-#[cfg(feature = "test-util")]
+#[cfg(any(test, feature = "test-util"))]
 /// Thread-local fake parent-protocol output controller for deterministic tests.
 #[derive(Debug, Clone)]
 pub struct Output {
     records: Arc<Mutex<Vec<String>>>,
 }
 
-#[cfg(feature = "test-util")]
+#[cfg(any(test, feature = "test-util"))]
 impl Output {
     /// Install a thread-local fake parent-protocol sink.
     #[must_use]
@@ -148,14 +154,14 @@ impl Output {
     }
 }
 
-#[cfg(feature = "test-util")]
+#[cfg(any(test, feature = "test-util"))]
 pub(crate) fn capture_output() -> Output {
     let records = Arc::new(Mutex::new(Vec::new()));
     PROTOCOL_OUTPUT.with(|output| *output.borrow_mut() = ProtocolOutput::fake(Arc::clone(&records)));
     Output { records }
 }
 
-#[cfg(feature = "test-util")]
+#[cfg(any(test, feature = "test-util"))]
 pub(crate) fn reset_output() {
     PROTOCOL_OUTPUT.with(|output| *output.borrow_mut() = ProtocolOutput::real());
 }
@@ -172,13 +178,23 @@ fn report_telemetry(failure: &FailureTelemetry<'_>) {
         protocol.marker = FAILURE_MARKER,
         "generated capture failure: {{error.type}} stage={{capture.stage}} protocol_marker={{protocol.marker}}"
     );
-    PROTOCOL_OUTPUT.with(|output| output.borrow().write(failure.protocol_marker));
+    // Reachable from `Drop`, including during thread-local destruction, where
+    // `LocalKey::with` would panic. The marker is the CLI's only signal that a
+    // sidecar is untrustworthy, so a destroyed thread local falls back to real
+    // stderr rather than dropping it.
+    if PROTOCOL_OUTPUT
+        .try_with(|output| output.borrow().write(failure.protocol_marker))
+        .is_err()
+    {
+        ProtocolOutput::real().write(failure.protocol_marker);
+    }
 }
 
 /// Validate and report a generated capture failure at a named instrumentation stage.
 ///
-/// # Panics
-/// Panics when a test has poisoned the feature-gated fake output mutex.
+/// Safe to call from `Drop`, including during thread-local destruction: a
+/// destroyed sink degrades to real stderr and a poisoned sink is recovered in
+/// place, so this never panics and never loses the failure marker.
 ///
 #[doc(hidden)]
 pub fn report_error(stage: Stage, error: impl AsRef<str>) {
@@ -206,8 +222,6 @@ pub fn report_error(stage: Stage, error: impl AsRef<str>) {
 /// # }
 /// ```
 ///
-/// # Panics
-/// Panics for a poisoned test-output mutex.
 #[doc(hidden)]
 pub fn report_completion<E: AsRef<str>>(result: Result<(), E>) {
     if let Err(error) = result {
