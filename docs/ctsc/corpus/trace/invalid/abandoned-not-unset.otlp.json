@@ -1,0 +1,143 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": {
+              "stringValue": "ctsc-abandoned-not-unset-example"
+            }
+          },
+          {
+            "key": "conformance.version",
+            "value": {
+              "stringValue": "0.3.0"
+            }
+          },
+          {
+            "key": "conformance.tool.name",
+            "value": {
+              "stringValue": "example-producer"
+            }
+          },
+          {
+            "key": "conformance.tool.version",
+            "value": {
+              "stringValue": "1.0.0"
+            }
+          },
+          {
+            "key": "conformance.target.name",
+            "value": {
+              "stringValue": "implementation-a"
+            }
+          },
+          {
+            "key": "conformance.target.language",
+            "value": {
+              "stringValue": "example"
+            }
+          }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": {
+            "name": "example.ctsc.instrumentation",
+            "version": "1.0.0"
+          },
+          "spans": [
+            {
+              "traceId": "77777777777777777777777777777771",
+              "spanId": "7777777777777a01",
+              "name": "conformance.run",
+              "kind": 1,
+              "startTimeUnixNano": "7000000000",
+              "endTimeUnixNano": "7000005000",
+              "attributes": [
+                {
+                  "key": "conformance.run.id",
+                  "value": {
+                    "stringValue": "run-abandoned-002"
+                  }
+                }
+              ],
+              "status": {
+                "code": 1
+              }
+            },
+            {
+              "traceId": "77777777777777777777777777777771",
+              "spanId": "7777777777777a02",
+              "parentSpanId": "7777777777777a01",
+              "name": "conformance.scenario",
+              "kind": 1,
+              "startTimeUnixNano": "7000001000",
+              "endTimeUnixNano": "7000004000",
+              "attributes": [
+                {
+                  "key": "conformance.scenario.name",
+                  "value": {
+                    "stringValue": "abandoned_claims_ok"
+                  }
+                },
+                {
+                  "key": "conformance.scenario.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                }
+              ],
+              "status": {
+                "code": 1
+              }
+            },
+            {
+              "traceId": "77777777777777777777777777777771",
+              "spanId": "7777777777777a03",
+              "parentSpanId": "7777777777777a02",
+              "name": "conformance.operation",
+              "kind": 1,
+              "startTimeUnixNano": "7000002000",
+              "endTimeUnixNano": "7000003000",
+              "attributes": [
+                {
+                  "key": "conformance.component.id",
+                  "value": {
+                    "stringValue": "example.search"
+                  }
+                },
+                {
+                  "key": "conformance.operation.name",
+                  "value": {
+                    "stringValue": "query"
+                  }
+                },
+                {
+                  "key": "conformance.operation.inputs",
+                  "value": {
+                    "kvlistValue": {
+                      "values": []
+                    }
+                  }
+                }
+              ],
+              "events": [
+                {
+                  "timeUnixNano": "7000002900",
+                  "name": "conformance.abandoned"
+                }
+              ],
+              "status": {
+                "code": 1
+              }
+            }
+          ],
+          "schemaUrl": "https://example.com/ctsc/schema/0.3.0"
+        }
+      ],
+      "schemaUrl": "https://example.com/ctsc/schema/0.3.0"
+    }
+  ]
+}

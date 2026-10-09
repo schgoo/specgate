@@ -29,7 +29,7 @@ policy cannot weigh evidence the trace never recorded.
 ## Decision
 
 1. Abandonment is a terminal state — neither a fault nor a completion outcome.
-   The §7.6 completion states describe an operation completing *through its
+   The §7.7 completion states describe an operation completing *through its
    contract*; abandonment is imposed by the caller and is not part of the
    operation's declared `outcomes`. It sits beside `conformance.fault` as the
    second non-contractual termination: a fault is failure, an abandonment is

@@ -1,4 +1,4 @@
-# CTSC Registry 0.2
+# CTSC Registry 0.3
 
 **Status:** Draft
 
@@ -7,7 +7,7 @@
 This document defines the CTSC language-neutral structural registry.
 
 Registry documents conform to
-[`ctsc-registry-0.2.schema.json`](ctsc-registry-0.2.schema.json).
+[`ctsc-registry.schema.json`](ctsc-registry.schema.json).
 
 The words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY** are
 normative.
@@ -19,7 +19,7 @@ A registry document is one JSON object with:
 ```json
 {
   "format": "ctsc.registry",
-  "formatVersion": "0.2.0",
+  "formatVersion": "0.3.0",
   "registryId": "...",
   "version": "...",
   "components": []

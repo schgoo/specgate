@@ -1,6 +1,6 @@
 {
   "format": "ctsc.registry",
-  "formatVersion": "0.2.0",
+  "formatVersion": "0.3.0",
   "registryId": "urn:ctsc:registry:example.values:1",
   "version": "1.0.0",
   "components": [

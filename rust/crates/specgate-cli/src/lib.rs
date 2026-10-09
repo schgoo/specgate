@@ -18,7 +18,7 @@
 //! components verbatim. `replay` verifies a capture bundle,
 //! statically links its top-level semantic inputs to a Rust candidate, and
 //! emits an independent deterministic CTSC trace. `validate` provides native
-//! CTSC 0.2 Registry, Trace Core, Linked, and capture-bundle validation.
+//! CTSC 0.3 Registry, Trace Core, Linked, and capture-bundle validation.
 //! `compare` applies deterministic `ctsc.strict/0.1.0` semantics. No command
 //! reads `.spec.yaml` or invokes Python. The library capture entry point accepts
 //! one owned [`CaptureRequest`], constructed with a validated builder, and

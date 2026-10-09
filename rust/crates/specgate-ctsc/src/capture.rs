@@ -45,9 +45,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 // CTSC Trace Core version and schema URL; changing either changes wire compatibility.
+// Both are re-exports of the crate-root definition so the encoder cannot emit a
+// version the validators in this crate do not accept.
 mod ctsc {
-    pub(super) const VERSION: &str = "0.2.0";
-    pub(super) const SCHEMA: &str = "https://specgate.dev/ctsc/schema/0.2.0";
+    pub(super) use crate::{CTSC_SCHEMA_URL as SCHEMA, CTSC_VERSION as VERSION};
 }
 // Deterministic reference/replay identity ranges keep independently encoded evidence disjoint.
 mod reference {
@@ -69,6 +70,7 @@ mod run {
     pub(super) const REPLAY: &str = "specgate.replay";
 }
 const KIND_INTERNAL: i32 = 1;
+const STATUS_UNSET: i32 = 0;
 const STATUS_OK: i32 = 1;
 const STATUS_ERROR: i32 = 2;
 const RUN_NAME: &str = "conformance.run";
@@ -79,6 +81,7 @@ const OBS_EVENT: &str = "conformance.observation";
 const RESULT_EVENT: &str = "conformance.result";
 const EMPTY_EVENT: &str = "conformance.empty";
 const FAULT_EVENT: &str = "conformance.fault";
+const ABANDONED_EVENT: &str = "conformance.abandoned";
 // Resource/scope identity literals are fixed by CTSC Trace Core and changing them changes wire compatibility.
 const TOOL_NAME: &str = "specgate";
 const SCOPE_NAME: &str = "specgate.ctsc";
@@ -201,6 +204,9 @@ pub enum Value {
     reason = "capture wire model variants are part of the stable construction API"
 )]
 pub enum Status {
+    /// Neither success nor failure: the operation stopped without reaching an
+    /// outcome. Encoded as OTLP `UNSET`.
+    Unset,
     /// Successful completion.
     Ok,
     /// Error or fault completion.
@@ -310,6 +316,15 @@ pub enum Completion {
         message: String,
         /// Observer identity.
         observer: String,
+    },
+    /// The operation stopped for good without reaching any outcome, because the
+    /// future carrying it was dropped before it resolved.
+    Abandoned {
+        /// Event order.
+        order: u64,
+        /// Timestamp.
+        #[serde(rename = "time_unix_nano")]
+        time_ns: i64,
     },
 }
 

@@ -774,7 +774,7 @@ mod uri_tests {
         #[test]
         fn injected_reader_loads_a_valid_registry() {
             let loaded = load(
-                r#"{"format":"ctsc.registry","formatVersion":"0.2.0","registryId":"urn:ctsc:registry:test","version":"0.1.0","components":[{"id":"test.component","operations":[{"name":"run","inputs":[],"observations":[],"outcomes":{}}],"types":[]}]}"#,
+                r#"{"format":"ctsc.registry","formatVersion":"0.3.0","registryId":"urn:ctsc:registry:test","version":"0.1.0","components":[{"id":"test.component","operations":[{"name":"run","inputs":[],"observations":[],"outcomes":{}}],"types":[]}]}"#,
             );
 
             assert!(loaded.issues.is_empty());
@@ -786,7 +786,7 @@ mod uri_tests {
         #[test]
         fn semantic_validation_reports_unknown_named_types() {
             let loaded = load(
-                r#"{"format":"ctsc.registry","formatVersion":"0.2.0","registryId":"urn:ctsc:registry:test","version":"0.1.0","components":[{"id":"test.component","operations":[{"name":"run","inputs":[],"observations":[],"outcomes":{"result":{"kind":"named","name":"Missing"}}}],"types":[]}]}"#,
+                r#"{"format":"ctsc.registry","formatVersion":"0.3.0","registryId":"urn:ctsc:registry:test","version":"0.1.0","components":[{"id":"test.component","operations":[{"name":"run","inputs":[],"observations":[],"outcomes":{"result":{"kind":"named","name":"Missing"}}}],"types":[]}]}"#,
             );
 
             assert!(loaded.value.is_some());

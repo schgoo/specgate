@@ -1,13 +1,13 @@
 {
   "format": "ctsc.registry",
-  "formatVersion": "0.2.0",
+  "formatVersion": "0.3.0",
   "registryId": "urn:ctsc:registry:example.orders:1",
   "version": "1.0.0",
   "imports": [
     {
       "registryId": "urn:ctsc:registry:example.tax:1",
       "version": "1.0.0",
-      "digest": "sha256:97628c2ba5e8c661268d8adf3cb06a6950af7f38b12153f283e2adce39e95d13",
+      "digest": "sha256:e3d9f134ef0a7b5b0916ee7bb7718361d047e4767ea444e1739035b4279a37bc",
       "uri": "file:./tax.registry.json"
     }
   ],

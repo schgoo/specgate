@@ -33,6 +33,24 @@
 //! assert!(encode_reference([], &metadata).is_err());
 //! ```
 
+/// The one CTSC format-version literal in Rust.
+///
+/// A macro rather than a `const` so the schema URL can be built from it with
+/// `concat!`, which needs a literal. [`CTSC_SCHEMA_URL`] therefore cannot drift
+/// from [`CTSC_VERSION`], and a version bump edits exactly one Rust token.
+/// `capture`, `registry`, `replay`, and `validation::model` all consume these
+/// two items instead of declaring their own copies.
+macro_rules! ctsc_version {
+    () => {
+        "0.3.0"
+    };
+}
+
+/// Registry and Trace Core contract version produced and accepted by this build.
+pub(crate) const CTSC_VERSION: &str = ctsc_version!();
+/// Schema URL advertised on encoded traces, derived from [`CTSC_VERSION`].
+pub(crate) const CTSC_SCHEMA_URL: &str = concat!("https://specgate.dev/ctsc/schema/", ctsc_version!());
+
 /// Compare two local CTSC traces with fixed `ctsc.strict/0.1.0` semantics.
 ///
 /// Inputs are validated before semantic comparison. Invalid artifacts populate

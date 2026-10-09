@@ -25,6 +25,7 @@ except ImportError as error:
     ) from error
 
 
+CTSC_VERSION = "0.3.0"
 CTSC_SPANS = {
     "conformance.run",
     "conformance.scenario",
@@ -37,6 +38,7 @@ CTSC_EVENTS = {
     "conformance.empty",
     "conformance.error",
     "conformance.fault",
+    "conformance.abandoned",
 }
 REQUIRED_RESOURCE_ATTRIBUTES = {
     "conformance.version",
@@ -194,7 +196,7 @@ def unique_names(
 
 
 def ascending_component_order(components: Any, validator: Validator) -> None:
-    """Registry 0.2 section 3.1: components are ordered by ascending id.
+    """Registry 0.3 section 3.1: components are ordered by ascending id.
 
     Python compares ``str`` by Unicode code point, which is exactly the
     comparison the contract specifies.
@@ -798,7 +800,7 @@ def load_registry_document(
     visiting.add(path)
     try:
         document = load_json(path)
-        schema = load_json(Path(__file__).with_name("ctsc-registry-0.2.schema.json"))
+        schema = load_json(Path(__file__).with_name("ctsc-registry.schema.json"))
         jsonschema.Draft202012Validator.check_schema(schema)
         schema_errors = list(jsonschema.Draft202012Validator(schema).iter_errors(document))
         for error in schema_errors:
@@ -928,6 +930,7 @@ def validate_event(
         "conformance.result",
         "conformance.empty",
         "conformance.error",
+        "conformance.abandoned",
     }
     if name in operation_events:
         validator.require(
@@ -952,6 +955,9 @@ def validate_event(
     elif name == "conformance.empty":
         if "conformance.result.value" in attributes:
             validator.error(location, "empty event must not contain a result value")
+    elif name == "conformance.abandoned":
+        if "conformance.result.value" in attributes:
+            validator.error(location, "abandoned event must not contain a result value")
     elif name == "conformance.error":
         string_attribute(attributes, "conformance.error.name", location, validator)
         value = attributes.get("conformance.error.value")
@@ -992,6 +998,11 @@ def status_is_error(span: dict[str, Any]) -> bool:
 def status_is_ok(span: dict[str, Any]) -> bool:
     status = span.get("status") or {}
     return status.get("code") in {1, "STATUS_CODE_OK"}
+
+
+def status_is_unset(span: dict[str, Any]) -> bool:
+    status = span.get("status") or {}
+    return status.get("code") in {0, "STATUS_CODE_UNSET", None}
 
 
 def validate_trace(path: Path) -> tuple[list[dict[str, Any]], Validator]:
@@ -1082,9 +1093,9 @@ def validate_trace(path: Path) -> tuple[list[dict[str, Any]], Validator]:
                 )
                 if key == "conformance.version" and actual is not None:
                     validator.require(
-                        actual == "0.2.0",
+                        actual == CTSC_VERSION,
                         resource_location,
-                        "conformance.version must be '0.2.0'",
+                        f"conformance.version must be '{CTSC_VERSION}'",
                     )
             spans.extend(
                 (span, resource_attributes, span_location)
@@ -1194,7 +1205,12 @@ def validate_trace(path: Path) -> tuple[list[dict[str, Any]], Validator]:
         if name == "conformance.operation":
             non_result_terminal = sum(
                 event_name
-                in {"conformance.empty", "conformance.error", "conformance.fault"}
+                in {
+                    "conformance.empty",
+                    "conformance.error",
+                    "conformance.fault",
+                    "conformance.abandoned",
+                }
                 for event_name in event_names
             )
             validator.require(
@@ -1218,9 +1234,15 @@ def validate_trace(path: Path) -> tuple[list[dict[str, Any]], Validator]:
                     location,
                     "declared error and fault operations must have ERROR status",
                 )
+            if "conformance.abandoned" in event_names:
+                validator.require(
+                    status_is_unset(span),
+                    location,
+                    "abandoned operations must have UNSET status",
+                )
             # Trace 7.5 requires an unfinished operation to carry an
             # incomplete_capture fault, which is itself a terminal event. A span
-            # with no terminal event is therefore a 7.6 unit completion, and any
+            # with no terminal event is therefore a 7.7 unit completion, and any
             # status other than OK is self-contradictory.
             validator.require(
                 bool(result_count or non_result_terminal) or status_is_ok(span),
@@ -1400,6 +1422,7 @@ def validate_linked(trace_path: Path, registry_path: Path) -> Validator:
                             "conformance.result",
                             "conformance.empty",
                             "conformance.error",
+                            "conformance.abandoned",
                         }
                     ]
                     outcome = operation["outcomes"]
@@ -1434,6 +1457,14 @@ def validate_linked(trace_path: Path, registry_path: Path) -> Validator:
                     elif terminal[0]["name"] == "conformance.empty":
                         if outcome.get("empty") is not True:
                             validator.error(span_location, "empty outcome not declared")
+                    elif terminal[0]["name"] == "conformance.abandoned":
+                        # An operation that never reached an outcome owes the
+                        # registry no outcome. Written out rather than left to a
+                        # fall-through so the permission is deliberate: this
+                        # mirrors the Rust linked validator, and reusing the
+                        # fault skip above would encode "abandonment is a
+                        # fault", which it is not.
+                        pass
                     elif terminal[0]["name"] == "conformance.error":
                         event_attributes = {
                             item["key"]: item["value"]

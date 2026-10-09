@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 // CTSC Registry Core contract version serialized into every document; changing it breaks compatibility.
-const CTSC_VERSION: &str = "0.2.0";
+use crate::CTSC_VERSION;
 // Registry Core format discriminator serialized into every document.
 const REGISTRY_FORMAT: &str = "ctsc.registry";
 // Discovery setup payload extension from the SpecGate normalized-schema contract; changing it breaks setup compatibility.

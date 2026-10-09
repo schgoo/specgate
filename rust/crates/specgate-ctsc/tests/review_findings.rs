@@ -512,7 +512,7 @@ fn parallel_interval_encloses_every_direct_branch() {
 fn registry_document(registry_id: &str, component_id: &str) -> Value {
     json!({
         "format":"ctsc.registry",
-        "formatVersion":"0.2.0",
+        "formatVersion":"0.3.0",
         "registryId":registry_id,
         "version":"1.0.0",
         "components":[{
@@ -728,7 +728,7 @@ fn registry_json_schema_shape_and_extension_rules_are_enforced() {
     std::fs::remove_dir_all(scratch).expect("remove scratch");
 }
 
-/// Registry 0.2 §3.1 makes ascending component id order a document-level
+/// Registry 0.3 §3.1 makes ascending component id order a document-level
 /// MUST. It is enforced exactly like the neighbouring component-id uniqueness
 /// MUST, so an unsorted hand-written or third-party document is rejected
 /// rather than silently accepted.
@@ -750,7 +750,7 @@ fn registry_validation_rejects_unsorted_component_order() {
     let document = |ids: [&str; 2]| {
         json!({
             "format": "ctsc.registry",
-            "formatVersion": "0.2.0",
+            "formatVersion": "0.3.0",
             "registryId": "urn:ctsc:registry:zeta.app",
             "version": "0.1.0",
             "components": [component(ids[0]), component(ids[1])]

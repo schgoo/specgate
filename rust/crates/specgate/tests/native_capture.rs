@@ -299,6 +299,82 @@ fn concurrently_interleaved_operations_record_correct_traces() {
     }
 }
 
+/// An async operation whose future is dropped after one `Pending` poll is
+/// recorded as abandoned, and the abandonment does not propagate.
+///
+/// The parent operation and the run both stay `Ok`: abandonment says the work
+/// stopped, not that anything failed. The poll is driven by hand — one poll,
+/// observe `Pending`, drop — so there is no executor, no timer, and no race.
+#[test]
+fn an_abandoned_async_operation_records_unset_without_propagating() {
+    use std::future::Future;
+    use std::task::{Context, Poll, Waker};
+
+    specgate::__rt::start(config(&[])).unwrap();
+    let mut outer = specgate::__rt::begin_operation(
+        specgate::__rt::ComponentId::from("fixture.macro_default"),
+        specgate::__rt::OperationName::from("outer"),
+    )
+    .unwrap();
+    outer.input("value", Value::Integer(2)).unwrap();
+
+    let mut context = Context::from_waker(Waker::noop());
+    let mut abandoned = Box::pin(async_suspends(2));
+    assert_eq!(abandoned.as_mut().poll(&mut context), Poll::Pending);
+    drop(abandoned);
+
+    outer.result(Value::Integer(4)).unwrap();
+    let capture = specgate::__rt::finish().unwrap();
+
+    assert_eq!(capture.operations.len(), 2);
+    assert_eq!(capture.operations[1].operation_name, "async_suspends");
+    assert_eq!(capture.operations[1].status, specgate::__rt::Status::Unset);
+    assert!(matches!(
+        capture.operations[1].completion,
+        Some(specgate::__rt::Completion::Abandoned { .. })
+    ));
+    assert_eq!(
+        capture.operations[0].status,
+        specgate::__rt::Status::Ok,
+        "abandonment does not propagate to the operation that constructed the future"
+    );
+    assert_eq!(capture.run.status, specgate::__rt::Status::Ok);
+    assert_eq!(capture.scenario.status, specgate::__rt::Status::Ok);
+}
+
+/// A future dropped before its first poll opens no operation at all.
+///
+/// Abandonment is recorded for an operation that *started* and stopped. A
+/// future that was never polled never opened a span, so there is nothing to
+/// abandon and the session stays empty.
+#[test]
+fn a_future_dropped_before_its_first_poll_records_no_operation() {
+    specgate::__rt::start(config(&[])).unwrap();
+    drop(async_suspends(2));
+    let capture = specgate::__rt::finish().unwrap();
+    assert!(capture.operations.is_empty());
+}
+
+/// A synchronous scope dropped without completing still poisons the session.
+///
+/// Only an async body earns the abandonment permission. A synchronous body
+/// that neither returns nor unwinds is impossible, so an uncompleted sync
+/// scope remains a producer bug and must keep failing loudly.
+#[test]
+fn a_sync_scope_dropped_without_completing_still_poisons_the_session() {
+    specgate::__rt::start(config(&[])).unwrap();
+    drop(
+        specgate::__rt::begin_operation(
+            specgate::__rt::ComponentId::from("fixture.macro_default"),
+            specgate::__rt::OperationName::from("outer"),
+        )
+        .unwrap(),
+    );
+    let failure = specgate::__rt::finish().expect_err("the session is poisoned");
+    let message = failure.to_string();
+    assert!(message.contains("unclosed operation scopes"), "{message}");
+}
+
 /// Drive one future to completion with no executor, so poll order is the
 /// test's own and span IDs stay deterministic.
 fn block_on<F: Future>(future: F) -> F::Output {

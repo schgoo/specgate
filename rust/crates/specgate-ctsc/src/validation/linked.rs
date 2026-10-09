@@ -29,6 +29,7 @@ const RESULT: &str = "conformance.result";
 const RESULT_ATTR: &str = "conformance.result.value";
 const EMPTY: &str = "conformance.empty";
 const ERROR: &str = "conformance.error";
+const ABANDONED: &str = "conformance.abandoned";
 const ERROR_NAME_ATTR: &str = "conformance.error.name";
 const ERROR_VALUE_ATTR: &str = "conformance.error.value";
 // Registry primitive and optional-variant spellings are normative CTSC schema
@@ -172,7 +173,7 @@ fn validate_operation(
     let terminal = span
         .events
         .iter()
-        .find(|event| matches!(event.name.as_str(), RESULT | EMPTY | ERROR));
+        .find(|event| matches!(event.name.as_str(), RESULT | EMPTY | ERROR | ABANDONED));
     match terminal.map(|event| event.name.as_str()) {
         None => {
             if operation.outcomes.result.is_some() || operation.outcomes.empty {
@@ -218,7 +219,16 @@ fn validate_operation(
                 (None, None) => {}
             }
         }
-        Some(_) => {}
+        // An operation that never reached an outcome owes the registry no outcome.
+        // Abandonment is terminal here for the same reason it is terminal in the
+        // trace validator, and reusing the `conformance.fault` early return above
+        // would encode "abandonment is a fault", which it is not.
+        Some(ABANDONED) => {}
+        // Unreachable: `terminal` is selected by the closed list above and every
+        // name in it is handled. This arm exists only because the scrutinee is
+        // `&str`, which can never be exhaustive. It fires if a name is added to
+        // that list without a matching arm here.
+        Some(other) => unreachable!("terminal event '{other}' is selected above but not handled"),
     }
 }
 

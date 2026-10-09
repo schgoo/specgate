@@ -12,7 +12,7 @@
           {
             "key": "conformance.version",
             "value": {
-              "stringValue": "0.2.0"
+              "stringValue": "0.3.0"
             }
           },
           {
@@ -54,7 +54,7 @@
           {
             "key": "conformance.registry.digest",
             "value": {
-              "stringValue": "sha256:85b13993d7fe3fc8f5731142736d12e266453fb75afd2e23c14c8794b1a9a099"
+              "stringValue": "sha256:9d864f7cd1c45f18fe3708ed87921128f27b80ae9ecfb10cd159412cce8e6092"
             }
           },
           {
@@ -346,10 +346,10 @@
               }
             }
           ],
-          "schemaUrl": "https://example.com/ctsc/schema/0.2.0"
+          "schemaUrl": "https://example.com/ctsc/schema/0.3.0"
         }
       ],
-      "schemaUrl": "https://example.com/ctsc/schema/0.2.0"
+      "schemaUrl": "https://example.com/ctsc/schema/0.3.0"
     }
   ]
 }

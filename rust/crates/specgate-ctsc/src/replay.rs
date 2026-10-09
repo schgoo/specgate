@@ -9,7 +9,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
 // CTSC contract version; changing it changes accepted artifact compatibility.
-const CTSC_VERSION: &str = "0.2.0";
+use crate::CTSC_VERSION;
 // Capture manifest discriminator and version from the capture-bundle contract.
 const MANIFEST_FORMAT: &str = "specgate.capture-manifest";
 const MANIFEST_VERSION: &str = "0.1.0";
@@ -48,6 +48,7 @@ const RESULT_VALUE: &str = "conformance.result.value";
 const OBS_EVENT: &str = "conformance.observation";
 const OBS_NAME: &str = "conformance.observation.name";
 const FAULT_EVENT: &str = "conformance.fault";
+const ABANDONED_EVENT: &str = "conformance.abandoned";
 const EMPTY_EVENT: &str = "conformance.empty";
 pub mod model;
 use model::{

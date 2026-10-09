@@ -124,6 +124,10 @@ pub struct OperationScope {
     operation_index: Option<usize>,
     collector: Option<CollectorHandle>,
     closed: bool,
+    /// Whether dropping this scope without a completion is abandonment rather
+    /// than a bug. Only [`begin_async_operation`] sets it: a synchronous body
+    /// cannot stop part-way without unwinding.
+    abandonable: bool,
 }
 
 impl OperationScope {
@@ -134,6 +138,7 @@ impl OperationScope {
             operation_index: None,
             collector: None,
             closed: true,
+            abandonable: false,
         }
     }
 
@@ -414,7 +419,20 @@ impl Drop for OperationScope {
         let Some((operation_index, collector)) = self.recording() else {
             return;
         };
+        // `panicking()` answers "did this operation unwind?" correctly for a
+        // synchronous call and for an awaited future, because in both cases the
+        // thread dropping the scope is the thread that ran the body.
+        //
+        // It is checked *before* the abandonable flag, and that ordering has a
+        // visible consequence: a future abandoned on a thread that is unwinding
+        // for an unrelated reason is recorded as `specgate.unexpected_target_fault`
+        // rather than abandoned. That is accepted. The other ordering would
+        // record a genuinely panicking async body as merely abandoned, silently
+        // losing a real failure on a run that otherwise looks clean.
+        // Over-reporting on an already-failing run beats under-reporting on a
+        // passing one.
         let panicking = std::thread::panicking();
+        let abandonable = self.abandonable;
         let mut guard = lock_collector(&collector);
         let Some(state) = guard.as_mut() else {
             return;
@@ -445,6 +463,25 @@ impl Drop for OperationScope {
                     operation.completion = Some(completion);
                     operation.end_ns = Some(end_ns);
                     operation.status = Some(Status::Error);
+                }
+                (Err(error), _) | (_, Err(error)) => state.terminal_error = Some(TerminalFailure::new(error.kind(), error.diagnostic())),
+            }
+        } else if abandonable {
+            // The future was dropped before it resolved. Nothing went wrong and
+            // no contract was satisfied, so this is neither a fault nor a
+            // completion: it is a terminal state of its own, with UNSET status
+            // and no propagation to the parent operation.
+            let completion = state.order().and_then(|order| {
+                let time_ns = state.tick()?;
+                Ok(Completion::Abandoned { order, time_ns })
+            });
+            let end_ns = state.tick();
+            match (completion, end_ns) {
+                (Ok(completion), Ok(end_ns)) => {
+                    let operation = &mut state.operations[operation_index];
+                    operation.completion = Some(completion);
+                    operation.end_ns = Some(end_ns);
+                    operation.status = Some(Status::Unset);
                 }
                 (Err(error), _) | (_, Err(error)) => state.terminal_error = Some(TerminalFailure::new(error.kind(), error.diagnostic())),
             }
@@ -528,10 +565,39 @@ fn start_with(config: Config, sidecar_path: Option<PathBuf>, file_system: FileSy
 /// # Ok::<(), specgate_runtime::CaptureError>(())
 /// ```
 pub fn begin_operation(component_id: ComponentId, operation_name: OperationName) -> Result<OperationScope, CaptureError> {
-    begin_active(component_id, operation_name)
+    begin_active(component_id, operation_name, false)
 }
 
-fn begin_active(component_id: ComponentId, operation_name: OperationName) -> Result<OperationScope, CaptureError> {
+/// Begin a native operation scope for an asynchronous body.
+///
+/// Identical to [`begin_operation`] except that dropping the returned scope
+/// without a completion records abandonment instead of poisoning the session.
+/// Only an async body can stop part-way without unwinding, so only an async
+/// body earns that permission.
+///
+/// # Errors
+///
+/// Returns an error when environment activation fails, setup inputs cannot be
+/// folded, the deterministic operation ID list is exhausted, or the logical
+/// clock cannot advance.
+///
+/// # Examples
+///
+/// ```
+/// use specgate_runtime::{ComponentId, OperationName, capture};
+///
+/// let mut operation = capture::begin_async_operation(
+///     ComponentId::from("example.math"),
+///     OperationName::from("add"),
+/// )?;
+/// operation.unit()?;
+/// # Ok::<(), specgate_runtime::CaptureError>(())
+/// ```
+pub fn begin_async_operation(component_id: ComponentId, operation_name: OperationName) -> Result<OperationScope, CaptureError> {
+    begin_active(component_id, operation_name, true)
+}
+
+fn begin_active(component_id: ComponentId, operation_name: OperationName, abandonable: bool) -> Result<OperationScope, CaptureError> {
     activate_env()?;
     let Some(collector) = current_collector() else {
         return Ok(OperationScope::inactive());
@@ -577,6 +643,7 @@ fn begin_active(component_id: ComponentId, operation_name: OperationName) -> Res
         operation_index: Some(operation_index),
         collector: Some(collector),
         closed: false,
+        abandonable,
     })
 }
 

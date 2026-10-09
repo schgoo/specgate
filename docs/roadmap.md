@@ -53,7 +53,7 @@ async C#. MVP+1 is what serves them.
 | Registry discovery | Rust link-time and C# compiled-assembly reflection; byte-identical for stateless, rich-type, and setup-folding fixtures | `specgate-discovery` |
 | Trace capture | Rust libtest only; synchronous calls and directly-awaited async operations | `capture.rs:189`, migration limitations |
 | C# trace capture | None - annotations are inert; no recording code exists | `csharp/SpecGate.Annotations` is the whole C# surface |
-| Async capture | A directly-awaited async operation captures: recording begins at first poll (M2 slice 1). Still unsupported: async `#[spec_setup]`, futures that migrate across threads, futures polled concurrently with another instrumented operation, and abandoned futures. Setup-input staging remains thread-affine | `annotations-macros/src/lib.rs` async arm, `PENDING_SETUP_INPUTS` |
+| Async capture | A directly-awaited async operation captures: recording begins at first poll (M2 slice 1). A future resumed on another executor thread records under the operation that built it, and two instrumented operations interleaved on one thread both record correctly (M2 slice 2). An async operation dropped before it completes records `conformance.abandoned` (M2 slice 3). Still unsupported: async `#[spec_setup]`, and operations first reached on a raw `std::thread::spawn`ed thread. Setup-input staging remains thread-affine | `annotations-macros/src/lib.rs` async arm, `PENDING_SETUP_INPUTS` |
 | Observations | Captured but never declared; a component emitting one cannot produce a linkable bundle | migration limitations |
 | Comparison | `compare <reference-trace> <candidate-trace>` exists; fixed `ctsc.strict/0.1.0`; scenarios paired by name | `comparison.rs:185-195` |
 | Replay | Synchronous public Rust free functions, lossless primitive inputs | migration limitations |
@@ -94,7 +94,7 @@ Operation context must survive every `Future` poll and every spawn, thread, and
 channel handoff, so that parentage remains correct when execution moves between
 threads.
 
-**Slices 1 and 2 are done.** The pre-poll rejection is gone, and an annotated
+**Slices 1, 2, and 3 are done**, which closes M2. The pre-poll rejection is gone, and an annotated
 `async fn` is rewritten into a `fn` returning `impl Future`, so it captures the
 caller's operation where the future is *constructed* and re-installs that
 context around every poll. A future therefore records under the operation that
@@ -107,9 +107,11 @@ not affect the registry: the macro authors `return_type`, `invocation`,
 `return_kind`, and `is_async` from the signature as written, before the
 rewrite, so byte-identical parity with the C# twin is preserved.
 
-Remaining: operations abandoned before completion
-([`abandonment-terminal-state`](decisions/abandonment-terminal-state.md) is
-accepted but not implemented).
+Slice 3 landed abandonment as a terminal state
+([`abandonment-terminal-state`](decisions/abandonment-terminal-state.md)): an
+async operation dropped before it reaches an outcome records
+`conformance.abandoned` with `UNSET` status, which is neither a fault nor a
+completion and does not propagate to its caller.
 
 Raw `std::thread::spawn` is its own slice. A spawned thread finds an empty
 thread-local slot and calls `activate_native_capture_from_environment`, which
@@ -158,7 +160,7 @@ Format-level decisions, not just runtime work:
 
 - unique span identity per retry or repeated identical invocation;
 - explicit parallel regions;
-- cancellation representation — settled by
+- cancellation representation — settled and implemented by
   [`abandonment-terminal-state`](decisions/abandonment-terminal-state.md);
 - known-started but unfinished operations;
 - exactly one completion or fault treatment per span.
@@ -187,10 +189,10 @@ discovery-only any more. `fixture.async_fetch`, `fixture.extract`,
 `fixture.async_smol_timer`, and `fixture.async_tokio_timer` all capture, and the
 `async-capture-unsupported` limitation code is unused. The harness still refuses
 to let a row carry that code while capturing, so it remains the guard for async
-setups.
+setups. `fixture.async_abandon` covers abandonment.
 
 Remaining: fixtures and rows for the cases that still fail closed — async
-setups, cross-thread migration, concurrent interleaving, and abandonment.
+setups, cross-thread migration, and concurrent interleaving.
 
 ---
 

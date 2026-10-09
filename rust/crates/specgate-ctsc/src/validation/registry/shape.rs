@@ -84,7 +84,7 @@ pub(super) fn validate_shape(document: &RegistryDocument, path: impl AsRef<Path>
         "id",
         issues,
     );
-    // Registry 0.2 Ã‚Â§3.1 orders components by ascending id, compared as a
+    // Registry 0.3 Ã‚Â§3.1 orders components by ascending id, compared as a
     // sequence of Unicode code points. Rust `str` comparison is byte-wise over
     // UTF-8, and UTF-8 byte order is identical to code-point order, so this is
     // exactly the comparison the contract specifies.
