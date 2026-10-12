@@ -1,0 +1,93 @@
+using System;
+using System.Collections.Generic;
+
+namespace SpecGate.Runtime;
+
+/// <summary>
+/// The live state of one operation boundary between entry and termination.
+/// </summary>
+/// <remarks>
+/// Woven code treats this as an opaque token. The type is a reference type on
+/// purpose: <see cref="SpecGateRuntime"/> publishes it through an
+/// <c>AsyncLocal</c>, so a continuation resuming on another thread observes the
+/// same instance rather than a thread-affine copy.
+/// </remarks>
+public sealed class OperationScope
+{
+    private readonly List<RecordedValue> _inputs = [];
+
+    internal OperationScope(
+        CaptureSession? session,
+        OperationScope? parent,
+        long spanId,
+        string component,
+        string operation)
+    {
+        Session = session;
+        Parent = parent;
+        SpanId = spanId;
+        Component = component;
+        Operation = operation;
+    }
+
+    internal CaptureSession? Session { get; }
+
+    internal OperationScope? Parent { get; }
+
+    internal bool Completed { get; private set; }
+
+    /// <summary>Gets the session-unique span identifier, or zero when not recording.</summary>
+    public long SpanId { get; }
+
+    /// <summary>Gets the owning component identifier.</summary>
+    public string Component { get; }
+
+    /// <summary>Gets the semantic operation name.</summary>
+    public string Operation { get; }
+
+    /// <summary>Gets whether this scope is attached to an active capture session.</summary>
+    public bool IsRecording => Session is not null;
+
+    internal static OperationScope Disabled { get; } =
+        new OperationScope(null, null, 0, string.Empty, string.Empty);
+
+    internal void AddInput(string name, object? value)
+    {
+        if (Session is null)
+        {
+            return;
+        }
+
+        lock (_inputs)
+        {
+            _inputs.Add(new RecordedValue(name, value));
+        }
+    }
+
+    internal void Complete(SpanStatus status, RecordedValue? result, Exception? exception)
+    {
+        if (Session is null || Completed)
+        {
+            return;
+        }
+
+        Completed = true;
+
+        RecordedValue[] inputs;
+        lock (_inputs)
+        {
+            inputs = [.. _inputs];
+        }
+
+        Session.Record(new RecordedSpan(
+            SpanId,
+            Parent?.SpanId,
+            Component,
+            Operation,
+            inputs,
+            status,
+            result,
+            exception?.GetType().FullName,
+            exception?.Message));
+    }
+}
