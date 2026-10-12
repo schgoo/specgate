@@ -238,13 +238,22 @@ Scope:
    context across `Task` boundaries via `AsyncLocal`, `Activity`, or
    equivalent.
 2. A test-run collector that emits a validated CTSC bundle.
-3. Instrumentation at annotated boundaries. The mechanism - weaving, source
-   generation, or interception - is an open implementation choice.
+3. Instrumentation at annotated boundaries by IL weaving of the real built
+   assembly, ratified in
+   [`decisions/csharp-capture-instrumentation.md`](decisions/csharp-capture-instrumentation.md).
+   Weaving is the only mechanism whose capture semantics match Rust: Roslyn
+   source generators cannot rewrite an existing method body, and C# 12
+   interceptors record the call site rather than the callee.
 4. Capture support for non-Rust binding targets, which `capture.rs` currently
    rejects outright.
 
-**Epic #48 needs rescoping.** It and its children #44, #45, #46, #47 are
-currently scoped synchronous, which this ordering supersedes.
+The first slice captures one annotated C# fixture end to end. The runtime it
+builds on is async-capable from the start, because a synchronous-only stage
+would be thread-affine and have to be torn out; see the same decision record.
+
+#43 is **not** a prerequisite. Exact seam selection is language-neutral
+operation-level filtering, and `specgate capture --component` already selects at
+the granularity the first C# slice needs.
 
 ## V2 - comparison
 
