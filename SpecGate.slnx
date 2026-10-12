@@ -2,10 +2,14 @@
   <Folder Name="/csharp/">
     <Project Path="csharp/SpecGate.Annotations/SpecGate.Annotations.csproj" />
     <Project Path="csharp/SpecGate.Runtime/SpecGate.Runtime.csproj" />
+    <Project Path="csharp/SpecGate.Weaver/SpecGate.Weaver.csproj" />
   </Folder>
   <Folder Name="/test/csharp/">
     <Project Path="test/csharp/SpecGate.CtscFixtures/SpecGate.CtscFixtures.csproj" />
     <Project Path="test/csharp/SpecGate.Runtime.Tests/SpecGate.Runtime.Tests.csproj" />
     <Project Path="test/csharp/SpecGate.CtscFixtures.Tests/SpecGate.CtscFixtures.Tests.csproj" />
+    <Project Path="test/csharp/SpecGate.WeaverFixtures/SpecGate.WeaverFixtures.csproj" />
+    <Project Path="test/csharp/SpecGate.WeaverNegativeFixtures/SpecGate.WeaverNegativeFixtures.csproj" />
+    <Project Path="test/csharp/SpecGate.Weaver.Tests/SpecGate.Weaver.Tests.csproj" />
   </Folder>
 </Solution>

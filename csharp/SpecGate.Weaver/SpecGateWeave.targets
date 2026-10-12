@@ -1,0 +1,16 @@
+<Project>
+  <!--
+    TaskHostFactory runs the weaver in a short-lived process. Without it the
+    long-lived MSBuild node keeps SpecGate.Weaver.dll loaded and the next build
+    cannot overwrite it.
+  -->
+  <UsingTask TaskName="SpecGate.Weaver.SpecGateWeaverTask"
+             AssemblyFile="$(SpecGateWeaverTaskAssembly)"
+             TaskFactory="TaskHostFactory" />
+
+  <Target Name="SpecGateWeaveAssembly"
+          AfterTargets="CopyFilesToOutputDirectory"
+          Condition="'$(SpecGateWeaverTaskAssembly)' != '' and Exists('$(SpecGateWeaverTaskAssembly)') and Exists('$(TargetPath)')">
+    <SpecGateWeaverTask AssemblyPath="$(TargetPath)" />
+  </Target>
+</Project>
