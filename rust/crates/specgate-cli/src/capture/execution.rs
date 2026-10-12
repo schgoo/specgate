@@ -6,9 +6,9 @@
 //! markers become bounded diagnostics; missing sidecars mean the test did not
 //! exercise the selected component rather than an execution failure.
 use super::{
-    BTreeSet, CAPTURE_ENV, CLOCK_STEP, Capture, CommandEnvironment, Config, ConfigDeps, Digest, EnvConfig, Execution, FAILURE_MARKER,
-    FailureContext, INDEX_WIDTH, IsolatedTest, Path, PathBuf, ProcessRequest, START_TIME, Sha256, TAIL_CHARS, TAIL_LINES, TestBinary,
-    cargo_bin, run_span, scenario_span, trace_id,
+    BTreeSet, CAPTURE_ENV, CLOCK_STEP, Capture, CommandEnvironment, Completion, Config, ConfigDeps, Digest, EnvConfig, Execution,
+    FAILURE_MARKER, FailureContext, INDEX_WIDTH, IsolatedTest, Path, PathBuf, ProcessRequest, START_TIME, Sha256, TAIL_CHARS, TAIL_LINES,
+    TestBinary, cargo_bin, run_span, scenario_span, trace_id,
 };
 
 // Cargo's `--message-format=json` schema identifies test binaries with these
@@ -242,6 +242,39 @@ pub(super) fn reject_persistence(
     Ok(())
 }
 
+/// Stable fault category a capture snapshot writes for an operation that was
+/// still outstanding when the recording ended.
+const INCOMPLETE_FAULT: &str = "incomplete_capture";
+
+/// Reject a decoded capture whose recording was never finalized.
+///
+/// A failing test's sidecar is deleted before it is ever decoded, so an
+/// `incomplete_capture` target fault reaching a decoded capture always comes
+/// from a test that reported success, and the artifact would therefore report
+/// an error for a scenario that passed. Detection keys on that observable fact
+/// rather than on a cause: more than one shape produces it — a top-level async
+/// abandonment, or a target that exits the process inside an open operation —
+/// and every one of them leaves a recording that could not be finalized, so all
+/// are rejected alike. See
+/// `docs/decisions/top-level-abandonment-unsupported.md`.
+pub(super) fn reject_incomplete_capture(scenario_name: impl AsRef<str>, capture: &Capture) -> Result<(), FailureContext> {
+    let scenario_name = scenario_name.as_ref();
+    let Some(operation) = capture
+        .operations
+        .iter()
+        .find(|operation| matches!(&operation.completion, Some(Completion::Fault { fault_type, .. }) if fault_type == INCOMPLETE_FAULT))
+    else {
+        return Ok(());
+    };
+    Err(FailureContext::domain(format!(
+        "the recording for '{scenario_name}' could not be finalized, because operation '{}' was still open when the capture ended, \
+         so the capture is rejected rather than recorded as a failed run. Likely causes: an annotated async operation abandoned \
+         (dropped before completion) with no enclosing and no subsequent annotated operation, or a target that exits the process \
+         inside an open operation. If the operation was abandoned, enclose it in an annotated operation that completes.",
+        operation.operation_name.as_str()
+    )))
+}
+
 /// Run every enumerated test once under deterministic native capture and return
 /// the sidecars that passing tests produced, in stable scenario order.
 ///
@@ -285,8 +318,12 @@ pub(super) fn run_tests(
         };
         let environment_json = serde_json::to_string(&environment)
             .map_err(|error| FailureContext::with_source(format!("failed to serialize native capture environment: {error}"), error))?;
-        // Exact filtering and one test thread isolate each scenario so no
-        // unrelated operation can enter its deterministic sidecar.
+        // Exact filtering isolates the scenario, and one test thread is a
+        // correctness requirement rather than only a determinism one: every
+        // capture session in this process shares one resolved scenario identity
+        // and one sidecar path, so concurrent capture threads would overwrite
+        // one another. Per-session identity is tracked by
+        // https://github.com/schgoo/specgate/issues/70.
         let request = ProcessRequest::builder(&test.executable)
             .arg(&test.test_name)
             .args(["--exact", "--test-threads=1"])
@@ -323,6 +360,7 @@ pub(super) fn run_tests(
         if capture.operations.is_empty() {
             continue;
         }
+        reject_incomplete_capture(&test.scenario_name, &capture)?;
         captures.push(capture);
     }
     captures.shrink_to_fit();

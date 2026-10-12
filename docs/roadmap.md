@@ -53,7 +53,7 @@ async C#. MVP+1 is what serves them.
 | Registry discovery | Rust link-time and C# compiled-assembly reflection; byte-identical for stateless, rich-type, and setup-folding fixtures | `specgate-discovery` |
 | Trace capture | Rust libtest only; synchronous calls and directly-awaited async operations | `capture.rs:189`, migration limitations |
 | C# trace capture | None - annotations are inert; no recording code exists | `csharp/SpecGate.Annotations` is the whole C# surface |
-| Async capture | A directly-awaited async operation captures: recording begins at first poll (M2 slice 1). A future resumed on another executor thread records under the operation that built it, and two instrumented operations interleaved on one thread both record correctly (M2 slice 2). An async operation dropped before it completes records `conformance.abandoned` (M2 slice 3). Still unsupported: async `#[spec_setup]`, and operations first reached on a raw `std::thread::spawn`ed thread. Setup-input staging remains thread-affine | `annotations-macros/src/lib.rs` async arm, `PENDING_SETUP_INPUTS` |
+| Async capture | A directly-awaited async operation captures: recording begins at first poll (M2 slice 1). A future resumed on another executor thread records under the operation that built it, and two instrumented operations interleaved on one thread both record correctly (M2 slice 2). An async operation dropped before it completes records `conformance.abandoned` (M2 slice 3). Still unsupported: async `#[spec_setup]`, operations first reached on a raw `std::thread::spawn`ed thread, and top-level abandonment - an abandoned async operation with no enclosing and no subsequent annotated operation, which `specgate capture` rejects rather than records. Setup-input staging remains thread-affine | `annotations-macros/src/lib.rs` async arm, `PENDING_SETUP_INPUTS` |
 | Observations | Captured but never declared; a component emitting one cannot produce a linkable bundle | migration limitations |
 | Comparison | `compare <reference-trace> <candidate-trace>` exists; fixed `ctsc.strict/0.1.0`; scenarios paired by name | `comparison.rs:185-195` |
 | Replay | Synchronous public Rust free functions, lossless primitive inputs | migration limitations |
@@ -111,7 +111,13 @@ Slice 3 landed abandonment as a terminal state
 ([`abandonment-terminal-state`](decisions/abandonment-terminal-state.md)): an
 async operation dropped before it reaches an outcome records
 `conformance.abandoned` with `UNSET` status, which is neither a fault nor a
-completion and does not propagate to its caller. Two follow-ups remain from that
+completion and does not propagate to its caller. That holds for an abandonment
+nested inside an annotated operation that completes afterwards. A *top-level*
+abandonment, with no enclosing and no subsequent annotated operation, leaves a
+recording that was never finalized; `specgate capture` rejects it rather than
+emitting a trace that reports an error for a scenario whose test passed
+([`top-level-abandonment-unsupported`](decisions/top-level-abandonment-unsupported.md)).
+Two follow-ups remain from that
 slice: abandonment is never exercised under a concurrent unwind or a
 multi-threaded drop (#65), and no test pins the macro's sync/async arm selection
 to which scopes are permitted to be abandonable (#67).
@@ -192,7 +198,7 @@ discovery-only any more. `fixture.async_fetch`, `fixture.extract`,
 `fixture.async_smol_timer`, and `fixture.async_tokio_timer` all capture, and the
 `async-capture-unsupported` limitation code is unused. The harness still refuses
 to let a row carry that code while capturing, so it remains the guard for async
-setups. `fixture.async_abandon` covers abandonment.
+setups. `fixture.async_abandon` covers nested abandonment, the supported case.
 
 Remaining: fixtures and rows for the cases that still fail closed — async
 setups. `fixture.async_migration` and `fixture.async_interleave` already carry

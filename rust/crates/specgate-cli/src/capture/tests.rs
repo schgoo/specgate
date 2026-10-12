@@ -4,7 +4,7 @@
 
 #[cfg(test)]
 mod cases {
-    use super::super::execution::{failure_summary, reject_persistence};
+    use super::super::execution::{failure_summary, reject_incomplete_capture, reject_persistence};
     use super::super::facade::{capture_many, execute_tests, write_bundles};
     use super::super::filter::filter;
     use super::super::*;
@@ -27,6 +27,16 @@ mod cases {
             .join("tests")
             .join("fixtures")
             .join("rust.binding.yaml")
+    }
+
+    fn aborted_binding() -> PathBuf {
+        repo_root()
+            .join("rust")
+            .join("crates")
+            .join("specgate-cli")
+            .join("tests")
+            .join("fixtures")
+            .join("rust-aborted.binding.yaml")
     }
 
     fn csharp_binding() -> PathBuf {
@@ -710,6 +720,98 @@ mod cases {
         assert_eq!(error.stage(), CaptureErrorKind::Execution);
         assert!(error.to_string().contains("native capture persistence failed"));
         assert!(error.to_string().contains("tests::persistence"));
+    }
+
+    // Decoding a sidecar is the only place a capture carries an
+    // `incomplete_capture` fault, so these synthesize what `serde_json` would
+    // hand `run_tests` rather than re-running a test binary.
+    fn decoded_capture(completion: &serde_json::Value, status: &str) -> Capture {
+        serde_json::from_value(serde_json::json!({
+            "trace_id": "11111111111111111111111111111111",
+            "scenario_name": "tests::abandoned",
+            "run": {
+                "span_id": "1111111111111101", "parent_span_id": null,
+                "start_time_unix_nano": 0, "end_time_unix_nano": 4, "status": status,
+            },
+            "scenario": {
+                "span_id": "1111111111111102", "parent_span_id": "1111111111111101",
+                "start_time_unix_nano": 1, "end_time_unix_nano": 3, "status": status,
+            },
+            "operations": [{
+                "order": 0,
+                "span_id": "1111111111111103",
+                "parent_span_id": "1111111111111102",
+                "component_id": "fixture.native",
+                "operation_name": "fetch",
+                "start_time_unix_nano": 1,
+                "end_time_unix_nano": 2,
+                "status": status,
+                "inputs": {},
+                "observations": [],
+                "completion": completion,
+            }],
+        }))
+        .expect("synthetic sidecar must decode as a capture")
+    }
+
+    #[test]
+    fn incomplete_capture_rejected() {
+        // A failing test's sidecar is deleted before decoding, so this fault can
+        // only come from a test that reported success. The diagnostic states
+        // that observable fact and offers the causes without asserting one:
+        // docs/decisions/top-level-abandonment-unsupported.md.
+        let capture = decoded_capture(
+            &serde_json::json!({
+                "kind": "fault",
+                "order": 1,
+                "time_unix_nano": 2,
+                "fault_type": "incomplete_capture",
+                "message": "native operation 'fetch' was still outstanding when the capture ended",
+                "observer": "target",
+            }),
+            "error",
+        );
+        let context = reject_incomplete_capture("tests::abandoned", &capture)
+            .expect_err("an unfinalized recording must not become a passing scenario reported as an error");
+        let error = public_error(CaptureErrorKind::Execution)(context);
+        let message = error.to_string();
+        assert!(message.contains("tests::abandoned"), "{message}");
+        assert!(message.contains("'fetch'"), "{message}");
+        assert!(message.contains("could not be finalized"), "{message}");
+        assert!(message.contains("still open when the capture ended"), "{message}");
+        assert!(message.contains("Likely causes"), "{message}");
+        assert!(message.contains("exits the process inside an open operation"), "{message}");
+        assert!(message.contains("enclose it in an annotated operation that completes"), "{message}");
+    }
+
+    #[test]
+    fn complete_capture_accepted() {
+        let capture = decoded_capture(&serde_json::json!({ "kind": "empty", "order": 1, "time_unix_nano": 2 }), "ok");
+        reject_incomplete_capture("tests::abandoned", &capture).expect("a finalized recording must be accepted unchanged");
+    }
+
+    /// End-to-end counterpart of [`incomplete_capture_rejected`].
+    ///
+    /// The `rust-aborted` fixture package drives `fixture.cli.aborted`'s
+    /// operation and then ends the process from inside it (issue #55), so the
+    /// recording can never be finalized even though the test reports success.
+    /// Capture must reject the whole run with the operation named, not publish a
+    /// bundle reporting `error` for a passing test.
+    #[test]
+    fn exiting_inside_an_open_operation_is_rejected() {
+        let root = output_dir("aborted");
+        let request = request_at("fixture.cli.aborted", root.join("aborted"));
+        let error = capture_many(aborted_binding().to_str().unwrap(), "", std::slice::from_ref(&request))
+            .expect_err("an unfinalizable recording must fail the capture");
+        let diagnostic = error.diagnostic();
+        assert!(
+            diagnostic.contains("tests::deliberately_exits_inside_an_open_operation"),
+            "{diagnostic}"
+        );
+        assert!(diagnostic.contains("'abort'"), "{diagnostic}");
+        assert!(diagnostic.contains("could not be finalized"), "{diagnostic}");
+        assert!(!request.out.exists());
+        let _ = std::fs::remove_dir_all(root);
     }
 
     fn request_at(component: impl AsRef<str>, out: PathBuf) -> BundleRequest {

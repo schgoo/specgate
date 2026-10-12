@@ -24,7 +24,7 @@ use crate::capture_failure::FailureStage as CaptureErrorKind;
 use crate::system::{CommandEnvironment, Discovery, Execution, ProcessRequest};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use specgate::__rt::{Capture, Config, ConfigDeps, EnvConfig, FAILURE_MARKER, SpanId, TraceId};
+use specgate::__rt::{Capture, Completion, Config, ConfigDeps, EnvConfig, FAILURE_MARKER, SpanId, TraceId};
 use specgate::{ComponentId, SpecEvent, TargetName, spec_operation};
 use specgate_ctsc::{capture as ctsc_capture, registry::encode_many as encode_registries};
 use specgate_discovery::output::Target;

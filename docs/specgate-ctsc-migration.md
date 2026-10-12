@@ -111,6 +111,17 @@ recording is byte-identical to one that never snapshotted. Nothing reads the
 sidecar while the process runs, so transient mid-operation inaccuracy is
 expected.
 
+An `incomplete_capture` fault that *survives* into a decoded sidecar is a
+different matter. Because a failing test's sidecar is deleted before it is ever
+decoded, such a fault means a test that reported success left a recording that
+could never be finalized. More than one shape produces it — a top-level
+abandonment, which no later operation boundary repairs, or a target that exits
+the process inside an open operation — so detection keys on the fact rather
+than the cause. `specgate capture` rejects that capture with an actionable
+diagnostic rather than emitting a bundle that reports `error` for a scenario
+whose test passed; see
+[`decisions/top-level-abandonment-unsupported.md`](decisions/top-level-abandonment-unsupported.md).
+
 ## Component capture scope
 
 `specgate capture --component <id>` anchors the export on the selected
@@ -216,11 +227,27 @@ the Rust and C# registries still differ in exactly the declared ways.
   instead, because `std::thread::panicking()` is checked first so that a
   genuinely panicking async body is never downgraded to merely abandoned. Not
   covered: operations first
-  reached on a raw `std::thread::spawn`ed thread. An async setup is not
+  reached on a raw `std::thread::spawn`ed thread, and *top-level* abandonment —
+  an abandoned async operation with no enclosing and no subsequent annotated
+  operation. Nothing rewrites the provisional sidecar after that drop, so
+  `specgate capture` rejects the capture with a diagnostic naming the scenario
+  and the operation that was still open, then the likely causes and the
+  workaround, instead of emitting a misleading bundle. The supported form is
+  nesting: enclose the abandoned
+  operation in an annotated operation that completes, which is what
+  `fixture.async_abandon` pins. See
+  [`decisions/top-level-abandonment-unsupported.md`](decisions/top-level-abandonment-unsupported.md).
+  An async setup is not
   instrumented at all, so capture rejects
   the whole component up front rather than encoding a bundle without its
   inputs. The ratified design for the remaining work is
   [`decisions/async-capture-context.md`](decisions/async-capture-context.md).
+- `specgate capture` runs each isolated test process with `--test-threads=1`.
+  That is a **correctness** constraint, not only a determinism one: every
+  capture session in one process shares a single resolved scenario identity and
+  sidecar path, so concurrent capture threads would overwrite one another.
+  [Issue #70](https://github.com/schgoo/specgate/issues/70) tracks the
+  per-session identity work required before it can be relaxed.
 - Native validation supports JSON and JSONL traces, registry imports, exact
   capture-bundle integrity, and linked type checking. Bundle validation is
   intentionally independent from replay's narrower invocation decoder.

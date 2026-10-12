@@ -77,8 +77,20 @@ pub fn nested_sibling(value: i32) -> i32 {
 /// This is the `specgate capture` shape of issue #55 and needs no test-only
 /// bypass: `std::process::exit` runs no destructor, so the macro-owned
 /// `OperationScope` never closes, yet the process exits 0 and capture sees an
-/// ordinary passing test. Only the provisional sidecar snapshot the runtime
-/// writes once the operation's inputs are recorded can preserve this operation.
+/// ordinary passing test. The only record is the provisional sidecar snapshot
+/// the runtime writes once the operation's inputs are recorded, and that
+/// snapshot necessarily carries an `incomplete_capture` fault: the recording
+/// could never be finalized.
+///
+/// The enumerated `#[test]` that drives this shape lives in the sibling
+/// `rust-aborted` fixture package, together with a mirror of this operation —
+/// discovery is source-based per package. That package pins end to end that
+/// `specgate capture` rejects the unfinalizable recording rather than emitting
+/// a bundle reporting `error` for a passing test; see
+/// `docs/decisions/top-level-abandonment-unsupported.md`. Capture runs one
+/// execution pass over every test in a target package, and this shape fails
+/// that pass by design, so the driving test cannot live beside the ordinary
+/// fixture corpus.
 ///
 /// It has its own component so it cannot perturb any other capture scenario.
 #[spec_operation("abort", spec = "fixture.cli.aborted")]
@@ -129,15 +141,5 @@ mod tests {
     #[test]
     fn deliberately_fails_for_strict_capture() {
         panic!("intentional focused fixture failure");
-    }
-
-    /// Leaves `abort`'s operation scope open while the process reports success.
-    ///
-    /// Exits before the assertion. Safe because this crate is its own workspace
-    /// and is never part of the ordinary `cargo test` run; capture runs each
-    /// test in its own process with `--exact`.
-    #[test]
-    fn deliberately_exits_inside_an_open_operation() {
-        assert_eq!(abort_inside_operation(1), -1, "unreachable: the operation exits the process");
     }
 }

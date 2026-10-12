@@ -436,7 +436,6 @@ impl Drop for OperationScope {
         // passing one.
         let panicking = std::thread::panicking();
         let abandonable = self.abandonable;
-        let mut should_persist = false;
         let mut guard = lock_collector(&collector);
         let Some(state) = guard.as_mut() else {
             return;
@@ -486,11 +485,6 @@ impl Drop for OperationScope {
                     operation.completion = Some(completion);
                     operation.end_ns = Some(end_ns);
                     operation.status = Some(Status::Unset);
-                    // The sidecar is the artifact. A top-level abandoned
-                    // operation has no enclosing `complete()` to rewrite the
-                    // provisional `incomplete_capture` placeholder left by
-                    // `inputs_recorded`, so abandonment must persist itself.
-                    should_persist = state.sidecar_path.is_some();
                 }
                 (Err(error), _) | (_, Err(error)) => state.terminal_error = Some(TerminalFailure::new(error.kind(), error.diagnostic())),
             }
@@ -502,14 +496,6 @@ impl Drop for OperationScope {
             state.terminal_error = Some(TerminalFailure::new(CaptureErrorKind::Configuration, diagnostic));
         }
         release_operation(state, operation_index);
-        // `persist_collector_capture` re-acquires this same non-reentrant
-        // collector mutex, so the guard must be released before persisting.
-        drop(guard);
-        if should_persist && let Err(error) = persist_collector_capture(&collector) {
-            // `Drop` must not panic: report the failure through the
-            // parent-protocol channel instead of propagating it.
-            generated::report_error(generated::Stage::OperationAbandon, &error);
-        }
     }
 }
 
