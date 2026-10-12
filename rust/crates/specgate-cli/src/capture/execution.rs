@@ -160,17 +160,33 @@ pub(super) struct ExecutedTests {
     pub(super) failures: Vec<FailedTest>,
 }
 
-/// One enumerated test that failed while running under capture.
+/// Why an enumerated test contributed no scenario to the batch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum FailureReason {
+    /// The isolated test process exited unsuccessfully.
+    TestFailed,
+    /// The test reported success, but its recording was never finalized and so
+    /// cannot be encoded. See
+    /// `docs/decisions/top-level-abandonment-unsupported.md`.
+    Unfinalized,
+}
+
+/// One enumerated test that produced no usable capture.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct FailedTest {
     pub(super) scenario_name: String,
-    /// Exit status plus the tail of the test's own output. Deliberately not an
-    /// artifact: it is machine-specific, and only ever reaches an error string.
+    pub(super) reason: FailureReason,
+    /// For [`FailureReason::TestFailed`], exit status plus the tail of the
+    /// test's own output; for [`FailureReason::Unfinalized`], why the recording
+    /// could not be finalized. Deliberately not an artifact: it is
+    /// machine-specific, and only ever reaches an error string.
     pub(super) summary: String,
 }
 
-/// Reject a capture batch in which any enumerated test failed.
-/// Reject any isolated test process that exited unsuccessfully.
+/// Reject a capture batch in which any enumerated test produced no capture.
+///
+/// Only strict callers use this. Ordinary `specgate capture` skips such tests
+/// and fails solely when a requested component is left with no scenario at all.
 pub(super) fn reject_failures(executed: &ExecutedTests) -> Result<(), FailureContext> {
     if executed.failures.is_empty() {
         return Ok(());
@@ -182,7 +198,7 @@ pub(super) fn reject_failures(executed: &ExecutedTests) -> Result<(), FailureCon
         .collect::<Vec<_>>()
         .join("\n  ");
     Err(FailureContext::domain(format!(
-        "{} fixture test(s) failed under capture; every enumerated test must pass:\n  {detail}",
+        "{} fixture test(s) produced no capture; every enumerated test must pass and leave a finalized recording:\n  {detail}",
         executed.failures.len()
     )))
 }
@@ -246,33 +262,32 @@ pub(super) fn reject_persistence(
 /// still outstanding when the recording ended.
 const INCOMPLETE_FAULT: &str = "incomplete_capture";
 
-/// Reject a decoded capture whose recording was never finalized.
+/// Report the operation that was still open when a recording ended, if any.
 ///
 /// A failing test's sidecar is deleted before it is ever decoded, so an
 /// `incomplete_capture` target fault reaching a decoded capture always comes
-/// from a test that reported success, and the artifact would therefore report
-/// an error for a scenario that passed. Detection keys on that observable fact
-/// rather than on a cause: more than one shape produces it — a top-level async
-/// abandonment, or a target that exits the process inside an open operation —
-/// and every one of them leaves a recording that could not be finalized, so all
-/// are rejected alike. See
-/// `docs/decisions/top-level-abandonment-unsupported.md`.
-pub(super) fn reject_incomplete_capture(scenario_name: impl AsRef<str>, capture: &Capture) -> Result<(), FailureContext> {
-    let scenario_name = scenario_name.as_ref();
-    let Some(operation) = capture
+/// from a test that reported success, and encoding it would report an error for
+/// a scenario that passed. Detection keys on that observable fact rather than on
+/// a cause: more than one shape produces it — a top-level async abandonment, or
+/// a target that exits the process inside an open operation — and every one of
+/// them leaves a recording that could not be finalized, so all are treated
+/// alike. See `docs/decisions/top-level-abandonment-unsupported.md`.
+pub(super) fn unfinalized_operation(capture: &Capture) -> Option<&str> {
+    capture
         .operations
         .iter()
         .find(|operation| matches!(&operation.completion, Some(Completion::Fault { fault_type, .. }) if fault_type == INCOMPLETE_FAULT))
-    else {
-        return Ok(());
-    };
-    Err(FailureContext::domain(format!(
-        "the recording for '{scenario_name}' could not be finalized, because operation '{}' was still open when the capture ended, \
-         so the capture is rejected rather than recorded as a failed run. Likely causes: an annotated async operation abandoned \
-         (dropped before completion) with no enclosing and no subsequent annotated operation, or a target that exits the process \
-         inside an open operation. If the operation was abandoned, enclose it in an annotated operation that completes.",
-        operation.operation_name.as_str()
-    )))
+        .map(|operation| operation.operation_name.as_str())
+}
+
+/// Explain why an unfinalized recording contributes no scenario.
+pub(super) fn unfinalized_summary(operation: &str) -> String {
+    format!(
+        "operation '{operation}' was still open when the capture ended, so the recording could not be finalized and contributes no \
+         scenario. Likely causes: an annotated async operation abandoned (dropped before completion) with no enclosing and no \
+         subsequent annotated operation, or a target that exits the process inside an open operation. If the operation was abandoned, \
+         enclose it in an annotated operation that completes."
+    )
 }
 
 /// Run every enumerated test once under deterministic native capture and return
@@ -282,8 +297,10 @@ pub(super) fn reject_incomplete_capture(scenario_name: impl AsRef<str>, capture:
 /// component, and scenario selection happens afterwards.
 /// Run each test in isolation and decode sidecars from successful relevant tests.
 ///
-/// A passing test without a sidecar is intentionally omitted. A failing test or
-/// malformed sidecar stops the batch with test identity in the diagnostic.
+/// A passing test without a sidecar is intentionally omitted. A failing test,
+/// and a passing test whose recording was never finalized, each contribute no
+/// scenario and are recorded as failures for the caller to weigh. A malformed
+/// sidecar stops the batch with test identity in the diagnostic.
 pub(super) fn run_tests(
     system: &CommandEnvironment,
     execution: &Execution,
@@ -337,6 +354,7 @@ pub(super) fn run_tests(
             let _ = system.remove_file(&sidecar);
             failures.push(FailedTest {
                 scenario_name: test.scenario_name.clone(),
+                reason: FailureReason::TestFailed,
                 summary: failure_summary(output.status.code(), &output.stdout, &output.stderr),
             });
             continue;
@@ -360,7 +378,14 @@ pub(super) fn run_tests(
         if capture.operations.is_empty() {
             continue;
         }
-        reject_incomplete_capture(&test.scenario_name, &capture)?;
+        if let Some(operation) = unfinalized_operation(&capture) {
+            failures.push(FailedTest {
+                scenario_name: test.scenario_name.clone(),
+                reason: FailureReason::Unfinalized,
+                summary: unfinalized_summary(operation),
+            });
+            continue;
+        }
         captures.push(capture);
     }
     captures.shrink_to_fit();

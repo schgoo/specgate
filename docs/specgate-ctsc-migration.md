@@ -230,10 +230,11 @@ the Rust and C# registries still differ in exactly the declared ways.
   reached on a raw `std::thread::spawn`ed thread, and *top-level* abandonment —
   an abandoned async operation with no enclosing and no subsequent annotated
   operation. Nothing rewrites the provisional sidecar after that drop, so
-  `specgate capture` rejects the capture with a diagnostic naming the scenario
-  and the operation that was still open, then the likely causes and the
-  workaround, instead of emitting a misleading bundle. The supported form is
-  nesting: enclose the abandoned
+  `specgate capture` drops that scenario instead of emitting a misleading
+  bundle, and records it as a failed test whose summary names the operation
+  that was still open, the likely causes, and the workaround. Sibling
+  components still bundle; the command fails only when a requested component is
+  left with no scenario. The supported form is nesting: enclose the abandoned
   operation in an annotated operation that completes, which is what
   `fixture.async_abandon` pins. See
   [`decisions/top-level-abandonment-unsupported.md`](decisions/top-level-abandonment-unsupported.md).

@@ -87,10 +87,14 @@ Rust.
   `std::thread::panicking()` is checked before abandonment. *Top-level*
   abandonment — no enclosing and no subsequent annotated operation — is
   unsupported: no boundary follows to rewrite the provisional sidecar. More
-  generally, `specgate capture` rejects any decoded capture still carrying an
+  generally, `specgate capture` drops any decoded capture still carrying an
   `incomplete_capture` fault, since a failing test's sidecar is discarded before
   decoding and such a recording could never be finalized, instead of emitting a
-  passing scenario as `error`. The supported form of abandonment is nesting
+  passing scenario as `error`. The dropped scenario is reported as a failed
+  test, so sibling components in the same execution pass still bundle, and only
+  a requested component left with no scenario fails the command; strict capture
+  (golden generation) still fails the whole batch. The supported form of
+  abandonment is nesting
   (`decisions/top-level-abandonment-unsupported.md`).
 - Environment-driven capture atomically persists the cumulative provisional
   scenario after declared inputs and after every operation close. Outstanding

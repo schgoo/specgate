@@ -4,7 +4,7 @@
 
 #[cfg(test)]
 mod cases {
-    use super::super::execution::{failure_summary, reject_incomplete_capture, reject_persistence};
+    use super::super::execution::{FailureReason, failure_summary, reject_persistence, unfinalized_operation, unfinalized_summary};
     use super::super::facade::{capture_many, execute_tests, write_bundles};
     use super::super::filter::filter;
     use super::super::*;
@@ -300,7 +300,7 @@ mod cases {
         let strict = request_at("fixture.cli.replay", root.join("strict"));
         let strict_error = write_bundles(&discovered, std::slice::from_ref(&strict), &executed, true)
             .expect_err("strict capture must reject the focused failing scenario");
-        assert!(strict_error.diagnostic().starts_with("1 fixture test(s) failed under capture"));
+        assert!(strict_error.diagnostic().starts_with("1 fixture test(s) produced no capture"));
         assert!(strict_error.diagnostic().contains("tests::deliberately_fails_for_strict_capture"));
         assert!(!strict.out.exists());
 
@@ -755,10 +755,10 @@ mod cases {
     }
 
     #[test]
-    fn incomplete_capture_rejected() {
+    fn unfinalized_operation_reported() {
         // A failing test's sidecar is deleted before decoding, so this fault can
-        // only come from a test that reported success. The diagnostic states
-        // that observable fact and offers the causes without asserting one:
+        // only come from a test that reported success. The summary states that
+        // observable fact and offers the causes without asserting one:
         // docs/decisions/top-level-abandonment-unsupported.md.
         let capture = decoded_capture(
             &serde_json::json!({
@@ -771,39 +771,45 @@ mod cases {
             }),
             "error",
         );
-        let context = reject_incomplete_capture("tests::abandoned", &capture)
-            .expect_err("an unfinalized recording must not become a passing scenario reported as an error");
-        let error = public_error(CaptureErrorKind::Execution)(context);
-        let message = error.to_string();
-        assert!(message.contains("tests::abandoned"), "{message}");
-        assert!(message.contains("'fetch'"), "{message}");
-        assert!(message.contains("could not be finalized"), "{message}");
-        assert!(message.contains("still open when the capture ended"), "{message}");
-        assert!(message.contains("Likely causes"), "{message}");
-        assert!(message.contains("exits the process inside an open operation"), "{message}");
-        assert!(message.contains("enclose it in an annotated operation that completes"), "{message}");
+        let operation =
+            unfinalized_operation(&capture).expect("an unfinalized recording must not become a passing scenario reported as an error");
+        assert_eq!(operation, "fetch");
+        let summary = unfinalized_summary(operation);
+        assert!(summary.contains("'fetch'"), "{summary}");
+        assert!(summary.contains("still open when the capture ended"), "{summary}");
+        assert!(summary.contains("could not be finalized"), "{summary}");
+        assert!(summary.contains("Likely causes"), "{summary}");
+        assert!(summary.contains("exits the process inside an open operation"), "{summary}");
+        assert!(summary.contains("enclose it in an annotated operation that completes"), "{summary}");
     }
 
     #[test]
-    fn complete_capture_accepted() {
+    fn finalized_capture_reports_no_unfinalized_operation() {
         let capture = decoded_capture(&serde_json::json!({ "kind": "empty", "order": 1, "time_unix_nano": 2 }), "ok");
-        reject_incomplete_capture("tests::abandoned", &capture).expect("a finalized recording must be accepted unchanged");
+        assert_eq!(
+            unfinalized_operation(&capture),
+            None,
+            "a finalized recording must be accepted unchanged"
+        );
     }
 
-    /// End-to-end counterpart of [`incomplete_capture_rejected`].
+    /// End-to-end counterpart of [`unfinalized_operation_reported`].
     ///
     /// The `rust-aborted` fixture package drives `fixture.cli.aborted`'s
     /// operation and then ends the process from inside it (issue #55), so the
     /// recording can never be finalized even though the test reports success.
-    /// Capture must reject the whole run with the operation named, not publish a
-    /// bundle reporting `error` for a passing test.
+    /// That scenario is dropped rather than published as a bundle reporting
+    /// `error` for a passing test, which leaves this component with nothing to
+    /// encode. The diagnostic must name the component and carry the dropped
+    /// scenario's reason.
     #[test]
-    fn exiting_inside_an_open_operation_is_rejected() {
+    fn exiting_inside_an_open_operation_yields_no_scenario() {
         let root = output_dir("aborted");
         let request = request_at("fixture.cli.aborted", root.join("aborted"));
         let error = capture_many(aborted_binding().to_str().unwrap(), "", std::slice::from_ref(&request))
-            .expect_err("an unfinalizable recording must fail the capture");
+            .expect_err("a component whose only test cannot be finalized must fail");
         let diagnostic = error.diagnostic();
+        assert!(diagnostic.contains("fixture.cli.aborted"), "{diagnostic}");
         assert!(
             diagnostic.contains("tests::deliberately_exits_inside_an_open_operation"),
             "{diagnostic}"
@@ -811,6 +817,63 @@ mod cases {
         assert!(diagnostic.contains("'abort'"), "{diagnostic}");
         assert!(diagnostic.contains("could not be finalized"), "{diagnostic}");
         assert!(!request.out.exists());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// An unfinalizable recording costs its own scenario and nothing else.
+    ///
+    /// `fixture.cli.survivor` is enumerated in the same execution pass as the
+    /// aborting test, so it proves the batch is not abandoned: the unfinalizable
+    /// scenario is reported as a failure, and the sibling component still
+    /// bundles normally.
+    #[test]
+    fn an_unfinalizable_scenario_does_not_fail_its_siblings() {
+        let root = output_dir("survivor");
+        let _ = std::fs::remove_dir_all(&root);
+        let requests = vec![request_at("fixture.cli.survivor", root.join("survivor"))];
+        let discovered = discover(aborted_binding().to_str().unwrap(), "").expect("aborted fixture discovery");
+        let executed = execute_tests(&discovered, &requests).expect("aborted fixture execution");
+
+        assert_eq!(executed.failures.len(), 1);
+        assert_eq!(
+            executed.failures[0].scenario_name,
+            "tests::deliberately_exits_inside_an_open_operation"
+        );
+        assert_eq!(executed.failures[0].reason, FailureReason::Unfinalized);
+        assert!(executed.failures[0].summary.contains("'abort'"), "{:?}", executed.failures[0]);
+
+        let reports = write_bundles(&discovered, &requests, &executed, false).expect("the sibling component must still bundle");
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].component_id, ComponentId::new("fixture.cli.survivor"));
+        assert_eq!(reports[0].scenarios, 1);
+        assert_eq!(reports[0].operations, 1);
+        let bundle = validate_bundle(&requests[0].out);
+        assert!(bundle.valid, "the surviving bundle must validate: {:#?}", bundle.issues);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Strict capture still refuses to hide an unfinalizable recording.
+    ///
+    /// Golden generation captures strictly, so a scenario that yields no
+    /// capture must fail the batch even when a sibling component bundles.
+    #[test]
+    fn strict_capture_rejects_an_unfinalizable_scenario() {
+        let root = output_dir("survivor-strict");
+        let _ = std::fs::remove_dir_all(&root);
+        let requests = vec![request_at("fixture.cli.survivor", root.join("survivor"))];
+        let discovered = discover(aborted_binding().to_str().unwrap(), "").expect("aborted fixture discovery");
+        let executed = execute_tests(&discovered, &requests).expect("aborted fixture execution");
+
+        let error = write_bundles(&discovered, &requests, &executed, true).expect_err("strict capture must reject the dropped scenario");
+        let diagnostic = error.diagnostic();
+        assert!(diagnostic.contains("produced no capture"), "{diagnostic}");
+        assert!(
+            diagnostic.contains("tests::deliberately_exits_inside_an_open_operation"),
+            "{diagnostic}"
+        );
+        assert!(diagnostic.contains("could not be finalized"), "{diagnostic}");
+
         let _ = std::fs::remove_dir_all(root);
     }
 

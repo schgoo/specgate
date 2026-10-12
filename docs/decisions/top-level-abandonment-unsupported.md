@@ -27,7 +27,7 @@ This narrows [`abandonment-terminal-state.md`](abandonment-terminal-state.md)
 without changing its semantics: abandonment still records
 `conformance.abandoned` with `UNSET` status, and `incomplete_capture` remains a
 capture defect distinct from abandonment. What changes is that a recording
-which never reaches a persisting boundary is rejected rather than emitted.
+which never reaches a persisting boundary is dropped rather than emitted.
 
 `OperationScope::drop` cannot repair this. Persisting from that destructor is
 prohibited by [`native-capture-finalization.md`](native-capture-finalization.md),
@@ -39,17 +39,23 @@ which requires it to perform only infallible, in-memory cleanup.
    does not attempt to produce a correct artifact for an annotated async
    operation that is abandoned with no enclosing and no subsequent annotated
    operation.
-2. **It fails loudly rather than silently.** When a decoded sidecar contains an
-   `incomplete_capture` target fault, `specgate capture` rejects the capture
-   with a diagnostic naming the scenario, the outstanding operation, the likely
-   causes, and the supported workaround. It never emits a trace that reports
-   `error` for a scenario whose test passed.
+2. **It fails loudly rather than silently, and only for what it affects.** When
+   a decoded sidecar contains an `incomplete_capture` target fault,
+   `specgate capture` drops that scenario and records it as a failed test whose
+   summary names the outstanding operation, the likely causes, and the supported
+   workaround. It never emits a trace that reports `error` for a scenario whose
+   test passed. The cost is bounded to that scenario: sibling components
+   enumerated in the same execution pass still bundle normally, and the command
+   fails only when a *requested* component is left with no scenario at all — in
+   which case the diagnostic names the component and carries the dropped
+   scenario's summary. Strict capture, used by golden generation, still fails
+   the whole batch, so a fixture that cannot be finalized can never be hidden.
 3. **Detection keys on the fact, not the cause.** A failing test's sidecar is
    already discarded before decoding, so any `incomplete_capture` reaching the
    decoded capture came from a test that reported success. More than one cause
    produces it — a top-level abandonment, and a target that calls
    `std::process::exit` inside an open operation. Every such cause leaves a
-   recording that could not be finalized, so all are rejected alike. No
+   recording that could not be finalized, so all are dropped alike. No
    exit-code heuristic or async-versus-sync inspection is used, and the
    diagnostic describes the observable fact rather than asserting a cause.
 4. **The supported workaround is nesting.** Enclosing the abandoned operation
