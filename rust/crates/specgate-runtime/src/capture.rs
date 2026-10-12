@@ -14,7 +14,10 @@ fn lock_collector(collector: &CollectorHandle) -> MutexGuard<'_, Option<State>> 
 }
 
 fn current_collector() -> Option<CollectorHandle> {
-    SESSION.with(|slot| slot.borrow().as_ref().map(Arc::clone))
+    // `try_with` because this is reachable from `Drop`, including during
+    // thread-local destruction. An unreachable session means there is nothing
+    // left to record, which is exactly what `None` already means to callers.
+    SESSION.try_with(|slot| slot.borrow().as_ref().map(Arc::clone)).ok().flatten()
 }
 
 pub(crate) fn is_active() -> bool {

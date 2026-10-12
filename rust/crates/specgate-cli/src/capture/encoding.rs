@@ -33,13 +33,13 @@ pub(super) fn encode_bundle(
             String::new()
         } else {
             format!(
-                "; these tests failed under capture and were skipped: {}",
+                "; these tests produced no capture and were skipped:\n  {}",
                 executed
                     .failures
                     .iter()
-                    .map(|failure| failure.scenario_name.as_str())
+                    .map(|failure| format!("{}: {}", failure.scenario_name, failure.summary))
                     .collect::<Vec<_>>()
-                    .join(", ")
+                    .join("\n  ")
             )
         };
         return Err(FailureContext::domain(format!(

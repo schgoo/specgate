@@ -389,6 +389,39 @@ fn unfinished_panics() {
     assert!(error.to_string().contains("closed without completion"), "{error}");
 }
 
+// A regression here aborts the process ("fatal runtime error: thread local
+// panicked on drop") and takes the whole specgate-runtime test binary with it
+// rather than reporting a failure against this test.
+#[test]
+fn abandonment_during_thread_local_teardown_does_not_abort() {
+    struct AbandonOnTeardown(Option<OperationScope>);
+    impl Drop for AbandonOnTeardown {
+        fn drop(&mut self) {
+            drop(self.0.take());
+        }
+    }
+    thread_local! {
+        static TEARDOWN: RefCell<Option<AbandonOnTeardown>> = const { RefCell::new(None) };
+    }
+
+    let worker = std::thread::spawn(move || {
+        // Touch the probe thread local *before* the capture session so its
+        // destructor is registered first. Destruction order is unspecified, but
+        // where it is reverse-registration this makes the probe run after
+        // `SESSION` is already destroyed, which is what `current_collector`
+        // reads with `try_with` rather than `with`.
+        TEARDOWN.with(|slot| assert!(slot.borrow().is_none()));
+        start_sidecar(FakeFs::default());
+        let scope = begin_async_operation(ComponentId::from("fixture.native"), OperationName::from("teardown")).unwrap();
+        // The scope is now owned by a thread local, so it is abandoned during
+        // this thread's thread-local destruction rather than on a live thread.
+        TEARDOWN.with(|slot| *slot.borrow_mut() = Some(AbandonOnTeardown(Some(scope))));
+    });
+    worker
+        .join()
+        .expect("abandonment during thread-local teardown must not panic or abort");
+}
+
 #[test]
 fn nested_capture() {
     start(native_config(["1111111111111103"])).unwrap();

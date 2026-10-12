@@ -2,7 +2,7 @@
 
 use super::*;
 #[cfg(feature = "test-util")]
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
 /// Parent-process capture protocol marker consumed by the `SpecGate` CLI.
 ///
@@ -106,10 +106,7 @@ impl ProtocolOutput {
                 let _ignored = writeln!(standard_error, "{marker}");
             }
             #[cfg(feature = "test-util")]
-            ProtocolBackend::Fake(records) => records
-                .lock()
-                .expect("generated protocol output mutex poisoned")
-                .push(marker.to_string()),
+            ProtocolBackend::Fake(records) => records.lock().unwrap_or_else(PoisonError::into_inner).push(marker.to_string()),
         }
     }
 }
@@ -172,13 +169,22 @@ fn report_telemetry(failure: &FailureTelemetry<'_>) {
         protocol.marker = FAILURE_MARKER,
         "generated capture failure: {{error.type}} stage={{capture.stage}} protocol_marker={{protocol.marker}}"
     );
-    PROTOCOL_OUTPUT.with(|output| output.borrow().write(failure.protocol_marker));
+    // `try_with` because this can run while thread locals are being destroyed,
+    // where `LocalKey::with` would panic. The marker is the CLI's only signal
+    // that a sidecar is untrustworthy, so a destroyed thread local falls back
+    // to real stderr rather than dropping it.
+    if PROTOCOL_OUTPUT
+        .try_with(|output| output.borrow().write(failure.protocol_marker))
+        .is_err()
+    {
+        ProtocolOutput::real().write(failure.protocol_marker);
+    }
 }
 
 /// Validate and report a generated capture failure at a named instrumentation stage.
 ///
-/// # Panics
-/// Panics when a test has poisoned the feature-gated fake output mutex.
+/// Never panics and never loses the failure marker: a destroyed thread-local
+/// sink degrades to real stderr and a poisoned test sink is recovered in place.
 ///
 #[doc(hidden)]
 pub fn report_error(stage: Stage, error: impl AsRef<str>) {
@@ -206,8 +212,6 @@ pub fn report_error(stage: Stage, error: impl AsRef<str>) {
 /// # }
 /// ```
 ///
-/// # Panics
-/// Panics for a poisoned test-output mutex.
 #[doc(hidden)]
 pub fn report_completion<E: AsRef<str>>(result: Result<(), E>) {
     if let Err(error) = result {
