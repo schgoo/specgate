@@ -287,11 +287,20 @@ enum SetupContribution {
 }
 
 #[derive(Debug)]
-struct ExpectedSetup {
+pub(super) struct ExpectedSetup {
     key: SetupKey,
     contribution: SetupContribution,
 }
 
+/// Merge the construction inputs an operation's setups recorded, and report
+/// which declared parameters those setups replace.
+///
+/// Every registered setup for the operation must contribute exactly one
+/// receiver or one parameter. A setup naming a parameter that does not exist, a
+/// setup whose return type matches several unfilled parameters, a second
+/// receiver producer, and two setups claiming one parameter are all rejected
+/// rather than dropped: discovery already refuses to publish such a component,
+/// so folding past one here would capture a surface nobody declared.
 pub(super) fn folded_inputs(
     component_id: impl AsRef<str>,
     operation_name: impl AsRef<str>,
@@ -305,51 +314,7 @@ pub(super) fn folded_inputs(
         return Ok((recorded_inputs(component_id, operation_name)?, BTreeSet::new()));
     };
 
-    let mut filled = BTreeSet::new();
-    let mut required_setups = Vec::with_capacity(registry::OPERATIONS.len());
-    let mut receiver_claimed = false;
-    for setup in registry::OPERATIONS
-        .iter()
-        .filter(|candidate| candidate.is_setup && candidate.component == component_id && candidate.name == operation_name)
-    {
-        let contribution = if setup.fills.is_none() {
-            let mut candidates = operation
-                .params
-                .iter()
-                .filter(|field| !filled.contains(field.name()) && types_match(field.rust_type(), setup.return_type))
-                .map(|field| field.name());
-            match (candidates.next(), candidates.next()) {
-                (Some(only), None) => Some(SetupContribution::Parameter(only.to_string())),
-                (None, _) if !receiver_claimed => {
-                    receiver_claimed = true;
-                    Some(SetupContribution::Receiver)
-                }
-                _ => None,
-            }
-        } else if let Some(fills) = setup.fills
-            && operation.params.iter().any(|field| field.name() == fills)
-        {
-            Some(SetupContribution::Parameter(fills.to_string()))
-        } else {
-            None
-        };
-
-        if let Some(contribution) = contribution {
-            if let SetupContribution::Parameter(name) = &contribution {
-                filled.insert(name.clone());
-            }
-            required_setups.push(ExpectedSetup {
-                key: SetupKey {
-                    component_id: registry::ComponentName::new(setup.component),
-                    operation_name: registry::OpName::new(setup.name),
-                    module_path: registry::ModulePath::new(setup.module_path),
-                    fn_name: registry::FnName::new(setup.fn_name),
-                    fills: setup.fills.map(registry::FieldName::new),
-                },
-                contribution,
-            });
-        }
-    }
+    let (required_setups, filled) = plan_setups(component_id, operation_name, operation)?;
 
     PENDING.with(|pending| {
         let pending = pending.borrow();
@@ -372,6 +337,103 @@ pub(super) fn folded_inputs(
         }
         Ok((merged, filled))
     })
+}
+
+/// Decide what each registered setup for `operation` contributes, rejecting any
+/// declaration set capture cannot fold unambiguously.
+///
+/// Reads the link-time registry for the setups themselves; `operation` supplies
+/// the declared parameter surface those setups fold into.
+fn plan_setups(
+    component_id: &str,
+    operation_name: &str,
+    operation: &registry::OpMeta,
+) -> Result<(Vec<ExpectedSetup>, BTreeSet<String>), CaptureError> {
+    let setups = registry::OPERATIONS
+        .iter()
+        .filter(|candidate| candidate.is_setup && candidate.component == component_id && candidate.name == operation_name);
+    plan_declared_setups(component_id, operation_name, operation, setups)
+}
+
+pub(super) fn plan_declared_setups<'meta>(
+    component_id: &str,
+    operation_name: &str,
+    operation: &registry::OpMeta,
+    setups: impl Iterator<Item = &'meta registry::OpMeta>,
+) -> Result<(Vec<ExpectedSetup>, BTreeSet<String>), CaptureError> {
+    let mut filled = BTreeSet::new();
+    let mut required_setups = Vec::new();
+    let mut receiver_claimed = false;
+    for setup in setups {
+        let producer = format!("{}::{}", setup.module_path, setup.fn_name);
+        let contribution = if let Some(fills) = setup.fills {
+            if !operation.params.iter().any(|field| field.name() == fills) {
+                return Err(CaptureError::setup_collision(
+                    component_id,
+                    operation_name,
+                    format!("setup '{producer}' fills unknown parameter '{fills}'"),
+                ));
+            }
+            SetupContribution::Parameter(fills.to_string())
+        } else {
+            let mut candidates = operation
+                .params
+                .iter()
+                .filter(|field| !filled.contains(field.name()) && types_match(field.rust_type(), setup.return_type))
+                .map(|field| field.name());
+            match (candidates.next(), candidates.next()) {
+                (Some(only), None) => SetupContribution::Parameter(only.to_string()),
+                (Some(first), Some(second)) => {
+                    let all = std::iter::once(first)
+                        .chain(std::iter::once(second))
+                        .chain(candidates)
+                        .collect::<Vec<_>>();
+                    return Err(CaptureError::setup_collision(
+                        component_id,
+                        operation_name,
+                        format!(
+                            "setup '{producer}' ambiguously matches parameters {} by its return type '{}'; declare fills explicitly",
+                            all.join(", "),
+                            setup.return_type
+                        ),
+                    ));
+                }
+                (None, _) => {
+                    if receiver_claimed {
+                        return Err(CaptureError::setup_collision(
+                            component_id,
+                            operation_name,
+                            format!("setup '{producer}' constructs a second receiver"),
+                        ));
+                    }
+                    receiver_claimed = true;
+                    SetupContribution::Receiver
+                }
+            }
+        };
+
+        if let SetupContribution::Parameter(name) = &contribution
+            && !filled.insert(name.clone())
+        {
+            return Err(CaptureError::setup_collision(
+                component_id,
+                operation_name,
+                format!("setup '{producer}' fills parameter '{name}', which an earlier setup already fills"),
+            ));
+        }
+        required_setups.push(ExpectedSetup {
+            key: SetupKey {
+                component_id: registry::ComponentName::new(setup.component),
+                operation_name: registry::OpName::new(setup.name),
+                module_path: registry::ModulePath::new(setup.module_path),
+                fn_name: registry::FnName::new(setup.fn_name),
+                fills: setup.fills.map(registry::FieldName::new),
+            },
+            contribution,
+        });
+    }
+
+    Ok((required_setups, filled))
 }
 
 pub(super) fn clear() {

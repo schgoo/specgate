@@ -109,6 +109,24 @@ impl CaptureError {
             ),
         )
     }
+    /// Reject a setup declaration set that capture cannot fold unambiguously.
+    ///
+    /// Discovery rejects these same declarations, so reaching one here means a
+    /// capture ran against metadata the published registry never accepted.
+    /// Folding silently instead would record an input surface nobody declared.
+    fn setup_collision(component: impl AsRef<str>, operation: impl AsRef<str>, detail: impl AsRef<str>) -> Self {
+        let component = component.as_ref();
+        let operation = operation.as_ref();
+        let detail = detail.as_ref();
+        Self::message(
+            CaptureErrorKind::SetupAmbiguity,
+            format!(
+                "native capture for '{component}::{operation}' cannot fold its #[spec_setup] declarations: {detail}. Capture records \
+                 the registry's folded surface and cannot choose between colliding setups; correct the declarations so each one \
+                 contributes exactly one receiver or parameter"
+            ),
+        )
+    }
     fn setup_missing(component: impl AsRef<str>, operation: impl AsRef<str>, setup: impl AsRef<str>) -> Self {
         let component = component.as_ref();
         let operation = operation.as_ref();

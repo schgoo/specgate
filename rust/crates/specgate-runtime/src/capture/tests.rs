@@ -507,3 +507,117 @@ fn invalid_config() {
     start(native_config(["1111111111111103"])).unwrap();
     assert!(finish().unwrap_err().to_string().contains("consumed 0"));
 }
+
+/// Setup-folding declarations cannot be registered from this crate: the
+/// workspace forbids `unsafe_code`, and a `#[linkme]` element declares a
+/// `link_section` static. These tests drive the folding decision directly with
+/// metadata built the same way the annotation macros build it. Discovery
+/// rejects every shape below, so none of them describes a shippable component.
+mod folding {
+    use super::*;
+    use crate::registry::{ComponentName, FieldMeta, FieldName, FnName, ModulePath, OpDeps, OpMeta, OpName, RustType};
+
+    const COMPONENT: &str = "fixture.folding";
+
+    fn operation(params: &'static [FieldMeta]) -> OpMeta {
+        OpMeta::const_builder(OpDeps {
+            name: OpName::new("fold"),
+            module_path: ModulePath::new("fixture::folding"),
+            fn_name: FnName::new("fold"),
+            params,
+            return_type: RustType::new("()"),
+            component: ComponentName::new(COMPONENT),
+        })
+        .public(true)
+        .build()
+    }
+
+    fn producer(fn_name: &'static str, return_type: &'static str, fills: Option<FieldName>) -> OpMeta {
+        OpMeta::const_builder(OpDeps {
+            name: OpName::new("fold"),
+            module_path: ModulePath::new("fixture::folding"),
+            fn_name: FnName::new(fn_name),
+            params: &[],
+            return_type: RustType::new(return_type),
+            component: ComponentName::new(COMPONENT),
+        })
+        .setup(fills)
+        .build()
+    }
+
+    fn plan(operation: &OpMeta, setups: &[OpMeta]) -> Result<BTreeSet<String>, CaptureError> {
+        setup::plan_declared_setups(COMPONENT, "fold", operation, setups.iter()).map(|(_required, filled)| filled)
+    }
+
+    fn rejection(operation: &OpMeta, setups: &[OpMeta]) -> String {
+        let error = plan(operation, setups).unwrap_err();
+        assert_eq!(error.kind(), CaptureErrorKind::SetupAmbiguity);
+        error.to_string()
+    }
+
+    const SEED: FieldMeta = FieldMeta::new(FieldName::new("seed"), RustType::new("Seed"));
+    const LEFT: FieldMeta = FieldMeta::new(FieldName::new("left"), RustType::new("Seed"));
+    const RIGHT: FieldMeta = FieldMeta::new(FieldName::new("right"), RustType::new("Seed"));
+
+    #[test]
+    fn rejects_unknown_fill_target() {
+        let message = rejection(
+            &operation(&[SEED]),
+            &[producer("make_absent", "Seed", Some(FieldName::new("absent")))],
+        );
+        assert!(
+            message.contains("setup 'fixture::folding::make_absent' fills unknown parameter 'absent'"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn rejects_ambiguous_return_type() {
+        let message = rejection(&operation(&[LEFT, RIGHT]), &[producer("make_seed", "Seed", None)]);
+        assert!(
+            message.contains("ambiguously matches parameters left, right by its return type 'Seed'"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn rejects_second_receiver() {
+        let message = rejection(
+            &operation(&[]),
+            &[producer("make_first", "Counter", None), producer("make_second", "Counter", None)],
+        );
+        assert!(
+            message.contains("setup 'fixture::folding::make_second' constructs a second receiver"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_fill_target() {
+        let message = rejection(
+            &operation(&[SEED]),
+            &[
+                producer("fill_first", "Seed", Some(FieldName::new("seed"))),
+                producer("fill_second", "Seed", Some(FieldName::new("seed"))),
+            ],
+        );
+        assert!(
+            message.contains("setup 'fixture::folding::fill_second' fills parameter 'seed', which an earlier setup already fills"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn folds_a_receiver_beside_a_filled_parameter() {
+        let filled = plan(
+            &operation(&[SEED]),
+            &[producer("make_seed", "Seed", None), producer("make_receiver", "Counter", None)],
+        )
+        .unwrap();
+        assert_eq!(
+            filled,
+            BTreeSet::from(["seed".to_string()]),
+            "an inferred parameter and a receiver are not a collision"
+        );
+    }
+}

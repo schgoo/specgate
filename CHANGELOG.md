@@ -18,6 +18,8 @@ under `docs/decisions/`, or `docs/roadmap.md`. Generate with `just changelog`.
 
 ### Changed
 
+- Native capture rejects colliding `#[spec_setup]` declarations instead of
+  dropping them, matching C# capture and discovery.
 - Native capture state is owned by a per-run `Send` collector rather than a
   thread-local, which is the precondition for carrying context into a future.
 - Trace validation rejects a `conformance.operation` span carrying no completion
