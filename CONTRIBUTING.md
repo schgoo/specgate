@@ -77,7 +77,10 @@ analyzers.
 
 Run `just package-smoke` for release changes; it packages all six retained crates,
 installs the packaged CLI, and exercises registry-dependency
-discover/capture/replay.
+discover/capture/replay. It then packs `SpecGate.Annotations` twice from clean
+`Release` output and requires both packages to be byte-identical, so it deletes
+that project's `bin/Release` and `obj/Release` directories as it runs. A
+mismatch reports the package entries that differ before it fails.
 
 `cargo-evaluate` is an internal local review tool and is not part of
 `just check` or GitHub-hosted CI. After installing `cargo-evaluate 0.23.0`, use

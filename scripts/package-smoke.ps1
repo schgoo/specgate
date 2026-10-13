@@ -33,6 +33,86 @@ function Invoke-Checked {
     }
 }
 
+# Packs one project from a clean Release tree, so the result reflects a full
+# compile rather than a repackaged incremental output. Both packs of a run build
+# through the same paths, leaving the commit as the only shared input.
+function Invoke-DeterministicPack {
+    param([string]$ProjectDirectory, [string]$OutputDirectory)
+
+    $name = Split-Path -Leaf $ProjectDirectory
+    foreach ($stale in @('bin/Release', 'obj/Release')) {
+        Remove-Item -Recurse -Force (Join-Path $ProjectDirectory $stale) -ErrorAction SilentlyContinue
+    }
+
+    Invoke-Checked dotnet @(
+        'pack',
+        (Join-Path $ProjectDirectory "$name.csproj"),
+        '-c', 'Release',
+        '-p:ContinuousIntegrationBuild=true',
+        '-o', $OutputDirectory
+    ) | Out-Host
+
+    $package = Get-ChildItem $OutputDirectory -Filter "$name.0.6.0.nupkg" | Select-Object -First 1
+    if ($null -eq $package) {
+        throw "$name package was not produced at version 0.6.0."
+    }
+
+    return $package.FullName
+}
+
+# Reports which parts of two packages differ. A package is an OPC zip, so naming
+# the differing entries distinguishes a nondeterministic compile from a
+# nondeterministic manifest, which a hash comparison alone cannot do.
+function Write-PackageDifference {
+    param([string]$Package, [string]$PackageRepeat)
+
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+    function Read-Entries([string]$Path) {
+        $entries = [ordered]@{}
+        $archive = [IO.Compression.ZipFile]::OpenRead($Path)
+        try {
+            foreach ($entry in $archive.Entries) {
+                $entries[$entry.FullName] = [pscustomobject]@{
+                    Length = $entry.Length
+                    Crc = '{0:x8}' -f $entry.Crc32
+                    LastWriteTime = $entry.LastWriteTime.ToString('o')
+                }
+            }
+        }
+        finally {
+            $archive.Dispose()
+        }
+
+        return $entries
+    }
+
+    $left = Read-Entries $Package
+    $right = Read-Entries $PackageRepeat
+
+    Write-Output "Package A: $Package"
+    Write-Output "Package B: $PackageRepeat"
+    if (@($left.Keys) -join "`n" -ne (@($right.Keys) -join "`n")) {
+        Write-Output "Entry order or membership differs:"
+        Write-Output "  A: $(@($left.Keys) -join ', ')"
+        Write-Output "  B: $(@($right.Keys) -join ', ')"
+    }
+
+    foreach ($name in $left.Keys) {
+        if (-not $right.Contains($name)) {
+            continue
+        }
+
+        $a = $left[$name]
+        $b = $right[$name]
+        if ($a.Length -ne $b.Length -or $a.Crc -ne $b.Crc -or $a.LastWriteTime -ne $b.LastWriteTime) {
+            Write-Output "Entry differs: $name"
+            Write-Output "  A: length=$($a.Length) crc=$($a.Crc) modified=$($a.LastWriteTime)"
+            Write-Output "  B: length=$($b.Length) crc=$($b.Crc) modified=$($b.LastWriteTime)"
+        }
+    }
+}
+
 try {
     New-Item -ItemType Directory -Force $cargoHome, (Join-Path $candidate 'src') | Out-Null
 
@@ -161,28 +241,12 @@ targets:
     $nuget = Join-Path $scratch 'nuget-a'
     $nugetRepeat = Join-Path $scratch 'nuget-b'
     $env:SOURCE_DATE_EPOCH = '315532800'
-    Invoke-Checked dotnet @(
-        'pack',
-        (Join-Path $root 'csharp/SpecGate.Annotations/SpecGate.Annotations.csproj'),
-        '-c', 'Release',
-        '-p:ContinuousIntegrationBuild=true',
-        '-o', $nuget
-    )
-    Invoke-Checked dotnet @(
-        'pack',
-        (Join-Path $root 'csharp/SpecGate.Annotations/SpecGate.Annotations.csproj'),
-        '-c', 'Release',
-        '-p:ContinuousIntegrationBuild=true',
-        '--no-restore',
-        '-o', $nugetRepeat
-    )
-    $package = Get-ChildItem $nuget -Filter 'SpecGate.Annotations.0.6.0.nupkg' | Select-Object -First 1
-    $packageRepeat = Get-ChildItem $nugetRepeat -Filter 'SpecGate.Annotations.0.6.0.nupkg' | Select-Object -First 1
-    if ($null -eq $package -or $null -eq $packageRepeat) {
-        throw 'C# annotations package was not produced at version 0.6.0.'
-    }
-    if ((Get-FileHash $package.FullName -Algorithm SHA256).Hash -ne
-        (Get-FileHash $packageRepeat.FullName -Algorithm SHA256).Hash) {
+    $annotations = Join-Path $root 'csharp/SpecGate.Annotations'
+    $package = Invoke-DeterministicPack $annotations $nuget
+    $packageRepeat = Invoke-DeterministicPack $annotations $nugetRepeat
+    if ((Get-FileHash $package -Algorithm SHA256).Hash -ne
+        (Get-FileHash $packageRepeat -Algorithm SHA256).Hash) {
+        Write-PackageDifference $package $packageRepeat
         throw 'C# annotations package is not byte-deterministic.'
     }
 
