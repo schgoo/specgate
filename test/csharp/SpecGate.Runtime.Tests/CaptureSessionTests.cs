@@ -8,8 +8,8 @@ public sealed class CaptureSessionTests
     [Fact]
     public void OperationsRecordNothingWithoutASession()
     {
-        OperationScope scope = SpecGateRuntime.EnterOperation("add", "fixture.basic");
-        SpecGateRuntime.RecordInput(scope, "left", 2);
+        OperationScope scope = SpecGateRuntime.EnterOperation(Boundaries.Of("Add"), "add", "fixture.basic");
+        SpecGateRuntime.RecordInputs(scope, [2, 3]);
         SpecGateRuntime.ExitOk(scope, 5);
 
         Assert.False(scope.IsRecording);
@@ -33,9 +33,8 @@ public sealed class CaptureSessionTests
     {
         using CaptureSession session = SpecGateRuntime.BeginSession("fixture.basic");
 
-        OperationScope scope = SpecGateRuntime.EnterOperation("add", "fixture.basic");
-        SpecGateRuntime.RecordInput(scope, "left", 2);
-        SpecGateRuntime.RecordInput(scope, "right", 3);
+        OperationScope scope = SpecGateRuntime.EnterOperation(Boundaries.Of("Add"), "add", "fixture.basic");
+        SpecGateRuntime.RecordInputs(scope, [2, 3]);
         SpecGateRuntime.ExitOk(scope, 5);
 
         RecordedSpan span = Assert.Single(session.Spans);
@@ -45,10 +44,10 @@ public sealed class CaptureSessionTests
         Assert.Null(span.ParentSpanId);
         Assert.Equal(2, span.Inputs.Count);
         Assert.Equal("left", span.Inputs[0].Name);
-        Assert.Equal(2, span.Inputs[0].Value);
+        Assert.Equal(Value.Integer(2), span.Inputs[0].Value);
         Assert.Equal("right", span.Inputs[1].Name);
-        Assert.Equal(3, span.Inputs[1].Value);
-        Assert.Equal(5, span.Result?.Value);
+        Assert.Equal(Value.Integer(3), span.Inputs[1].Value);
+        Assert.Equal(Value.Integer(5), span.Result?.Value);
     }
 
     [Fact]
@@ -56,7 +55,7 @@ public sealed class CaptureSessionTests
     {
         using CaptureSession session = SpecGateRuntime.BeginSession("fixture.basic");
 
-        OperationScope scope = SpecGateRuntime.EnterOperation("divide", "fixture.basic");
+        OperationScope scope = SpecGateRuntime.EnterOperation(Boundaries.Of("Divide"), "divide", "fixture.basic");
         SpecGateRuntime.ExitError(scope, new DivideByZeroException("denominator was zero"));
 
         RecordedSpan span = Assert.Single(session.Spans);
@@ -72,8 +71,8 @@ public sealed class CaptureSessionTests
     {
         using CaptureSession session = SpecGateRuntime.BeginSession("fixture.basic");
 
-        OperationScope outer = SpecGateRuntime.EnterOperation("process", "fixture.basic");
-        OperationScope inner = SpecGateRuntime.EnterOperation("upper", "fixture.basic");
+        OperationScope outer = SpecGateRuntime.EnterOperation(Boundaries.Of("Process"), "process", "fixture.basic");
+        OperationScope inner = SpecGateRuntime.EnterOperation(Boundaries.Of("Process"), "upper", "fixture.basic");
         Assert.Same(inner, SpecGateRuntime.Current);
         SpecGateRuntime.ExitOk(inner, "HELLO");
         Assert.Same(outer, SpecGateRuntime.Current);

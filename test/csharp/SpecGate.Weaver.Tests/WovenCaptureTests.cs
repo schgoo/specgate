@@ -36,8 +36,8 @@ public sealed class WovenCaptureTests
         Assert.Null(span.ParentSpanId);
         Assert.Equal(SpanStatus.Ok, span.Status);
         Assert.Equal(["a", "b"], span.Inputs.Select(input => input.Name));
-        Assert.Equal([2, 3], span.Inputs.Select(input => input.Value).Cast<int>());
-        Assert.Equal(5, Assert.IsType<int>(span.Result?.Value));
+        Assert.Equal([Value.Integer(2), Value.Integer(3)], span.Inputs.Select(input => input.Value));
+        Assert.Equal(Value.Integer(5), span.Result?.Value);
     }
 
     [Fact]
@@ -73,7 +73,7 @@ public sealed class WovenCaptureTests
 
         RecordedSpan span = Assert.Single(session.Spans);
         Assert.Equal("describe", span.Operation);
-        Assert.Equal(expected, span.Result?.Value);
+        Assert.Equal(Value.String(expected), span.Result?.Value);
     }
 
     [Fact]
@@ -144,8 +144,10 @@ public sealed class WovenCaptureTests
 
         RecordedSpan span = Assert.Single(session.Spans);
         Assert.Equal(SpanStatus.Ok, span.Status);
-        Assert.Equal(expected, span.Result?.Value);
-        Assert.Equal(text, Assert.Single(span.Inputs).Value);
+        Assert.Equal(Value.Integer(expected), span.Result?.Value);
+        Assert.Equal(
+            Value.Tagged("Some", Value.String(text)),
+            Assert.Single(span.Inputs).Value);
     }
 
     [Fact]
@@ -159,8 +161,12 @@ public sealed class WovenCaptureTests
 
         Assert.Equal(2, session.Spans.Count);
         Assert.All(session.Spans, span => Assert.Equal("amount", Assert.Single(span.Inputs).Name));
-        Assert.Equal([2, 3], session.Spans.Select(span => span.Inputs[0].Value).Cast<int>());
-        Assert.Equal([2, 5], session.Spans.Select(span => span.Result?.Value).Cast<int>());
+        Assert.Equal(
+            [Value.Integer(2), Value.Integer(3)],
+            session.Spans.Select(span => span.Inputs[0].Value));
+        Assert.Equal(
+            [Value.Integer(2), Value.Integer(5)],
+            session.Spans.Select(span => span.Result?.Value));
     }
 
     [Fact]

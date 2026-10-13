@@ -15,7 +15,7 @@ public sealed class ComponentSelectionTests
     {
         using CaptureSession session = SpecGateRuntime.BeginSession("fixture.stateless_add");
 
-        OperationScope scope = SpecGateRuntime.EnterOperation("add", "fixture.multi_case");
+        OperationScope scope = SpecGateRuntime.EnterOperation(Boundaries.Of("Add"), "add", "fixture.multi_case");
         SpecGateRuntime.ExitOk(scope, 5);
 
         Assert.False(scope.IsRecording);
@@ -28,7 +28,7 @@ public sealed class ComponentSelectionTests
         using CaptureSession session = SpecGateRuntime.BeginSession("fixture.multi_case");
         string[] declared = ["fixture.stateless_add", "fixture.multi_case"];
 
-        OperationScope scope = SpecGateRuntime.EnterOperation("add", declared);
+        OperationScope scope = SpecGateRuntime.EnterOperation(Boundaries.Of("Add"), "add", declared);
         SpecGateRuntime.ExitOk(scope, 5);
 
         RecordedSpan span = Assert.Single(session.Spans);
@@ -42,7 +42,7 @@ public sealed class ComponentSelectionTests
         using CaptureSession session = SpecGateRuntime.BeginSession("fixture.other");
         string[] declared = ["fixture.stateless_add", "fixture.multi_case"];
 
-        OperationScope scope = SpecGateRuntime.EnterOperation("add", declared);
+        OperationScope scope = SpecGateRuntime.EnterOperation(Boundaries.Of("Add"), "add", declared);
         SpecGateRuntime.ExitOk(scope, 5);
 
         Assert.False(scope.IsRecording);
@@ -54,8 +54,8 @@ public sealed class ComponentSelectionTests
     {
         using CaptureSession session = SpecGateRuntime.BeginSession("fixture.basic");
 
-        OperationScope outer = SpecGateRuntime.EnterOperation("process", "fixture.basic");
-        OperationScope ignored = SpecGateRuntime.EnterOperation("helper", "fixture.other");
+        OperationScope outer = SpecGateRuntime.EnterOperation(Boundaries.Of("Process"), "process", "fixture.basic");
+        OperationScope ignored = SpecGateRuntime.EnterOperation(Boundaries.Of("Process"), "helper", "fixture.other");
         Assert.Same(outer, SpecGateRuntime.Current);
         SpecGateRuntime.ExitOk(ignored, null);
         Assert.Same(outer, SpecGateRuntime.Current);

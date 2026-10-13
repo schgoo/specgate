@@ -21,18 +21,23 @@ public sealed class OperationScope
         OperationScope? parent,
         long spanId,
         string component,
-        string operation)
+        string operation,
+        RuntimeMethodHandle method)
     {
         Session = session;
         Parent = parent;
         SpanId = spanId;
         Component = component;
         Operation = operation;
+        Method = method;
     }
 
     internal CaptureSession? Session { get; }
 
     internal OperationScope? Parent { get; }
+
+    /// <summary>The woven method, used to read what its values mean.</summary>
+    internal RuntimeMethodHandle Method { get; }
 
     internal bool Completed { get; private set; }
 
@@ -49,19 +54,48 @@ public sealed class OperationScope
     public bool IsRecording => Session is not null;
 
     internal static OperationScope Disabled { get; } =
-        new OperationScope(null, null, 0, string.Empty, string.Empty);
+        new OperationScope(null, null, 0, string.Empty, string.Empty, default);
 
-    internal void AddInput(string name, object? value)
+    /// <summary>
+    /// Projects and records every argument the woven call received, in parameter
+    /// order.
+    /// </summary>
+    internal void RecordInputs(object?[] arguments)
     {
         if (Session is null)
         {
             return;
         }
 
+        SemanticInput[] declared = OperationMetadata.For(Method).Inputs;
+        if (declared.Length != arguments.Length)
+        {
+            throw new SpecGateCaptureException(
+                CaptureRejection.TypeMismatch,
+                $"specgate: operation '{Operation}' received {arguments.Length} argument(s) but "
+                + $"declares {declared.Length}.");
+        }
+
+        RecordedValue[] recorded = new RecordedValue[declared.Length];
+        for (int index = 0; index < declared.Length; index++)
+        {
+            recorded[index] = new RecordedValue(
+                declared[index].Name, ValueProjector.Project(declared[index].Type, arguments[index]));
+        }
+
         lock (_inputs)
         {
-            _inputs.Add(new RecordedValue(name, value));
+            _inputs.AddRange(recorded);
         }
+    }
+
+    /// <summary>Projects the operation's return value, or returns null when it is void.</summary>
+    internal RecordedValue? ProjectResult(object? result)
+    {
+        SemanticType? declared = OperationMetadata.For(Method).Result;
+        return declared is null
+            ? null
+            : new RecordedValue(OperationMetadata.ResultName, ValueProjector.Project(declared, result));
     }
 
     internal void Complete(SpanStatus status, RecordedValue? result, Exception? exception)

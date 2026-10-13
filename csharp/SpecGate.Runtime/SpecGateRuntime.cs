@@ -55,7 +55,8 @@ public static class SpecGateRuntime
 
     /// <summary>Opens an operation declared for a single component. Called by woven code.</summary>
     [EditorBrowsable(EditorBrowsableState.Never)]
-    public static OperationScope EnterOperation(string operation, string component)
+    public static OperationScope EnterOperation(
+        RuntimeMethodHandle method, string operation, string component)
     {
         CaptureSession? session = Volatile.Read(ref _session);
         if (session is null || !string.Equals(session.Component, component, StringComparison.Ordinal))
@@ -63,7 +64,7 @@ public static class SpecGateRuntime
             return OperationScope.Disabled;
         }
 
-        return Open(session, operation, component);
+        return Open(session, operation, component, method);
     }
 
     /// <summary>
@@ -71,7 +72,8 @@ public static class SpecGateRuntime
     /// when a method carries more than one operation annotation.
     /// </summary>
     [EditorBrowsable(EditorBrowsableState.Never)]
-    public static OperationScope EnterOperation(string operation, string[] components)
+    public static OperationScope EnterOperation(
+        RuntimeMethodHandle method, string operation, string[] components)
     {
         CaptureSession? session = Volatile.Read(ref _session);
         if (session is null)
@@ -79,39 +81,61 @@ public static class SpecGateRuntime
             return OperationScope.Disabled;
         }
 
+        if (components is null)
+        {
+            throw new ArgumentNullException(nameof(components));
+        }
+
         foreach (string component in components)
         {
             if (string.Equals(session.Component, component, StringComparison.Ordinal))
             {
-                return Open(session, operation, component);
+                return Open(session, operation, component, method);
             }
         }
 
         return OperationScope.Disabled;
     }
 
-    private static OperationScope Open(CaptureSession session, string operation, string component)
+    private static OperationScope Open(
+        CaptureSession session, string operation, string component, RuntimeMethodHandle method)
     {
         OperationScope scope = new(
             session,
             CurrentScope.Value,
             session.NextSpanId(),
             component,
-            operation);
+            operation,
+            method);
         CurrentScope.Value = scope;
         return scope;
     }
 
-    /// <summary>Records one operation input. Called by woven code.</summary>
+    /// <summary>Records the operation's inputs. Called by woven code.</summary>
     [EditorBrowsable(EditorBrowsableState.Never)]
-    public static void RecordInput(OperationScope scope, string name, object? value) =>
-        scope.AddInput(name, value);
+    public static void RecordInputs(OperationScope scope, object?[] arguments)
+    {
+        if (scope is null)
+        {
+            throw new ArgumentNullException(nameof(scope));
+        }
+
+        scope.RecordInputs(arguments ?? throw new ArgumentNullException(nameof(arguments)));
+    }
 
     /// <summary>Closes an operation that returned a value. Called by woven code.</summary>
     [EditorBrowsable(EditorBrowsableState.Never)]
     public static void ExitOk(OperationScope scope, object? result)
     {
-        scope.Complete(SpanStatus.Ok, new RecordedValue("return", result), exception: null);
+        if (scope is null)
+        {
+            throw new ArgumentNullException(nameof(scope));
+        }
+
+        scope.Complete(
+            SpanStatus.Ok,
+            scope.IsRecording ? scope.ProjectResult(result) : null,
+            exception: null);
         Restore(scope);
     }
 
@@ -119,6 +143,11 @@ public static class SpecGateRuntime
     [EditorBrowsable(EditorBrowsableState.Never)]
     public static void ExitVoid(OperationScope scope)
     {
+        if (scope is null)
+        {
+            throw new ArgumentNullException(nameof(scope));
+        }
+
         scope.Complete(SpanStatus.Ok, result: null, exception: null);
         Restore(scope);
     }
@@ -127,6 +156,11 @@ public static class SpecGateRuntime
     [EditorBrowsable(EditorBrowsableState.Never)]
     public static void ExitError(OperationScope scope, Exception exception)
     {
+        if (scope is null)
+        {
+            throw new ArgumentNullException(nameof(scope));
+        }
+
         scope.Complete(SpanStatus.Error, result: null, exception);
         Restore(scope);
     }

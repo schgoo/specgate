@@ -18,4 +18,7 @@
     <Version>0.6.0</Version>
     <PackageVersion>0.6.0</PackageVersion>
   </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\SpecGate.Annotations\SpecGate.Annotations.csproj" />
+  </ItemGroup>
 </Project>

@@ -19,7 +19,7 @@ internal sealed class RuntimeReferences
         TypeReference scopeType,
         MethodReference enterOperation,
         MethodReference enterOperationMulti,
-        MethodReference recordInput,
+        MethodReference recordInputs,
         MethodReference exitOk,
         MethodReference exitVoid,
         MethodReference exitError)
@@ -27,7 +27,7 @@ internal sealed class RuntimeReferences
         ScopeType = scopeType;
         EnterOperation = enterOperation;
         EnterOperationMulti = enterOperationMulti;
-        RecordInput = recordInput;
+        RecordInputs = recordInputs;
         ExitOk = exitOk;
         ExitVoid = exitVoid;
         ExitError = exitError;
@@ -39,7 +39,7 @@ internal sealed class RuntimeReferences
 
     internal MethodReference EnterOperationMulti { get; }
 
-    internal MethodReference RecordInput { get; }
+    internal MethodReference RecordInputs { get; }
 
     internal MethodReference ExitOk { get; }
 
@@ -69,7 +69,7 @@ internal sealed class RuntimeReferences
             module.ImportReference(scopeType),
             module.ImportReference(SelectEnter(entries, isMulti: false)),
             module.ImportReference(SelectEnter(entries, isMulti: true)),
-            module.ImportReference(FindMethod(runtimeType, "RecordInput")),
+            module.ImportReference(FindMethod(runtimeType, "RecordInputs")),
             module.ImportReference(FindMethod(runtimeType, "ExitOk")),
             module.ImportReference(FindMethod(runtimeType, "ExitVoid")),
             module.ImportReference(FindMethod(runtimeType, "ExitError")));
@@ -107,7 +107,7 @@ internal sealed class RuntimeReferences
     private static MethodDefinition SelectEnter(MethodDefinition[] candidates, bool isMulti)
     {
         MethodDefinition? match = candidates.FirstOrDefault(
-            method => method.Parameters.Count == 2 && method.Parameters[1].ParameterType.IsArray == isMulti);
+            method => method.Parameters.Count == 3 && method.Parameters[2].ParameterType.IsArray == isMulti);
         return match ?? throw new WeaveException(
             $"{RuntimeTypeName} has no EnterOperation overload taking "
             + (isMulti ? "a component array." : "a single component."));

@@ -12,8 +12,8 @@ namespace SpecGate.Weaver;
 /// <remarks>
 /// The woven shape is:
 /// <code>
-/// scope = EnterOperation(operation, component);
-/// RecordInput(scope, "a", a);
+/// scope = EnterOperation(ldtoken thisMethod, operation, component);
+/// RecordInputs(scope, new object[] { a, b });
 /// try { ...original body, every `ret` becomes `leave epilogue`... }
 /// catch (Exception e) { ExitError(scope, e); throw; }
 /// epilogue: ExitOk(scope, result); return result;
@@ -37,7 +37,7 @@ internal sealed class MethodWeaver(ModuleDefinition module, RuntimeReferences ru
         VariableDefinition? result = returnsValue ? AddVariable(body, method.ReturnType) : null;
 
         Instruction firstOriginal = body.Instructions[0];
-        foreach (Instruction instruction in BuildPrologue(il, declaration, scope))
+        foreach (Instruction instruction in BuildPrologue(il, method, declaration, scope))
         {
             il.InsertBefore(firstOriginal, instruction);
         }
@@ -79,10 +79,19 @@ internal sealed class MethodWeaver(ModuleDefinition module, RuntimeReferences ru
 
     private List<Instruction> BuildPrologue(
         ILProcessor il,
+        MethodDefinition method,
         OperationDeclaration declaration,
         VariableDefinition scope)
     {
-        List<Instruction> prologue = [il.Create(OpCodes.Ldstr, declaration.Operation)];
+        // The method's own handle is passed instead of a description of its
+        // signature. The runtime reads parameter names, declared types, and
+        // nullability from it by reflection, so C# declarations are interpreted
+        // in exactly one place.
+        List<Instruction> prologue =
+        [
+            il.Create(OpCodes.Ldtoken, method),
+            il.Create(OpCodes.Ldstr, declaration.Operation),
+        ];
 
         if (declaration.Components.Length == 1)
         {
@@ -106,14 +115,20 @@ internal sealed class MethodWeaver(ModuleDefinition module, RuntimeReferences ru
 
         prologue.Add(il.Create(OpCodes.Stloc, scope));
 
-        foreach (InputDeclaration input in declaration.Inputs)
+        prologue.Add(il.Create(OpCodes.Ldloc, scope));
+        prologue.Add(il.Create(OpCodes.Ldc_I4, declaration.Inputs.Length));
+        prologue.Add(il.Create(OpCodes.Newarr, module.TypeSystem.Object));
+        for (int index = 0; index < declaration.Inputs.Length; index++)
         {
-            prologue.Add(il.Create(OpCodes.Ldloc, scope));
-            prologue.Add(il.Create(OpCodes.Ldstr, input.Name));
-            prologue.Add(il.Create(OpCodes.Ldarg, input.Parameter));
-            AppendBoxIfNeeded(il, prologue, input.Parameter.ParameterType);
-            prologue.Add(il.Create(OpCodes.Call, runtime.RecordInput));
+            ParameterDefinition parameter = declaration.Inputs[index];
+            prologue.Add(il.Create(OpCodes.Dup));
+            prologue.Add(il.Create(OpCodes.Ldc_I4, index));
+            prologue.Add(il.Create(OpCodes.Ldarg, parameter));
+            AppendBoxIfNeeded(il, prologue, parameter.ParameterType);
+            prologue.Add(il.Create(OpCodes.Stelem_Ref));
         }
+
+        prologue.Add(il.Create(OpCodes.Call, runtime.RecordInputs));
 
         return prologue;
     }
