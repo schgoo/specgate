@@ -11,13 +11,12 @@ namespace SpecGate.Weaver;
 internal sealed class OperationDeclaration
 {
     private const string SpecOperationAttribute = "SpecGate.Annotations.SpecOperationAttribute";
-    private const string SpecInputAttribute = "SpecGate.Annotations.SpecInputAttribute";
     private const string AsyncStateMachineAttribute =
         "System.Runtime.CompilerServices.AsyncStateMachineAttribute";
     private const string IteratorStateMachineAttribute =
         "System.Runtime.CompilerServices.IteratorStateMachineAttribute";
 
-    private OperationDeclaration(string operation, string[] components, InputDeclaration[] inputs)
+    private OperationDeclaration(string operation, string[] components, ParameterDefinition[] inputs)
     {
         Operation = operation;
         Components = components;
@@ -29,7 +28,11 @@ internal sealed class OperationDeclaration
     /// <summary>Gets the components declaring this operation, in source order.</summary>
     internal string[] Components { get; }
 
-    internal InputDeclaration[] Inputs { get; }
+    /// <summary>
+    /// Gets the parameters recorded as inputs, in declaration order. Their
+    /// recorded names come from reflection at capture time, not from here.
+    /// </summary>
+    internal ParameterDefinition[] Inputs { get; }
 
     /// <summary>
     /// Reads the operation declaration from <paramref name="method"/>, or returns
@@ -100,6 +103,24 @@ internal sealed class OperationDeclaration
                 $"{method.FullName} is an iterator operation. Iterator capture is not supported; "
                 + "return a materialized collection instead.");
         }
+
+        // Capture resolves the method by its handle and reads what its values
+        // mean from reflection. A generic method or a generic declaring type has
+        // no single resolvable signature, and discovery cannot publish a type
+        // parameter in the registry either, so both are refused here.
+        if (method.HasGenericParameters)
+        {
+            throw new WeaveException(
+                $"{method.FullName} is a generic method. SpecGate operations must have concrete "
+                + "parameter and return types; declare the operation on a non-generic method.");
+        }
+
+        if (method.DeclaringType.HasGenericParameters)
+        {
+            throw new WeaveException(
+                $"{method.FullName} is declared on generic type '{method.DeclaringType.FullName}'. "
+                + "SpecGate operations must be declared on a non-generic type.");
+        }
     }
 
     private static bool HasAttribute(MethodDefinition method, string fullName)
@@ -137,9 +158,8 @@ internal sealed class OperationDeclaration
             + "Capture selects operations by component, so the component is required.");
     }
 
-    private static InputDeclaration[] ReadInputs(MethodDefinition method)
+    private static ParameterDefinition[] ReadInputs(MethodDefinition method)
     {
-        List<InputDeclaration> inputs = [];
         foreach (ParameterDefinition parameter in method.Parameters)
         {
             if (parameter.ParameterType.IsByReference || parameter.ParameterType.IsPointer)
@@ -148,34 +168,8 @@ internal sealed class OperationDeclaration
                     $"{method.FullName} has by-reference parameter '{parameter.Name}'. "
                     + "SpecGate operations must take parameters by value.");
             }
-
-            inputs.Add(new InputDeclaration(parameter, SemanticName(parameter)));
         }
 
-        return [.. inputs];
+        return [.. method.Parameters];
     }
-
-    private static string SemanticName(ParameterDefinition parameter)
-    {
-        foreach (CustomAttribute attribute in parameter.CustomAttributes)
-        {
-            if (string.Equals(attribute.AttributeType.FullName, SpecInputAttribute, StringComparison.Ordinal)
-                && attribute.ConstructorArguments.Count == 1
-                && attribute.ConstructorArguments[0].Value is string name
-                && name.Length > 0)
-            {
-                return name;
-            }
-        }
-
-        return parameter.Name;
-    }
-}
-
-/// <summary>One recorded operation input and the parameter it reads.</summary>
-internal sealed class InputDeclaration(ParameterDefinition parameter, string name)
-{
-    internal ParameterDefinition Parameter { get; } = parameter;
-
-    internal string Name { get; } = name;
 }

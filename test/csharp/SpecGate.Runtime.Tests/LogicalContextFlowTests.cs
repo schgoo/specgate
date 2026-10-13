@@ -16,7 +16,7 @@ public sealed class LogicalContextFlowTests
     {
         using CaptureSession session = SpecGateRuntime.BeginSession("fixture.async");
 
-        OperationScope outer = SpecGateRuntime.EnterOperation("fetch", "fixture.async");
+        OperationScope outer = SpecGateRuntime.EnterOperation(Boundaries.Of("Fetch"), "fetch", "fixture.async");
         int enteredOn = Environment.CurrentManagedThreadId;
 
         await DedicatedThreadHop.Instance;
@@ -36,13 +36,13 @@ public sealed class LogicalContextFlowTests
     {
         using CaptureSession session = SpecGateRuntime.BeginSession("fixture.async");
 
-        OperationScope outer = SpecGateRuntime.EnterOperation("fetch", "fixture.async");
+        OperationScope outer = SpecGateRuntime.EnterOperation(Boundaries.Of("Fetch"), "fetch", "fixture.async");
         int enteredOn = Environment.CurrentManagedThreadId;
 
         await DedicatedThreadHop.Instance;
         Assert.NotEqual(enteredOn, Environment.CurrentManagedThreadId);
 
-        OperationScope inner = SpecGateRuntime.EnterOperation("decode", "fixture.async");
+        OperationScope inner = SpecGateRuntime.EnterOperation(Boundaries.Of("Fetch"), "decode", "fixture.async");
         SpecGateRuntime.ExitOk(inner, "decoded");
         SpecGateRuntime.ExitOk(outer, "response");
 
@@ -69,7 +69,7 @@ public sealed class LogicalContextFlowTests
     {
         await Task.Yield();
 
-        OperationScope scope = SpecGateRuntime.EnterOperation(operation, "fixture.async");
+        OperationScope scope = SpecGateRuntime.EnterOperation(Boundaries.Of("Fetch"), operation, "fixture.async");
         await Task.Yield();
 
         Assert.Same(scope, SpecGateRuntime.Current);

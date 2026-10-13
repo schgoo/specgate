@@ -52,7 +52,7 @@ async C#. MVP+1 is what serves them.
 |---|---|---|
 | Registry discovery | Rust link-time and C# compiled-assembly reflection; byte-identical for stateless, rich-type, and setup-folding fixtures | `specgate-discovery` |
 | Trace capture | Rust libtest only; synchronous calls and directly-awaited async operations | `capture.rs:189`, migration limitations |
-| C# trace capture | None - annotations are inert; no recording code exists | `csharp/SpecGate.Annotations` is the whole C# surface |
+| C# trace capture | IL weaving instruments annotated synchronous methods, and recording produces CTSC semantic values projected at the boundary from the woven method's own reflection metadata. Still missing: setup folding, trace serialization, async, and a `specgate capture` path that accepts a C# binding | `csharp/SpecGate.Weaver`, `csharp/SpecGate.Runtime/ValueProjector.cs` |
 | Async capture | A directly-awaited async operation captures: recording begins at first poll (M2 slice 1). A future resumed on another executor thread records under the operation that built it, and two instrumented operations interleaved on one thread both record correctly (M2 slice 2). An async operation dropped before it completes records `conformance.abandoned` (M2 slice 3). Still unsupported: async `#[spec_setup]`, operations first reached on a raw `std::thread::spawn`ed thread, and top-level abandonment - an abandoned async operation with no enclosing and no subsequent annotated operation, which `specgate capture` drops rather than records. Setup-input staging remains thread-affine | `annotations-macros/src/lib.rs` async arm, `PENDING_SETUP_INPUTS` |
 | Observations | Captured but never declared; a component emitting one cannot produce a linkable bundle | migration limitations |
 | Comparison | `compare <reference-trace> <candidate-trace>` exists; fixed `ctsc.strict/0.1.0`; scenarios paired by name | `comparison.rs:185-195` |
@@ -209,11 +209,12 @@ rows, so cross-thread migration and concurrent interleaving are covered.
 
 ## MVP+1 - C# capture
 
-C# today is **annotations plus reflection only**. The entire C# source surface
-is one 4 KB file of inert attributes (`SpecOperation`, `SpecSetup`,
-`SpecInput`, `SpecEvent`, `SpecException`) plus `Option<T>` and `Result<T,E>`
-for metadata discovery. There is no recording code: no runtime, no weaver, no
-buffer. The former weaver and runtime were removed during the CTSC migration.
+C# started as **annotations plus reflection only**: one 4 KB file of inert
+attributes (`SpecOperation`, `SpecSetup`, `SpecInput`, `SpecEvent`,
+`SpecException`) plus `Option<T>` and `Result<T,E>` for metadata discovery, with
+no recording code at all. #44 added the recording runtime and the IL weaver, and
+the first #45 slice added the semantic value model. What remains missing is
+bundle emission from a test run.
 
 This is smaller than a rebuild, because everything around it already exists and
 is proven:
@@ -227,6 +228,7 @@ is proven:
 | Ordinary behavior tests over those fixtures | Done - eight test files |
 | Recording runtime (`SpecGate.Runtime`) | Done (#44), `AsyncLocal` logical context |
 | IL weaver (`SpecGate.Weaver`) | Done (#44), synchronous operations |
+| CTSC semantic values at the boundary | Done (#45 slice 1), projected from the woven method's reflection metadata |
 | CTSC bundle emission from a test run | **Missing** (#45) |
 
 The capture model is "capture ordinary tests at native operation boundaries."
@@ -261,6 +263,13 @@ targets exactly one component, matching `specgate capture --component`, because
 a method may declare the same operation for several components and recording
 all of them would produce multiple spans for one call. Annotated `async`
 methods and iterators fail the weave loudly; async C# capture is #71.
+
+The first #45 slice replaced that runtime's raw `object?` buffer with the CTSC
+value model. The weaver hands the runtime each operation's
+`RuntimeMethodHandle`, and the runtime derives parameter names, declared types,
+and nullability by reflection, then projects every recorded value eagerly at the
+boundary. That keeps one C# type mapper rather than two, and a value CTSC cannot
+represent now fails the call instead of being stored as a live object reference.
 
 #43 is **not** a prerequisite. Exact seam selection is language-neutral
 operation-level filtering, and `specgate capture --component` already selects at

@@ -1,0 +1,309 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Reflection;
+using SpecGate.Annotations;
+
+namespace SpecGate.Runtime;
+
+/// <summary>
+/// Converts a live CLR value into the CTSC <see cref="Value"/> that capture
+/// records.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Projection happens at the operation boundary, while the call is on the stack.
+/// Holding the original object and converting later would record whatever the
+/// object was mutated into afterwards, not what the operation actually saw.
+/// </para>
+/// <para>
+/// The shapes here mirror the Rust runtime exactly, because a C# reference
+/// capture and a Rust one have to be comparable: a record becomes a map of its
+/// members, a tagged union becomes a single-entry map from variant name to its
+/// payload, a payload-free variant's payload is the empty map, an optional
+/// becomes <c>Some</c> or <c>None</c>, and a result becomes <c>Ok</c> or
+/// <c>Err</c>.
+/// </para>
+/// </remarks>
+internal static class ValueProjector
+{
+    private const string SomeKey = "Some";
+    private const string NoneKey = "None";
+    private const string OkKey = "Ok";
+    private const string ErrKey = "Err";
+
+    internal static Value Project(SemanticType type, object? value)
+    {
+        if (type.Kind == SemanticKind.Option)
+        {
+            return ProjectOption(type.First!, value);
+        }
+
+        if (value is null)
+        {
+            throw Rejected(
+                CaptureRejection.NullValue,
+                $"a null was observed where {Describe(type)} is required. Declare the "
+                + "parameter, member, or return value nullable to record absence.");
+        }
+
+        return type.Kind switch
+        {
+            SemanticKind.Bool => Value.Bool(Require<bool>(type, value)),
+            SemanticKind.I8 => Value.Integer(Require<sbyte>(type, value)),
+            SemanticKind.I16 => Value.Integer(Require<short>(type, value)),
+            SemanticKind.I32 => Value.Integer(Require<int>(type, value)),
+            SemanticKind.I64 => Value.Integer(Require<long>(type, value)),
+            SemanticKind.F32 => Value.Float(Require<float>(type, value)),
+            SemanticKind.F64 => Value.Float(Require<double>(type, value)),
+            SemanticKind.String => ProjectString(Require<string>(type, value)),
+            SemanticKind.Dynamic => ProjectDynamic(value),
+            SemanticKind.List => Value.List(ProjectElements(type, type.First!, value)),
+            SemanticKind.Set => Value.Set(ProjectElements(type, type.First!, value)),
+            SemanticKind.Map => ProjectMap(type, value),
+            SemanticKind.Result => ProjectResult(type, value),
+            SemanticKind.Named => ProjectNamed(type.Declared!, value),
+            _ => throw Rejected(
+                CaptureRejection.UnsupportedType, $"{Describe(type)} cannot be recorded."),
+        };
+    }
+
+    private static Value ProjectOption(SemanticType inner, object? value)
+    {
+        if (value is null)
+        {
+            return Value.Tagged(NoneKey, Value.Unit);
+        }
+
+        // Option<T> and Result<T, E> are structs, so a declared Option<T> always
+        // arrives boxed and non-null; absence lives in HasValue, not in the box.
+        Type actual = value.GetType();
+        if (actual.IsGenericType && actual.GetGenericTypeDefinition() == typeof(Option<>))
+        {
+            PropertyInfo hasValue = actual.GetProperty(nameof(Option<int>.HasValue))!;
+            if (!(bool)hasValue.GetValue(value)!)
+            {
+                return Value.Tagged(NoneKey, Value.Unit);
+            }
+
+            object? held = actual.GetProperty(nameof(Option<int>.Value))!.GetValue(value);
+            return Value.Tagged(SomeKey, Project(inner, held));
+        }
+
+        return Value.Tagged(SomeKey, Project(inner, value));
+    }
+
+    private static Value ProjectResult(SemanticType type, object value)
+    {
+        Type actual = value.GetType();
+        if (!actual.IsGenericType || actual.GetGenericTypeDefinition() != typeof(Result<,>))
+        {
+            throw Mismatch(type, actual);
+        }
+
+        if ((bool)actual.GetProperty(nameof(Result<int, int>.IsOk))!.GetValue(value)!)
+        {
+            object? ok = actual.GetProperty(nameof(Result<int, int>.OkValue))!.GetValue(value);
+            return Value.Tagged(OkKey, Project(type.First!, ok));
+        }
+
+        object? error = actual.GetProperty(nameof(Result<int, int>.ErrValue))!.GetValue(value);
+        return Value.Tagged(ErrKey, Project(type.Second!, error));
+    }
+
+    private static Value ProjectNamed(Type declared, object value)
+    {
+        Type actual = value.GetType();
+        if (!declared.IsAssignableFrom(actual))
+        {
+            throw Rejected(
+                CaptureRejection.TypeMismatch,
+                $"a '{actual.FullName}' was observed where '{declared.FullName}' is declared.");
+        }
+
+        // An abstract annotated base class is a tagged union: each concrete
+        // subclass is a variant, recorded as its own name over its own members.
+        if (declared.IsAbstract)
+        {
+            return Value.Tagged(SemanticType.EventName(actual), Record(actual, value));
+        }
+
+        return Record(declared, value);
+    }
+
+    private static Value Record(Type type, object instance)
+    {
+        SemanticMember[] members = SemanticType.MembersOf(type);
+        KeyValuePair<string, Value>[] entries = new KeyValuePair<string, Value>[members.Length];
+        for (int index = 0; index < members.Length; index++)
+        {
+            SemanticMember member = members[index];
+            entries[index] = new KeyValuePair<string, Value>(
+                member.Name, Project(member.Type, member.Read(instance)));
+        }
+
+        return Value.Map(entries);
+    }
+
+    private static List<Value> ProjectElements(SemanticType type, SemanticType element, object value)
+    {
+        if (value is not IEnumerable sequence || value is string)
+        {
+            throw Mismatch(type, value.GetType());
+        }
+
+        List<Value> projected = [];
+        foreach (object? item in sequence)
+        {
+            projected.Add(Project(element, item));
+        }
+
+        return projected;
+    }
+
+    private static Value ProjectMap(SemanticType type, object value)
+    {
+        if (type.First!.Kind != SemanticKind.String)
+        {
+            throw Rejected(
+                CaptureRejection.UnsupportedMapKey,
+                $"{Describe(type)} is keyed by {Describe(type.First)}. CTSC maps are "
+                + "keyed by strings.");
+        }
+
+        if (value is not IDictionary dictionary)
+        {
+            throw Mismatch(type, value.GetType());
+        }
+
+        List<KeyValuePair<string, Value>> entries = [];
+        foreach (DictionaryEntry entry in dictionary)
+        {
+            if (entry.Key is not string key)
+            {
+                throw Rejected(
+                    CaptureRejection.UnsupportedMapKey,
+                    $"a map key of type '{entry.Key.GetType().FullName}' was observed. CTSC maps "
+                    + "are keyed by strings.");
+            }
+
+            entries.Add(new KeyValuePair<string, Value>(
+                RejectUnpairedSurrogates(key),
+                Project(type.Second!, entry.Value)));
+        }
+
+        return Value.Map(entries);
+    }
+
+    /// <summary>
+    /// Projects a value whose declared type is <see cref="object"/>.
+    /// </summary>
+    /// <remarks>
+    /// Only families whose CTSC shape is unambiguous from the runtime type are
+    /// accepted. A collection is refused because nothing distinguishes a list
+    /// from a set once the declared type is erased, and guessing would make two
+    /// captures of the same data disagree.
+    /// </remarks>
+    private static Value ProjectDynamic(object value) => value switch
+    {
+        bool flag => Value.Bool(flag),
+        sbyte number => Value.Integer(number),
+        short number => Value.Integer(number),
+        int number => Value.Integer(number),
+        long number => Value.Integer(number),
+        float number => Value.Float(number),
+        double number => Value.Float(number),
+        string text => ProjectString(text),
+        _ when SemanticType.HasSpecEvent(ResolveDynamicType(value)) =>
+            ProjectNamed(ResolveDynamicType(value), value),
+        _ => throw Rejected(
+            CaptureRejection.UnsupportedType,
+            $"a '{value.GetType().FullName}' was observed for a declared 'object'. Declare the "
+            + "concrete type, or annotate it with [SpecEvent]."),
+    };
+
+    /// <summary>
+    /// Finds the annotated type to record an erased value as: its own type, or
+    /// the abstract annotated base that makes it a variant.
+    /// </summary>
+    private static Type ResolveDynamicType(object value)
+    {
+        Type actual = value.GetType();
+        for (Type? scope = actual.BaseType; scope is not null; scope = scope.BaseType)
+        {
+            if (scope.IsAbstract && SemanticType.HasSpecEvent(scope))
+            {
+                return scope;
+            }
+        }
+
+        return actual;
+    }
+
+    private static Value ProjectString(string text) => Value.String(RejectUnpairedSurrogates(text));
+
+    /// <summary>
+    /// Returns the text unchanged, or refuses it when it has no UTF-8 encoding.
+    /// Map keys run through this too, because a key that cannot be encoded
+    /// cannot produce the same UTF-8 map the Rust runtime produces.
+    /// </summary>
+    private static string RejectUnpairedSurrogates(string text)
+    {
+        for (int index = 0; index < text.Length; index++)
+        {
+            if (!char.IsSurrogate(text[index]))
+            {
+                continue;
+            }
+
+            bool paired = char.IsHighSurrogate(text[index])
+                && index + 1 < text.Length
+                && char.IsLowSurrogate(text[index + 1]);
+            if (!paired)
+            {
+                throw Rejected(
+                    CaptureRejection.UnrepresentableValue,
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "a string containing the unpaired surrogate U+{0:X4} at index {1} was "
+                        + "observed. Such a string has no UTF-8 encoding and cannot be recorded.",
+                        (int)text[index],
+                        index));
+            }
+
+            index++;
+        }
+
+        return text;
+    }
+
+    private static T Require<T>(SemanticType type, object value)
+    {
+        if (value is T typed)
+        {
+            return typed;
+        }
+
+        throw Mismatch(type, value.GetType());
+    }
+
+    private static SpecGateCaptureException Mismatch(SemanticType type, Type actual) =>
+        Rejected(
+            CaptureRejection.TypeMismatch,
+            $"a '{actual.FullName}' was observed where {Describe(type)} is declared.");
+
+    private static SpecGateCaptureException Rejected(CaptureRejection rejection, string detail) =>
+        new(rejection, "specgate: " + detail);
+
+    private static string Describe(SemanticType type) => type.Kind switch
+    {
+        SemanticKind.Named => $"'{type.Declared!.FullName}'",
+        SemanticKind.Option => $"an optional {Describe(type.First!)}",
+        SemanticKind.List => $"a list of {Describe(type.First!)}",
+        SemanticKind.Set => $"a set of {Describe(type.First!)}",
+        SemanticKind.Map => $"a map of {Describe(type.Second!)}",
+        SemanticKind.Result => $"a result of {Describe(type.First!)}",
+        _ => $"a {type.Kind.ToString().ToUpperInvariant()} value",
+    };
+}

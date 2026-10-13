@@ -13,9 +13,14 @@ public enum SpanStatus
 }
 
 /// <summary>A named value observed at an operation boundary.</summary>
+/// <remarks>
+/// The value is the CTSC projection taken while the call was still on the stack,
+/// not the original object. Keeping the object and converting it later would
+/// record whatever it was mutated into after the operation returned.
+/// </remarks>
 public sealed class RecordedValue
 {
-    internal RecordedValue(string name, object? value)
+    internal RecordedValue(string name, Value value)
     {
         Name = name;
         Value = value;
@@ -25,7 +30,7 @@ public sealed class RecordedValue
     public string Name { get; }
 
     /// <summary>Gets the observed value.</summary>
-    public object? Value { get; }
+    public Value Value { get; }
 }
 
 /// <summary>A completed operation observation produced by woven instrumentation.</summary>

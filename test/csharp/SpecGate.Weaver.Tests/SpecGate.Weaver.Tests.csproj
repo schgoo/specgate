@@ -19,6 +19,8 @@
     <ProjectReference Include="..\..\..\csharp\SpecGate.Weaver\SpecGate.Weaver.csproj" />
     <ProjectReference Include="..\SpecGate.WeaverFixtures\SpecGate.WeaverFixtures.csproj" />
     <ProjectReference Include="..\SpecGate.WeaverNegativeFixtures\SpecGate.WeaverNegativeFixtures.csproj" />
+    <ProjectReference Include="..\SpecGate.WeaverGenericMethodFixture\SpecGate.WeaverGenericMethodFixture.csproj" />
+    <ProjectReference Include="..\SpecGate.WeaverGenericTypeFixture\SpecGate.WeaverGenericTypeFixture.csproj" />
   </ItemGroup>
 
 </Project>
