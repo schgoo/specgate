@@ -225,7 +225,9 @@ is proven:
 | Registry parity with Rust | Byte-identical on stateless, rich-type, and setup-folding fixtures |
 | Fixtures, including async | Done |
 | Ordinary behavior tests over those fixtures | Done - eight test files |
-| Observation of those tests | **Missing** |
+| Recording runtime (`SpecGate.Runtime`) | Done (#44), `AsyncLocal` logical context |
+| IL weaver (`SpecGate.Weaver`) | Done (#44), synchronous operations |
+| CTSC bundle emission from a test run | **Missing** (#45) |
 
 The capture model is "capture ordinary tests at native operation boundaries."
 In C# those ordinary tests already exist and pass. The missing piece is
@@ -250,6 +252,15 @@ Scope:
 The first slice captures one annotated C# fixture end to end. The runtime it
 builds on is async-capable from the start, because a synchronous-only stage
 would be thread-affine and have to be torn out; see the same decision record.
+
+That first slice landed in #44: `SpecGate.Runtime` records spans into a
+process-wide session, `SpecGate.Weaver` rewrites annotated method bodies
+during the build, and `SpecGate.Weaver.Tests` executes the woven fixtures and
+asserts on inputs, results, parentage, and terminal status. A capture session
+targets exactly one component, matching `specgate capture --component`, because
+a method may declare the same operation for several components and recording
+all of them would produce multiple spans for one call. Annotated `async`
+methods and iterators fail the weave loudly; async C# capture is #71.
 
 #43 is **not** a prerequisite. Exact seam selection is language-neutral
 operation-level filtering, and `specgate capture --component` already selects at

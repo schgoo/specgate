@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Deliberately does not import SpecGateWeave.targets. These fixtures declare
+    constructs the weaver must reject, so weaving them during the build would
+    fail the build instead of being asserted on.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\csharp\SpecGate.Annotations\SpecGate.Annotations.csproj" />
+  </ItemGroup>
+
+</Project>
