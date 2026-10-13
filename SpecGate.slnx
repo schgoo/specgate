@@ -10,6 +10,8 @@
     <Project Path="test/csharp/SpecGate.CtscFixtures.Tests/SpecGate.CtscFixtures.Tests.csproj" />
     <Project Path="test/csharp/SpecGate.WeaverFixtures/SpecGate.WeaverFixtures.csproj" />
     <Project Path="test/csharp/SpecGate.WeaverNegativeFixtures/SpecGate.WeaverNegativeFixtures.csproj" />
+    <Project Path="test/csharp/SpecGate.WeaverGenericMethodFixture/SpecGate.WeaverGenericMethodFixture.csproj" />
+    <Project Path="test/csharp/SpecGate.WeaverGenericTypeFixture/SpecGate.WeaverGenericTypeFixture.csproj" />
     <Project Path="test/csharp/SpecGate.Weaver.Tests/SpecGate.Weaver.Tests.csproj" />
   </Folder>
 </Solution>

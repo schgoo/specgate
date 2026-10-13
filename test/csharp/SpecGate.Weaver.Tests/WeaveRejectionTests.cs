@@ -12,7 +12,48 @@ public sealed class WeaveRejectionTests
     [Fact]
     public void RejectsAnnotatedAsyncOperation()
     {
-        string source = Path.Combine(AppContext.BaseDirectory, "SpecGate.WeaverNegativeFixtures.dll");
+        WeaveException failure = WeaveFixture("SpecGate.WeaverNegativeFixtures");
+
+        Assert.Contains("DelayedAddAsync", failure.Message, StringComparison.Ordinal);
+        Assert.Contains("async", failure.Message, StringComparison.Ordinal);
+        Assert.Contains("#71", failure.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RejectsAnnotatedGenericMethod()
+    {
+        WeaveException failure = WeaveFixture("SpecGate.WeaverGenericMethodFixture");
+
+        Assert.Contains("Echo", failure.Message, StringComparison.Ordinal);
+        Assert.Contains("generic method", failure.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RejectsOperationOnGenericDeclaringType()
+    {
+        WeaveException failure = WeaveFixture("SpecGate.WeaverGenericTypeFixture");
+
+        Assert.Contains("Count", failure.Message, StringComparison.Ordinal);
+        Assert.Contains("generic type", failure.Message, StringComparison.Ordinal);
+        Assert.Contains("GenericHolder", failure.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RejectsMissingAssembly()
+    {
+        string missing = Path.Combine(AppContext.BaseDirectory, "does-not-exist.dll");
+
+        Assert.Throws<WeaveException>(() => AssemblyWeaver.Weave(missing));
+    }
+
+    /// <summary>
+    /// Weaves a copy of a negative fixture assembly and returns the failure it
+    /// must raise. Weaving a copy leaves the fixture assembly in the test
+    /// output untouched for the other facts.
+    /// </summary>
+    private static WeaveException WeaveFixture(string assemblyName)
+    {
+        string source = Path.Combine(AppContext.BaseDirectory, assemblyName + ".dll");
         Assert.True(File.Exists(source), $"Negative fixture assembly not found at {source}.");
 
         string workingDirectory = Path.Combine(Path.GetTempPath(), "specgate-weave-" + Guid.NewGuid().ToString("N"));
@@ -25,23 +66,11 @@ public sealed class WeaveRejectionTests
                 Path.Combine(AppContext.BaseDirectory, "SpecGate.Annotations.dll"),
                 Path.Combine(workingDirectory, "SpecGate.Annotations.dll"));
 
-            WeaveException failure = Assert.Throws<WeaveException>(() => AssemblyWeaver.Weave(target));
-
-            Assert.Contains("DelayedAddAsync", failure.Message, StringComparison.Ordinal);
-            Assert.Contains("async", failure.Message, StringComparison.Ordinal);
-            Assert.Contains("#71", failure.Message, StringComparison.Ordinal);
+            return Assert.Throws<WeaveException>(() => AssemblyWeaver.Weave(target));
         }
         finally
         {
             Directory.Delete(workingDirectory, recursive: true);
         }
-    }
-
-    [Fact]
-    public void RejectsMissingAssembly()
-    {
-        string missing = Path.Combine(AppContext.BaseDirectory, "does-not-exist.dll");
-
-        Assert.Throws<WeaveException>(() => AssemblyWeaver.Weave(missing));
     }
 }

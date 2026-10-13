@@ -69,11 +69,16 @@ internal sealed class OperationMetadata
         return new OperationMetadata(inputs, result);
     }
 
+    /// <remarks>
+    /// Any declared name is preserved exactly, including an empty one, because
+    /// C# discovery publishes <c>inp?.Name ?? p.Name</c>. Treating an empty
+    /// declared name as absent would make capture and the discovered registry
+    /// disagree about the same parameter.
+    /// </remarks>
     private static string InputName(ParameterInfo parameter)
     {
         SpecInputAttribute? annotation = parameter.GetCustomAttribute<SpecInputAttribute>(inherit: false);
-        string? declared = annotation?.Name;
-        return string.IsNullOrEmpty(declared) ? parameter.Name! : declared!;
+        return annotation?.Name ?? parameter.Name!;
     }
 
     private static void RejectDuplicates(MethodBase method, SemanticInput[] inputs)

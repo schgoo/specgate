@@ -371,7 +371,13 @@ public sealed class Value : IEquatable<Value>, IComparable<Value>, IComparable
     /// <returns>Whether the left value does not sort before.</returns>
     public static bool operator >=(Value? left, Value? right) => Compare(left, right) >= 0;
 
-    /// <summary>Renders the value for diagnostics, matching the Rust runtime's rendering.</summary>
+    /// <summary>Renders the value for diagnostics, mirroring the Rust runtime's rendering.</summary>
+    /// <remarks>
+    /// Lists and sets both render as <c>[a,b]</c>, maps as <c>{"k":v}</c>, and
+    /// strings are quoted inside a container but not at the top level, matching
+    /// <c>Display for Value</c> in the Rust runtime. Numeric text is .NET's, so
+    /// non-finite floats still print differently from Rust's <c>inf</c>.
+    /// </remarks>
     /// <returns>The rendered value.</returns>
     public override string ToString()
     {
@@ -409,9 +415,9 @@ public sealed class Value : IEquatable<Value>, IComparable<Value>, IComparable
                 break;
             case ValueKind.List:
             case ValueKind.Set:
-                builder.Append(Kind == ValueKind.List ? '[' : '{');
+                builder.Append('[');
                 RenderSequence(builder, (Value[])_payload!);
-                builder.Append(Kind == ValueKind.List ? ']' : '}');
+                builder.Append(']');
                 break;
             default:
                 builder.Append('{');
@@ -420,11 +426,11 @@ public sealed class Value : IEquatable<Value>, IComparable<Value>, IComparable
                 {
                     if (!first)
                     {
-                        builder.Append(", ");
+                        builder.Append(',');
                     }
 
                     first = false;
-                    builder.Append(entry.Key).Append(": ");
+                    builder.Append('"').Append(entry.Key).Append("\":");
                     entry.Value.Render(builder, quoteStrings: true);
                 }
 
@@ -439,7 +445,7 @@ public sealed class Value : IEquatable<Value>, IComparable<Value>, IComparable
         {
             if (index > 0)
             {
-                builder.Append(", ");
+                builder.Append(',');
             }
 
             items[index].Render(builder, quoteStrings: true);

@@ -225,6 +225,39 @@ public sealed class ValueProjectionTests
     }
 
     [Fact]
+    public void AnUnpairedSurrogateInAMapKeyIsRejected()
+    {
+        Assert.Equal(
+            CaptureRejection.UnrepresentableValue,
+            Reject(
+                nameof(Declarations.Collections),
+                [
+                    new List<int>(),
+                    new SortedSet<string>(),
+                    new SortedDictionary<string, int> { ["\ud800"] = 1 },
+                    new List<SortedDictionary<string, string>>(),
+                ]).Rejection);
+    }
+
+    [Fact]
+    public void AnExplicitlyEmptyInputNameIsPreserved()
+    {
+        RecordedSpan span = Capture(nameof(Declarations.EmptyNames), [1]);
+
+        // C# discovery publishes `inp?.Name ?? p.Name`, so an empty declared name
+        // reaches the registry. Capture has to agree with it.
+        Assert.Equal(string.Empty, Assert.Single(span.Inputs).Name);
+    }
+
+    [Fact]
+    public void AnExplicitlyEmptyMemberNameIsPreserved()
+    {
+        Assert.Equal(
+            Map((string.Empty, Value.Integer(7))),
+            Single(nameof(Declarations.EmptyMemberName), [new Unnamed { Count = 7 }]));
+    }
+
+    [Fact]
     public void AnArgumentCountThatDisagreesWithTheDeclarationIsRejected()
     {
         Assert.Equal(
@@ -278,17 +311,11 @@ public sealed class ValueProjectionTests
 
         OperationScope scope = SpecGateRuntime.EnterOperation(
             Declarations.Of(declaration), declaration, Component);
-        try
-        {
-            return Assert.Throws<SpecGateCaptureException>(
-                () => SpecGateRuntime.RecordInputs(scope, arguments));
-        }
-        finally
-        {
-            // A rejection propagates out of the instrumented call, so the woven
-            // epilogue still terminates the scope on the way out.
-            SpecGateRuntime.ExitError(scope, new InvalidOperationException("rejected"));
-        }
+
+        // A rejected RecordInputs abandons its own scope, so the caller does not
+        // close it; the woven try region has not been entered yet.
+        return Assert.Throws<SpecGateCaptureException>(
+            () => SpecGateRuntime.RecordInputs(scope, arguments));
     }
 
     /// <summary>Declarations standing in for the woven methods under capture.</summary>
@@ -346,6 +373,10 @@ public sealed class ValueProjectionTests
 
         internal static void KeyedByNumber(SortedDictionary<int, string> counts) => _ = counts;
 
+        internal static void EmptyNames([SpecInput("")] int count) => _ = count;
+
+        internal static void EmptyMemberName(Unnamed value) => _ = value;
+
         internal static void NestedNullability(
             List<string?> maybeTexts,
             List<string> texts,
@@ -388,3 +419,11 @@ internal sealed class Circle : Shape
 
 [SpecEvent]
 internal sealed class Origin : Shape;
+
+/// <summary>A record whose only member declares an empty semantic name.</summary>
+[SpecEvent]
+internal sealed class Unnamed
+{
+    [SpecEvent("")]
+    public int Count { get; init; }
+}

@@ -188,7 +188,9 @@ internal static class ValueProjector
                     + "are keyed by strings.");
             }
 
-            entries.Add(new KeyValuePair<string, Value>(key, Project(type.Second!, entry.Value)));
+            entries.Add(new KeyValuePair<string, Value>(
+                RejectUnpairedSurrogates(key),
+                Project(type.Second!, entry.Value)));
         }
 
         return Value.Map(entries);
@@ -239,7 +241,14 @@ internal static class ValueProjector
         return actual;
     }
 
-    private static Value ProjectString(string text)
+    private static Value ProjectString(string text) => Value.String(RejectUnpairedSurrogates(text));
+
+    /// <summary>
+    /// Returns the text unchanged, or refuses it when it has no UTF-8 encoding.
+    /// Map keys run through this too, because a key that cannot be encoded
+    /// cannot produce the same UTF-8 map the Rust runtime produces.
+    /// </summary>
+    private static string RejectUnpairedSurrogates(string text)
     {
         for (int index = 0; index < text.Length; index++)
         {
@@ -266,7 +275,7 @@ internal static class ValueProjector
             index++;
         }
 
-        return Value.String(text);
+        return text;
     }
 
     private static T Require<T>(SemanticType type, object value)

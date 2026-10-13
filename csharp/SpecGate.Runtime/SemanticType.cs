@@ -207,11 +207,16 @@ internal sealed class SemanticType
     }
 
     /// <summary>Gets the semantic name a <see cref="SpecEventAttribute"/> declares.</summary>
+    /// <remarks>
+    /// Only a missing name falls back to the CLR name, matching discovery's
+    /// <c>SpecEventName(member) ?? member.Name</c>. An explicitly declared empty
+    /// name is preserved, so record keys, type names, and variant names stay
+    /// identical between the registry and captured values.
+    /// </remarks>
     internal static string EventName(MemberInfo member)
     {
         SpecEventAttribute? annotation = member.GetCustomAttribute<SpecEventAttribute>(inherit: false);
-        string? declared = annotation?.Name;
-        return string.IsNullOrEmpty(declared) ? member.Name : declared!;
+        return annotation?.Name ?? member.Name;
     }
 
     internal static bool HasSpecEvent(Type type) =>

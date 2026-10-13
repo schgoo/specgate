@@ -120,7 +120,18 @@ public static class SpecGateRuntime
             throw new ArgumentNullException(nameof(scope));
         }
 
-        scope.RecordInputs(arguments ?? throw new ArgumentNullException(nameof(arguments)));
+        try
+        {
+            scope.RecordInputs(arguments ?? throw new ArgumentNullException(nameof(arguments)));
+        }
+        catch
+        {
+            // The woven try region begins after this call, so no epilogue closes
+            // this scope. Leaving it current would parent the caller's next
+            // operation to an operation that never completed.
+            Restore(scope);
+            throw;
+        }
     }
 
     /// <summary>Closes an operation that returned a value. Called by woven code.</summary>
@@ -132,11 +143,19 @@ public static class SpecGateRuntime
             throw new ArgumentNullException(nameof(scope));
         }
 
-        scope.Complete(
-            SpanStatus.Ok,
-            scope.IsRecording ? scope.ProjectResult(result) : null,
-            exception: null);
-        Restore(scope);
+        try
+        {
+            scope.Complete(
+                SpanStatus.Ok,
+                scope.IsRecording ? scope.ProjectResult(result) : null,
+                exception: null);
+        }
+        finally
+        {
+            // The woven epilogue runs outside the try region, so a rejected
+            // result would otherwise leave this scope current.
+            Restore(scope);
+        }
     }
 
     /// <summary>Closes an operation that returned no value. Called by woven code.</summary>
@@ -148,8 +167,14 @@ public static class SpecGateRuntime
             throw new ArgumentNullException(nameof(scope));
         }
 
-        scope.Complete(SpanStatus.Ok, result: null, exception: null);
-        Restore(scope);
+        try
+        {
+            scope.Complete(SpanStatus.Ok, result: null, exception: null);
+        }
+        finally
+        {
+            Restore(scope);
+        }
     }
 
     /// <summary>Closes an operation that terminated by throwing. Called by woven code.</summary>
@@ -161,8 +186,14 @@ public static class SpecGateRuntime
             throw new ArgumentNullException(nameof(scope));
         }
 
-        scope.Complete(SpanStatus.Error, result: null, exception);
-        Restore(scope);
+        try
+        {
+            scope.Complete(SpanStatus.Error, result: null, exception);
+        }
+        finally
+        {
+            Restore(scope);
+        }
     }
 
     private static void Restore(OperationScope scope)

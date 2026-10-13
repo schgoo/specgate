@@ -67,6 +67,44 @@ public sealed class CaptureSessionTests
     }
 
     [Fact]
+    public void ARejectedInputLeavesNoOperationCurrent()
+    {
+        using CaptureSession session = SpecGateRuntime.BeginSession("fixture.basic");
+
+        OperationScope rejected = SpecGateRuntime.EnterOperation(
+            Boundaries.Of("Add"), "add", "fixture.basic");
+        Assert.Throws<SpecGateCaptureException>(
+            () => SpecGateRuntime.RecordInputs(rejected, ["not an int", 3]));
+
+        // The woven try region starts after RecordInputs, so nothing closes this
+        // scope. A caller that catches the rejection and calls another operation
+        // must not have that operation parented to the abandoned one.
+        Assert.Null(SpecGateRuntime.Current);
+
+        OperationScope next = SpecGateRuntime.EnterOperation(
+            Boundaries.Of("Add"), "add", "fixture.basic");
+        SpecGateRuntime.RecordInputs(next, [2, 3]);
+        SpecGateRuntime.ExitOk(next, 5);
+
+        RecordedSpan span = Assert.Single(session.Spans);
+        Assert.Null(span.ParentSpanId);
+        Assert.Null(SpecGateRuntime.Current);
+    }
+
+    [Fact]
+    public void ARejectedResultLeavesNoOperationCurrent()
+    {
+        using CaptureSession session = SpecGateRuntime.BeginSession("fixture.basic");
+
+        OperationScope scope = SpecGateRuntime.EnterOperation(Boundaries.Of("Add"), "add", "fixture.basic");
+        SpecGateRuntime.RecordInputs(scope, [2, 3]);
+        Assert.Throws<SpecGateCaptureException>(() => SpecGateRuntime.ExitOk(scope, "not an int"));
+
+        Assert.Null(SpecGateRuntime.Current);
+        Assert.Empty(session.Spans);
+    }
+
+    [Fact]
     public void ANestedOperationRecordsItsCallerAsParent()
     {
         using CaptureSession session = SpecGateRuntime.BeginSession("fixture.basic");
