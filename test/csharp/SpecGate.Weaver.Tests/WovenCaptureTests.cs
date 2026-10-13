@@ -12,6 +12,13 @@ namespace SpecGate.Weaver.Tests;
 /// exception handler range or stack shape surfaces as
 /// <see cref="InvalidProgramException"/> when the method is first jitted.
 /// </summary>
+/// <remarks>
+/// The behavioral scenario tests here are interim. Once #47 generates C# trace
+/// goldens, generated artifacts byte-compared against themselves and compared to
+/// the Rust reference under <c>ctsc.strict/0.1.0</c> become the oracle, and #47
+/// deletes the scenarios they replace. Only the session-scoping and IL-mechanics
+/// tests, which no golden can express, survive that slice.
+/// </remarks>
 [Collection(WovenCaptureSerialization.Name)]
 public sealed class WovenCaptureTests
 {
