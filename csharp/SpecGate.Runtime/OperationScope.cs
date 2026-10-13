@@ -57,9 +57,16 @@ public sealed class OperationScope
         new OperationScope(null, null, 0, string.Empty, string.Empty, default);
 
     /// <summary>
-    /// Projects and records every argument the woven call received, in parameter
-    /// order.
+    /// Projects and records the operation's folded inputs: the construction
+    /// inputs of the setups it requires, plus every declared parameter no setup
+    /// contributes in its place.
     /// </summary>
+    /// <remarks>
+    /// Inputs are recorded sorted by name, not in parameter order, because Rust
+    /// capture stores them in a <c>BTreeMap&lt;String, Value&gt;</c>
+    /// (<c>rust/crates/specgate-runtime/src/capture.rs:67-85</c>) and the two
+    /// producers have to agree on the CTSC-visible order.
+    /// </remarks>
     internal void RecordInputs(object?[] arguments)
     {
         if (Session is null)
@@ -76,17 +83,75 @@ public sealed class OperationScope
                 + $"declares {declared.Length}.");
         }
 
-        RecordedValue[] recorded = new RecordedValue[declared.Length];
+        SetupFolding folding = SetupFolding.For(Method, Component, Operation, declared);
+        SortedDictionary<string, Value> folded = new(Utf8KeyComparer.Instance);
+        Dictionary<string, string> producers = new(StringComparer.Ordinal);
+
+        foreach (FoldedSetup setup in folding.Required)
+        {
+            SortedDictionary<string, Value> inputs = Session.SetupInputs(setup.Key)
+                ?? throw new SpecGateCaptureException(
+                    CaptureRejection.SetupMissing,
+                    $"specgate: capture for '{Component}::{Operation}' requires successful provenance "
+                    + $"from {setup.Description}; invoke that [SpecSetup] during this capture and let it "
+                    + $"return successfully before calling '{Operation}'.");
+
+            foreach (KeyValuePair<string, Value> input in inputs)
+            {
+                Merge(folded, producers, input.Key, input.Value, setup.Description);
+            }
+        }
+
         for (int index = 0; index < declared.Length; index++)
         {
-            recorded[index] = new RecordedValue(
-                declared[index].Name, ValueProjector.Project(declared[index].Type, arguments[index]));
+            SemanticInput input = declared[index];
+            Value value = ValueProjector.Project(input.Type, arguments[index]);
+            if (folding.Filled.Contains(input.Name))
+            {
+                // A filled argument is projected and then discarded, mirroring
+                // the generated Rust code at
+                // `rust/crates/specgate-runtime/src/capture.rs:179-202`, where the
+                // value is projected before `input()` drops the filled name. An
+                // unrepresentable value in a filled position has to fail in both
+                // producers, not just one.
+                continue;
+            }
+
+            Merge(folded, producers, input.Name, value, $"operation parameter '{input.Name}'");
         }
 
         lock (_inputs)
         {
-            _inputs.AddRange(recorded);
+            foreach (KeyValuePair<string, Value> input in folded)
+            {
+                _inputs.Add(new RecordedValue(input.Key, input.Value));
+            }
         }
+    }
+
+    /// <remarks>
+    /// Rust asserts here, because a folded surface with two inputs of one name is
+    /// a metadata fault that discovery already rejects
+    /// (<c>discovery/setup.rs:160-171</c>). Capture names both producers so the
+    /// fault is actionable.
+    /// </remarks>
+    private void Merge(
+        SortedDictionary<string, Value> folded,
+        Dictionary<string, string> producers,
+        string name,
+        Value value,
+        string producer)
+    {
+        if (producers.TryGetValue(name, out string? earlier))
+        {
+            throw new SpecGateCaptureException(
+                CaptureRejection.AmbiguousDeclaration,
+                $"specgate: setup folding for '{Component}::{Operation}' produces duplicate input name "
+                + $"'{name}'; {earlier} collides with {producer}.");
+        }
+
+        producers.Add(name, producer);
+        folded.Add(name, value);
     }
 
     /// <summary>Projects the operation's return value, or returns null when it is void.</summary>

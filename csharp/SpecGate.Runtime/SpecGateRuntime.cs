@@ -111,6 +111,33 @@ public static class SpecGateRuntime
         return scope;
     }
 
+    /// <summary>Opens a setup producer and projects its construction inputs. Called by woven code.</summary>
+    /// <remarks>
+    /// Returns <see langword="null"/> when nothing is recording or the method
+    /// declares no setup for the session's component.
+    /// </remarks>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public static SetupStaging? StageSetup(RuntimeMethodHandle method, object?[] arguments)
+    {
+        CaptureSession? session = Volatile.Read(ref _session);
+        if (session is null)
+        {
+            return null;
+        }
+
+        return SetupStaging.Stage(
+            session, method, arguments ?? throw new ArgumentNullException(nameof(arguments)));
+    }
+
+    /// <summary>Commits a setup producer's provenance. Called by woven code.</summary>
+    /// <remarks>
+    /// The woven call sits on the producer's success path only, so a setup that
+    /// throws commits nothing and the operation it prepares then fails with a
+    /// missing-provenance rejection.
+    /// </remarks>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public static void CommitSetup(SetupStaging? staged) => staged?.Commit();
+
     /// <summary>Records the operation's inputs. Called by woven code.</summary>
     [EditorBrowsable(EditorBrowsableState.Never)]
     public static void RecordInputs(OperationScope scope, object?[] arguments)

@@ -77,6 +77,68 @@ internal sealed class MethodWeaver(ModuleDefinition module, RuntimeReferences ru
         body.OptimizeMacros();
     }
 
+    /// <summary>
+    /// Rewrites one setup producer so it commits construction provenance on its
+    /// success path.
+    /// </summary>
+    /// <remarks>
+    /// The woven shape carries no scope and no handler:
+    /// <code>
+    /// staged = StageSetup(ldtoken thisMethod, new object[] { a, b });
+    /// ...original body, every `ret` becomes `leave epilogue`...
+    /// epilogue: CommitSetup(staged); return result;
+    /// </code>
+    /// Inputs are projected at entry, mirroring <c>defer_setup</c>
+    /// (<c>rust/crates/specgate-runtime/src/capture/setup.rs:55-67</c>), so a body
+    /// that mutates its arguments cannot change what is recorded. The original
+    /// <c>ret</c> instructions are the only way to reach the epilogue, so a setup
+    /// that throws commits nothing — which is Rust's "commit only after a
+    /// successful return" without needing a handler. A rejection raised by
+    /// <c>CommitSetup</c> is raised outside any try region and reaches the
+    /// caller, matching the rule that a capture rejection is a defect to surface.
+    /// </remarks>
+    internal void WeaveSetup(MethodDefinition method, SetupDeclaration declaration)
+    {
+        MethodBody body = method.Body;
+        body.SimplifyMacros();
+        body.InitLocals = true;
+
+        ILProcessor il = body.GetILProcessor();
+        VariableDefinition staged = AddVariable(body, runtime.StagingType);
+        bool returnsValue = method.ReturnType.MetadataType != MetadataType.Void;
+        VariableDefinition? result = returnsValue ? AddVariable(body, method.ReturnType) : null;
+
+        Instruction firstOriginal = body.Instructions[0];
+        List<Instruction> prologue = [il.Create(OpCodes.Ldtoken, method)];
+        AppendArgumentArray(il, prologue, declaration.Inputs);
+        prologue.Add(il.Create(OpCodes.Call, runtime.StageSetup));
+        prologue.Add(il.Create(OpCodes.Stloc, staged));
+        foreach (Instruction instruction in prologue)
+        {
+            il.InsertBefore(firstOriginal, instruction);
+        }
+
+        List<Instruction> epilogue =
+        [
+            il.Create(OpCodes.Ldloc, staged),
+            il.Create(OpCodes.Call, runtime.CommitSetup),
+        ];
+        if (result is not null)
+        {
+            epilogue.Add(il.Create(OpCodes.Ldloc, result));
+        }
+
+        epilogue.Add(il.Create(OpCodes.Ret));
+
+        RedirectReturns(il, body, epilogue[0], result);
+        foreach (Instruction instruction in epilogue)
+        {
+            il.Append(instruction);
+        }
+
+        body.OptimizeMacros();
+    }
+
     private List<Instruction> BuildPrologue(
         ILProcessor il,
         MethodDefinition method,
@@ -116,21 +178,27 @@ internal sealed class MethodWeaver(ModuleDefinition module, RuntimeReferences ru
         prologue.Add(il.Create(OpCodes.Stloc, scope));
 
         prologue.Add(il.Create(OpCodes.Ldloc, scope));
-        prologue.Add(il.Create(OpCodes.Ldc_I4, declaration.Inputs.Length));
-        prologue.Add(il.Create(OpCodes.Newarr, module.TypeSystem.Object));
-        for (int index = 0; index < declaration.Inputs.Length; index++)
-        {
-            ParameterDefinition parameter = declaration.Inputs[index];
-            prologue.Add(il.Create(OpCodes.Dup));
-            prologue.Add(il.Create(OpCodes.Ldc_I4, index));
-            prologue.Add(il.Create(OpCodes.Ldarg, parameter));
-            AppendBoxIfNeeded(il, prologue, parameter.ParameterType);
-            prologue.Add(il.Create(OpCodes.Stelem_Ref));
-        }
-
+        AppendArgumentArray(il, prologue, declaration.Inputs);
         prologue.Add(il.Create(OpCodes.Call, runtime.RecordInputs));
 
         return prologue;
+    }
+
+    /// <summary>Emits <c>new object[] { a, b }</c> from the annotated parameters.</summary>
+    private void AppendArgumentArray(
+        ILProcessor il, List<Instruction> target, ParameterDefinition[] inputs)
+    {
+        target.Add(il.Create(OpCodes.Ldc_I4, inputs.Length));
+        target.Add(il.Create(OpCodes.Newarr, module.TypeSystem.Object));
+        for (int index = 0; index < inputs.Length; index++)
+        {
+            ParameterDefinition parameter = inputs[index];
+            target.Add(il.Create(OpCodes.Dup));
+            target.Add(il.Create(OpCodes.Ldc_I4, index));
+            target.Add(il.Create(OpCodes.Ldarg, parameter));
+            AppendBoxIfNeeded(il, target, parameter.ParameterType);
+            target.Add(il.Create(OpCodes.Stelem_Ref));
+        }
     }
 
     private List<Instruction> BuildEpilogue(
