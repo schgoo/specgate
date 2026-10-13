@@ -18,8 +18,13 @@ public sealed class AssemblyWeaver
     /// Weaves <paramref name="assemblyPath"/> in place.
     /// </summary>
     /// <param name="assemblyPath">The compiled assembly to instrument.</param>
-    /// <returns>The names of the operations woven, empty when nothing changed.</returns>
-    /// <exception cref="WeaveException">The assembly declares an operation that cannot be woven.</exception>
+    /// <returns>
+    /// One entry per annotated method woven, each naming the declaration kind and
+    /// the method it was woven into. Empty when nothing changed.
+    /// </returns>
+    /// <exception cref="WeaveException">
+    /// The assembly declares an operation or setup that cannot be woven.
+    /// </exception>
     public static IReadOnlyList<string> Weave(string assemblyPath)
     {
         if (!File.Exists(assemblyPath))
@@ -49,7 +54,7 @@ public sealed class AssemblyWeaver
         using (AssemblyDefinition assembly = AssemblyDefinition.ReadAssembly(assemblyPath, readerParameters))
         {
             ModuleDefinition module = assembly.MainModule;
-            List<WeaveTarget> targets = FindOperations(module);
+            List<WeaveTarget> targets = FindTargets(module);
             if (targets.Count == 0)
             {
                 return [];
@@ -62,7 +67,7 @@ public sealed class AssemblyWeaver
                 if (target.Operation is not null)
                 {
                     weaver.Weave(target.Method, target.Operation);
-                    woven.Add($"{target.Operation.Operation} ({target.Method.FullName})");
+                    woven.Add($"operation '{target.Operation.Operation}' ({target.Method.FullName})");
                 }
                 else
                 {
@@ -86,7 +91,7 @@ public sealed class AssemblyWeaver
         return woven;
     }
 
-    private static List<WeaveTarget> FindOperations(ModuleDefinition module)
+    private static List<WeaveTarget> FindTargets(ModuleDefinition module)
     {
         List<WeaveTarget> targets = [];
         foreach (TypeDefinition type in module.Types.SelectMany(FlattenTypes))
