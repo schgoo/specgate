@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Xunit;
 
 namespace SpecGate.Runtime.Tests;
@@ -18,9 +19,9 @@ public sealed class LogicalContextFlowTests
         OperationScope outer = SpecGateRuntime.EnterOperation("fetch", "fixture.async");
         int enteredOn = Environment.CurrentManagedThreadId;
 
-        int resumedOn = await HopToAnotherThreadAsync(enteredOn);
+        await DedicatedThreadHop.Instance;
 
-        Assert.NotEqual(enteredOn, resumedOn);
+        Assert.NotEqual(enteredOn, Environment.CurrentManagedThreadId);
         Assert.Same(outer, SpecGateRuntime.Current);
 
         SpecGateRuntime.ExitOk(outer, "response");
@@ -38,8 +39,8 @@ public sealed class LogicalContextFlowTests
         OperationScope outer = SpecGateRuntime.EnterOperation("fetch", "fixture.async");
         int enteredOn = Environment.CurrentManagedThreadId;
 
-        int resumedOn = await HopToAnotherThreadAsync(enteredOn);
-        Assert.NotEqual(enteredOn, resumedOn);
+        await DedicatedThreadHop.Instance;
+        Assert.NotEqual(enteredOn, Environment.CurrentManagedThreadId);
 
         OperationScope inner = SpecGateRuntime.EnterOperation("decode", "fixture.async");
         SpecGateRuntime.ExitOk(inner, "decoded");
@@ -76,27 +77,28 @@ public sealed class LogicalContextFlowTests
     }
 
     /// <summary>
-    /// Completes a task from a freshly started thread until the awaiting code
-    /// actually resumes on a different thread, then reports that thread.
+    /// Awaitable that always resumes its continuation on a brand-new dedicated
+    /// thread, so the resumed managed thread id is guaranteed to differ from the
+    /// awaiting one. Completing a task from another thread is not enough: the
+    /// thread pool may hand the continuation straight back to the thread that
+    /// just went idle, which it reliably does on two-core Linux CI runners.
     /// </summary>
-    private static async Task<int> HopToAnotherThreadAsync(int startingThreadId)
+    private sealed class DedicatedThreadHop : INotifyCompletion
     {
-        for (int attempt = 0; attempt < 50; attempt++)
+        public static DedicatedThreadHop Instance { get; } = new();
+
+        public bool IsCompleted => false;
+
+        public DedicatedThreadHop GetAwaiter() => this;
+
+        public void OnCompleted(Action continuation)
         {
-            TaskCompletionSource<bool> signal =
-                new(TaskCreationOptions.RunContinuationsAsynchronously);
-            Thread signaller = new(() => signal.SetResult(true)) { IsBackground = true };
-            signaller.Start();
-
-            await signal.Task.ConfigureAwait(false);
-
-            if (Environment.CurrentManagedThreadId != startingThreadId)
-            {
-                return Environment.CurrentManagedThreadId;
-            }
+            Thread worker = new(() => continuation()) { IsBackground = true };
+            worker.Start();
         }
 
-        throw new InvalidOperationException(
-            "could not force a continuation onto a different thread after 50 attempts.");
+        public void GetResult()
+        {
+        }
     }
 }
