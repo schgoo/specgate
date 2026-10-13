@@ -13,10 +13,18 @@ namespace SpecGate.CtscFixtures.Tests;
 /// fixtures that declare <c>[SpecSetup]</c>.
 /// </summary>
 /// <remarks>
+/// <para>
 /// These fixtures are compiled unwoven, so the capture entry points are driven
 /// directly with the fixture methods' own handles. That exercises the real
 /// assembly scan and the real folding — the woven IL shape is covered separately
 /// by the weaver's own fixture.
+/// </para>
+/// <para>
+/// The four facts asserting a folded input surface are an interim surface. A
+/// generated C# trace golden asserts the same surface against woven code, so
+/// #47 deletes them. The four rejection facts are not interim: a capture bundle
+/// only records runs that succeeded, so no golden can express them.
+/// </para>
 /// </remarks>
 public sealed class SetupFoldingTests
 {
