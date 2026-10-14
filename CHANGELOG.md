@@ -21,6 +21,10 @@ under `docs/decisions/`, or `docs/roadmap.md`. Generate with `just changelog`.
 
 ### Changed
 
+- The packaged-context smoke compares NuGet package entry content rather than
+  package bytes, which `dotnet pack` stamps with the wall clock.
+- A failed replay reports its whole cause chain, so a runner failure names the
+  candidate's own output instead of only the stage.
 - Native capture rejects colliding `#[spec_setup]` declarations instead of
   dropping them, matching C# capture and discovery.
 - Capture activation validates the whole linked registry, so a misconfigured
