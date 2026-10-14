@@ -13,7 +13,7 @@ internal sealed class FoldedSetup(SetupKey key, string description)
 
     /// <summary>
     /// How the setup is named in a rejection, mirroring <c>describe_setup</c> in
-    /// <c>rust/crates/specgate-runtime/src/capture/setup.rs:381-391</c>.
+    /// <c>rust/crates/specgate-runtime/src/capture/setup.rs</c>.
     /// </summary>
     internal string Description { get; } = description;
 }
@@ -25,17 +25,19 @@ internal sealed class FoldedSetup(SetupKey key, string description)
 /// <remarks>
 /// <para>
 /// Mirrors <c>folded_inputs</c> in
-/// <c>rust/crates/specgate-runtime/src/capture/setup.rs:295-375</c>, cross-checked
+/// <c>rust/crates/specgate-runtime/src/capture/setup.rs</c>, cross-checked
 /// against the discovery-time authority <c>fold_operation</c> in
-/// <c>rust/crates/specgate-discovery/src/discovery/setup.rs:79-173</c>, whose
-/// wording the rejections below reuse.
+/// <c>rust/crates/specgate-discovery/src/discovery/setup.rs</c>, whose wording
+/// the rejections below reuse.
 /// </para>
 /// <para>
-/// Two deliberate differences from Rust capture. First, a setup whose
-/// <c>Fills</c> names no declared parameter is rejected here; Rust capture drops
-/// it silently while discovery errors, and a capture that silently diverged from
-/// the published registry would record a surface nobody declared. Second, an
-/// ambiguous or duplicated contribution is rejected here for the same reason.
+/// A setup that names no declared parameter, one whose return type matches
+/// several unfilled parameters, a second receiver producer, and two setups
+/// claiming one parameter are all rejected, exactly as Rust capture rejects
+/// them. Discovery already refuses to publish such a component, so folding past
+/// one here would capture a surface nobody declared.
+/// </para>
+/// <para>
 /// Discovery's "an instance operation must have a receiver setup" rule is
 /// deliberately <em>not</em> enforced: Rust capture does not enforce it either,
 /// and a second enforcement point could only diverge from the first.
