@@ -60,6 +60,81 @@ pub mod missing_setup {
     }
 }
 
+pub mod setup_unknown_fill {
+    use specgate::{spec_operation, spec_setup};
+
+    #[spec_setup("render", spec = "fixture.setup_unknown_fill", fills = "height")]
+    pub fn make_height() -> i32 {
+        1
+    }
+
+    #[spec_operation("render", spec = "fixture.setup_unknown_fill")]
+    pub fn render(width: i32) -> i32 {
+        width
+    }
+}
+
+pub mod setup_ambiguous_fill {
+    use specgate::{spec_operation, spec_setup};
+
+    #[spec_setup("render", spec = "fixture.setup_ambiguous_fill")]
+    pub fn make_side() -> i32 {
+        1
+    }
+
+    #[spec_operation("render", spec = "fixture.setup_ambiguous_fill")]
+    pub fn render(left: i32, right: i32) -> i32 {
+        left + right
+    }
+}
+
+pub mod setup_duplicate_fill {
+    use specgate::{spec_operation, spec_setup};
+
+    #[spec_setup("render", spec = "fixture.setup_duplicate_fill", fills = "width")]
+    pub fn make_width() -> i32 {
+        1
+    }
+
+    #[spec_setup("render", spec = "fixture.setup_duplicate_fill", fills = "width")]
+    pub fn make_width_again() -> i32 {
+        2
+    }
+
+    #[spec_operation("render", spec = "fixture.setup_duplicate_fill")]
+    pub fn render(width: i32) -> i32 {
+        width
+    }
+}
+
+pub mod setup_extra_receiver {
+    use specgate::{SpecEvent, spec_operation, spec_setup};
+
+    #[derive(Debug, SpecEvent)]
+    #[spec_component("fixture.setup_extra_receiver")]
+    pub struct Canvas {
+        #[spec_event]
+        pub width: i32,
+    }
+
+    #[spec_setup("render", spec = "fixture.setup_extra_receiver")]
+    pub fn make_canvas() -> Canvas {
+        Canvas { width: 1 }
+    }
+
+    #[spec_setup("render", spec = "fixture.setup_extra_receiver")]
+    pub fn make_wider_canvas() -> Canvas {
+        Canvas { width: 2 }
+    }
+
+    impl Canvas {
+        #[spec_operation("render", spec = "fixture.setup_extra_receiver")]
+        pub fn render(&self) -> i32 {
+            self.width
+        }
+    }
+}
+
 pub mod private_operation {
     use specgate::spec_operation;
 

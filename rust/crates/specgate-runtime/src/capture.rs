@@ -504,13 +504,15 @@ impl Drop for OperationScope {
 /// # Errors
 ///
 /// Rejects malformed or duplicate identifiers, non-positive clock settings,
-/// logical-clock overflow, and attempts to start while a session is active.
+/// logical-clock overflow, attempts to start while a session is active, and
+/// any linked component whose `#[spec_setup]` declarations cannot be folded.
 pub fn start(config: Config) -> Result<(), CaptureError> {
     start_with(config, None, FileSystem::real())
 }
 
 fn start_with(config: Config, sidecar_path: Option<PathBuf>, file_system: FileSystem) -> Result<(), CaptureError> {
     validate_config(&config)?;
+    setup::validate_registry_folding()?;
     if sidecar_path.as_ref().is_some_and(|path| path.as_os_str().is_empty()) {
         return Err("native capture sidecar path must not be empty".to_string().into());
     }

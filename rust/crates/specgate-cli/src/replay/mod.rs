@@ -89,7 +89,7 @@ pub fn format_outcome(outcome: &Result<Report, Error>) -> String {
             report.plans,
             report.output_path.display()
         ),
-        Err(error) => format!("Error({})\n", error.diagnostic()),
+        Err(error) => format!("Error({})\n", error.chain()),
     }
 }
 

@@ -33,6 +33,54 @@ function Invoke-Checked {
     }
 }
 
+# `dotnet pack` stamps each zip entry with the wall clock, so two packs of
+# identical content differ byte for byte whenever they straddle a second
+# boundary. Compare the content the package actually delivers instead: entry
+# order, names, and the hash of each entry's bytes.
+function Get-PackageContent([string]$Path) {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($Path)
+    try {
+        return @($archive.Entries | ForEach-Object {
+            $stream = $_.Open()
+            try {
+                $digest = [Convert]::ToHexString($sha.ComputeHash($stream))
+            }
+            finally {
+                $stream.Dispose()
+            }
+            [pscustomobject]@{ Name = $_.FullName; Length = $_.Length; Digest = $digest }
+        })
+    }
+    finally {
+        $archive.Dispose()
+        $sha.Dispose()
+    }
+}
+
+function Assert-SamePackageContent([string]$First, [string]$Second) {
+    $firstEntries = Get-PackageContent $First
+    $secondEntries = Get-PackageContent $Second
+    $differences = @()
+    if ($firstEntries.Count -ne $secondEntries.Count) {
+        $differences += "entry count $($firstEntries.Count) vs $($secondEntries.Count)"
+    }
+    for ($index = 0; $index -lt [Math]::Min($firstEntries.Count, $secondEntries.Count); $index++) {
+        $a = $firstEntries[$index]
+        $b = $secondEntries[$index]
+        if ($a.Name -ne $b.Name -or $a.Length -ne $b.Length -or $a.Digest -ne $b.Digest) {
+            $differences += "entry $index`: $($a.Name) length=$($a.Length) sha256=$($a.Digest) vs $($b.Name) length=$($b.Length) sha256=$($b.Digest)"
+        }
+    }
+    if ($differences.Count -gt 0) {
+        Write-Output "Package A: $First"
+        Write-Output "Package B: $Second"
+        $differences | ForEach-Object { Write-Output "  $_" }
+        throw 'C# annotations package content is not deterministic.'
+    }
+}
+
 try {
     New-Item -ItemType Directory -Force $cargoHome, (Join-Path $candidate 'src') | Out-Null
 
@@ -181,10 +229,7 @@ targets:
     if ($null -eq $package -or $null -eq $packageRepeat) {
         throw 'C# annotations package was not produced at version 0.6.0.'
     }
-    if ((Get-FileHash $package.FullName -Algorithm SHA256).Hash -ne
-        (Get-FileHash $packageRepeat.FullName -Algorithm SHA256).Hash) {
-        throw 'C# annotations package is not byte-deterministic.'
-    }
+    Assert-SamePackageContent $package.FullName $packageRepeat.FullName
 
     Write-Output 'Packaged-context discover/capture/replay/validate/compare smoke passed.'
 }
