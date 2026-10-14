@@ -264,13 +264,14 @@ pub fn normalize_registry(
         crate::binding::Language::Rust => build_schema(registry, &component)?,
     };
     reject_dynamic(&schema)?;
+    reject_ambiguous_variants(&schema)?;
     Ok(schema)
 }
 
 pub(crate) mod model;
 use model::{Batch, Component, Schema, Target};
 mod normalize;
-use normalize::{build_normalized, build_schema, reject_dynamic, validate_surface};
+use normalize::{build_normalized, build_schema, reject_ambiguous_variants, reject_dynamic, validate_surface};
 pub(crate) mod registry;
 use registry::Registry;
 pub(crate) mod runner;

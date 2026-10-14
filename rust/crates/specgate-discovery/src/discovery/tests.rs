@@ -37,6 +37,24 @@ fn ambiguous_setups() {
     assert!(raw_inputs(&registry.ops[0], &registry).unwrap_err().contains("ambiguously matches"));
 }
 
+/// A renamed variant can collide in either language, so the rejection lives in
+/// shared normalization rather than in one language's discovery program.
+#[test]
+fn ambiguous_variants() {
+    let collided = registry(
+        r#"{"operations":[
+                {"name":"level_for","module_path":"fixture","fn_name":"level_for","is_setup":false,"is_async":false,"is_method":false,"is_public":true,"return_type":"Level","fills":"","params":[],"component":"fixture.collided"}
+            ],"types":[
+                {"name":"Level","kind":"enum","fields":[],"variants":[{"name":"same","fields":[]},{"name":"same","fields":[]}],"component":"fixture.collided"}
+            ]}"#,
+    );
+    for language in [crate::binding::Language::Rust, crate::binding::Language::CSharp] {
+        assert_eq!(
+            normalize_registry(&collided, language, "fixture.collided").unwrap_err(),
+            "type 'Level' declares variant 'same' more than once; a variant is identified by its name alone"
+        );
+    }
+}
 #[test]
 fn surface_validation() {
     let duplicate = registry(

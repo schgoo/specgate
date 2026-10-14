@@ -10,7 +10,7 @@ mod schema;
 mod validation;
 
 pub(super) use schema::{build_normalized, build_schema};
-pub(super) use validation::{reject_dynamic, validate_surface};
+pub(super) use validation::{reject_ambiguous_variants, reject_dynamic, validate_surface};
 
 /// Source syntax used while constructing a canonical semantic schema.
 #[derive(Clone, Copy)]

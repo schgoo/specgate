@@ -9,8 +9,9 @@ under `docs/decisions/`, or `docs/roadmap.md`. Generate with `just changelog`.
 
 - A plain CLR enum maps onto a CTSC tagged union of payload-free variants in
   declaration order, in both C# capture and C# discovery.
-- Two enum members that resolve to one CTSC variant name are rejected as an
-  ambiguous declaration, matching the rule already applied to record members.
+- Two declarations that resolve to one CTSC variant name are rejected, in C#
+  capture and in discovery normalization for both languages, matching the rule
+  already applied to record members.
 - Negative discovery goldens pin all four `#[spec_setup]` collision rejections:
   unknown fills target, ambiguous return-type match, duplicate fills, and a
   second receiver producer.

@@ -103,6 +103,30 @@ pub(in crate::discovery) fn reject_dynamic(schema: &Schema) -> Result<(), Error>
     Ok(())
 }
 
+/// Reject a named type that declares one variant name more than once.
+///
+/// A CTSC variant is identified by its name alone, so two declarations that
+/// resolve to one name describe no distinguishable variant. A rename makes
+/// this reachable in either language: Rust `#[spec_event(rename = "...")]` and
+/// a C# `[SpecEvent("...")]` enum member both choose the published name.
+/// Discovery rejects it here so the collision names its type rather than
+/// surfacing as a confusing downstream encoding or comparison failure.
+pub(in crate::discovery) fn reject_ambiguous_variants(schema: &Schema) -> Result<(), Error> {
+    for declared in schema
+        .types
+        .iter()
+        .chain(schema.dependency_types.iter().flat_map(|owner| owner.types.iter()))
+    {
+        let mut seen = BTreeSet::new();
+        if let Some(variant) = declared.variants.iter().find(|variant| !seen.insert(variant.name.as_str())) {
+            return Err(failure(format!(
+                "type '{}' declares variant '{}' more than once; a variant is identified by its name alone",
+                declared.name, variant.name
+            )));
+        }
+    }
+    Ok(())
+}
 /// Canonical schema token for an untyped runtime value, which CTSC declarations reject.
 const DYNAMIC_TYPE: &str = "value";
 
