@@ -1,0 +1,1 @@
+{"case":"negative/setup-unknown-fill","category":"setup-unknown-fill","component":"fixture.setup_unknown_fill","detail":{"message":"setup 'make_height' for 'fixture.setup_unknown_fill::render' fills unknown parameter 'height'"},"format":"specgate.ctsc-golden-error","formatVersion":"0.1.0","outcome":"failure","phase":"discover"}

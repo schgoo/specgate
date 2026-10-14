@@ -1,0 +1,1 @@
+{"case":"negative/setup-extra-receiver","category":"setup-extra-receiver","component":"fixture.setup_extra_receiver","detail":{"message":"multiple receiver setups are registered for 'fixture.setup_extra_receiver::render'"},"format":"specgate.ctsc-golden-error","formatVersion":"0.1.0","outcome":"failure","phase":"discover"}

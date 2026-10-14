@@ -7,6 +7,9 @@ under `docs/decisions/`, or `docs/roadmap.md`. Generate with `just changelog`.
 
 ### Added
 
+- Negative discovery goldens pin all four `#[spec_setup]` collision rejections:
+  unknown fills target, ambiguous return-type match, duplicate fills, and a
+  second receiver producer.
 - `#[spec_operation]` instruments a directly-awaited `async fn`, recording from
   first poll through completion.
 - `finish_native_capture` closes outstanding operations with an
@@ -18,6 +21,14 @@ under `docs/decisions/`, or `docs/roadmap.md`. Generate with `just changelog`.
 
 ### Changed
 
+- The packaged-context smoke compares NuGet package entry content rather than
+  package bytes, which `dotnet pack` stamps with the wall clock.
+- A failed replay reports its whole cause chain, so a runner failure names the
+  candidate's own output instead of only the stage.
+- Native capture rejects colliding `#[spec_setup]` declarations instead of
+  dropping them, matching C# capture and discovery.
+- Capture activation validates the whole linked registry, so a misconfigured
+  component fails before any operation records a value.
 - Native capture state is owned by a per-run `Send` collector rather than a
   thread-local, which is the precondition for carrying context into a future.
 - Trace validation rejects a `conformance.operation` span carrying no completion

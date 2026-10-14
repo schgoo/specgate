@@ -4,6 +4,7 @@
 
 #[cfg(test)]
 mod cases {
+    use super::super::error::FailureStage;
     use super::super::runner::{cargo_manifest, source};
     use super::super::*;
     use crate::capture_impl::{CapturePaths, CaptureRequest, capture};
@@ -394,6 +395,21 @@ mod cases {
         );
         assert_eq!(classify("candidate is missing operation 'fixture.add::add'"), None);
         assert_eq!(classify("capture bundle digest mismatch"), None);
+    }
+
+    #[test]
+    fn error_chain_reports_causes() {
+        let runner = Error::new_message(FailureStage::Linking, "candidate replay runner failed: no such file");
+        let wrapped = Error::wrap(FailureStage::Execution, "candidate replay execution failed", runner);
+        assert_eq!(
+            wrapped.chain(),
+            "candidate replay execution failed: candidate replay runner failed: no such file"
+        );
+
+        let repeated = Error::wrap(FailureStage::Capture, "bundle is unreadable", Error::from("bundle is unreadable"));
+        assert_eq!(repeated.chain(), "bundle is unreadable");
+
+        assert_eq!(Error::from("plain").chain(), "plain");
     }
 
     #[test]

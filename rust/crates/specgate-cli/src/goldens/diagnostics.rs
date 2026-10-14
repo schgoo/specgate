@@ -13,6 +13,10 @@ const PRIVATE_OPERATION: &str = "is declared on private function";
 const DYNAMIC_VALUE: &str = "is the dynamic runtime value";
 const MISSING_OWNER: &str = "has no registered component owner";
 const UNKNOWN_TYPE: &str = "unknown named type";
+const UNKNOWN_FILL: &str = "fills unknown parameter";
+const AMBIGUOUS_FILL: &str = "ambiguously matches parameters";
+const DUPLICATE_FILL: &str = "fill parameter";
+const EXTRA_RECEIVER: &str = "multiple receiver setups are registered";
 
 #[derive(Clone, Copy)]
 pub(super) enum ErrorCategory {
@@ -22,6 +26,10 @@ pub(super) enum ErrorCategory {
     Private,
     Dynamic,
     Unresolved,
+    UnknownFill,
+    AmbiguousFill,
+    DuplicateFill,
+    ExtraReceiver,
     Other,
     Compile,
 }
@@ -35,6 +43,10 @@ impl ErrorCategory {
             Self::Private => "private-operation",
             Self::Dynamic => "dynamic-value-type",
             Self::Unresolved => "unresolved-type",
+            Self::UnknownFill => "setup-unknown-fill",
+            Self::AmbiguousFill => "setup-ambiguous-fill",
+            Self::DuplicateFill => "setup-duplicate-fill",
+            Self::ExtraReceiver => "setup-extra-receiver",
             Self::Other => "unclassified",
             Self::Compile => "compile-error",
         }
@@ -149,6 +161,14 @@ pub(super) fn error_category(message: impl AsRef<str>) -> ErrorCategory {
         ErrorCategory::Dynamic
     } else if message.contains(MISSING_OWNER) || message.contains(UNKNOWN_TYPE) {
         ErrorCategory::Unresolved
+    } else if message.contains(UNKNOWN_FILL) {
+        ErrorCategory::UnknownFill
+    } else if message.contains(AMBIGUOUS_FILL) {
+        ErrorCategory::AmbiguousFill
+    } else if message.contains(DUPLICATE_FILL) {
+        ErrorCategory::DuplicateFill
+    } else if message.contains(EXTRA_RECEIVER) {
+        ErrorCategory::ExtraReceiver
     } else {
         ErrorCategory::Other
     }

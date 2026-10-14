@@ -60,8 +60,24 @@ impl Error {
         Self::caused_by(kind, diagnostic.into(), source)
     }
 
-    pub(super) fn diagnostic(&self) -> &str {
-        &self.diagnostic
+    /// Renders the diagnostic followed by every upstream cause.
+    ///
+    /// A replay failure wraps the stage that failed around the cause that
+    /// explains it, so reporting only the outer diagnostic hides the candidate
+    /// runner's own output. A cause already spelled by its wrapper is not
+    /// repeated.
+    pub(super) fn chain(&self) -> String {
+        let mut rendered = self.diagnostic.clone();
+        let mut next = std::error::Error::source(self);
+        while let Some(cause) = next {
+            let message = cause.to_string();
+            if !message.is_empty() && !rendered.ends_with(&message) {
+                rendered.push_str(": ");
+                rendered.push_str(&message);
+            }
+            next = cause.source();
+        }
+        rendered
     }
 }
 

@@ -2770,6 +2770,142 @@
       ]
     },
     {
+      "id": "negative/setup-unknown-fill",
+      "classification": "negative-fixture",
+      "sourceGroup": "negative/discovery",
+      "component": "fixture.setup_unknown_fill",
+      "sources": [
+        "test/rust/negative-fixtures/specgate-ctsc-negative-fixtures/src/lib.rs"
+      ],
+      "rust": {
+        "binding": "rust-negative",
+        "phases": [
+          "discover"
+        ],
+        "expect": "failure",
+        "artifacts": [
+          "error.json"
+        ],
+        "expectCategory": "setup-unknown-fill"
+      },
+      "parity": {
+        "mode": "not-applicable",
+        "reason": "Negative cases assert that one language's discovery rejects the fixture; there is no second surface to compare."
+      },
+      "replay": {
+        "mode": "not-applicable",
+        "reason": "Rejected components never produce a capture bundle to replay."
+      },
+      "limitations": [
+        {
+          "code": "normalized-error-only",
+          "detail": "Only the normalized phase, category, component, and product message are recorded. A setup names a fills target the operation never declares, so folding has no parameter to replace."
+        }
+      ]
+    },
+    {
+      "id": "negative/setup-ambiguous-fill",
+      "classification": "negative-fixture",
+      "sourceGroup": "negative/discovery",
+      "component": "fixture.setup_ambiguous_fill",
+      "sources": [
+        "test/rust/negative-fixtures/specgate-ctsc-negative-fixtures/src/lib.rs"
+      ],
+      "rust": {
+        "binding": "rust-negative",
+        "phases": [
+          "discover"
+        ],
+        "expect": "failure",
+        "artifacts": [
+          "error.json"
+        ],
+        "expectCategory": "setup-ambiguous-fill"
+      },
+      "parity": {
+        "mode": "not-applicable",
+        "reason": "Negative cases assert that one language's discovery rejects the fixture; there is no second surface to compare."
+      },
+      "replay": {
+        "mode": "not-applicable",
+        "reason": "Rejected components never produce a capture bundle to replay."
+      },
+      "limitations": [
+        {
+          "code": "normalized-error-only",
+          "detail": "Only the normalized phase, category, component, and product message are recorded. A setup without an explicit fills target matches several parameters by return type, so folding cannot choose one."
+        }
+      ]
+    },
+    {
+      "id": "negative/setup-duplicate-fill",
+      "classification": "negative-fixture",
+      "sourceGroup": "negative/discovery",
+      "component": "fixture.setup_duplicate_fill",
+      "sources": [
+        "test/rust/negative-fixtures/specgate-ctsc-negative-fixtures/src/lib.rs"
+      ],
+      "rust": {
+        "binding": "rust-negative",
+        "phases": [
+          "discover"
+        ],
+        "expect": "failure",
+        "artifacts": [
+          "error.json"
+        ],
+        "expectCategory": "setup-duplicate-fill"
+      },
+      "parity": {
+        "mode": "not-applicable",
+        "reason": "Negative cases assert that one language's discovery rejects the fixture; there is no second surface to compare."
+      },
+      "replay": {
+        "mode": "not-applicable",
+        "reason": "Rejected components never produce a capture bundle to replay."
+      },
+      "limitations": [
+        {
+          "code": "normalized-error-only",
+          "detail": "Only the normalized phase, category, component, and product message are recorded. Two setups claim the same parameter, so folding has no single construction input set for it."
+        }
+      ]
+    },
+    {
+      "id": "negative/setup-extra-receiver",
+      "classification": "negative-fixture",
+      "sourceGroup": "negative/discovery",
+      "component": "fixture.setup_extra_receiver",
+      "sources": [
+        "test/rust/negative-fixtures/specgate-ctsc-negative-fixtures/src/lib.rs"
+      ],
+      "rust": {
+        "binding": "rust-negative",
+        "phases": [
+          "discover"
+        ],
+        "expect": "failure",
+        "artifacts": [
+          "error.json"
+        ],
+        "expectCategory": "setup-extra-receiver"
+      },
+      "parity": {
+        "mode": "not-applicable",
+        "reason": "Negative cases assert that one language's discovery rejects the fixture; there is no second surface to compare."
+      },
+      "replay": {
+        "mode": "not-applicable",
+        "reason": "Rejected components never produce a capture bundle to replay."
+      },
+      "limitations": [
+        {
+          "code": "normalized-error-only",
+          "detail": "Only the normalized phase, category, component, and product message are recorded. Two setups construct the method receiver, so folding has no single receiver input set."
+        }
+      ]
+    },
+    {
       "id": "negative/private-operation",
       "classification": "negative-fixture",
       "sourceGroup": "negative/discovery",
