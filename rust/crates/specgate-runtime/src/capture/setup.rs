@@ -339,6 +339,33 @@ pub(super) fn folded_inputs(
     })
 }
 
+/// Reject every unfoldable setup declaration in the linked registry.
+///
+/// Called once when a capture session starts so a misconfigured component
+/// fails before any operation records a value, rather than only when that one
+/// operation is first called.
+///
+/// # Errors
+///
+/// Returns the first [`CaptureError::setup_collision`] any operation produces.
+pub(super) fn validate_registry_folding() -> Result<(), CaptureError> {
+    validate_declared_folding(&registry::OPERATIONS)
+}
+
+/// Reject every unfoldable setup declaration among `operations`.
+///
+/// Takes the declaration set explicitly so the rule is exercised without
+/// link-time registration.
+pub(super) fn validate_declared_folding(operations: &[registry::OpMeta]) -> Result<(), CaptureError> {
+    for operation in operations.iter().filter(|candidate| !candidate.is_setup) {
+        let setups = operations
+            .iter()
+            .filter(|candidate| candidate.is_setup && candidate.component == operation.component && candidate.name == operation.name);
+        plan_declared_setups(operation.component, operation.name, operation, setups)?;
+    }
+    Ok(())
+}
+
 /// Decide what each registered setup for `operation` contributes, rejecting any
 /// declaration set capture cannot fold unambiguously.
 ///

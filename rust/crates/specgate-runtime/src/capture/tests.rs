@@ -620,4 +620,27 @@ mod folding {
             "an inferred parameter and a receiver are not a collision"
         );
     }
+
+    #[test]
+    fn registry_validation_rejects_a_collision_before_any_operation_runs() {
+        let declarations = [
+            operation(&[SEED]),
+            producer("fill_first", "Seed", Some(FieldName::new("seed"))),
+            producer("fill_second", "Seed", Some(FieldName::new("seed"))),
+        ];
+        let error = setup::validate_declared_folding(&declarations).unwrap_err();
+        assert_eq!(error.kind(), CaptureErrorKind::SetupAmbiguity);
+        let message = error.to_string();
+        assert!(message.contains("fixture.folding::fold"), "{message}");
+    }
+
+    #[test]
+    fn registry_validation_accepts_foldable_declarations() {
+        let declarations = [
+            operation(&[SEED]),
+            producer("make_seed", "Seed", None),
+            producer("make_receiver", "Counter", None),
+        ];
+        setup::validate_declared_folding(&declarations).unwrap();
+    }
 }

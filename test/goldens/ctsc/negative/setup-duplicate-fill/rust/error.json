@@ -1,0 +1,1 @@
+{"case":"negative/setup-duplicate-fill","category":"setup-duplicate-fill","component":"fixture.setup_duplicate_fill","detail":{"message":"multiple setups for 'fixture.setup_duplicate_fill::render' fill parameter 'width'"},"format":"specgate.ctsc-golden-error","formatVersion":"0.1.0","outcome":"failure","phase":"discover"}
