@@ -21,6 +21,8 @@
     <ProjectReference Include="..\SpecGate.WeaverNegativeFixtures\SpecGate.WeaverNegativeFixtures.csproj" />
     <ProjectReference Include="..\SpecGate.WeaverGenericMethodFixture\SpecGate.WeaverGenericMethodFixture.csproj" />
     <ProjectReference Include="..\SpecGate.WeaverGenericTypeFixture\SpecGate.WeaverGenericTypeFixture.csproj" />
+    <ProjectReference Include="..\SpecGate.WeaverSetupConflictFixture\SpecGate.WeaverSetupConflictFixture.csproj" />
+    <ProjectReference Include="..\SpecGate.WeaverSetupFixture\SpecGate.WeaverSetupFixture.csproj" />
   </ItemGroup>
 
 </Project>

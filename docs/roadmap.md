@@ -52,7 +52,7 @@ async C#. MVP+1 is what serves them.
 |---|---|---|
 | Registry discovery | Rust link-time and C# compiled-assembly reflection; byte-identical for stateless, rich-type, and setup-folding fixtures | `specgate-discovery` |
 | Trace capture | Rust libtest only; synchronous calls and directly-awaited async operations | `capture.rs:189`, migration limitations |
-| C# trace capture | IL weaving instruments annotated synchronous methods, and recording produces CTSC semantic values projected at the boundary from the woven method's own reflection metadata. Still missing: setup folding, trace serialization, async, and a `specgate capture` path that accepts a C# binding | `csharp/SpecGate.Weaver`, `csharp/SpecGate.Runtime/ValueProjector.cs` |
+| C# trace capture | IL weaving instruments annotated synchronous methods, and recording produces CTSC semantic values projected at the boundary from the woven method's own reflection metadata. `[SpecSetup]` producers commit construction provenance that the operations they prepare fold into their input surface. Still missing: trace serialization, async, and a `specgate capture` path that accepts a C# binding | `csharp/SpecGate.Weaver`, `csharp/SpecGate.Runtime/ValueProjector.cs` |
 | Async capture | A directly-awaited async operation captures: recording begins at first poll (M2 slice 1). A future resumed on another executor thread records under the operation that built it, and two instrumented operations interleaved on one thread both record correctly (M2 slice 2). An async operation dropped before it completes records `conformance.abandoned` (M2 slice 3). Still unsupported: async `#[spec_setup]`, operations first reached on a raw `std::thread::spawn`ed thread, and top-level abandonment - an abandoned async operation with no enclosing and no subsequent annotated operation, which `specgate capture` drops rather than records. Setup-input staging remains thread-affine | `annotations-macros/src/lib.rs` async arm, `PENDING_SETUP_INPUTS` |
 | Observations | Captured but never declared; a component emitting one cannot produce a linkable bundle | migration limitations |
 | Comparison | `compare <reference-trace> <candidate-trace>` exists; fixed `ctsc.strict/0.1.0`; scenarios paired by name | `comparison.rs:185-195` |
@@ -270,6 +270,15 @@ value model. The weaver hands the runtime each operation's
 and nullability by reflection, then projects every recorded value eagerly at the
 boundary. That keeps one C# type mapper rather than two, and a value CTSC cannot
 represent now fails the call instead of being stored as a live object reference.
+
+The second #45 slice added `[SpecSetup]` provenance and folding. A woven setup
+projects its declared inputs at entry and commits them against its session on
+its success path only; an operation then resolves the setups that prepare it by
+reflecting over its own assembly, the way C# discovery does, and folds their
+construction inputs into its surface while dropping the parameters they fill.
+Inputs are emitted sorted by name, matching the `BTreeMap` the Rust producer
+records into. Missing provenance, an ambiguous match, and a setup run twice with
+differing inputs all fail the call rather than record a partial surface.
 
 #43 is **not** a prerequisite. Exact seam selection is language-neutral
 operation-level filtering, and `specgate capture --component` already selects at

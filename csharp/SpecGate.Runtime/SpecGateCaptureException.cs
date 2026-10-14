@@ -44,9 +44,23 @@ public enum CaptureRejection
 
     /// <summary>
     /// An annotated declaration is ambiguous, such as two members of one type
-    /// claiming the same semantic name.
+    /// claiming the same semantic name, or a folded surface that would record one
+    /// input name twice.
     /// </summary>
     AmbiguousDeclaration,
+
+    /// <summary>
+    /// An operation requires provenance from a <c>[SpecSetup]</c> producer that
+    /// has not run successfully in this capture.
+    /// </summary>
+    SetupMissing,
+
+    /// <summary>
+    /// Setup provenance cannot be attributed: the setups of one operation
+    /// contend for the same contribution, or one declaration ran twice with
+    /// different construction inputs.
+    /// </summary>
+    SetupAmbiguity,
 }
 
 /// <summary>

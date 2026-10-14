@@ -28,16 +28,21 @@ public sealed class ValueProjectionTests
             nameof(Declarations.Scalars),
             [true, (sbyte)-1, (short)2, 3, 4L, 1.5f, 2.5, "hello"]);
 
+        // Inputs are recorded sorted by name, not in parameter order, because
+        // Rust capture stores them in a BTreeMap (capture.rs:67-85).
+        Assert.Equal(
+            ["count", "flag", "ratio", "single", "small", "text", "tiny", "total"],
+            span.Inputs.Select(input => input.Name));
         Assert.Equal(
             [
-                Value.Bool(true),
-                Value.Integer(-1),
-                Value.Integer(2),
                 Value.Integer(3),
-                Value.Integer(4),
-                Value.Float(1.5),
+                Value.Bool(true),
                 Value.Float(2.5),
+                Value.Float(1.5),
+                Value.Integer(2),
                 Value.String("hello"),
+                Value.Integer(-1),
+                Value.Integer(4),
             ],
             span.Inputs.Select(input => input.Value));
     }
@@ -80,9 +85,9 @@ public sealed class ValueProjectionTests
         Assert.Equal(
             [
                 Value.Tagged("Some", Value.Integer(7)),
-                Value.Tagged("Some", Value.String("text")),
                 Value.Tagged("Some", Value.Integer(9)),
                 Value.Tagged("Some", Map(("city", Value.String("Seattle")))),
+                Value.Tagged("Some", Value.String("text")),
             ],
             span.Inputs.Select(input => input.Value));
     }
@@ -111,17 +116,17 @@ public sealed class ValueProjectionTests
             ]);
 
         Assert.Equal(
-            Value.List([Value.Integer(3), Value.Integer(1)]),
-            span.Inputs[0].Value);
-        Assert.Equal(
-            Value.Set([Value.String("a"), Value.String("b")]),
-            span.Inputs[1].Value);
-        Assert.Equal(
             Map(("a", Value.Integer(1)), ("b", Value.Integer(2))),
-            span.Inputs[2].Value);
+            Named(span, "counts"));
+        Assert.Equal(
+            Value.List([Value.Integer(3), Value.Integer(1)]),
+            Named(span, "numbers"));
         Assert.Equal(
             Value.List([Map(("k", Value.String("v")))]),
-            span.Inputs[3].Value);
+            Named(span, "rows"));
+        Assert.Equal(
+            Value.Set([Value.String("a"), Value.String("b")]),
+            Named(span, "tags"));
     }
 
     [Fact]
@@ -279,13 +284,16 @@ public sealed class ValueProjectionTests
 
         Assert.Equal(
             [
-                Value.List([Value.Tagged("Some", Value.String("a")), Value.Tagged("None", Value.Unit)]),
-                Value.List([Value.String("b")]),
                 Value.Tagged("Some", Map(("city", Value.String("Kyoto")))),
                 Map(("k", Value.Tagged("None", Value.Unit))),
+                Value.List([Value.Tagged("Some", Value.String("a")), Value.Tagged("None", Value.Unit)]),
+                Value.List([Value.String("b")]),
             ],
             span.Inputs.Select(input => input.Value));
     }
+
+    private static Value Named(RecordedSpan span, string name) =>
+        Assert.Single(span.Inputs, input => input.Name == name).Value;
 
     private static Value Map(params (string Key, Value Value)[] entries) =>
         Value.Map(entries.Select(entry => new KeyValuePair<string, Value>(entry.Key, entry.Value)));

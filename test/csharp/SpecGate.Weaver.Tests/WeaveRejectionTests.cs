@@ -39,6 +39,15 @@ public sealed class WeaveRejectionTests
     }
 
     [Fact]
+    public void RejectsMethodDeclaredAsBothOperationAndSetup()
+    {
+        WeaveException failure = WeaveFixture("SpecGate.WeaverSetupConflictFixture");
+
+        Assert.Contains("Make", failure.Message, StringComparison.Ordinal);
+        Assert.Contains("both a SpecGate operation and a SpecGate setup", failure.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RejectsMissingAssembly()
     {
         string missing = Path.Combine(AppContext.BaseDirectory, "does-not-exist.dll");

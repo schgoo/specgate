@@ -14,6 +14,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\SpecGate.CtscFixtures\SpecGate.CtscFixtures.csproj" />
+    <ProjectReference Include="..\..\..\csharp\SpecGate.Runtime\SpecGate.Runtime.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="..\..\goldens\ctsc\matrix.json" Link="matrix.json" CopyToOutputDirectory="PreserveNewest" />

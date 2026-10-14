@@ -22,13 +22,14 @@ public sealed class SpecGateWeaverTask : Task
             IReadOnlyList<string> woven = AssemblyWeaver.Weave(AssemblyPath);
             if (woven.Count == 0)
             {
-                Log.LogMessage(MessageImportance.Low, "SpecGate wove no operations into {0}.", AssemblyPath);
+                Log.LogMessage(
+                    MessageImportance.Low, "SpecGate wove no annotated methods into {0}.", AssemblyPath);
                 return true;
             }
 
             Log.LogMessage(
                 MessageImportance.Normal,
-                "SpecGate wove {0} operation(s) into {1}: {2}",
+                "SpecGate wove {0} annotated method(s) into {1}: {2}",
                 woven.Count,
                 AssemblyPath,
                 string.Join(", ", woven));

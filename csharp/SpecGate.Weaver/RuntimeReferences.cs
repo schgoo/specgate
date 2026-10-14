@@ -14,26 +14,39 @@ internal sealed class RuntimeReferences
     private const string RuntimeAssembly = "SpecGate.Runtime";
     private const string RuntimeTypeName = "SpecGate.Runtime.SpecGateRuntime";
     private const string ScopeTypeName = "SpecGate.Runtime.OperationScope";
+    private const string StagingTypeName = "SpecGate.Runtime.SetupStaging";
 
     private RuntimeReferences(
         TypeReference scopeType,
+        TypeReference stagingType,
         MethodReference enterOperation,
         MethodReference enterOperationMulti,
         MethodReference recordInputs,
         MethodReference exitOk,
         MethodReference exitVoid,
-        MethodReference exitError)
+        MethodReference exitError,
+        MethodReference stageSetup,
+        MethodReference commitSetup)
     {
         ScopeType = scopeType;
+        StagingType = stagingType;
         EnterOperation = enterOperation;
         EnterOperationMulti = enterOperationMulti;
         RecordInputs = recordInputs;
         ExitOk = exitOk;
         ExitVoid = exitVoid;
         ExitError = exitError;
+        StageSetup = stageSetup;
+        CommitSetup = commitSetup;
     }
 
     internal TypeReference ScopeType { get; }
+
+    internal TypeReference StagingType { get; }
+
+    internal MethodReference StageSetup { get; }
+
+    internal MethodReference CommitSetup { get; }
 
     internal MethodReference EnterOperation { get; }
 
@@ -59,6 +72,7 @@ internal sealed class RuntimeReferences
         TypeDefinition runtimeType = FindType(runtime, RuntimeTypeName);
         TypeDefinition scopeType = FindType(runtime, ScopeTypeName);
 
+
         MethodDefinition[] entries =
         [
             .. runtimeType.Methods.Where(
@@ -67,12 +81,15 @@ internal sealed class RuntimeReferences
 
         return new RuntimeReferences(
             module.ImportReference(scopeType),
+            module.ImportReference(FindType(runtime, StagingTypeName)),
             module.ImportReference(SelectEnter(entries, isMulti: false)),
             module.ImportReference(SelectEnter(entries, isMulti: true)),
             module.ImportReference(FindMethod(runtimeType, "RecordInputs")),
             module.ImportReference(FindMethod(runtimeType, "ExitOk")),
             module.ImportReference(FindMethod(runtimeType, "ExitVoid")),
-            module.ImportReference(FindMethod(runtimeType, "ExitError")));
+            module.ImportReference(FindMethod(runtimeType, "ExitError")),
+            module.ImportReference(FindMethod(runtimeType, "StageSetup")),
+            module.ImportReference(FindMethod(runtimeType, "CommitSetup")));
     }
 
     /// <summary>

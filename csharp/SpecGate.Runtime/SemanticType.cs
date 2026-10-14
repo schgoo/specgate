@@ -43,7 +43,7 @@ internal enum SemanticKind
 /// weaver and the runtime is what keeps capture consistent with the registry
 /// that <c>specgate discover</c> publishes.
 /// </remarks>
-internal sealed class SemanticType
+internal sealed class SemanticType : IEquatable<SemanticType>
 {
     private static readonly ConcurrentDictionary<Type, SemanticMember[]> MemberCache = new();
 
@@ -205,6 +205,62 @@ internal sealed class SemanticType
             + "List, Dictionary, SortedDictionary, HashSet, SortedSet, Option, Result, or a type "
             + "annotated with [SpecEvent].");
     }
+
+    /// <summary>
+    /// Whether two declarations mean the same CTSC type.
+    /// </summary>
+    /// <remarks>
+    /// Setup folding matches a producer's return type against an operation's
+    /// parameters. Rust compares the whitespace-stripped declared type strings
+    /// (<c>rust/crates/specgate-runtime/src/capture/setup.rs:393-407</c>); the C#
+    /// equivalent is the mapped type rather than the CLR type, because two CLR
+    /// types can carry the same <see cref="SpecEventAttribute"/> name and
+    /// discovery folds on the registry-visible name.
+    /// </remarks>
+    public bool Equals(SemanticType? other)
+    {
+        if (other is null)
+        {
+            return false;
+        }
+
+        if (ReferenceEquals(this, other))
+        {
+            return true;
+        }
+
+        if (Kind != other.Kind)
+        {
+            return false;
+        }
+
+        if (Kind == SemanticKind.Named)
+        {
+            return string.Equals(EventName(Declared!), EventName(other.Declared!), StringComparison.Ordinal);
+        }
+
+        return Same(First, other.First) && Same(Second, other.Second);
+    }
+
+    public override bool Equals(object? obj) => Equals(obj as SemanticType);
+
+    public override int GetHashCode()
+    {
+        unchecked
+        {
+            int hash = (17 * 31) + (int)Kind;
+            if (Kind == SemanticKind.Named)
+            {
+                return (hash * 31) + EventName(Declared!).GetHashCode();
+            }
+
+            hash = (hash * 31) + (First?.GetHashCode() ?? 0);
+            return (hash * 31) + (Second?.GetHashCode() ?? 0);
+        }
+    }
+
+    private static bool Same(SemanticType? left, SemanticType? right) =>
+        left is null ? right is null : left.Equals(right);
 
     /// <summary>Gets the semantic name a <see cref="SpecEventAttribute"/> declares.</summary>
     /// <remarks>
