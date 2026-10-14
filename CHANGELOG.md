@@ -7,6 +7,11 @@ under `docs/decisions/`, or `docs/roadmap.md`. Generate with `just changelog`.
 
 ### Added
 
+- A plain CLR enum maps onto a CTSC tagged union of payload-free variants in
+  declaration order, in both C# capture and C# discovery.
+- Two declarations that resolve to one CTSC variant name are rejected, in C#
+  capture and in discovery normalization for both languages, matching the rule
+  already applied to record members.
 - Negative discovery goldens pin all four `#[spec_setup]` collision rejections:
   unknown fills target, ambiguous return-type match, duplicate fills, and a
   second receiver producer.
@@ -21,6 +26,8 @@ under `docs/decisions/`, or `docs/roadmap.md`. Generate with `just changelog`.
 
 ### Changed
 
+- `[SpecEvent]` is valid on an enum declaration, which is what lets a plain CLR
+  enum be discovered and captured as a named type.
 - The packaged-context smoke compares NuGet package entry content rather than
   package bytes, which `dotnet pack` stamps with the wall clock.
 - A failed replay reports its whole cause chain, so a runner failure names the

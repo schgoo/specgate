@@ -397,7 +397,21 @@ for (int i = 0; i < typeQueue.Count; i++)
 {
     Type t = typeQueue[i];
     string tname = SpecEventName(t) ?? t.Name;
-    if (t.IsAbstract)
+    if (t.IsEnum)
+    {
+        // Declaration order, not numeric order: Enum.GetNames orders by
+        // underlying value, which would reorder the published variants away
+        // from the equivalent Rust enum. A plain enum's variants carry no
+        // payload, so each one publishes an empty field list.
+        var enumVariants = new List<object>();
+        foreach (FieldInfo f in t.GetFields(BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly))
+        {
+            if (f.IsSpecialName) continue;
+            enumVariants.Add(new { name = SpecEventName(f) ?? f.Name, fields = new List<string[]>() });
+        }
+        typeRecords.Add(new { name = tname, kind = "enum", fields = new List<string[]>(), variants = enumVariants, component = Component });
+    }
+    else if (t.IsAbstract)
     {
         var variants = new List<object>();
         foreach (Type sub in allTypes.Where(x => x != t && !x.IsAbstract && t.IsAssignableFrom(x)))

@@ -45,7 +45,9 @@ public sealed class SpecInputAttribute : Attribute
 }
 
 /// <summary>Marks a type or member for semantic type discovery.</summary>
-[AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct | AttributeTargets.Field | AttributeTargets.Property)]
+[AttributeUsage(
+    AttributeTargets.Class | AttributeTargets.Struct | AttributeTargets.Enum
+    | AttributeTargets.Field | AttributeTargets.Property)]
 public sealed class SpecEventAttribute : Attribute
 {
     /// <summary>Initializes an annotation that uses the symbol's own name.</summary>

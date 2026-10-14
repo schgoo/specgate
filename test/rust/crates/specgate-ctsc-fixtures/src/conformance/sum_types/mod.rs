@@ -5,6 +5,7 @@ pub mod checked_divide;
 pub mod enum_event;
 pub mod option_none;
 pub mod option_some;
+pub mod plain_enum;
 pub mod result_err;
 pub mod result_ok;
 pub mod unrecoverable;

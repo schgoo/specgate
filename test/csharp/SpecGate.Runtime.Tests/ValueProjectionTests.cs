@@ -292,6 +292,88 @@ public sealed class ValueProjectionTests
             span.Inputs.Select(input => input.Value));
     }
 
+    [Fact]
+    public void AnEnumProjectsAsItsMemberNameOverTheEmptyMap()
+    {
+        Assert.Equal(
+            Value.Tagged("Medium", Value.Unit),
+            Single(nameof(Declarations.Ranked), [Level.Medium]));
+    }
+
+    /// <summary>
+    /// <see cref="Level"/> declares its members in an order its underlying
+    /// values deliberately contradict, so a projection that read names by
+    /// numeric order would report the wrong member here.
+    /// </summary>
+    [Fact]
+    public void AValueReorderedEnumProjectsEachMemberUnderItsOwnName()
+    {
+        Assert.Equal(
+            [
+                Value.Tagged("Low", Value.Unit),
+                Value.Tagged("Medium", Value.Unit),
+                Value.Tagged("High", Value.Unit),
+            ],
+            new[] { Level.Low, Level.Medium, Level.High }
+                .Select(level => Single(nameof(Declarations.Ranked), [level])));
+    }
+
+    [Fact]
+    public void AnEnumWithANonIntUnderlyingTypeProjectsTheSameWay()
+    {
+        Assert.Equal(
+            Value.Tagged("Second", Value.Unit),
+            Single(nameof(Declarations.Widened), [Wide.Second]));
+    }
+
+    [Fact]
+    public void AnErasedEnumProjectsFromItsRuntimeType()
+    {
+        Assert.Equal(
+            Value.Tagged("High", Value.Unit),
+            Single(nameof(Declarations.Erased), [Level.High]));
+    }
+
+    [Fact]
+    public void AnUndeclaredEnumValueIsRejected()
+    {
+        Assert.Equal(
+            CaptureRejection.UnrepresentableValue,
+            Reject(nameof(Declarations.Ranked), [(Level)99]).Rejection);
+    }
+
+    /// <summary>
+    /// An alias shares one underlying value with the member it aliases, and a
+    /// CTSC variant carries no discriminant to tell them apart, so both record
+    /// the one name the lookup deterministically returns.
+    /// </summary>
+    [Fact]
+    public void AnAliasMemberRecordsTheNameItsDiscriminantResolvesTo()
+    {
+        Assert.Equal(
+            Single(nameof(Declarations.AliasedRanked), [Aliased.Low]),
+            Single(nameof(Declarations.AliasedRanked), [Aliased.Default]));
+    }
+
+    [Fact]
+    public void AnEnumMemberHonoursItsDeclaredSemanticName()
+    {
+        Assert.Equal(
+            Value.Tagged("renamed", Value.Unit),
+            Single(nameof(Declarations.AliasedRanked), [Aliased.Renamed]));
+    }
+
+    /// <summary>
+    /// A CTSC variant is identified by its name alone, so two members cannot
+    /// rename onto one name even though their discriminants differ.
+    /// </summary>
+    [Fact]
+    public void TwoEnumMembersRenamedOntoOneNameAreRejected()
+    {
+        Assert.Equal(
+            CaptureRejection.AmbiguousDeclaration,
+            Reject(nameof(Declarations.Collided), [Collided.First]).Rejection);
+    }
     private static Value Named(RecordedSpan span, string name) =>
         Assert.Single(span.Inputs, input => input.Name == name).Value;
 
@@ -375,6 +457,14 @@ public sealed class ValueProjectionTests
 
         internal static void Variants(Shape shape) => _ = shape;
 
+        internal static void Ranked(Level level) => _ = level;
+
+        internal static void Widened(Wide value) => _ = value;
+
+        internal static void AliasedRanked(Aliased value) => _ = value;
+
+        internal static void Collided(Collided value) => _ = value;
+
         internal static void Erased(object value) => _ = value;
 
         internal static void Unrepresentable(byte value) => _ = value;
@@ -434,4 +524,42 @@ internal sealed class Unnamed
 {
     [SpecEvent("")]
     public int Count { get; init; }
+}
+
+/// <summary>An enum whose declaration order contradicts its numeric order.</summary>
+[SpecEvent]
+internal enum Level
+{
+    Low = 30,
+    Medium = 10,
+    High = 20,
+}
+
+/// <summary>An enum whose discriminant is not an <see langword="int"/>.</summary>
+[SpecEvent]
+internal enum Wide : long
+{
+    First,
+    Second,
+}
+
+/// <summary>An enum whose two members rename onto one variant name.</summary>
+[SpecEvent]
+internal enum Collided
+{
+    [SpecEvent("same")]
+    First = 1,
+
+    [SpecEvent("same")]
+    Second = 2,
+}
+/// <summary>An enum declaring an alias member and a renamed member.</summary>
+[SpecEvent]
+internal enum Aliased
+{
+    Low = 1,
+    Default = Low,
+
+    [SpecEvent("renamed")]
+    Renamed = 2,
 }

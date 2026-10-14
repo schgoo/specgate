@@ -223,12 +223,13 @@ is proven:
 |---|---|
 | Annotations | Done, stable |
 | Discovery to registry | Done, reflection over the built assembly |
-| Registry parity with Rust | Byte-identical on stateless, rich-type, and setup-folding fixtures |
+| Registry parity with Rust | Byte-identical on stateless, rich-type, and setup-folding fixtures, except the `fixture.enum_event` tuple-variant exception (#78) |
 | Fixtures, including async | Done |
 | Ordinary behavior tests over those fixtures | Done - eight test files |
 | Recording runtime (`SpecGate.Runtime`) | Done (#44), `AsyncLocal` logical context |
 | IL weaver (`SpecGate.Weaver`) | Done (#44), synchronous operations |
 | CTSC semantic values at the boundary | Done (#45 slice 1), projected from the woven method's reflection metadata |
+| CLR enum mapping | In progress (#45), plain enums only; `[Flags]` is #79 |
 | CTSC bundle emission from a test run | **Missing** (#45) |
 
 The capture model is "capture ordinary tests at native operation boundaries."
