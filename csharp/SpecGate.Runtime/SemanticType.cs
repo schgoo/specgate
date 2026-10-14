@@ -47,6 +47,8 @@ internal sealed class SemanticType : IEquatable<SemanticType>
 {
     private static readonly ConcurrentDictionary<Type, SemanticMember[]> MemberCache = new();
 
+    private static readonly ConcurrentDictionary<Type, Dictionary<string, string>> VariantCache = new();
+
     private SemanticType(SemanticKind kind, SemanticType? first, SemanticType? second, Type? declared)
     {
         Kind = kind;
@@ -333,6 +335,70 @@ internal sealed class SemanticType : IEquatable<SemanticType>
 
     private static bool HasSpecEvent(MemberInfo member) =>
         member.GetCustomAttribute<SpecEventAttribute>(inherit: false) is not null;
+
+    /// <summary>
+    /// Gets the variant name recorded for one enum value, or <see langword="null"/>
+    /// when the value is not exactly one declared member.
+    /// </summary>
+    /// <remarks>
+    /// The name comes from <see cref="Enum.GetName(Type, object)"/>, which is
+    /// deterministic but cannot distinguish an alias from the member it aliases:
+    /// <c>Default = Low</c> and <c>Low</c> share one underlying value, and a
+    /// CTSC variant has no slot for a discriminant to tell them apart. Both
+    /// therefore record the one name the lookup returns. Variant order is not
+    /// decided here; the discovery pass publishes the declared order.
+    /// </remarks>
+    internal static string? VariantOf(Type type, object value)
+    {
+        string? member = Enum.GetName(type, value);
+        return member is not null
+            && VariantCache.GetOrAdd(type, DescribeEnum).TryGetValue(member, out string? name)
+            ? name
+            : null;
+    }
+
+    /// <summary>
+    /// Maps each declared member of an enum onto its semantic variant name.
+    /// </summary>
+    /// <remarks>
+    /// The members of an enum are its public static declared fields, read
+    /// through reflection so that a <see cref="SpecEventAttribute"/> name
+    /// override is honored. The compiler-generated backing field is
+    /// special-named and is not one of them.
+    /// <para>
+    /// A CTSC variant is identified by its name alone, so two members that
+    /// resolve to one variant name are rejected as an ambiguous declaration,
+    /// mirroring the rule applied to the members of a record.
+    /// </para>
+    /// </remarks>
+    private static Dictionary<string, string> DescribeEnum(Type type)
+    {
+        const BindingFlags Selection =
+            BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly;
+
+        Dictionary<string, string> byMemberName = new(StringComparer.Ordinal);
+        HashSet<string> declared = new(StringComparer.Ordinal);
+        foreach (FieldInfo field in type.GetFields(Selection))
+        {
+            if (field.IsSpecialName)
+            {
+                continue;
+            }
+
+            string name = EventName(field);
+            if (!declared.Add(name))
+            {
+                throw new SpecGateCaptureException(
+                    CaptureRejection.AmbiguousDeclaration,
+                    $"specgate: '{type.FullName}' declares the variant name '{name}' more than "
+                    + "once. A CTSC variant is identified by its name alone.");
+            }
+
+            byMemberName[field.Name] = name;
+        }
+
+        return byMemberName;
+    }
 }
 
 /// <summary>One annotated member of a recorded type.</summary>

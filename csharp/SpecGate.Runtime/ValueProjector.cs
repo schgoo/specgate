@@ -122,6 +122,24 @@ internal static class ValueProjector
                 $"a '{actual.FullName}' was observed where '{declared.FullName}' is declared.");
         }
 
+        // A plain CLR enum is a tagged union of payload-free variants: the
+        // member name over the empty map, matching how the Rust runtime records
+        // a unit variant.
+        if (declared.IsEnum)
+        {
+            string? variant = SemanticType.VariantOf(declared, value);
+            if (variant is null)
+            {
+                string discriminant = ((Enum)value).ToString("D");
+                throw Rejected(
+                    CaptureRejection.UnrepresentableValue,
+                    $"the value {discriminant} of '{declared.FullName}' is not one of its declared "
+                    + "members. CTSC records an enum as exactly one declared variant.");
+            }
+
+            return Value.Tagged(variant, Value.Unit);
+        }
+
         // An abstract annotated base class is a tagged union: each concrete
         // subclass is a variant, recorded as its own name over its own members.
         if (declared.IsAbstract)

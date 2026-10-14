@@ -1728,6 +1728,51 @@
       "limitations": []
     },
     {
+      "id": "component/fixture.plain_enum",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/sum_types",
+      "component": "fixture.plain_enum",
+      "sources": [
+        "test/rust/crates/specgate-ctsc-fixtures/src/conformance/sum_types/plain_enum.rs",
+        "test/csharp/SpecGate.CtscFixtures/Conformance/SumTypes/PlainEnum.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": [
+          "discover",
+          "capture"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "manifest.json",
+          "reference.otlp.json",
+          "registry.ctsc.json"
+        ]
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": [
+          "discover"
+        ],
+        "expect": "success",
+        "artifacts": [
+          "registry.ctsc.json"
+        ]
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "replay": {
+        "mode": "unsupported",
+        "expectCategory": "structured-value",
+        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
+      },
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
       "id": "component/fixture.property_add",
       "classification": "implementation-component",
       "sourceGroup": "conformance/basic",

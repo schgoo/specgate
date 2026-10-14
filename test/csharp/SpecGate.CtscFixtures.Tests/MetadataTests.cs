@@ -106,8 +106,14 @@ public sealed class MetadataTests
             }
 
             Assert.False(string.IsNullOrWhiteSpace(typeEvent.Name));
-            IEnumerable<MemberInfo> members =
-                type.GetMembers(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+
+            // An enum's semantic members are its variants, which are public
+            // static fields; its only instance field is the compiler-generated
+            // discriminant backing field, which carries no semantics.
+            IEnumerable<MemberInfo> members = type.IsEnum
+                ? type.GetFields(BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly)
+                    .Where(field => !field.IsSpecialName)
+                : type.GetMembers(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
                     .Where(
                         member =>
                             member.MemberType is MemberTypes.Field or MemberTypes.Property);
