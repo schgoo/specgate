@@ -301,7 +301,6 @@ fn runner_failures() {
             ("SPECGATE_CACHE_DIR".to_string(), "cache".into()),
             ("CARGO".to_string(), "fake-cargo".into()),
         ]))
-        .current_directory(Ok(PathBuf::from("cwd")))
         .process_id(7)
         .build()
     }
@@ -376,7 +375,6 @@ fn registry_failure() {
         })]),
     ))
     .environment(BTreeMap::from([("SPECGATE_CACHE_DIR".to_string(), "cache".into())]))
-    .current_directory(Ok(PathBuf::from("cwd")))
     .process_id(7)
     .build();
     assert_eq!(

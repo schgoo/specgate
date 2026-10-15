@@ -338,7 +338,6 @@ fn fake_system(
 ) -> system::System {
     system::System::builder((filesystem, system::FakeProcess::queued(results)))
         .environment(environment)
-        .current_directory(Ok(PathBuf::from("injected-cwd")))
         .process_id(4242)
         .build()
 }

@@ -151,7 +151,6 @@ pub(crate) fn run_many<F: AsRef<str>, R: AsRef<str>>(
     let components = std::iter::once(first.as_ref())
         .chain(rest.iter().map(AsRef::as_ref))
         .collect::<Vec<_>>();
-    let settings = runner_settings(target, system);
     let sanitized_label: String = components
         .first()
         .copied()
@@ -159,14 +158,9 @@ pub(crate) fn run_many<F: AsRef<str>, R: AsRef<str>>(
         .chars()
         .map(|c| if c.is_alphanumeric() { c } else { '_' })
         .collect();
-    let sanitized_framework: String = settings
-        .framework
-        .chars()
-        .map(|c| if c.is_alphanumeric() { c } else { '_' })
-        .collect();
     let scratch = crate::runner::cache::InvocationCache::create_with(
         crate::runner::cache::CacheScope::new("csharp-discovery"),
-        crate::runner::cache::CacheLabel::new(format!("{sanitized_label}_{sanitized_framework}_{}", components.len())),
+        crate::runner::cache::CacheLabel::new(format!("{sanitized_label}_{}", components.len())),
         system,
     )?;
     run_in(target, &components, scratch.path(), system)
@@ -188,7 +182,6 @@ fn run_in(
     system: &System,
 ) -> Result<DiscoveryOutput, Error> {
     let scratch = scratch.as_ref();
-    let settings = runner_settings(target, system);
 
     // 1. Build the fixture's REAL project into a per-run isolated artifacts tree,
     //    then reflect over the resulting assembly. This is what lets discovery
@@ -202,20 +195,11 @@ fn run_in(
     let built = build_project(target, scratch, "discovery", system)?;
     let fixture_dll = built.fixture_dll;
     let fixture_out = built.fixture_out;
-    // 2. Write a tiny reflection runner that references the same annotations
-    //    assembly the fixture was compiled against, then reflects over the
-    //    compiled fixture types.
-    let runner_csproj = runner_project(&settings, &fixture_out, system);
-    system
-        .filesystem
-        .write(scratch.join("Runner.csproj"), runner_csproj)
-        .map_err(|source| with_source(format!("failed to write C# discovery Runner.csproj: {source}"), source))?;
 
-    let program = render_program(components);
-    system
-        .filesystem
-        .write(scratch.join("Program.cs"), program)
-        .map_err(|source| with_source(format!("failed to write C# discovery Program.cs: {source}"), source))?;
+    // 2. Locate the prebuilt reflection tool. It is a normal compiled C# project
+    //    in this repository, so it is analyzed, formatted, and unit-tested like
+    //    any other source - unlike a program generated at discovery time.
+    let discovery_assembly = tool::discovery_assembly(system)?;
 
     let out_dir = scratch.join("discovery");
     let _ = system.filesystem.remove_dir_all(&out_dir);
@@ -224,16 +208,18 @@ fn run_in(
         .create_dir_all(&out_dir)
         .map_err(|source| with_source(format!("failed to create C# discovery output directory: {source}"), source))?;
 
-    let request = ProcessRequest::builder("dotnet")
-        .arg("run")
-        .arg("--project")
-        .arg(scratch.join("Runner.csproj"))
-        .arg("--")
+    // 3. Reflect. The tool takes the output directory, the compiled fixture
+    //    assembly, the fixture's copy-local output directory, and then one
+    //    argument per requested component, in request order.
+    let mut request = ProcessRequest::builder("dotnet")
+        .arg(&discovery_assembly)
         .arg(&out_dir)
         .arg(&fixture_dll)
-        .arg(&fixture_out)
-        .current_dir(scratch)
-        .build();
+        .arg(&fixture_out);
+    for component in components {
+        request = request.arg(component.as_ref());
+    }
+    let request = request.current_dir(scratch).build();
     let output = system
         .process
         .output(&request)
@@ -285,29 +271,6 @@ fn run_in(
     })
 }
 
-fn runner_project(settings: &RunnerSettings, fixture_out: impl AsRef<Path>, system: &System) -> String {
-    let fixture_out = fixture_out.as_ref();
-    let lang_version = settings
-        .lang_version
-        .as_ref()
-        .map(|value| format!("    <LangVersion>{}</LangVersion>\n", xml_text(value)))
-        .unwrap_or_default();
-    let output = xml_text(slash_path(fixture_out, system));
-    format!(
-        "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    \
-         <OutputType>Exe</OutputType>\n    <TargetFramework>{framework}</TargetFramework>\n    \
-         <EnableDefaultCompileItems>false</EnableDefaultCompileItems>\n    \
-         <EnableNETAnalyzers>false</EnableNETAnalyzers>\n    <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>\n    \
-         <TreatWarningsAsErrors>false</TreatWarningsAsErrors>\n    \
-         <Nullable>{nullable}</Nullable>\n    <ImplicitUsings>{implicit_usings}</ImplicitUsings>\n{lang_version}  </PropertyGroup>\n  <ItemGroup>\n    \
-         <Compile Include=\"Program.cs\" />\n  </ItemGroup>\n  <ItemGroup>\n    \
-         <Reference Include=\"SpecGate.Annotations\">\n      <HintPath>{output}/SpecGate.Annotations.dll</HintPath>\n    </Reference>\n  </ItemGroup>\n</Project>\n",
-        framework = xml_text(&settings.framework),
-        nullable = xml_text(settings.nullable),
-        implicit_usings = xml_text(settings.implicit_usings),
-    )
-}
-
 /// Find the first `.csproj` directly under `package_root` (the fixture project).
 fn find_project(package_root: impl AsRef<Path>, system: &System) -> Option<PathBuf> {
     let package_root = package_root.as_ref();
@@ -320,36 +283,20 @@ fn find_project(package_root: impl AsRef<Path>, system: &System) -> Option<PathB
         .find(|path| path.extension().and_then(|extension| extension.to_str()) == Some("csproj"))
 }
 
-mod program;
 mod project;
+mod tool;
 
-use program::render_program;
-#[cfg(test)]
-use project::{ImplicitUsings, NullableMode};
-use project::{RunnerSettings, extract_tag, runner_settings, slash_path, strip_prefix, xml_text};
+use project::{extract_tag, strip_prefix};
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::runner::system::FailureKey;
+    use std::ffi::OsString;
 
-    // End-to-end discovery tests below exercise generated runner requests,
+    // End-to-end discovery tests below exercise reflection-tool requests,
     // registry parsing, component inventories, setup selection, and private
-    // operation rejection through observed discovery results rather than
-    // matching implementation text in the generated C# source.
-
-    #[test]
-    fn project_escaping() {
-        let settings = RunnerSettings {
-            framework: "net10.0".to_string(),
-            nullable: NullableMode::Enable,
-            implicit_usings: ImplicitUsings::Enable,
-            lang_version: None,
-        };
-        let project = runner_project(&settings, Path::new("build&a"), &System::real());
-        assert!(project.contains("build&amp;a"));
-        assert!(!project.contains("build&a/SpecGate.Annotations.dll"));
-    }
+    // operation rejection through observed discovery results.
 
     fn fake_target() -> crate::binding::Target {
         crate::binding::Target {
@@ -374,6 +321,7 @@ mod tests {
                     b"<Project><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>".to_vec(),
                 ),
                 (fixture_dll, Vec::new()),
+                (PathBuf::from("tools/SpecGate.Discovery.dll"), Vec::new()),
                 (out.join("0.json"), br#"{"operations":[],"types":[]}"#.to_vec()),
                 (out.join("components.json"), br#"["fixture.component"]"#.to_vec()),
             ]))
@@ -382,10 +330,7 @@ mod tests {
                 vec![PathBuf::from("fixture/Fixture.csproj")],
             )]))
             .build();
-        System::builder((filesystem, FakeProcess::queued(results)))
-            .current_directory(Ok(PathBuf::from("injected-cwd")))
-            .process_id(99)
-            .build()
+        System::builder((filesystem, FakeProcess::queued(results))).process_id(99).build()
     }
 
     fn success() -> crate::runner::system::ProcessOutput {
@@ -475,19 +420,18 @@ mod tests {
 
     #[test]
     fn scaffold_failures() {
-        for (key, expected) in [
-            ("create_dir_all", "failed to scaffold C# discovery dir"),
-            ("write:Runner.csproj", "failed to write C# discovery Runner.csproj"),
-            ("write:Program.cs", "failed to write C# discovery Program.cs"),
-        ] {
-            let system = fake_system(vec![Ok(success()), Ok(success())]);
-            system.filesystem.fake_state().borrow_mut().fail(FailureKey::test(key), "denied");
-            assert!(
-                run_in(&fake_target(), &["fixture.component"], Path::new("scratch"), &system)
-                    .unwrap_err()
-                    .contains(expected)
-            );
-        }
+        let system = fake_system(vec![Ok(success()), Ok(success())]);
+        system
+            .filesystem
+            .fake_state()
+            .borrow_mut()
+            .fail(FailureKey::test("create_dir_all"), "denied");
+        assert!(
+            run_in(&fake_target(), &["fixture.component"], Path::new("scratch"), &system)
+                .unwrap_err()
+                .contains("failed to scaffold C# discovery dir")
+        );
+
         let system = fake_system(vec![Ok(success())]);
         system
             .filesystem
@@ -499,17 +443,66 @@ mod tests {
                 .unwrap_err()
                 .contains("build produced no assembly at")
         );
+    }
 
+    #[test]
+    fn discovery_tool_resolution() {
+        use crate::runner::system::{FakeFs, FakeProcess};
+        use std::collections::BTreeMap;
+        use std::ffi::OsString;
+
+        // Beside the running executable by default.
         let system = fake_system(Vec::new());
-        assert_eq!(slash_path(Path::new("relative/path"), &system), "injected-cwd/relative/path");
-        let failed_cwd = System::builder((
-            crate::runner::system::FakeFs::default(),
-            crate::runner::system::FakeProcess::default(),
-        ))
-        .current_directory(Err("cwd denied".to_string()))
-        .process_id(1)
-        .build();
-        assert_eq!(slash_path(Path::new("relative/path"), &failed_cwd), "relative/path");
+        assert_eq!(
+            tool::discovery_assembly(&system).unwrap(),
+            PathBuf::from("tools/SpecGate.Discovery.dll")
+        );
+
+        // The override accepts either the assembly or its directory.
+        for value in ["override/SpecGate.Discovery.dll", "override"] {
+            let system = System::builder((
+                FakeFs::builder()
+                    .files(BTreeMap::from([(PathBuf::from("override/SpecGate.Discovery.dll"), Vec::new())]))
+                    .build(),
+                FakeProcess::default(),
+            ))
+            .environment(BTreeMap::from([("SPECGATE_DISCOVERY_PATH", OsString::from(value))]))
+            .build();
+            assert_eq!(
+                tool::discovery_assembly(&system).unwrap(),
+                PathBuf::from("override/SpecGate.Discovery.dll")
+            );
+        }
+
+        // A missing override is named, not silently replaced by the default.
+        let system = System::builder((FakeFs::default(), FakeProcess::default()))
+            .environment(BTreeMap::from([("SPECGATE_DISCOVERY_PATH", OsString::from("absent"))]))
+            .build();
+        assert!(
+            tool::discovery_assembly(&system)
+                .unwrap_err()
+                .to_string()
+                .contains("SPECGATE_DISCOVERY_PATH names no SpecGate.Discovery.dll at")
+        );
+
+        // Neither a readable executable path nor a neighbouring assembly.
+        let system = System::builder((FakeFs::default(), FakeProcess::default()))
+            .executable_path(Err("exe denied".to_string()))
+            .build();
+        assert!(
+            tool::discovery_assembly(&system)
+                .unwrap_err()
+                .to_string()
+                .contains("failed to locate the running specgate executable")
+        );
+
+        let system = System::builder((FakeFs::default(), FakeProcess::default())).build();
+        assert!(
+            tool::discovery_assembly(&system)
+                .unwrap_err()
+                .to_string()
+                .contains("beside the specgate executable at tools")
+        );
     }
 
     #[test]
@@ -530,7 +523,6 @@ mod tests {
                 .build(),
             FakeProcess::default(),
         ))
-        .current_directory(Ok(PathBuf::from("cwd")))
         .process_id(1)
         .build();
         assert_eq!(find_project(Path::new("fixture"), &system), Some(usable));
@@ -578,8 +570,6 @@ mod tests {
         let state = system.filesystem.fake_state();
         let state = state.borrow();
         assert!(state.has_directory(Path::new("scratch")));
-        assert!(state.has_file(Path::new("scratch/Runner.csproj")));
-        assert!(state.has_file(Path::new("scratch/Program.cs")));
         assert_eq!(system.process.fake_state().lock().unwrap().requests.len(), 1);
     }
 
@@ -599,14 +589,23 @@ mod tests {
     }
 
     #[test]
-    fn slash_path_normalization() {
-        let system = fake_system(Vec::new());
-        #[cfg(windows)]
-        let absolute = Path::new(r"C:\work\absolute.dll");
-        #[cfg(not(windows))]
-        let absolute = Path::new("/work/absolute.dll");
-        assert_eq!(slash_path(absolute, &system), absolute.display().to_string().replace('\\', "/"));
-        #[cfg(windows)]
-        assert_eq!(slash_path(Path::new(r"\\?\C:\work\fixture.dll"), &system), "C:/work/fixture.dll");
+    fn reflection_tool_request() {
+        let system = fake_system(vec![Ok(success()), Ok(success())]);
+        run_in(&fake_target(), &["fixture.component"], Path::new("scratch"), &system).unwrap();
+        let process = system.process.fake_state();
+        let process = process.lock().unwrap();
+        let request = &process.requests[1];
+        assert_eq!(request.executable, OsString::from("dotnet"));
+        let fixture_out = Path::new("scratch").join("artifacts").join("bin").join("Fixture").join("debug");
+        assert_eq!(
+            request.args,
+            vec![
+                Path::new("tools").join("SpecGate.Discovery.dll").into_os_string(),
+                Path::new("scratch").join("discovery").into_os_string(),
+                fixture_out.join("Fixture.dll").into_os_string(),
+                fixture_out.into_os_string(),
+                OsString::from("fixture.component"),
+            ]
+        );
     }
 }

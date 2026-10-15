@@ -24,7 +24,13 @@ Rust.
 - `specgate` is the sole Rust annotation and runtime facade.
 - `specgate-discovery` owns strict binding resolution, Rust discovery builds,
   C# compiled-assembly reflection, raw invocation metadata, and deterministic
-  normalization and setup folding.
+  normalization and setup folding. C# reflection runs in the prebuilt
+  `csharp/SpecGate.Discovery` tool, invoked as
+  `dotnet SpecGate.Discovery.dll <output-dir> <assembly> <assembly-out-dir> [component...]`.
+  The tool emits raw per-component JSON only; it produces no CTSC artifacts.
+  It is located beside the `specgate` executable unless
+  `SPECGATE_DISCOVERY_PATH` names its directory or assembly path, which the
+  justfile sets from `just discovery-tool`.
 - `specgate-ctsc` owns registry and trace encoding, digest and linkage
   verification, replay models, validators, and strict comparison.
 - `specgate-cli` exposes the product commands. Its Rust capture API takes an

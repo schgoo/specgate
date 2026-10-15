@@ -14,8 +14,10 @@ use std::path::PathBuf;
 
 #[cfg(any(test, feature = "test-util"))]
 const FAKE_PID: u32 = 0;
+#[cfg(any(test, feature = "test-util"))]
+const FAKE_EXECUTABLE: &str = "tools/specgate";
 
-pub(crate) use environment::{CurrentDirectory, Environment, ProcessId};
+pub(crate) use environment::{Environment, ExecutablePath, ProcessId};
 #[cfg(any(test, feature = "test-util"))]
 pub(crate) use filesystem::{FailureKey, FakeFs};
 pub(crate) use filesystem::{Filesystem, UniqueDirectory};
@@ -38,10 +40,10 @@ pub(crate) struct System {
     pub(crate) process: Process,
     /// Environment-variable access.
     pub(crate) environment: Environment,
-    /// Current-directory access.
-    pub(crate) current_directory: CurrentDirectory,
     /// Process-identity access.
     pub(crate) process_id: ProcessId,
+    /// Running-executable path access.
+    pub(crate) executable_path: ExecutablePath,
 }
 
 impl System {
@@ -53,8 +55,8 @@ impl System {
             filesystem: dependencies.filesystem,
             process: dependencies.process,
             environment: BTreeMap::new(),
-            current_directory: Ok(PathBuf::from(".")),
             process_id: FAKE_PID,
+            executable_path: Ok(PathBuf::from(FAKE_EXECUTABLE)),
         }
     }
 
@@ -64,8 +66,8 @@ impl System {
             filesystem: Filesystem::real(),
             process: Process::real(),
             environment: Environment::real(),
-            current_directory: CurrentDirectory::real(),
             process_id: ProcessId::real(),
+            executable_path: ExecutablePath::real(),
         }
     }
 }
@@ -100,8 +102,8 @@ pub(crate) struct SystemBuilder {
     filesystem: Filesystem,
     process: FakeProcess,
     environment: BTreeMap<OsString, OsString>,
-    current_directory: Result<PathBuf, String>,
     process_id: u32,
+    executable_path: Result<PathBuf, String>,
 }
 
 #[cfg(any(test, feature = "test-util"))]
@@ -117,16 +119,16 @@ impl SystemBuilder {
     }
 
     #[cfg(test)]
-    /// Sets the fake current-directory result.
-    pub(crate) fn current_directory(mut self, current_directory: Result<PathBuf, String>) -> Self {
-        self.current_directory = current_directory;
+    /// Sets the fake process identifier.
+    pub(crate) fn process_id(mut self, process_id: u32) -> Self {
+        self.process_id = process_id;
         self
     }
 
     #[cfg(test)]
-    /// Sets the fake process identifier.
-    pub(crate) fn process_id(mut self, process_id: u32) -> Self {
-        self.process_id = process_id;
+    /// Sets the fake running-executable path result.
+    pub(crate) fn executable_path(mut self, executable_path: Result<PathBuf, String>) -> Self {
+        self.executable_path = executable_path;
         self
     }
 
@@ -136,8 +138,8 @@ impl SystemBuilder {
             filesystem: self.filesystem,
             process: Process::fake(self.process),
             environment: Environment::fake(self.environment),
-            current_directory: CurrentDirectory::fake(self.current_directory),
             process_id: ProcessId::fake(self.process_id),
+            executable_path: ExecutablePath::fake(self.executable_path),
         }
     }
 }

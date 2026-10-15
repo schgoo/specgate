@@ -26,6 +26,9 @@ under `docs/decisions/`, or `docs/roadmap.md`. Generate with `just changelog`.
 
 ### Changed
 
+- C# discovery runs the prebuilt `SpecGate.Discovery` tool instead of a C#
+  program generated and compiled on every run, so the reflection code is built,
+  analyzed, formatted, and unit tested by the ordinary C# gate.
 - `[SpecEvent]` is valid on an enum declaration, which is what lets a plain CLR
   enum be discovered and captured as a named type.
 - The packaged-context smoke compares NuGet package entry content rather than
