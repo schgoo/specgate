@@ -262,7 +262,20 @@ public sealed class OperationSpan
         StartTimeUnixNano = startTimeUnixNano;
         EndTimeUnixNano = endTimeUnixNano;
         Status = status;
-        Inputs = inputs ?? throw new ArgumentNullException(nameof(inputs));
+        if (inputs is null)
+        {
+            throw new ArgumentNullException(nameof(inputs));
+        }
+
+        // The wire form is a sorted map, so the order is fixed here rather than
+        // trusting whatever order the caller's dictionary enumerates in.
+        SortedDictionary<string, Value> ordered = new(Utf8KeyComparer.Instance);
+        foreach (KeyValuePair<string, Value> input in inputs)
+        {
+            ordered.Add(input.Key, input.Value);
+        }
+
+        Inputs = new ReadOnlyDictionary<string, Value>(ordered);
         Observations = observations ?? throw new ArgumentNullException(nameof(observations));
         OperationCompletion = completion;
     }

@@ -1,3 +1,4 @@
+using SpecGate.Annotations;
 using SpecGate.TestSupport;
 using Xunit;
 
@@ -177,6 +178,58 @@ public sealed class CaptureSessionTests
         OperationSpan span = Assert.Single(session.Finish().Operations);
         ErrorCompletion error = Assert.IsType<ErrorCompletion>(span.OperationCompletion);
         Assert.Equal(Value.String("anything"), error.ErrorValue);
+    }
+
+    /// <summary>
+    /// An optional return unwraps onto the channel Rust records: a present value
+    /// is the result carrying the inner value, an absent one is <c>empty</c>.
+    /// </summary>
+    [Fact]
+    public void AnOptionalReturnSelectsTheResultOrEmptyChannel()
+    {
+        using CaptureSession session = CaptureScenario.Begin("fixture.basic");
+
+        OperationScope present = SpecGateRuntime.EnterOperation(Boundaries.Of("Find"), "find", "fixture.basic");
+        SpecGateRuntime.ExitOk(present, Option<int>.Some(7));
+        OperationScope absent = SpecGateRuntime.EnterOperation(Boundaries.Of("Find"), "find", "fixture.basic");
+        SpecGateRuntime.ExitOk(absent, Option<int>.None());
+
+        IReadOnlyList<OperationSpan> spans = session.Finish().Operations;
+        Assert.Equal(Value.Integer(7), spans[0].Result());
+        Assert.IsType<EmptyCompletion>(spans[1].OperationCompletion);
+        Assert.Equal(SpanStatus.Ok, spans[1].Status);
+    }
+
+    /// <summary>
+    /// A result return records <c>Ok</c> on the result channel with the inner
+    /// value and <c>Err</c> on the error channel, the way Rust does.
+    /// </summary>
+    [Fact]
+    public void AResultReturnSelectsTheResultOrErrorChannel()
+    {
+        using CaptureSession session = CaptureScenario.Begin("fixture.basic");
+
+        OperationScope ok = SpecGateRuntime.EnterOperation(Boundaries.Of("TryDivide"), "try_divide", "fixture.basic");
+        SpecGateRuntime.ExitOk(ok, Result<int, string>.Ok(4));
+        OperationScope failed = SpecGateRuntime.EnterOperation(Boundaries.Of("TryDivide"), "try_divide", "fixture.basic");
+        SpecGateRuntime.ExitOk(failed, Result<int, string>.Err("boom"));
+
+        IReadOnlyList<OperationSpan> spans = session.Finish().Operations;
+        Assert.Equal(Value.Integer(4), spans[0].Result());
+        ErrorCompletion error = Assert.IsType<ErrorCompletion>(spans[1].OperationCompletion);
+        Assert.Equal("error", error.Name);
+        Assert.Equal(Value.String("boom"), error.ErrorValue);
+    }
+
+    [Fact]
+    public void AnOperationCannotBeginOnAFinishedSession()
+    {
+        CaptureSession session = CaptureScenario.Begin("fixture.basic");
+        session.Finish();
+
+        OperationScope scope = SpecGateRuntime.EnterOperation(Boundaries.Of("Add"), "add", "fixture.basic");
+
+        Assert.False(scope.IsRecording);
     }
 
     [Fact]

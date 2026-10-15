@@ -195,7 +195,7 @@ public static class SpecGateRuntime
 
         try
         {
-            scope.CompleteValue(result: null);
+            scope.CompleteValue(null);
         }
         finally
         {

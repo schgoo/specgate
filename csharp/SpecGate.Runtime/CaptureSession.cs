@@ -134,6 +134,12 @@ public sealed class CaptureSession : IDisposable
     {
         lock (_gate)
         {
+            if (_finished)
+            {
+                throw new InvalidOperationException(
+                    "specgate: cannot begin an operation after the capture session has finished.");
+            }
+
             SpanId spanId = NextSpanId();
             long startNs = Tick();
             ulong order = Order();

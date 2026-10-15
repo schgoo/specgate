@@ -149,32 +149,41 @@ public sealed class OperationScope
         folded.Add(name, value);
     }
 
-    /// <summary>Projects the operation's return value, or returns null when it is void.</summary>
-    internal Value? ProjectResult(object? result)
+    /// <summary>
+    /// Projects the operation's return value onto its terminal channel, or
+    /// returns null when it is void.
+    /// </summary>
+    internal ReturnOutcome? ProjectResult(object? result)
     {
         SemanticType? declared = OperationMetadata.For(Method).Result;
-        return declared is null ? null : ValueProjector.Project(declared, result);
+        return declared is null ? null : ValueProjector.ProjectReturn(declared, result);
     }
 
     /// <summary>
-    /// Completes the span on the <c>result</c> channel, or on no channel at all
-    /// when the operation returns nothing.
+    /// Completes the span on the channel the return value selected, or on no
+    /// channel at all when the operation returns nothing.
     /// </summary>
     /// <remarks>
     /// A void operation reports no completion event, matching Rust's
     /// <c>NativeTerminal::Unit</c>: the span is still <c>Ok</c>, but there is no
-    /// terminal value to record.
+    /// terminal value to record. An absent optional is the explicit
+    /// <c>empty</c> channel, and a failed result is the <c>error</c> channel.
     /// </remarks>
-    internal void CompleteValue(Value? result)
+    internal void CompleteValue(ReturnOutcome? outcome)
     {
         if (!TryBeginCompletion())
         {
             return;
         }
 
-        Func<ulong, long, Completion>? completion = result is null
-            ? null
-            : (order, time) => new ResultCompletion(order, time, result);
+        Func<ulong, long, Completion>? completion = outcome switch
+        {
+            null => null,
+            { Channel: ReturnChannel.Empty } => (order, time) => new EmptyCompletion(order, time),
+            { Channel: ReturnChannel.Error } returned => (order, time) =>
+                new ErrorCompletion(order, time, OperationMetadata.ErrorName, returned.Value),
+            { } returned => (order, time) => new ResultCompletion(order, time, returned.Value!),
+        };
         Session!.Complete(Pending!, completion);
     }
 

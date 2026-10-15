@@ -29,6 +29,11 @@ internal static class Boundaries
     {
     }
 
+    internal static Option<int> Find(int value) => Option<int>.Some(value);
+
+    internal static Result<int, string> TryDivide(int numerator, int denominator) =>
+        Result<int, string>.Ok(numerator / denominator);
+
     /// <summary>A declaration whose contract includes one error outcome.</summary>
     [SpecException(typeof(InvalidOperationException))]
     internal static int Checked(int value) => value;

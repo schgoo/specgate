@@ -62,7 +62,38 @@ public class CaptureJsonParityTests
             ExplicitEmpty(),
             Abandoned(),
             UnitWithoutCompletion(),
+            TextAndNumbers(),
         ]);
+
+    /// <summary>
+    /// Strings and floats whose serde_json spelling is easy to get wrong, with
+    /// inputs supplied out of order and keys whose UTF-8 order differs from
+    /// their UTF-16 order, so the constructor must sort them.
+    /// </summary>
+    private static OperationSpan TextAndNumbers()
+    {
+        double[] floats = [1e-5, 1e-6, 1e15, 1e16, 1.5e300, 5e-324, -0.0, -2.5, 123456789.125, 0.1];
+        Dictionary<string, Value> inputs = new()
+        {
+            ["text"] = Value.String("\u2028\U0001F600\u001f\b\f\t\u007f\u00e9/"),
+            ["\U0001F600"] = Value.Bool(false),
+            ["floats"] = Value.List([.. floats.Select(Value.Float)]),
+            ["\uffff"] = Value.Bool(true),
+        };
+
+        return new OperationSpan(
+            15,
+            SpanId.Parse("aaaaaaaaaaaa0017"),
+            SpanId.Parse("aaaaaaaaaaaa0002"),
+            Component,
+            "text_and_numbers",
+            28,
+            30,
+            SpanStatus.Ok,
+            inputs,
+            [],
+            new EmptyCompletion(16, 29));
+    }
 
     /// <summary>
     /// A result completion whose inputs reach every semantic value kind, plus

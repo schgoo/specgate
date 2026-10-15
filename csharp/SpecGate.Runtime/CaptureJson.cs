@@ -2,8 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
-using System.Text.Encodings.Web;
-using System.Text.Json;
 
 namespace SpecGate.Runtime;
 
@@ -26,16 +24,6 @@ namespace SpecGate.Runtime;
 /// </remarks>
 public static class CaptureJson
 {
-    private static readonly JsonWriterOptions WriterOptions = new()
-    {
-        Indented = false,
-
-        // serde_json escapes only quote, backslash, and control characters. The
-        // relaxed encoder matches that; the default encoder would additionally
-        // escape HTML-sensitive and non-ASCII characters and diverge from Rust.
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-    };
-
     /// <summary>Serializes <paramref name="capture"/> to sidecar JSON bytes.</summary>
     /// <param name="capture">The finished capture.</param>
     /// <returns>The UTF-8 encoded sidecar document.</returns>
@@ -46,13 +34,9 @@ public static class CaptureJson
             throw new ArgumentNullException(nameof(capture));
         }
 
-        using System.IO.MemoryStream stream = new();
-        using (Utf8JsonWriter writer = new(stream, WriterOptions))
-        {
-            WriteCapture(writer, capture);
-        }
-
-        return stream.ToArray();
+        JsonText writer = new();
+        WriteCapture(writer, capture);
+        return new UTF8Encoding(encoderShouldEmitUTF8Identifier: false).GetBytes(writer.ToString());
     }
 
     /// <summary>Serializes <paramref name="capture"/> to a sidecar JSON string.</summary>
@@ -60,7 +44,7 @@ public static class CaptureJson
     /// <returns>The sidecar document.</returns>
     public static string SerializeToString(Capture capture) => Encoding.UTF8.GetString(Serialize(capture));
 
-    private static void WriteCapture(Utf8JsonWriter writer, Capture capture)
+    private static void WriteCapture(JsonText writer, Capture capture)
     {
         writer.WriteStartObject();
         writer.WriteString("trace_id", capture.TraceId.Text);
@@ -80,7 +64,7 @@ public static class CaptureJson
         writer.WriteEndObject();
     }
 
-    private static void WriteBoundary(Utf8JsonWriter writer, SpanBoundary boundary)
+    private static void WriteBoundary(JsonText writer, SpanBoundary boundary)
     {
         writer.WriteStartObject();
         writer.WriteString("span_id", boundary.SpanId.Text);
@@ -99,7 +83,7 @@ public static class CaptureJson
         writer.WriteEndObject();
     }
 
-    private static void WriteOperation(Utf8JsonWriter writer, OperationSpan operation)
+    private static void WriteOperation(JsonText writer, OperationSpan operation)
     {
         writer.WriteStartObject();
         writer.WriteNumber("order", operation.Order);
@@ -141,7 +125,7 @@ public static class CaptureJson
         writer.WriteEndObject();
     }
 
-    private static void WriteCompletion(Utf8JsonWriter writer, Completion? completion)
+    private static void WriteCompletion(JsonText writer, Completion? completion)
     {
         if (completion is null)
         {
@@ -187,7 +171,7 @@ public static class CaptureJson
         writer.WriteEndObject();
     }
 
-    private static void WriteValue(Utf8JsonWriter writer, Value value)
+    private static void WriteValue(JsonText writer, Value value)
     {
         writer.WriteStartObject();
         writer.WriteString("kind", KindName(value.Kind));
@@ -232,7 +216,7 @@ public static class CaptureJson
         writer.WriteEndObject();
     }
 
-    private static void WriteItems(Utf8JsonWriter writer, IReadOnlyList<Value> items)
+    private static void WriteItems(JsonText writer, IReadOnlyList<Value> items)
     {
         writer.WriteStartArray();
         foreach (Value item in items)
@@ -244,13 +228,15 @@ public static class CaptureJson
     }
 
     /// <remarks>
-    /// Rust renders a float with the shortest round-trip form and always keeps a
-    /// decimal point or an exponent, and <c>serde_json</c> writes a non-finite
-    /// float as <c>null</c>. .NET's shortest round-trip form drops the decimal
-    /// point and uppercases the exponent, so it is normalized here rather than
-    /// leaving the two producers byte-different for the same number.
+    /// Reproduces the float text <c>serde_json</c> writes: the shortest
+    /// round-trip digits, positional notation while the decimal point falls
+    /// within <c>1e-5</c> up to below <c>1e16</c>, scientific notation outside
+    /// that range (<c>1e-6</c>, <c>1e+16</c>), always a decimal point in
+    /// positional form, and <c>null</c> for a non-finite float. .NET's shortest
+    /// round-trip text supplies the digits; the notation is chosen here so both
+    /// producers agree on the bytes.
     /// </remarks>
-    private static void WriteFloat(Utf8JsonWriter writer, double value)
+    private static void WriteFloat(JsonText writer, double value)
     {
         if (double.IsNaN(value) || double.IsInfinity(value))
         {
@@ -258,27 +244,57 @@ public static class CaptureJson
             return;
         }
 
-        string text = value.ToString("R", CultureInfo.InvariantCulture);
-        int exponent = text.IndexOf('E');
-        if (exponent >= 0)
-        {
-            string mantissa = text.Substring(0, exponent);
-            string power = text.Substring(exponent + 1);
-            bool negative = power[0] == '-';
-            power = power.TrimStart('+', '-').TrimStart('0');
-            if (power.Length == 0)
-            {
-                power = "0";
-            }
+        writer.WriteRawValue(FormatFloat(value));
+    }
 
-            text = $"{mantissa}e{(negative ? "-" : string.Empty)}{power}";
-        }
-        else if (text.IndexOf('.') < 0)
+    private static string FormatFloat(double value)
+    {
+        bool negative = value < 0 || (value == 0 && BitConverter.DoubleToInt64Bits(value) < 0);
+        if (value == 0)
         {
-            text += ".0";
+            return negative ? "-0.0" : "0.0";
         }
 
-        writer.WriteRawValue(text, skipInputValidation: true);
+        string text = Math.Abs(value).ToString("R", CultureInfo.InvariantCulture);
+        int exponentAt = text.IndexOf('E');
+        int exponent = exponentAt >= 0 ? int.Parse(text.Substring(exponentAt + 1), CultureInfo.InvariantCulture) : 0;
+        string mantissa = exponentAt >= 0 ? text.Substring(0, exponentAt) : text;
+        int pointAt = mantissa.IndexOf('.');
+        int integerLength = pointAt >= 0 ? pointAt : mantissa.Length;
+        string digits = mantissa.Replace(".", string.Empty);
+
+        // The value is the digit string read as an integer times 10^scale.
+        int scale = exponent + integerLength - digits.Length;
+        digits = digits.TrimStart('0');
+        string significant = digits.TrimEnd('0');
+        scale += digits.Length - significant.Length;
+        int length = significant.Length;
+        int point = length + scale;
+
+        string body;
+        if (scale >= 0 && point <= 16)
+        {
+            body = significant + new string('0', scale) + ".0";
+        }
+        else if (point > 0 && point <= 16)
+        {
+            body = significant.Substring(0, point) + "." + significant.Substring(point);
+        }
+        else if (point > -5 && point <= 0)
+        {
+            body = "0." + new string('0', -point) + significant;
+        }
+        else
+        {
+            int scientificExponent = point - 1;
+            string sign = scientificExponent < 0 ? "-" : "+";
+            string scientific = Math.Abs(scientificExponent).ToString(CultureInfo.InvariantCulture);
+            body = length == 1
+                ? significant + "e" + sign + scientific
+                : significant.Substring(0, 1) + "." + significant.Substring(1) + "e" + sign + scientific;
+        }
+
+        return negative ? "-" + body : body;
     }
 
     private static string StatusName(SpanStatus status) => status switch

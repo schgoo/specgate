@@ -57,8 +57,32 @@ fn parity_capture() -> Capture {
             explicit_empty(),
             abandoned(),
             unit_without_completion(),
+            text_and_numbers(),
         ],
     }
+}
+
+/// Strings and floats whose `serde_json` spelling is easy to get wrong: control
+/// and line-separator characters, a non-BMP character, float notation
+/// boundaries, and keys whose UTF-8 order differs from their UTF-16 order.
+fn text_and_numbers() -> OperationSpan {
+    let floats = [1e-5, 1e-6, 1e15, 1e16, 1.5e300, 5e-324, -0.0, -2.5, 123_456_789.125, 0.1];
+    let inputs = BTreeMap::from([
+        ("\u{ffff}".to_owned(), Value::Bool(true)),
+        ("\u{1f600}".to_owned(), Value::Bool(false)),
+        ("floats".to_owned(), Value::List(floats.into_iter().map(Value::Float).collect())),
+        (
+            "text".to_owned(),
+            Value::String("\u{2028}\u{1f600}\u{1f}\u{8}\u{c}\t\u{7f}\u{e9}/".to_owned()),
+        ),
+    ]);
+
+    OperationSpan::builder(deps(15, "aaaaaaaaaaaa0017", "aaaaaaaaaaaa0002", "text_and_numbers", 28))
+        .end_time(30)
+        .inputs(inputs)
+        .completion(Completion::Empty { order: 16, time_ns: 29 })
+        .build()
+        .expect("the text span is well formed")
 }
 
 /// A result completion whose inputs reach every semantic value kind, plus one
