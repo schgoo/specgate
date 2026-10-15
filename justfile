@@ -7,17 +7,17 @@ _default:
 # layout nothing sits beside the specgate executable, so every recipe that
 # drives C# discovery builds the tool here and points SPECGATE_DISCOVERY_PATH
 # at it.
-discovery_tool := justfile_directory() / "artifacts" / "discovery"
+export SPECGATE_DISCOVERY_PATH := justfile_directory() / "artifacts" / "discovery"
 
 discovery-tool:
-    dotnet build csharp/SpecGate.Discovery/SpecGate.Discovery.csproj --output {{ discovery_tool }}
+    dotnet build csharp/SpecGate.Discovery/SpecGate.Discovery.csproj --output {{ SPECGATE_DISCOVERY_PATH }}
 
 build:
     cd rust && cargo build --workspace --all-targets
     cd test/rust && cargo build --workspace --all-targets
 
 test: discovery-tool
-    $env:SPECGATE_DISCOVERY_PATH = "{{ discovery_tool }}"; cd rust; cargo test --workspace
+    cd rust && cargo test --workspace
     cd test/rust && cargo test --workspace
 
 clippy:
@@ -80,13 +80,13 @@ ctsc-smoke:
     pwsh -NoLogo -NoProfile -File scripts/ctsc-smoke.ps1
 
 ctsc-goldens-regressions: discovery-tool
-    $env:SPECGATE_DISCOVERY_PATH = "{{ discovery_tool }}"; pwsh -NoLogo -NoProfile -File scripts/ctsc-goldens-tests.ps1
+    pwsh -NoLogo -NoProfile -File scripts/ctsc-goldens-tests.ps1
 
 ctsc-goldens-update: ctsc-goldens-regressions
-    $env:SPECGATE_DISCOVERY_PATH = "{{ discovery_tool }}"; pwsh -NoLogo -NoProfile -File scripts/ctsc-goldens.ps1 -Mode Update
+    pwsh -NoLogo -NoProfile -File scripts/ctsc-goldens.ps1 -Mode Update
 
 ctsc-goldens-check: ctsc-goldens-regressions
-    $env:SPECGATE_DISCOVERY_PATH = "{{ discovery_tool }}"; pwsh -NoLogo -NoProfile -File scripts/ctsc-goldens.ps1 -Mode Check
+    pwsh -NoLogo -NoProfile -File scripts/ctsc-goldens.ps1 -Mode Check
 
 package-smoke:
     pwsh -NoLogo -NoProfile -File scripts/package-smoke.ps1
