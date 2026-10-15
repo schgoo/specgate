@@ -13,6 +13,12 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
   </ItemGroup>
   <ItemGroup>
+    <!-- The cross-language sidecar contract. Rust asserts the same bytes from
+         rust/crates/specgate-runtime/tests/sidecar_parity.rs. -->
+    <None Include="..\..\goldens\capture-sidecar\parity.json" Link="parity.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\..\..\csharp\SpecGate.Runtime\SpecGate.Runtime.csproj" />
+    <ProjectReference Include="..\SpecGate.TestSupport\SpecGate.TestSupport.csproj" />
   </ItemGroup>
 </Project>

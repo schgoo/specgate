@@ -1,5 +1,6 @@
 using System.Reflection;
 using SpecGate.Annotations;
+using SpecGate.TestSupport;
 using Xunit;
 
 namespace SpecGate.Runtime.Tests;
@@ -24,7 +25,7 @@ public sealed class ValueProjectionTests
     [Fact]
     public void ScalarsProjectOntoTheirValueFamilies()
     {
-        RecordedSpan span = Capture(
+        OperationSpan span = Capture(
             nameof(Declarations.Scalars),
             [true, (sbyte)-1, (short)2, 3, 4L, 1.5f, 2.5, "hello"]);
 
@@ -32,7 +33,7 @@ public sealed class ValueProjectionTests
         // Rust capture stores them in a BTreeMap (capture.rs:67-85).
         Assert.Equal(
             ["count", "flag", "ratio", "single", "small", "text", "tiny", "total"],
-            span.Inputs.Select(input => input.Name));
+            span.Inputs.Keys);
         Assert.Equal(
             [
                 Value.Integer(3),
@@ -44,41 +45,40 @@ public sealed class ValueProjectionTests
                 Value.Integer(-1),
                 Value.Integer(4),
             ],
-            span.Inputs.Select(input => input.Value));
+            span.Inputs.Values);
     }
 
     [Fact]
-    public void TheReturnValueIsRecordedUnderReturn()
+    public void TheReturnValueIsRecordedAsTheResultCompletion()
     {
-        RecordedSpan span = Capture(nameof(Declarations.Total), [new List<int> { 1, 2 }], 3);
+        OperationSpan span = Capture(nameof(Declarations.Total), [new List<int> { 1, 2 }], 3);
 
-        Assert.Equal("return", span.Result?.Name);
-        Assert.Equal(Value.Integer(3), span.Result?.Value);
+        Assert.Equal(Value.Integer(3), span.Result());
     }
 
     [Fact]
     public void AVoidOperationRecordsNoResult()
     {
-        RecordedSpan span = Capture(nameof(Declarations.Scalars), [true, (sbyte)0, (short)0, 0, 0L, 0f, 0d, ""]);
+        OperationSpan span = Capture(nameof(Declarations.Scalars), [true, (sbyte)0, (short)0, 0, 0L, 0f, 0d, ""]);
 
-        Assert.Null(span.Result);
+        Assert.Null(span.OperationCompletion);
     }
 
     [Fact]
     public void AbsentOptionalsProjectAsNone()
     {
-        RecordedSpan span = Capture(
+        OperationSpan span = Capture(
             nameof(Declarations.Optionals),
             [null, null, Option<int>.None(), null]);
 
         Value none = Value.Tagged("None", Value.Unit);
-        Assert.Equal([none, none, none, none], span.Inputs.Select(input => input.Value));
+        Assert.Equal([none, none, none, none], span.Inputs.Values);
     }
 
     [Fact]
     public void PresentOptionalsProjectAsSome()
     {
-        RecordedSpan span = Capture(
+        OperationSpan span = Capture(
             nameof(Declarations.Optionals),
             [7, "text", Option<int>.Some(9), new Address { City = "Seattle" }]);
 
@@ -89,7 +89,7 @@ public sealed class ValueProjectionTests
                 Value.Tagged("Some", Map(("city", Value.String("Seattle")))),
                 Value.Tagged("Some", Value.String("text")),
             ],
-            span.Inputs.Select(input => input.Value));
+            span.Inputs.Values);
     }
 
     [Fact]
@@ -106,7 +106,7 @@ public sealed class ValueProjectionTests
     [Fact]
     public void CollectionsProjectOntoListSetAndMap()
     {
-        RecordedSpan span = Capture(
+        OperationSpan span = Capture(
             nameof(Declarations.Collections),
             [
                 new List<int> { 3, 1 },
@@ -247,11 +247,11 @@ public sealed class ValueProjectionTests
     [Fact]
     public void AnExplicitlyEmptyInputNameIsPreserved()
     {
-        RecordedSpan span = Capture(nameof(Declarations.EmptyNames), [1]);
+        OperationSpan span = Capture(nameof(Declarations.EmptyNames), [1]);
 
         // C# discovery publishes `inp?.Name ?? p.Name`, so an empty declared name
         // reaches the registry. Capture has to agree with it.
-        Assert.Equal(string.Empty, Assert.Single(span.Inputs).Name);
+        Assert.Equal(string.Empty, Assert.Single(span.Inputs).Key);
     }
 
     [Fact]
@@ -273,7 +273,7 @@ public sealed class ValueProjectionTests
     [Fact]
     public void NullabilityIsReadPositionallyInsideGenerics()
     {
-        RecordedSpan span = Capture(
+        OperationSpan span = Capture(
             nameof(Declarations.NestedNullability),
             [
                 new List<string?> { "a", null },
@@ -289,7 +289,7 @@ public sealed class ValueProjectionTests
                 Value.List([Value.Tagged("Some", Value.String("a")), Value.Tagged("None", Value.Unit)]),
                 Value.List([Value.String("b")]),
             ],
-            span.Inputs.Select(input => input.Value));
+            span.Inputs.Values);
     }
 
     [Fact]
@@ -374,8 +374,8 @@ public sealed class ValueProjectionTests
             CaptureRejection.AmbiguousDeclaration,
             Reject(nameof(Declarations.Collided), [Collided.First]).Rejection);
     }
-    private static Value Named(RecordedSpan span, string name) =>
-        Assert.Single(span.Inputs, input => input.Name == name).Value;
+    private static Value Named(OperationSpan span, string name) =>
+        span.Inputs[name];
 
     private static Value Map(params (string Key, Value Value)[] entries) =>
         Value.Map(entries.Select(entry => new KeyValuePair<string, Value>(entry.Key, entry.Value)));
@@ -383,21 +383,21 @@ public sealed class ValueProjectionTests
     private static Value Single(string declaration, object?[] arguments) =>
         Assert.Single(Capture(declaration, arguments).Inputs).Value;
 
-    private static RecordedSpan Capture(string declaration, object?[] arguments, object? result = null)
+    private static OperationSpan Capture(string declaration, object?[] arguments, object? result = null)
     {
-        using CaptureSession session = SpecGateRuntime.BeginSession(Component);
+        using CaptureSession session = CaptureScenario.Begin(Component);
 
         OperationScope scope = SpecGateRuntime.EnterOperation(
             Declarations.Of(declaration), declaration, Component);
         SpecGateRuntime.RecordInputs(scope, arguments);
         SpecGateRuntime.ExitOk(scope, result);
 
-        return Assert.Single(session.Spans);
+        return Assert.Single(session.Finish().Operations);
     }
 
     private static SpecGateCaptureException Reject(string declaration, object?[] arguments)
     {
-        using CaptureSession session = SpecGateRuntime.BeginSession(Component);
+        using CaptureSession session = CaptureScenario.Begin(Component);
 
         OperationScope scope = SpecGateRuntime.EnterOperation(
             Declarations.Of(declaration), declaration, Component);

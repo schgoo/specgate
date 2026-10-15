@@ -1,7 +1,7 @@
 using System;
 using System.IO;
-using System.Linq;
 using SpecGate.Runtime;
+using SpecGate.TestSupport;
 using SpecGate.WeaverSetupFixture;
 using Xunit;
 
@@ -18,25 +18,25 @@ public sealed class WovenSetupTests
     [Fact]
     public void ASetupContributesItsConstructionInputsAndFoldsAwayTheReceiver()
     {
-        using CaptureSession session = SpecGateRuntime.BeginSession("weaver.setup");
+        using CaptureSession session = CaptureScenario.Begin("weaver.setup");
 
         Counter counter = Counter.Make(5);
         int total = counter.Increment(2);
 
         Assert.Equal(7, total);
-        RecordedSpan span = Assert.Single(session.Spans);
-        Assert.Equal("increment", span.Operation);
+        OperationSpan span = Assert.Single(session.Finish().Operations);
+        Assert.Equal("increment", span.OperationName);
 
         // The receiver itself is never an input; the setup's own declared input
         // is, and inputs are emitted sorted by name.
-        Assert.Equal(["by", "start"], span.Inputs.Select(input => input.Name));
-        Assert.Equal([Value.Integer(2), Value.Integer(5)], span.Inputs.Select(input => input.Value));
+        Assert.Equal(["by", "start"], span.Inputs.Keys);
+        Assert.Equal([Value.Integer(2), Value.Integer(5)], span.Inputs.Values);
     }
 
     [Fact]
     public void ASetupThatThrowsCommitsNothing()
     {
-        using CaptureSession session = SpecGateRuntime.BeginSession("weaver.setup");
+        using CaptureSession session = CaptureScenario.Begin("weaver.setup");
 
         Assert.Throws<InvalidOperationException>(() => Counter.MakeBroken(5));
 
@@ -48,7 +48,11 @@ public sealed class WovenSetupTests
 
         Assert.Equal(CaptureRejection.SetupMissing, rejection.Rejection);
         Assert.Contains("MakeBroken", rejection.Message, StringComparison.Ordinal);
-        Assert.Empty(session.Spans);
+
+        // The boundary the rejection opened never reached a terminal channel,
+        // so the capture refuses to finish rather than publishing a partial run.
+        InvalidOperationException failure = Assert.Throws<InvalidOperationException>(session.Finish);
+        Assert.Contains("broken", failure.Message, StringComparison.Ordinal);
     }
 
     [Fact]

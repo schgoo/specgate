@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\csharp\SpecGate.Runtime\SpecGate.Runtime.csproj" />
+    <ProjectReference Include="..\SpecGate.TestSupport\SpecGate.TestSupport.csproj" />
     <ProjectReference Include="..\..\..\csharp\SpecGate.Weaver\SpecGate.Weaver.csproj" />
     <ProjectReference Include="..\SpecGate.WeaverFixtures\SpecGate.WeaverFixtures.csproj" />
     <ProjectReference Include="..\SpecGate.WeaverNegativeFixtures\SpecGate.WeaverNegativeFixtures.csproj" />

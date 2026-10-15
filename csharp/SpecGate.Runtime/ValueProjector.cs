@@ -69,29 +69,83 @@ internal static class ValueProjector
         };
     }
 
-    private static Value ProjectOption(SemanticType inner, object? value)
+    /// <summary>
+    /// Projects an operation's outer return value onto the channel Rust records
+    /// it on.
+    /// </summary>
+    /// <remarks>
+    /// Discovery unwraps the outermost <c>Option</c> or <c>Result</c> of a
+    /// return type (<c>discovery/normalize/schema.rs</c>), and Rust's annotation
+    /// macro records the same split: a present option and an <c>Ok</c> are the
+    /// <c>result</c> channel carrying the inner value, an absent option is
+    /// <c>empty</c>, and an <c>Err</c> is the <c>error</c> channel. Only the
+    /// outermost wrapper is unwrapped; inputs and nested values keep the tagged
+    /// projection.
+    /// </remarks>
+    internal static ReturnOutcome ProjectReturn(SemanticType type, object? value)
     {
-        if (value is null)
+        if (type.Kind == SemanticKind.Option)
         {
-            return Value.Tagged(NoneKey, Value.Unit);
+            return TryUnwrapOption(value, out object? held)
+                ? new ReturnOutcome(ReturnChannel.Result, Project(type.First!, held))
+                : new ReturnOutcome(ReturnChannel.Empty, null);
         }
 
-        // Option<T> and Result<T, E> are structs, so a declared Option<T> always
-        // arrives boxed and non-null; absence lives in HasValue, not in the box.
+        if (type.Kind == SemanticKind.Result && value is not null)
+        {
+            Type actual = value.GetType();
+            if (!actual.IsGenericType || actual.GetGenericTypeDefinition() != typeof(Result<,>))
+            {
+                throw Mismatch(type, actual);
+            }
+
+            if ((bool)actual.GetProperty(nameof(Result<int, int>.IsOk))!.GetValue(value)!)
+            {
+                object? ok = actual.GetProperty(nameof(Result<int, int>.OkValue))!.GetValue(value);
+                return new ReturnOutcome(ReturnChannel.Result, Project(type.First!, ok));
+            }
+
+            object? error = actual.GetProperty(nameof(Result<int, int>.ErrValue))!.GetValue(value);
+            return new ReturnOutcome(ReturnChannel.Error, Project(type.Second!, error));
+        }
+
+        return new ReturnOutcome(ReturnChannel.Result, Project(type, value));
+    }
+
+    private static Value ProjectOption(SemanticType inner, object? value) =>
+        TryUnwrapOption(value, out object? held)
+            ? Value.Tagged(SomeKey, Project(inner, held))
+            : Value.Tagged(NoneKey, Value.Unit);
+
+    /// <summary>Reads whether an optional value is present, and the value it holds.</summary>
+    /// <remarks>
+    /// Option&lt;T&gt; and Result&lt;T, E&gt; are structs, so a declared
+    /// Option&lt;T&gt; always arrives boxed and non-null; absence lives in
+    /// HasValue, not in the box. A nullable's absence is a null.
+    /// </remarks>
+    private static bool TryUnwrapOption(object? value, out object? held)
+    {
+        held = null;
+        if (value is null)
+        {
+            return false;
+        }
+
         Type actual = value.GetType();
         if (actual.IsGenericType && actual.GetGenericTypeDefinition() == typeof(Option<>))
         {
             PropertyInfo hasValue = actual.GetProperty(nameof(Option<int>.HasValue))!;
             if (!(bool)hasValue.GetValue(value)!)
             {
-                return Value.Tagged(NoneKey, Value.Unit);
+                return false;
             }
 
-            object? held = actual.GetProperty(nameof(Option<int>.Value))!.GetValue(value);
-            return Value.Tagged(SomeKey, Project(inner, held));
+            held = actual.GetProperty(nameof(Option<int>.Value))!.GetValue(value);
+            return true;
         }
 
-        return Value.Tagged(SomeKey, Project(inner, value));
+        held = value;
+        return true;
     }
 
     private static Value ProjectResult(SemanticType type, object value)

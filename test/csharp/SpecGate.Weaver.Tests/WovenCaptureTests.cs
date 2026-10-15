@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using SpecGate.Runtime;
+using SpecGate.TestSupport;
 using SpecGate.WeaverFixtures;
 using Xunit;
 
@@ -25,40 +26,40 @@ public sealed class WovenCaptureTests
     [Fact]
     public void RecordsInputsAndResultForSimpleOperation()
     {
-        using CaptureSession session = SpecGateRuntime.BeginSession("weaver.basic");
+        using CaptureSession session = CaptureScenario.Begin("weaver.basic");
 
         int sum = Arithmetic.Add(2, 3);
 
         Assert.Equal(5, sum);
-        RecordedSpan span = Assert.Single(session.Spans);
-        Assert.Equal("weaver.basic", span.Component);
-        Assert.Equal("add", span.Operation);
-        Assert.Null(span.ParentSpanId);
+        OperationSpan span = Assert.Single(session.Finish().Operations);
+        Assert.Equal("weaver.basic", span.ComponentId);
+        Assert.Equal("add", span.OperationName);
+        Assert.Equal(CaptureScenario.ScenarioSpanId, span.ParentSpanId);
         Assert.Equal(SpanStatus.Ok, span.Status);
-        Assert.Equal(["a", "b"], span.Inputs.Select(input => input.Name));
-        Assert.Equal([Value.Integer(2), Value.Integer(3)], span.Inputs.Select(input => input.Value));
-        Assert.Equal(Value.Integer(5), span.Result?.Value);
+        Assert.Equal(["a", "b"], span.Inputs.Keys);
+        Assert.Equal([Value.Integer(2), Value.Integer(3)], span.Inputs.Values);
+        Assert.Equal(Value.Integer(5), span.Result());
     }
 
     [Fact]
     public void RecordsOnlyTheSessionComponentForMultiComponentOperation()
     {
-        using CaptureSession session = SpecGateRuntime.BeginSession("weaver.alternate");
+        using CaptureSession session = CaptureScenario.Begin("weaver.alternate");
 
         Arithmetic.Add(1, 1);
 
-        RecordedSpan span = Assert.Single(session.Spans);
-        Assert.Equal("weaver.alternate", span.Component);
+        OperationSpan span = Assert.Single(session.Finish().Operations);
+        Assert.Equal("weaver.alternate", span.ComponentId);
     }
 
     [Fact]
     public void RecordsNothingForUntargetedComponent()
     {
-        using CaptureSession session = SpecGateRuntime.BeginSession("weaver.absent");
+        using CaptureSession session = CaptureScenario.Begin("weaver.absent");
 
         Arithmetic.Add(1, 1);
 
-        Assert.Empty(session.Spans);
+        Assert.Empty(session.Finish().Operations);
     }
 
     [Theory]
@@ -67,68 +68,68 @@ public sealed class WovenCaptureTests
     [InlineData(7, "positive")]
     public void RoutesEveryReturnThroughOneEpilogue(int value, string expected)
     {
-        using CaptureSession session = SpecGateRuntime.BeginSession("weaver.basic");
+        using CaptureSession session = CaptureScenario.Begin("weaver.basic");
 
         Assert.Equal(expected, Arithmetic.Describe(value));
 
-        RecordedSpan span = Assert.Single(session.Spans);
-        Assert.Equal("describe", span.Operation);
-        Assert.Equal(Value.String(expected), span.Result?.Value);
+        OperationSpan span = Assert.Single(session.Finish().Operations);
+        Assert.Equal("describe", span.OperationName);
+        Assert.Equal(Value.String(expected), span.Result());
     }
 
     [Fact]
     public void RecordsThrownExceptionAndRethrows()
     {
-        using CaptureSession session = SpecGateRuntime.BeginSession("weaver.basic");
+        using CaptureSession session = CaptureScenario.Begin("weaver.basic");
 
         Assert.Throws<DivideByZeroException>(() => Arithmetic.Divide(1, 0));
 
-        RecordedSpan span = Assert.Single(session.Spans);
-        Assert.Equal("divide", span.Operation);
+        OperationSpan span = Assert.Single(session.Finish().Operations);
+        Assert.Equal("divide", span.OperationName);
         Assert.Equal(SpanStatus.Error, span.Status);
-        Assert.Equal("System.DivideByZeroException", span.ErrorType);
-        Assert.NotNull(span.ErrorMessage);
-        Assert.Null(span.Result);
+        FaultCompletion fault = Assert.IsType<FaultCompletion>(span.OperationCompletion);
+        Assert.Equal("specgate.unexpected_target_fault", fault.FaultType);
     }
 
     [Fact]
     public void RecordsVoidSuccessWithoutResult()
     {
-        using CaptureSession session = SpecGateRuntime.BeginSession("weaver.basic");
+        using CaptureSession session = CaptureScenario.Begin("weaver.basic");
 
         Arithmetic.Guard(0);
 
-        RecordedSpan span = Assert.Single(session.Spans);
-        Assert.Equal("guard", span.Operation);
+        OperationSpan span = Assert.Single(session.Finish().Operations);
+        Assert.Equal("guard", span.OperationName);
         Assert.Equal(SpanStatus.Ok, span.Status);
-        Assert.Null(span.Result);
+        Assert.Null(span.OperationCompletion);
     }
 
     [Fact]
     public void RecordsVoidFailure()
     {
-        using CaptureSession session = SpecGateRuntime.BeginSession("weaver.basic");
+        using CaptureSession session = CaptureScenario.Begin("weaver.basic");
 
         Assert.Throws<ArgumentOutOfRangeException>(() => Arithmetic.Guard(-1));
 
-        RecordedSpan span = Assert.Single(session.Spans);
+        OperationSpan span = Assert.Single(session.Finish().Operations);
         Assert.Equal(SpanStatus.Error, span.Status);
-        Assert.Equal("System.ArgumentOutOfRangeException", span.ErrorType);
+        Assert.IsType<FaultCompletion>(span.OperationCompletion);
     }
 
     [Fact]
     public void RecordsNestedOperationsWithParentage()
     {
-        using CaptureSession session = SpecGateRuntime.BeginSession("weaver.basic");
+        using CaptureSession session = CaptureScenario.Begin("weaver.basic");
 
         Assert.Equal(6, Arithmetic.SumAll([1, 2, 3]));
 
-        // Inner spans complete first, so the outer operation is recorded last.
-        RecordedSpan outer = session.Spans[^1];
-        Assert.Equal("sum_all", outer.Operation);
-        Assert.Null(outer.ParentSpanId);
+        // Operations are recorded in start order, so the caller comes first.
+        Capture capture = session.Finish();
+        OperationSpan outer = capture.Operations[0];
+        Assert.Equal("sum_all", outer.OperationName);
+        Assert.Equal(CaptureScenario.ScenarioSpanId, outer.ParentSpanId);
 
-        RecordedSpan[] inner = [.. session.Spans.Where(span => span.Operation == "add")];
+        OperationSpan[] inner = [.. capture.Operations.Where(span => span.OperationName == "add")];
         Assert.Equal(3, inner.Length);
         Assert.All(inner, span => Assert.Equal(outer.SpanId, span.ParentSpanId));
     }
@@ -138,13 +139,13 @@ public sealed class WovenCaptureTests
     [InlineData("not a number", 0)]
     public void LeavesAnExistingTryCatchIntact(string text, int expected)
     {
-        using CaptureSession session = SpecGateRuntime.BeginSession("weaver.basic");
+        using CaptureSession session = CaptureScenario.Begin("weaver.basic");
 
         Assert.Equal(expected, Arithmetic.ParseOrDefault(text));
 
-        RecordedSpan span = Assert.Single(session.Spans);
+        OperationSpan span = Assert.Single(session.Finish().Operations);
         Assert.Equal(SpanStatus.Ok, span.Status);
-        Assert.Equal(Value.Integer(expected), span.Result?.Value);
+        Assert.Equal(Value.Integer(expected), span.Result());
         Assert.Equal(
             Value.Tagged("Some", Value.String(text)),
             Assert.Single(span.Inputs).Value);
@@ -153,29 +154,30 @@ public sealed class WovenCaptureTests
     [Fact]
     public void SkipsTheImplicitInstanceArgument()
     {
-        using CaptureSession session = SpecGateRuntime.BeginSession("weaver.basic");
+        using CaptureSession session = CaptureScenario.Begin("weaver.basic");
 
         Accumulator accumulator = new();
         Assert.Equal(2, accumulator.Accumulate(2));
         Assert.Equal(5, accumulator.Accumulate(3));
 
-        Assert.Equal(2, session.Spans.Count);
-        Assert.All(session.Spans, span => Assert.Equal("amount", Assert.Single(span.Inputs).Name));
+        Capture capture = session.Finish();
+        Assert.Equal(2, capture.Operations.Count);
+        Assert.All(capture.Operations, span => Assert.Equal("amount", Assert.Single(span.Inputs).Key));
         Assert.Equal(
             [Value.Integer(2), Value.Integer(3)],
-            session.Spans.Select(span => span.Inputs[0].Value));
+            capture.Operations.Select(span => span.Inputs.Values.Single()));
         Assert.Equal(
             [Value.Integer(2), Value.Integer(5)],
-            session.Spans.Select(span => span.Result?.Value));
+            capture.Operations.Select(span => span.Result()));
     }
 
     [Fact]
     public void RecordsNothingAfterTheSessionEnds()
     {
-        CaptureSession session = SpecGateRuntime.BeginSession("weaver.basic");
+        CaptureSession session = CaptureScenario.Begin("weaver.basic");
         session.Dispose();
 
         Assert.Equal(5, Arithmetic.Add(2, 3));
-        Assert.Empty(session.Spans);
+        Assert.Empty(session.Finish().Operations);
     }
 }

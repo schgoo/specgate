@@ -28,15 +28,21 @@ public static class SpecGateRuntime
 
     /// <summary>Attaches a capture session that records one component.</summary>
     /// <param name="component">The only component recorded by this session.</param>
+    /// <param name="config">The deterministic protocol configuration.</param>
     /// <exception cref="InvalidOperationException">A session is already active.</exception>
-    public static CaptureSession BeginSession(string component)
+    public static CaptureSession BeginSession(string component, CaptureConfig config)
     {
         if (string.IsNullOrEmpty(component))
         {
             throw new ArgumentException("specgate: a capture session requires a component.", nameof(component));
         }
 
-        CaptureSession session = new(component);
+        if (config is null)
+        {
+            throw new ArgumentNullException(nameof(config));
+        }
+
+        CaptureSession session = new(component, config);
         if (Interlocked.CompareExchange(ref _session, session, null) is not null)
         {
             throw new InvalidOperationException(
@@ -100,13 +106,9 @@ public static class SpecGateRuntime
     private static OperationScope Open(
         CaptureSession session, string operation, string component, RuntimeMethodHandle method)
     {
-        OperationScope scope = new(
-            session,
-            CurrentScope.Value,
-            session.NextSpanId(),
-            component,
-            operation,
-            method);
+        OperationScope? parent = CurrentScope.Value;
+        PendingOperation pending = session.Begin(component, operation, parent?.Pending?.SpanId);
+        OperationScope scope = new(session, parent, pending, component, operation, method);
         CurrentScope.Value = scope;
         return scope;
     }
@@ -172,10 +174,7 @@ public static class SpecGateRuntime
 
         try
         {
-            scope.Complete(
-                SpanStatus.Ok,
-                scope.IsRecording ? scope.ProjectResult(result) : null,
-                exception: null);
+            scope.CompleteValue(scope.IsRecording ? scope.ProjectResult(result) : null);
         }
         finally
         {
@@ -196,7 +195,7 @@ public static class SpecGateRuntime
 
         try
         {
-            scope.Complete(SpanStatus.Ok, result: null, exception: null);
+            scope.CompleteValue(null);
         }
         finally
         {
@@ -215,7 +214,7 @@ public static class SpecGateRuntime
 
         try
         {
-            scope.Complete(SpanStatus.Error, result: null, exception);
+            scope.CompleteThrown(exception ?? throw new ArgumentNullException(nameof(exception)));
         }
         finally
         {
