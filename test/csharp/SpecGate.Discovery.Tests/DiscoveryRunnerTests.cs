@@ -32,7 +32,13 @@ public static class Fixtures
     }
 
     [SpecOperation("record_reading", Spec = "fixtures.alpha")]
-    public static Reading RecordReading([SpecInput("label")] int count) => new() { Raw = count };
+    [Exploding]
+    public static Reading RecordReading([SpecInput("label")][Exploding] int count) => new() { Raw = count };
+
+    [Exploding]
+    public static void UnannotatedHelper()
+    {
+    }
 
     [SpecOperation("beta_only", Spec = "fixtures.beta")]
     public static void BetaOnly()
@@ -41,6 +47,34 @@ public static class Fixtures
 
     [SpecSetup("record_reading")]
     public static Reading PrepareReading() => new();
+
+    /// <summary>Declares the input name that <see cref="DerivedSource"/> overrides.</summary>
+    public abstract class Source
+    {
+        /// <summary>Reads one value.</summary>
+        /// <param name="count">The semantic input, named on this declaration only.</param>
+        /// <returns>The reading.</returns>
+        public abstract Reading Read([SpecInput("label")] int count);
+    }
+
+    /// <summary>Annotates the override while leaving the input name on the base declaration.</summary>
+    public sealed class DerivedSource : Source
+    {
+        /// <inheritdoc/>
+        [SpecOperation("derived_read", Spec = "fixtures.gamma")]
+        public override Reading Read(int count) => new() { Raw = count };
+    }
+}
+
+/// <summary>
+/// An unrelated attribute whose constructor throws. Discovery must name
+/// annotations from metadata rather than constructing every attribute it meets.
+/// </summary>
+[AttributeUsage(AttributeTargets.Method | AttributeTargets.Parameter)]
+public sealed class ExplodingAttribute : Attribute
+{
+    /// <summary>Always throws.</summary>
+    public ExplodingAttribute() => throw new InvalidOperationException("discovery must not construct unrelated attributes");
 }
 
 public class DiscoveryRunnerTests
@@ -64,7 +98,43 @@ public class DiscoveryRunnerTests
 
         Assert.Equal(["out"], system.Directories);
         string[] inventory = JsonSerializer.Deserialize<string[]>(system.Files[Path.Combine("out", "components.json")])!;
-        Assert.Equal(["fixtures.alpha", "fixtures.beta"], inventory);
+        Assert.Equal(["fixtures.alpha", "fixtures.beta", "fixtures.gamma"], inventory);
+    }
+
+    /// <summary>
+    /// An unrelated attribute is named from metadata, never constructed, so a
+    /// throwing constructor on an annotated member cannot abort discovery.
+    /// </summary>
+    [Fact]
+    public void UnrelatedAttributesAreNeverConstructed()
+    {
+        Assert.Throws<InvalidOperationException>(() => new ExplodingAttribute());
+
+        RecordingSystem system = new();
+
+        Assert.Equal(0, DiscoveryRunner.Run(["out", "assembly.dll", "bin", "fixtures.alpha"], system.Adapter));
+        Assert.Contains(
+            Document(system, 0).GetProperty("operations").EnumerateArray(),
+            operation => operation.GetProperty("name").GetString() == "record_reading");
+    }
+
+    /// <summary>
+    /// An override publishes the input name declared on the base parameter, which
+    /// only an inheritance-aware parameter read can see.
+    /// </summary>
+    [Fact]
+    public void OverriddenParametersInheritTheirInputName()
+    {
+        RecordingSystem system = new();
+
+        Assert.Equal(0, DiscoveryRunner.Run(["out", "assembly.dll", "bin", "fixtures.gamma"], system.Adapter));
+
+        JsonElement operation = Document(system, 0)
+            .GetProperty("operations")
+            .EnumerateArray()
+            .Single(entry => entry.GetProperty("name").GetString() == "derived_read");
+        Assert.Equal(["label", "i32"], operation.GetProperty("params")[0].EnumerateArray().Select(entry => entry.GetString()));
+        Assert.Equal(["label", "int"], operation.GetProperty("cs_params")[0].EnumerateArray().Select(entry => entry.GetString()));
     }
 
     [Fact]

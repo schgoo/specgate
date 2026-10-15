@@ -38,7 +38,10 @@ paid a compile on every discovery run.
   `SpecGate.Annotations`. A prebuilt tool and a candidate assembly carry
   independent copies of the annotations package, so attribute reads must not
   depend on the two copies resolving to one `Type` identity. Name matching
-  mirrors what the embedded program already did for `SpecEventAttribute`.
+  mirrors what the embedded program already did for `SpecEventAttribute`. The
+  name is matched against `CustomAttributeData`, which names attribute types
+  without constructing them, and only the resolved annotation type is then read
+  through the inheritance-aware `Attribute` API.
 - Discovery emits no CTSC artifacts. Normalization, registry encoding, and
   manifests stay in Rust, and the Rust CLI remains the only entry point.
 
@@ -54,7 +57,8 @@ paid a compile on every discovery run.
   `cargo test` that reaches C# discovery fails with an error naming the
   variable.
 - A release layout must ship `SpecGate.Discovery` beside the `specgate`
-  executable.
+  executable. The release workflow uploads that layout per platform and runs a
+  C# discovery against it.
 - Discovery no longer compiles the reflection program per run; only the
   candidate assembly is built.
 
@@ -62,9 +66,10 @@ paid a compile on every discovery run.
 
 - `SpecGate.Discovery.Tests` covers argument rejection, the component
   inventory, positional component output, unscoped setup scoping, semantic and
-  raw metadata, and enum variant declaration order.
+  raw metadata, enum variant declaration order, inherited parameter input
+  names, and an unrelated attribute whose constructor throws.
 - `specgate-discovery` unit tests pin tool resolution and the exact process
-  request, including the missing-assembly failure.
+  request, including the missing-assembly failure and a relative override.
 - The CTSC goldens are the port's correctness proof: regenerating them after
   the move produced a byte-identical tree.
 

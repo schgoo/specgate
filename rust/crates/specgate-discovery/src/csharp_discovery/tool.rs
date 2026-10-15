@@ -24,6 +24,10 @@ const DISCOVERY_ASSEMBLY: &str = "SpecGate.Discovery.dll";
 /// the directory holding it. Otherwise the tool is expected beside the running
 /// `specgate` executable, which is how a published install is laid out.
 ///
+/// The override is canonicalized because discovery launches `dotnet` from the
+/// scratch directory, where a path relative to the caller would resolve
+/// elsewhere.
+///
 /// # Errors
 ///
 /// Returns an error when the override names a missing assembly, when the running
@@ -37,7 +41,14 @@ pub(super) fn discovery_assembly(system: &System) -> Result<PathBuf, Error> {
                 candidate.display()
             )));
         }
-        return Ok(candidate);
+        return system
+            .filesystem
+            .canonicalize(&candidate)
+            .map(super::project::strip_prefix)
+            .map_err(|source| {
+                let message = format!("failed to resolve {DISCOVERY_PATH_VAR} at {}: {source}", candidate.display());
+                with_source(message, source)
+            });
     }
 
     let executable = system

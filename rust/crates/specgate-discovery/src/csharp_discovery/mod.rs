@@ -474,6 +474,25 @@ mod tests {
             );
         }
 
+        // A relative override is canonicalized, because discovery launches dotnet
+        // from the scratch directory rather than from the caller.
+        let system = System::builder((
+            FakeFs::builder()
+                .files(BTreeMap::from([(PathBuf::from("relative/SpecGate.Discovery.dll"), Vec::new())]))
+                .canonical(BTreeMap::from([(
+                    PathBuf::from("relative/SpecGate.Discovery.dll"),
+                    Ok(PathBuf::from("/installed/discovery/SpecGate.Discovery.dll")),
+                )]))
+                .build(),
+            FakeProcess::default(),
+        ))
+        .environment(BTreeMap::from([("SPECGATE_DISCOVERY_PATH", OsString::from("relative"))]))
+        .build();
+        assert_eq!(
+            tool::discovery_assembly(&system).unwrap(),
+            PathBuf::from("/installed/discovery/SpecGate.Discovery.dll")
+        );
+
         // A missing override is named, not silently replaced by the default.
         let system = System::builder((FakeFs::default(), FakeProcess::default()))
             .environment(BTreeMap::from([("SPECGATE_DISCOVERY_PATH", OsString::from("absent"))]))

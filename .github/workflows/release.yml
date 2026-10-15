@@ -51,23 +51,46 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact: specgate-linux-x86_64
+            exe: ''
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact: specgate-windows-x86_64.exe
+            artifact: specgate-windows-x86_64
+            exe: '.exe'
           - os: macos-latest
             target: aarch64-apple-darwin
             artifact: specgate-macos-aarch64
+            exe: ''
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.96.0"
           targets: ${{ matrix.target }}
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
       - name: Build release binary
         working-directory: rust
         run: cargo build --release -p specgate-cli --target ${{ matrix.target }}
-      - name: Upload binary
+      # C# discovery runs the prebuilt SpecGate.Discovery tool from beside the
+      # specgate executable, so the uploaded artifact is that whole layout: the
+      # CLI plus the tool's framework-dependent publish output, including its
+      # runtime configuration and dependency manifest.
+      - name: Assemble the install layout
+        shell: pwsh
+        run: |
+          dotnet publish csharp/SpecGate.Discovery/SpecGate.Discovery.csproj -c Release --no-self-contained -o dist
+          Copy-Item "rust/target/${{ matrix.target }}/release/specgate${{ matrix.exe }}" dist
+      - name: Run C# discovery from the install layout
+        shell: pwsh
+        run: |
+          ./dist/specgate${{ matrix.exe }} discover test/bindings/csharp.yaml `
+            --component fixture.stateless_add `
+            --registry-id urn:ctsc:registry:fixture.stateless_add `
+            --registry-version 0.1.0 `
+            --out dist-discovery.json
+      - name: Upload install layout
         uses: actions/upload-artifact@v5
         with:
           name: ${{ matrix.artifact }}
-          path: rust/target/${{ matrix.target }}/release/specgate${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+          path: dist

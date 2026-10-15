@@ -10,7 +10,7 @@ _default:
 export SPECGATE_DISCOVERY_PATH := justfile_directory() / "artifacts" / "discovery"
 
 discovery-tool:
-    dotnet build csharp/SpecGate.Discovery/SpecGate.Discovery.csproj --output {{ SPECGATE_DISCOVERY_PATH }}
+    dotnet build csharp/SpecGate.Discovery/SpecGate.Discovery.csproj --output "{{ SPECGATE_DISCOVERY_PATH }}"
 
 build:
     cd rust && cargo build --workspace --all-targets

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 
@@ -19,7 +20,9 @@ namespace SpecGate.Discovery;
 /// <para>
 /// Matching on <see cref="Type.FullName"/> removes that coupling entirely, and
 /// mirrors how the original reflection program already read
-/// <c>SpecEventAttribute</c>.
+/// <c>SpecEventAttribute</c>. The name is matched against
+/// <see cref="CustomAttributeData"/>, so only the annotation itself is ever
+/// constructed; unrelated attributes on the same member are left as metadata.
 /// </para>
 /// </remarks>
 internal static class Annotations
@@ -47,23 +50,29 @@ internal static class Annotations
     /// program mixed the two: generic <c>GetCustomAttributes&lt;T&gt;()</c> reads
     /// inherit, while the <c>SpecEvent</c> reads did not.
     /// </remarks>
-    internal static object[] On(MemberInfo member, string attributeFullName, bool inherit) =>
-        [.. member.GetCustomAttributes(inherit).Where(a => Matches(a, attributeFullName))];
+    internal static object[] On(MemberInfo member, string attributeFullName, bool inherit)
+    {
+        Type? type = MatchingType(member, attributeFullName, inherit);
+        return type is null ? [] : Attribute.GetCustomAttributes(member, type, inherit);
+    }
 
     /// <summary>
     /// Every attribute on <paramref name="parameter"/> whose type full name matches
     /// <paramref name="attributeFullName"/>, in reflection order.
     /// </summary>
-    internal static object[] On(ParameterInfo parameter, string attributeFullName, bool inherit) =>
-        [.. parameter.GetCustomAttributes(inherit).Where(a => Matches(a, attributeFullName))];
+    internal static object[] On(ParameterInfo parameter, string attributeFullName, bool inherit)
+    {
+        Type? type = MatchingType(parameter, attributeFullName, inherit);
+        return type is null ? [] : Attribute.GetCustomAttributes(parameter, type, inherit);
+    }
 
     /// <summary>The first matching attribute on <paramref name="member"/>, or <see langword="null"/>.</summary>
     internal static object? FirstOn(MemberInfo member, string attributeFullName, bool inherit) =>
-        member.GetCustomAttributes(inherit).FirstOrDefault(a => Matches(a, attributeFullName));
+        On(member, attributeFullName, inherit).FirstOrDefault();
 
     /// <summary>The first matching attribute on <paramref name="parameter"/>, or <see langword="null"/>.</summary>
     internal static object? FirstOn(ParameterInfo parameter, string attributeFullName, bool inherit) =>
-        parameter.GetCustomAttributes(inherit).FirstOrDefault(a => Matches(a, attributeFullName));
+        On(parameter, attributeFullName, inherit).FirstOrDefault();
 
     /// <summary>Whether <paramref name="member"/> carries at least one matching attribute.</summary>
     internal static bool Has(MemberInfo member, string attributeFullName, bool inherit) =>
@@ -84,6 +93,58 @@ internal static class Annotations
     internal static bool IsGenericDefinition(Type definition, string fullName) =>
         string.Equals(definition.FullName, fullName, StringComparison.Ordinal);
 
-    private static bool Matches(object attribute, string attributeFullName) =>
-        string.Equals(attribute.GetType().FullName, attributeFullName, StringComparison.Ordinal);
+    /// <summary>
+    /// The annotation <see cref="Type"/> named by <paramref name="attributeFullName"/>
+    /// as the candidate assembly declares it, or <see langword="null"/> when the
+    /// member carries no such annotation.
+    /// </summary>
+    /// <remarks>
+    /// Metadata is read through <see cref="CustomAttributeData"/>, which names
+    /// attribute types without constructing them, so an unrelated attribute whose
+    /// constructor throws or whose assembly is unresolvable cannot abort discovery.
+    /// Only the resolved annotation type is then materialized, through the
+    /// inheritance-aware <see cref="Attribute"/> API.
+    /// </remarks>
+    private static Type? MatchingType(MemberInfo member, string attributeFullName, bool inherit) =>
+        Declarations(member, inherit)
+            .SelectMany(declaration => declaration.GetCustomAttributesData())
+            .Select(data => data.AttributeType)
+            .FirstOrDefault(type => string.Equals(type.FullName, attributeFullName, StringComparison.Ordinal));
+
+    /// <summary>Overload of <see cref="MatchingType(MemberInfo, string, bool)"/> for a parameter.</summary>
+    private static Type? MatchingType(ParameterInfo parameter, string attributeFullName, bool inherit) =>
+        Declarations(parameter, inherit)
+            .SelectMany(declaration => declaration.GetCustomAttributesData())
+            .Select(data => data.AttributeType)
+            .FirstOrDefault(type => string.Equals(type.FullName, attributeFullName, StringComparison.Ordinal));
+
+    /// <summary>
+    /// The members whose own metadata can name an annotation that an inheriting
+    /// read of <paramref name="member"/> would return.
+    /// </summary>
+    private static IEnumerable<MemberInfo> Declarations(MemberInfo member, bool inherit)
+    {
+        yield return member;
+        if (!inherit) yield break;
+        if (member is MethodInfo method)
+        {
+            MethodInfo baseDefinition = method.GetBaseDefinition();
+            if (baseDefinition != method) yield return baseDefinition;
+        }
+        else if (member is Type type)
+        {
+            for (Type? current = type.BaseType; current is not null; current = current.BaseType) yield return current;
+        }
+    }
+
+    /// <summary>Overload of <see cref="Declarations(MemberInfo, bool)"/> for a parameter.</summary>
+    private static IEnumerable<ParameterInfo> Declarations(ParameterInfo parameter, bool inherit)
+    {
+        yield return parameter;
+        if (!inherit || parameter.Member is not MethodInfo method) yield break;
+        MethodInfo baseDefinition = method.GetBaseDefinition();
+        if (baseDefinition == method) yield break;
+        ParameterInfo[] baseParameters = baseDefinition.GetParameters();
+        if (parameter.Position >= 0 && parameter.Position < baseParameters.Length) yield return baseParameters[parameter.Position];
+    }
 }
