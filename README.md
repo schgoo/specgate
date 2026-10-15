@@ -48,6 +48,16 @@ source through `cargo metadata`. `SPECGATE_RUNTIME_PATH` and
 substitutions: path overrides must resolve to the candidate's exact Cargo
 PackageId, and version overrides must match its crates.io package.
 
+C# discovery runs the prebuilt `SpecGate.Discovery` tool. It is located beside
+the running `specgate` executable; `SPECGATE_DISCOVERY_PATH` overrides that
+with either the directory holding `SpecGate.Discovery.dll` or the assembly
+path itself, and a relative override is resolved against the caller's working
+directory. Working from a source checkout, `just discovery-tool` builds it and
+every recipe that drives C# discovery points the override at that build.
+Release artifacts ship that layout: each downloadable archive holds the
+`specgate` executable and the tool's publish output beside it, so C# discovery
+needs only a .NET runtime.
+
 ## Annotation surface
 
 Rust implementations use `#[spec_operation]`, `#[spec_setup]`,
@@ -67,6 +77,7 @@ renamed dependencies.
   `compare`.
 - `test/rust/crates/specgate-ctsc-fixtures` — focused Rust fixtures.
 - `test/rust/negative-fixtures` — fixtures discovery or the compiler must reject.
+- `csharp/SpecGate.Discovery` — the C# reflection tool the Rust driver invokes.
 - `test/csharp/SpecGate.CtscFixtures` — annotation-only C# fixtures.
 - `test/goldens/ctsc` — the golden matrix and its generated artifacts.
 - `docs/ctsc` — committed CTSC contracts, validator, and corpus.

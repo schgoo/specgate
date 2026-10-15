@@ -140,7 +140,6 @@ mod tests {
     fn linked_system(filesystem: Filesystem) -> System {
         System::builder((filesystem, FakeProcess::default()))
             .environment(BTreeMap::from([("SPECGATE_CACHE_DIR".to_string(), "cache".into())]))
-            .current_directory(Ok(PathBuf::from("cwd")))
             .process_id(41)
             .build()
     }
@@ -148,7 +147,6 @@ mod tests {
     fn bare_system(environment: BTreeMap<String, std::ffi::OsString>) -> System {
         System::builder((FakeFs::default(), FakeProcess::default()))
             .environment(environment)
-            .current_directory(Ok(PathBuf::from("cwd")))
             .process_id(41)
             .build()
     }

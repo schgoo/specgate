@@ -52,39 +52,6 @@ impl Environment {
     }
 }
 
-/// Resolves the process current directory through a real or deterministic fake adapter.
-#[derive(Clone)]
-pub(crate) struct CurrentDirectory {
-    inner: DirectoryKind,
-}
-#[derive(Clone)]
-enum DirectoryKind {
-    Real,
-    #[cfg(any(test, feature = "test-util"))]
-    Fake(Result<PathBuf, String>),
-}
-impl CurrentDirectory {
-    pub(super) fn real() -> Self {
-        Self {
-            inner: DirectoryKind::Real,
-        }
-    }
-    #[cfg(any(test, feature = "test-util"))]
-    pub(super) fn fake(value: Result<PathBuf, String>) -> Self {
-        Self {
-            inner: DirectoryKind::Fake(value),
-        }
-    }
-    /// Returns the current directory, propagating operating-system or injected failures.
-    pub(crate) fn get(&self) -> Result<PathBuf, Error> {
-        match &self.inner {
-            DirectoryKind::Real => Ok(std::env::current_dir()?),
-            #[cfg(any(test, feature = "test-util"))]
-            DirectoryKind::Fake(value) => value.clone().map_err(failure),
-        }
-    }
-}
-
 /// Supplies the process identifier through a real or deterministic fake adapter.
 #[derive(Clone)]
 pub(crate) struct ProcessId {
@@ -112,6 +79,39 @@ impl ProcessId {
             IdKind::Real => std::process::id(),
             #[cfg(any(test, feature = "test-util"))]
             IdKind::Fake(value) => value,
+        }
+    }
+}
+
+/// Resolves the running executable's own path through a real or deterministic fake adapter.
+#[derive(Clone)]
+pub(crate) struct ExecutablePath {
+    inner: ExecutableKind,
+}
+#[derive(Clone)]
+enum ExecutableKind {
+    Real,
+    #[cfg(any(test, feature = "test-util"))]
+    Fake(Result<PathBuf, String>),
+}
+impl ExecutablePath {
+    pub(super) fn real() -> Self {
+        Self {
+            inner: ExecutableKind::Real,
+        }
+    }
+    #[cfg(any(test, feature = "test-util"))]
+    pub(super) fn fake(value: Result<PathBuf, String>) -> Self {
+        Self {
+            inner: ExecutableKind::Fake(value),
+        }
+    }
+    /// Returns the running executable's path, propagating operating-system or injected failures.
+    pub(crate) fn get(&self) -> Result<PathBuf, Error> {
+        match &self.inner {
+            ExecutableKind::Real => Ok(std::env::current_exe()?),
+            #[cfg(any(test, feature = "test-util"))]
+            ExecutableKind::Fake(value) => value.clone().map_err(failure),
         }
     }
 }

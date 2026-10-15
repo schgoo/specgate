@@ -9,6 +9,9 @@ obj/
 target/
 coverage*.json
 
+# Prebuilt tooling output
+/artifacts/
+
 # cargo-evaluate
 /rust/.evaluate/*
 /rust/evaluate-report.*
