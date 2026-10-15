@@ -1,4 +1,5 @@
 using System.Reflection;
+using SpecGate.Annotations;
 
 namespace SpecGate.Runtime.Tests;
 
@@ -23,4 +24,16 @@ internal static class Boundaries
     internal static string Process(string text) => text.ToUpperInvariant();
 
     internal static string Fetch() => "response";
+
+    internal static void Reset()
+    {
+    }
+
+    /// <summary>A declaration whose contract includes one error outcome.</summary>
+    [SpecException(typeof(InvalidOperationException))]
+    internal static int Checked(int value) => value;
+
+    /// <summary>A declaration whose contract admits any exception as its error outcome.</summary>
+    [SpecException]
+    internal static int CatchAll(int value) => value;
 }

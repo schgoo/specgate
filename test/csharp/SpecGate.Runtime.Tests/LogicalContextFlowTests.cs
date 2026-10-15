@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using SpecGate.TestSupport;
 using Xunit;
 
 namespace SpecGate.Runtime.Tests;
@@ -14,7 +15,7 @@ public sealed class LogicalContextFlowTests
     [Fact]
     public async Task TheActiveOperationSurvivesAContinuationOnAnotherThread()
     {
-        using CaptureSession session = SpecGateRuntime.BeginSession("fixture.async");
+        using CaptureSession session = CaptureScenario.Begin("fixture.async");
 
         OperationScope outer = SpecGateRuntime.EnterOperation(Boundaries.Of("Fetch"), "fetch", "fixture.async");
         int enteredOn = Environment.CurrentManagedThreadId;
@@ -26,15 +27,15 @@ public sealed class LogicalContextFlowTests
 
         SpecGateRuntime.ExitOk(outer, "response");
 
-        RecordedSpan span = Assert.Single(session.Spans);
-        Assert.Equal("fetch", span.Operation);
+        OperationSpan span = Assert.Single(session.Finish().Operations);
+        Assert.Equal("fetch", span.OperationName);
         Assert.Equal(SpanStatus.Ok, span.Status);
     }
 
     [Fact]
     public async Task AnOperationStartedAfterAThreadHopStillNestsUnderItsCaller()
     {
-        using CaptureSession session = SpecGateRuntime.BeginSession("fixture.async");
+        using CaptureSession session = CaptureScenario.Begin("fixture.async");
 
         OperationScope outer = SpecGateRuntime.EnterOperation(Boundaries.Of("Fetch"), "fetch", "fixture.async");
         int enteredOn = Environment.CurrentManagedThreadId;
@@ -46,23 +47,25 @@ public sealed class LogicalContextFlowTests
         SpecGateRuntime.ExitOk(inner, "decoded");
         SpecGateRuntime.ExitOk(outer, "response");
 
-        RecordedSpan innerSpan = session.Spans.Single(span => span.Operation == "decode");
-        RecordedSpan outerSpan = session.Spans.Single(span => span.Operation == "fetch");
+        Capture capture = session.Finish();
+        OperationSpan innerSpan = capture.Operation("decode");
+        OperationSpan outerSpan = capture.Operation("fetch");
         Assert.Equal(outerSpan.SpanId, innerSpan.ParentSpanId);
     }
 
     [Fact]
     public async Task ConcurrentOperationsDoNotSeeEachOthersContext()
     {
-        using CaptureSession session = SpecGateRuntime.BeginSession("fixture.async");
+        using CaptureSession session = CaptureScenario.Begin("fixture.async");
 
         await Task.WhenAll(
             RunIsolatedOperationAsync("alpha"),
             RunIsolatedOperationAsync("beta"));
 
         Assert.Null(SpecGateRuntime.Current);
-        Assert.Equal(2, session.Spans.Count);
-        Assert.All(session.Spans, span => Assert.Null(span.ParentSpanId));
+        Capture capture = session.Finish();
+        Assert.Equal(2, capture.Operations.Count);
+        Assert.All(capture.Operations, span => Assert.Equal(CaptureScenario.ScenarioSpanId, span.ParentSpanId));
     }
 
     private static async Task RunIsolatedOperationAsync(string operation)

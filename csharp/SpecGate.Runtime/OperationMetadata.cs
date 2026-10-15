@@ -27,18 +27,65 @@ internal sealed class OperationMetadata
     /// <summary>The name recorded for an operation's return value.</summary>
     internal const string ResultName = "return";
 
+    /// <summary>
+    /// The name recorded for an operation's declared error outcome.
+    /// </summary>
+    /// <remarks>
+    /// Rust's annotation macro names every <c>Result::Err</c> channel <c>error</c>
+    /// (<c>rust/crates/specgate-annotations-macros-impl/src/lib.rs:19</c>), and
+    /// C# discovery publishes a <c>[SpecException]</c> method as the same single
+    /// error channel, so both producers record one name.
+    /// </remarks>
+    internal const string ErrorName = "error";
+
     private static readonly ConcurrentDictionary<RuntimeMethodHandle, OperationMetadata> Cache = new();
 
-    private OperationMetadata(SemanticInput[] inputs, SemanticType? result)
+    private OperationMetadata(SemanticInput[] inputs, SemanticType? result, Type[]? declaredExceptions)
     {
         Inputs = inputs;
         Result = result;
+        DeclaredExceptions = declaredExceptions;
     }
 
     internal SemanticInput[] Inputs { get; }
 
     /// <summary>The return value's meaning, or <see langword="null"/> for a void operation.</summary>
     internal SemanticType? Result { get; }
+
+    /// <summary>
+    /// The exception types the operation maps to its declared error channel,
+    /// or <see langword="null"/> when it declares no error channel at all. An
+    /// empty array means the declaration listed no types, which
+    /// <see cref="SpecExceptionAttribute"/> defines as catch-all.
+    /// </summary>
+    internal Type[]? DeclaredExceptions { get; }
+
+    /// <summary>
+    /// Whether <paramref name="exception"/> belongs to the operation's declared
+    /// error channel rather than being an unexpected target fault.
+    /// </summary>
+    internal bool MapsException(Exception exception)
+    {
+        if (DeclaredExceptions is null)
+        {
+            return false;
+        }
+
+        if (DeclaredExceptions.Length == 0)
+        {
+            return true;
+        }
+
+        foreach (Type declared in DeclaredExceptions)
+        {
+            if (declared.IsInstanceOfType(exception))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     internal static OperationMetadata For(RuntimeMethodHandle handle) => Cache.GetOrAdd(handle, Describe);
 
@@ -66,7 +113,23 @@ internal sealed class OperationMetadata
             result = SemanticType.ForParameter(function.ReturnParameter, function);
         }
 
-        return new OperationMetadata(inputs, result);
+        return new OperationMetadata(inputs, result, DeclaredExceptionsOf(method));
+    }
+
+    /// <remarks>
+    /// Inheritance is honored so an override that does not repeat
+    /// <c>[SpecException]</c> keeps the base declaration's error channel, which
+    /// is what the discovered registry publishes for it.
+    /// </remarks>
+    private static Type[]? DeclaredExceptionsOf(MethodBase method)
+    {
+        SpecExceptionAttribute? annotation = method.GetCustomAttribute<SpecExceptionAttribute>(inherit: true);
+        if (annotation is null)
+        {
+            return null;
+        }
+
+        return annotation.ExceptionTypes ?? [];
     }
 
     /// <remarks>

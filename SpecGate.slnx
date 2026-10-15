@@ -7,6 +7,7 @@
   </Folder>
   <Folder Name="/test/csharp/">
     <Project Path="test/csharp/SpecGate.CtscFixtures/SpecGate.CtscFixtures.csproj" />
+    <Project Path="test/csharp/SpecGate.TestSupport/SpecGate.TestSupport.csproj" />
     <Project Path="test/csharp/SpecGate.Runtime.Tests/SpecGate.Runtime.Tests.csproj" />
     <Project Path="test/csharp/SpecGate.CtscFixtures.Tests/SpecGate.CtscFixtures.Tests.csproj" />
     <Project Path="test/csharp/SpecGate.Discovery.Tests/SpecGate.Discovery.Tests.csproj" />

@@ -14,19 +14,17 @@ namespace SpecGate.Runtime;
 /// </remarks>
 public sealed class OperationScope
 {
-    private readonly List<RecordedValue> _inputs = [];
-
     internal OperationScope(
         CaptureSession? session,
         OperationScope? parent,
-        long spanId,
+        PendingOperation? pending,
         string component,
         string operation,
         RuntimeMethodHandle method)
     {
         Session = session;
         Parent = parent;
-        SpanId = spanId;
+        Pending = pending;
         Component = component;
         Operation = operation;
         Method = method;
@@ -36,13 +34,16 @@ public sealed class OperationScope
 
     internal OperationScope? Parent { get; }
 
+    /// <summary>The span being recorded, or <see langword="null"/> when not recording.</summary>
+    internal PendingOperation? Pending { get; }
+
     /// <summary>The woven method, used to read what its values mean.</summary>
     internal RuntimeMethodHandle Method { get; }
 
     internal bool Completed { get; private set; }
 
-    /// <summary>Gets the session-unique span identifier, or zero when not recording.</summary>
-    public long SpanId { get; }
+    /// <summary>Gets the span identifier, or <see langword="null"/> when not recording.</summary>
+    public SpanId? SpanId => Pending?.SpanId;
 
     /// <summary>Gets the owning component identifier.</summary>
     public string Component { get; }
@@ -51,10 +52,10 @@ public sealed class OperationScope
     public string Operation { get; }
 
     /// <summary>Gets whether this scope is attached to an active capture session.</summary>
-    public bool IsRecording => Session is not null;
+    public bool IsRecording => Session is not null && Pending is not null;
 
     internal static OperationScope Disabled { get; } =
-        new OperationScope(null, null, 0, string.Empty, string.Empty, default);
+        new OperationScope(null, null, null, string.Empty, string.Empty, default);
 
     /// <summary>
     /// Projects and records the operation's folded inputs: the construction
@@ -69,7 +70,7 @@ public sealed class OperationScope
     /// </remarks>
     internal void RecordInputs(object?[] arguments)
     {
-        if (Session is null)
+        if (Session is null || Pending is null)
         {
             return;
         }
@@ -120,13 +121,7 @@ public sealed class OperationScope
             Merge(folded, producers, input.Name, value, $"operation parameter '{input.Name}'");
         }
 
-        lock (_inputs)
-        {
-            foreach (KeyValuePair<string, Value> input in folded)
-            {
-                _inputs.Add(new RecordedValue(input.Key, input.Value));
-            }
-        }
+        Pending.RecordInputs(folded);
     }
 
     /// <remarks>
@@ -155,38 +150,74 @@ public sealed class OperationScope
     }
 
     /// <summary>Projects the operation's return value, or returns null when it is void.</summary>
-    internal RecordedValue? ProjectResult(object? result)
+    internal Value? ProjectResult(object? result)
     {
         SemanticType? declared = OperationMetadata.For(Method).Result;
-        return declared is null
-            ? null
-            : new RecordedValue(OperationMetadata.ResultName, ValueProjector.Project(declared, result));
+        return declared is null ? null : ValueProjector.Project(declared, result);
     }
 
-    internal void Complete(SpanStatus status, RecordedValue? result, Exception? exception)
+    /// <summary>
+    /// Completes the span on the <c>result</c> channel, or on no channel at all
+    /// when the operation returns nothing.
+    /// </summary>
+    /// <remarks>
+    /// A void operation reports no completion event, matching Rust's
+    /// <c>NativeTerminal::Unit</c>: the span is still <c>Ok</c>, but there is no
+    /// terminal value to record.
+    /// </remarks>
+    internal void CompleteValue(Value? result)
     {
-        if (Session is null || Completed)
+        if (!TryBeginCompletion())
         {
             return;
         }
 
-        Completed = true;
+        Func<ulong, long, Completion>? completion = result is null
+            ? null
+            : (order, time) => new ResultCompletion(order, time, result);
+        Session!.Complete(Pending!, completion);
+    }
 
-        RecordedValue[] inputs;
-        lock (_inputs)
+    /// <summary>
+    /// Completes the span for an operation that terminated by throwing.
+    /// </summary>
+    /// <remarks>
+    /// An exception the operation declares through <c>[SpecException]</c> is its
+    /// semantic error outcome, so it is recorded on the <c>error</c> channel with
+    /// the message as its value, exactly as Rust records a declared
+    /// <c>Result::Err</c>. Any other exception is not part of the operation's
+    /// contract: it becomes an unexpected target fault, which carries no CLR type
+    /// or message, because Rust's fault channel records neither and a channel
+    /// only one producer can fill is not comparable evidence.
+    /// </remarks>
+    internal void CompleteThrown(Exception exception)
+    {
+        if (!TryBeginCompletion())
         {
-            inputs = [.. _inputs];
+            return;
         }
 
-        Session.Record(new RecordedSpan(
-            SpanId,
-            Parent?.SpanId,
-            Component,
-            Operation,
-            inputs,
-            status,
-            result,
-            exception?.GetType().FullName,
-            exception?.Message));
+        bool declared = OperationMetadata.For(Method).MapsException(exception);
+        Func<ulong, long, Completion> completion = declared
+            ? (order, time) => new ErrorCompletion(
+                order, time, OperationMetadata.ErrorName, Value.String(exception.Message))
+            : (order, time) => new FaultCompletion(
+                order,
+                time,
+                NativeFault.UnexpectedTargetFault,
+                NativeFault.UnwoundMessage,
+                NativeFault.TargetObserver);
+        Session!.Complete(Pending!, completion);
+    }
+
+    private bool TryBeginCompletion()
+    {
+        if (Session is null || Pending is null || Completed)
+        {
+            return false;
+        }
+
+        Completed = true;
+        return true;
     }
 }

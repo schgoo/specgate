@@ -21,4 +21,10 @@
   <ItemGroup>
     <ProjectReference Include="..\SpecGate.Annotations\SpecGate.Annotations.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- The native capture sidecar is a cross-language protocol, so this runtime
+         writes JSON itself rather than handing a model to the CLI. netstandard2.0
+         has no in-box JSON writer. -->
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  </ItemGroup>
 </Project>

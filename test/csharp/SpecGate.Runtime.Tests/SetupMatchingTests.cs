@@ -1,5 +1,6 @@
 using System.Reflection;
 using SpecGate.Annotations;
+using SpecGate.TestSupport;
 using Xunit;
 
 namespace SpecGate.Runtime.Tests;
@@ -22,22 +23,22 @@ public sealed class SetupMatchingTests
     [Fact]
     public void TwoClrTypesSharingOneEventNameAreOneSemanticType()
     {
-        using CaptureSession session = SpecGateRuntime.BeginSession(Component);
+        using CaptureSession session = CaptureScenario.Begin(Component);
 
         // MakeBox returns BoxOne and the operation declares BoxTwo. They are
         // distinct CLR types publishing one registry-visible name, which is what
         // discovery folds on, so the setup still infers the 'box' parameter.
         RunSetup(nameof(SetupDeclarations.MakeBox));
-        RecordedSpan span = Operate(
+        OperationSpan span = Operate(
             session, nameof(SetupDeclarations.FoldByType), "fold_by_type", [new BoxTwo(), 7]);
 
-        Assert.Equal(["count"], span.Inputs.Select(input => input.Name));
+        Assert.Equal(["count"], span.Inputs.Keys);
     }
 
     [Fact]
     public void ASetupMatchingSeveralParametersIsRejected()
     {
-        using CaptureSession session = SpecGateRuntime.BeginSession(Component);
+        using CaptureSession session = CaptureScenario.Begin(Component);
 
         RunSetup(nameof(SetupDeclarations.MakeAmbiguous));
         SpecGateCaptureException rejection = Reject(
@@ -51,7 +52,7 @@ public sealed class SetupMatchingTests
     [Fact]
     public void ASetupFillingAnUndeclaredParameterIsRejected()
     {
-        using CaptureSession session = SpecGateRuntime.BeginSession(Component);
+        using CaptureSession session = CaptureScenario.Begin(Component);
 
         RunSetup(nameof(SetupDeclarations.MakeUnknownFill));
         SpecGateCaptureException rejection = Reject(
@@ -64,7 +65,7 @@ public sealed class SetupMatchingTests
     [Fact]
     public void AFilledArgumentIsStillProjectedBeforeItIsDiscarded()
     {
-        using CaptureSession session = SpecGateRuntime.BeginSession(Component);
+        using CaptureSession session = CaptureScenario.Begin(Component);
 
         RunSetup(nameof(SetupDeclarations.MakeFilled));
 
@@ -95,14 +96,14 @@ public sealed class SetupMatchingTests
     private static void RunSetup(string name, params object?[] arguments) =>
         SpecGateRuntime.CommitSetup(SpecGateRuntime.StageSetup(Handle(name), arguments));
 
-    private static RecordedSpan Operate(
+    private static OperationSpan Operate(
         CaptureSession session, string name, string operation, object?[] arguments)
     {
         OperationScope scope = SpecGateRuntime.EnterOperation(Handle(name), operation, Component);
         SpecGateRuntime.RecordInputs(scope, arguments);
         SpecGateRuntime.ExitOk(scope, 0);
 
-        return Assert.Single(session.Spans);
+        return Assert.Single(session.Finish().Operations);
     }
 
     private static SpecGateCaptureException Reject(
