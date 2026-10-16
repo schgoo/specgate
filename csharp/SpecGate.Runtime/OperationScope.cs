@@ -219,6 +219,21 @@ public sealed class OperationScope
         Session!.Complete(Pending!, completion);
     }
 
+    /// <summary>
+    /// Completes the span for an operation its caller discarded before it
+    /// reached an outcome. The span stays <c>UNSET</c> and no failure propagates
+    /// to its parents, per <c>docs/decisions/abandonment-terminal-state.md</c>.
+    /// </summary>
+    internal void CompleteAbandoned()
+    {
+        if (!TryBeginCompletion())
+        {
+            return;
+        }
+
+        Session!.Complete(Pending!, (order, time) => new AbandonedCompletion(order, time));
+    }
+
     private bool TryBeginCompletion()
     {
         if (Session is null || Pending is null || Completed)

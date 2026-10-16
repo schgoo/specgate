@@ -10,10 +10,11 @@ namespace SpecGate.WeaverNegativeFixtures;
 /// </summary>
 public static class Unsupported
 {
-    [SpecOperation("delayed_add", Spec = "weaver.negative")]
-    public static async Task<int> DelayedAddAsync([SpecInput("a")] int a, [SpecInput("b")] int b)
+    // An async void method has no awaitable for the caller, so completion cannot
+    // be observed and the weaver must refuse it.
+    [SpecOperation("fire_and_forget", Spec = "weaver.negative")]
+    public static async void FireAndForget([SpecInput("a")] int a)
     {
         await Task.Yield();
-        return a + b;
     }
 }

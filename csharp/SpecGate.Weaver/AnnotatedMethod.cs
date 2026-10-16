@@ -18,6 +18,35 @@ internal static class AnnotatedMethod
         "System.Runtime.CompilerServices.AsyncStateMachineAttribute";
     private const string IteratorStateMachineAttribute =
         "System.Runtime.CompilerServices.IteratorStateMachineAttribute";
+    private const string AsyncIteratorStateMachineAttribute =
+        "System.Runtime.CompilerServices.AsyncIteratorStateMachineAttribute";
+
+    /// <summary>
+    /// The awaitable a woven async operation returns, which selects the runtime
+    /// observer that completes it, or <see cref="AsyncShape.None"/> when the
+    /// method is not async.
+    /// </summary>
+    internal static AsyncShape ShapeOf(MethodDefinition method)
+    {
+        if (!HasAttribute(method, AsyncStateMachineAttribute))
+        {
+            return AsyncShape.None;
+        }
+
+        TypeReference type = method.ReturnType;
+        return (type.Namespace, type.Name, type.IsGenericInstance) switch
+        {
+            ("System.Threading.Tasks", "Task", false) => AsyncShape.Task,
+            ("System.Threading.Tasks", "Task`1", true) => AsyncShape.TaskOfT,
+            ("System.Threading.Tasks", "ValueTask", false) => AsyncShape.ValueTask,
+            ("System.Threading.Tasks", "ValueTask`1", true) => AsyncShape.ValueTaskOfT,
+            _ => AsyncShape.Unsupported,
+        };
+    }
+
+    private static bool IsSupportedAsync(MethodDefinition method, string kind) =>
+        string.Equals(kind, "operation", StringComparison.Ordinal)
+        && ShapeOf(method) is not (AsyncShape.None or AsyncShape.Unsupported);
 
     internal static List<CustomAttribute> Annotations(MethodDefinition method, string attributeFullName) =>
     [
@@ -36,11 +65,19 @@ internal static class AnnotatedMethod
                 $"{method.FullName} is annotated as a SpecGate {kind} but has no body.");
         }
 
-        if (HasAttribute(method, AsyncStateMachineAttribute))
+        if (HasAttribute(method, AsyncStateMachineAttribute) && !IsSupportedAsync(method, kind))
         {
             throw new WeaveException(
-                $"{method.FullName} is an async {kind}. C# async capture is not supported yet; "
-                + $"see issue #71. Remove the annotation or make the {kind} synchronous.");
+                $"{method.FullName} is an async {kind} returning '{method.ReturnType.FullName}'. "
+                + "Async capture supports operations returning Task, Task<T>, ValueTask, or "
+                + "ValueTask<T>; async setups, async void, and other awaitable types are not captured.");
+        }
+
+        if (HasAttribute(method, AsyncIteratorStateMachineAttribute))
+        {
+            throw new WeaveException(
+                $"{method.FullName} is an async iterator {kind}. Stream capture is not supported; "
+                + "return a materialized collection instead.");
         }
 
         if (HasAttribute(method, IteratorStateMachineAttribute))

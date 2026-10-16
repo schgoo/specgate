@@ -10,13 +10,13 @@ namespace SpecGate.Weaver.Tests;
 public sealed class WeaveRejectionTests
 {
     [Fact]
-    public void RejectsAnnotatedAsyncOperation()
+    public void RejectsAsyncVoidOperation()
     {
         WeaveException failure = WeaveFixture("SpecGate.WeaverNegativeFixtures");
 
-        Assert.Contains("DelayedAddAsync", failure.Message, StringComparison.Ordinal);
-        Assert.Contains("async", failure.Message, StringComparison.Ordinal);
-        Assert.Contains("#71", failure.Message, StringComparison.Ordinal);
+        Assert.Contains("FireAndForget", failure.Message, StringComparison.Ordinal);
+        Assert.Contains("async operation returning", failure.Message, StringComparison.Ordinal);
+        Assert.Contains("Task, Task<T>, ValueTask, or", failure.Message, StringComparison.Ordinal);
     }
 
     [Fact]

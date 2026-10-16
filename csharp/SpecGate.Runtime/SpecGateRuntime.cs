@@ -1,6 +1,8 @@
 using System;
 using System.ComponentModel;
+using System.Runtime.ExceptionServices;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace SpecGate.Runtime;
 
@@ -219,6 +221,218 @@ public static class SpecGateRuntime
         finally
         {
             Restore(scope);
+        }
+    }
+
+    /// <summary>
+    /// Completes an asynchronous operation when its task settles. Called by woven
+    /// code in place of <see cref="ExitOk"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The woven method is the compiler's non-async kick-off stub, so by the time
+    /// it reaches here the body has run to its first suspension point and the
+    /// operation is already open: recording begins at the call, never at some
+    /// later construction step. The scope is restored for the caller on return,
+    /// while the state machine's captured execution context keeps the scope
+    /// current for every continuation.
+    /// </para>
+    /// <para>
+    /// The returned task replaces the original. It settles after the operation
+    /// has been completed, so the caller's next operation cannot be recorded
+    /// before this one ends.
+    /// </para>
+    /// </remarks>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public static Task ObserveTask(OperationScope scope, Task task)
+    {
+        RequireObservable(scope, task);
+        try
+        {
+            return scope.IsRecording ? ObserveTaskCore(scope, task) : task;
+        }
+        finally
+        {
+            Restore(scope);
+        }
+    }
+
+    /// <inheritdoc cref="ObserveTask(OperationScope, Task)"/>
+    /// <typeparam name="T">The awaited result type.</typeparam>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public static Task<T> ObserveTask<T>(OperationScope scope, Task<T> task)
+    {
+        RequireObservable(scope, task);
+        try
+        {
+            return scope.IsRecording ? ObserveTaskCore(scope, task) : task;
+        }
+        finally
+        {
+            Restore(scope);
+        }
+    }
+
+    /// <inheritdoc cref="ObserveTask(OperationScope, Task)"/>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public static ValueTask ObserveValueTask(OperationScope scope, ValueTask task)
+    {
+        RequireScope(scope);
+        try
+        {
+            return scope.IsRecording ? ObserveValueTaskCore(scope, task) : task;
+        }
+        finally
+        {
+            Restore(scope);
+        }
+    }
+
+    /// <inheritdoc cref="ObserveTask(OperationScope, Task)"/>
+    /// <typeparam name="T">The awaited result type.</typeparam>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public static ValueTask<T> ObserveValueTask<T>(OperationScope scope, ValueTask<T> task)
+    {
+        RequireScope(scope);
+        try
+        {
+            return scope.IsRecording ? ObserveValueTaskCore(scope, task) : task;
+        }
+        finally
+        {
+            Restore(scope);
+        }
+    }
+
+    private static async Task ObserveTaskCore(OperationScope scope, Task task)
+    {
+        Exception? failure = null;
+        try
+        {
+            await task.ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            failure = exception;
+        }
+
+        if (failure is null)
+        {
+            scope.CompleteValue(null);
+            return;
+        }
+
+        FinishFailed(scope, failure, task.IsCanceled);
+    }
+
+    private static async Task<T> ObserveTaskCore<T>(OperationScope scope, Task<T> task)
+    {
+        Exception? failure = null;
+        T result = default!;
+        try
+        {
+            result = await task.ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            failure = exception;
+        }
+
+        if (failure is null)
+        {
+            scope.CompleteValue(scope.ProjectResult(result));
+            return result;
+        }
+
+        FinishFailed(scope, failure, task.IsCanceled);
+        return result;
+    }
+
+    private static async ValueTask ObserveValueTaskCore(OperationScope scope, ValueTask task)
+    {
+        Exception? failure = null;
+        bool canceled = false;
+        try
+        {
+            await task.ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            failure = exception;
+            canceled = exception is OperationCanceledException;
+        }
+
+        if (failure is null)
+        {
+            scope.CompleteValue(null);
+            return;
+        }
+
+        FinishFailed(scope, failure, canceled);
+    }
+
+    private static async ValueTask<T> ObserveValueTaskCore<T>(OperationScope scope, ValueTask<T> task)
+    {
+        Exception? failure = null;
+        bool canceled = false;
+        T result = default!;
+        try
+        {
+            result = await task.ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            failure = exception;
+            canceled = exception is OperationCanceledException;
+        }
+
+        if (failure is null)
+        {
+            scope.CompleteValue(scope.ProjectResult(result));
+            return result;
+        }
+
+        FinishFailed(scope, failure, canceled);
+        return result;
+    }
+
+    /// <summary>
+    /// Completes the span for a task that did not return, then rethrows the
+    /// original exception with its stack intact.
+    /// </summary>
+    /// <remarks>
+    /// A canceled task is the operation being discarded by its caller before it
+    /// reached an outcome, which is what Rust records as abandonment when a
+    /// future is dropped. Any other exception is a thrown operation.
+    /// </remarks>
+    private static void FinishFailed(OperationScope scope, Exception failure, bool canceled)
+    {
+        if (canceled)
+        {
+            scope.CompleteAbandoned();
+        }
+        else
+        {
+            scope.CompleteThrown(failure);
+        }
+
+        ExceptionDispatchInfo.Capture(failure).Throw();
+    }
+
+    private static void RequireObservable(OperationScope scope, Task task)
+    {
+        RequireScope(scope);
+        if (task is null)
+        {
+            throw new ArgumentNullException(nameof(task));
+        }
+    }
+
+    private static void RequireScope(OperationScope scope)
+    {
+        if (scope is null)
+        {
+            throw new ArgumentNullException(nameof(scope));
         }
     }
 

@@ -42,7 +42,7 @@ internal sealed class MethodWeaver(ModuleDefinition module, RuntimeReferences ru
             il.InsertBefore(firstOriginal, instruction);
         }
 
-        List<Instruction> epilogue = BuildEpilogue(il, scope, result);
+        List<Instruction> epilogue = BuildEpilogue(il, method, scope, result);
         Instruction epilogueStart = epilogue[0];
         RedirectReturns(il, body, epilogueStart, result);
 
@@ -203,11 +203,21 @@ internal sealed class MethodWeaver(ModuleDefinition module, RuntimeReferences ru
 
     private List<Instruction> BuildEpilogue(
         ILProcessor il,
+        MethodDefinition method,
         VariableDefinition scope,
         VariableDefinition? result)
     {
         List<Instruction> epilogue = [il.Create(OpCodes.Ldloc, scope)];
-        if (result is null)
+        AsyncShape shape = AnnotatedMethod.ShapeOf(method);
+        if (shape != AsyncShape.None)
+        {
+            // The compiler's stub has already started the body, so the operation
+            // stays open until the returned awaitable settles. The observer hands
+            // back the awaitable the caller must await in its place.
+            epilogue.Add(il.Create(OpCodes.Ldloc, result!));
+            epilogue.Add(il.Create(OpCodes.Call, runtime.ObserverFor(shape, method.ReturnType)));
+        }
+        else if (result is null)
         {
             epilogue.Add(il.Create(OpCodes.Call, runtime.ExitVoid));
         }
