@@ -25,6 +25,14 @@ internal static class Boundaries
 
     internal static string Fetch() => "response";
 
+    internal static Task<string> FetchAsync() => Task.FromResult("response");
+
+    internal static Task ResetAsync() => Task.CompletedTask;
+
+    internal static ValueTask<string> FetchValueAsync() => new("response");
+
+    internal static ValueTask ResetValueAsync() => default;
+
     internal static void Reset()
     {
     }

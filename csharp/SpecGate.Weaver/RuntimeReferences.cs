@@ -26,7 +26,8 @@ internal sealed class RuntimeReferences
         MethodReference exitVoid,
         MethodReference exitError,
         MethodReference stageSetup,
-        MethodReference commitSetup)
+        MethodReference commitSetup,
+        MethodReference[] observers)
     {
         ScopeType = scopeType;
         StagingType = stagingType;
@@ -38,6 +39,27 @@ internal sealed class RuntimeReferences
         ExitError = exitError;
         StageSetup = stageSetup;
         CommitSetup = commitSetup;
+        _observers = observers;
+    }
+
+    private readonly MethodReference[] _observers;
+
+    /// <summary>
+    /// The runtime observer that completes an async operation returning
+    /// <paramref name="returnType"/>, instantiated over its awaited type when
+    /// the shape is generic.
+    /// </summary>
+    internal MethodReference ObserverFor(AsyncShape shape, TypeReference returnType)
+    {
+        MethodReference observer = _observers[(int)shape - (int)AsyncShape.Task];
+        if (shape is not (AsyncShape.TaskOfT or AsyncShape.ValueTaskOfT))
+        {
+            return observer;
+        }
+
+        GenericInstanceMethod instance = new(observer);
+        instance.GenericArguments.Add(((GenericInstanceType)returnType).GenericArguments[0]);
+        return instance;
     }
 
     internal TypeReference ScopeType { get; }
@@ -89,7 +111,13 @@ internal sealed class RuntimeReferences
             module.ImportReference(FindMethod(runtimeType, "ExitVoid")),
             module.ImportReference(FindMethod(runtimeType, "ExitError")),
             module.ImportReference(FindMethod(runtimeType, "StageSetup")),
-            module.ImportReference(FindMethod(runtimeType, "CommitSetup")));
+            module.ImportReference(FindMethod(runtimeType, "CommitSetup")),
+            [
+                module.ImportReference(FindMethod(runtimeType, "ObserveTask", genericParameters: 0)),
+                module.ImportReference(FindMethod(runtimeType, "ObserveTask", genericParameters: 1)),
+                module.ImportReference(FindMethod(runtimeType, "ObserveValueTask", genericParameters: 0)),
+                module.ImportReference(FindMethod(runtimeType, "ObserveValueTask", genericParameters: 1)),
+            ]);
     }
 
     /// <summary>
@@ -136,9 +164,11 @@ internal sealed class RuntimeReferences
             ?? throw new WeaveException($"{RuntimeAssembly} does not define {fullName}.");
     }
 
-    private static MethodDefinition FindMethod(TypeDefinition type, string name)
+    private static MethodDefinition FindMethod(TypeDefinition type, string name, int genericParameters = 0)
     {
-        return type.Methods.FirstOrDefault(method => string.Equals(method.Name, name, StringComparison.Ordinal))
+        return type.Methods.FirstOrDefault(method =>
+                string.Equals(method.Name, name, StringComparison.Ordinal)
+                && method.GenericParameters.Count == genericParameters)
             ?? throw new WeaveException($"{type.FullName} does not define {name}.");
     }
 }

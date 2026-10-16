@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Threading.Tasks;
 using SpecGate.Annotations;
 
 namespace SpecGate.Runtime;
@@ -110,10 +111,39 @@ internal sealed class OperationMetadata
         SemanticType? result = null;
         if (method is MethodInfo function && function.ReturnType != typeof(void))
         {
-            result = SemanticType.ForParameter(function.ReturnParameter, function);
+            result = ResultOf(function);
         }
 
         return new OperationMetadata(inputs, result, DeclaredExceptionsOf(method));
+    }
+
+    /// <summary>
+    /// The meaning of what an operation produces, which for an asynchronous
+    /// operation is the awaited value rather than the task that carries it.
+    /// </summary>
+    /// <remarks>
+    /// This mirrors discovery's unwrapping, so a captured result has the type the
+    /// registry publishes. The task's own nullability byte precedes its type
+    /// argument's, and is consumed before the awaited type is mapped.
+    /// </remarks>
+    private static SemanticType? ResultOf(MethodInfo function)
+    {
+        Type returnType = function.ReturnType;
+        if (returnType == typeof(Task) || returnType == typeof(ValueTask))
+        {
+            return null;
+        }
+
+        if (returnType.IsGenericType
+            && (returnType.GetGenericTypeDefinition() == typeof(Task<>)
+                || returnType.GetGenericTypeDefinition() == typeof(ValueTask<>)))
+        {
+            NullableFlagReader flags = NullableFlagReader.ForParameter(function.ReturnParameter, function);
+            flags.Next();
+            return SemanticType.Map(returnType.GetGenericArguments()[0], flags);
+        }
+
+        return SemanticType.ForParameter(function.ReturnParameter, function);
     }
 
     /// <remarks>

@@ -52,7 +52,7 @@ async C#. MVP+1 is what serves them.
 |---|---|---|
 | Registry discovery | Rust link-time and C# compiled-assembly reflection; byte-identical for stateless, rich-type, and setup-folding fixtures | `specgate-discovery` |
 | Trace capture | Rust libtest only; synchronous calls and directly-awaited async operations | `capture.rs:189`, migration limitations |
-| C# trace capture | IL weaving instruments annotated synchronous methods, and recording produces CTSC semantic values projected at the boundary from the woven method's own reflection metadata. `[SpecSetup]` producers commit construction provenance that the operations they prepare fold into their input surface. Still missing: trace serialization, async, and a `specgate capture` path that accepts a C# binding | `csharp/SpecGate.Weaver`, `csharp/SpecGate.Runtime/ValueProjector.cs` |
+| C# trace capture | IL weaving instruments annotated synchronous methods, and recording produces CTSC semantic values projected at the boundary from the woven method's own reflection metadata. `[SpecSetup]` producers commit construction provenance that the operations they prepare fold into their input surface. Async operations (`Task`, `Task<T>`, `ValueTask`, `ValueTask<T>`) capture too, with cancellation recorded as abandonment. Still missing: trace serialization and a `specgate capture` path that accepts a C# binding | `csharp/SpecGate.Weaver`, `csharp/SpecGate.Runtime/ValueProjector.cs` |
 | Async capture | A directly-awaited async operation captures: recording begins at first poll (M2 slice 1). A future resumed on another executor thread records under the operation that built it, and two instrumented operations interleaved on one thread both record correctly (M2 slice 2). An async operation dropped before it completes records `conformance.abandoned` (M2 slice 3). Still unsupported: async `#[spec_setup]`, operations first reached on a raw `std::thread::spawn`ed thread, and top-level abandonment - an abandoned async operation with no enclosing and no subsequent annotated operation, which `specgate capture` drops rather than records. Setup-input staging remains thread-affine | `annotations-macros/src/lib.rs` async arm, `PENDING_SETUP_INPUTS` |
 | Observations | Captured but never declared; a component emitting one cannot produce a linkable bundle | migration limitations |
 | Comparison | `compare <reference-trace> <candidate-trace>` exists; fixed `ctsc.strict/0.1.0`; scenarios paired by name | `comparison.rs:185-195` |
@@ -262,8 +262,10 @@ during the build, and `SpecGate.Weaver.Tests` executes the woven fixtures and
 asserts on inputs, results, parentage, and terminal status. A capture session
 targets exactly one component, matching `specgate capture --component`, because
 a method may declare the same operation for several components and recording
-all of them would produce multiple spans for one call. Annotated `async`
-methods and iterators fail the weave loudly; async C# capture is #71.
+all of them would produce multiple spans for one call. Async capture landed
+in #71: the weaver wraps the compiler's async stub and the runtime completes
+the span when the task settles; see
+[`decisions/csharp-async-capture.md`](decisions/csharp-async-capture.md).
 
 The first #45 slice replaced that runtime's raw `object?` buffer with the CTSC
 value model. The weaver hands the runtime each operation's
