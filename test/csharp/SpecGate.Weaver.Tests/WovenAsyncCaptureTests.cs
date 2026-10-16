@@ -93,6 +93,36 @@ public sealed class WovenAsyncCaptureTests
     }
 
     [Fact]
+    public async Task ForwardingTaskStaysOpenUntilItSettlesAndRecordsItsValue()
+    {
+        using CaptureSession session = CaptureScenario.Begin("weaver.async");
+        AsyncOperations.Pending = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        Task<int> pending = AsyncOperations.Forward(1);
+
+        Assert.False(pending.IsCompleted);
+        AsyncOperations.Pending.SetResult(7);
+        Assert.Equal(7, await pending);
+        OperationSpan span = Assert.Single(session.Finish().Operations);
+        Assert.Equal(SpanStatus.Ok, span.Status);
+        Assert.Equal(Value.Integer(7), span.Result());
+    }
+
+    [Fact]
+    public async Task ForwardingTaskRecordsAFault()
+    {
+        using CaptureSession session = CaptureScenario.Begin("weaver.async");
+        AsyncOperations.Pending = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        Task pending = AsyncOperations.ForwardUnit(1);
+        AsyncOperations.Pending.SetException(new InvalidOperationException("boom"));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => pending);
+        OperationSpan span = Assert.Single(session.Finish().Operations);
+        Assert.Equal(SpanStatus.Error, span.Status);
+    }
+
+    [Fact]
     public async Task NestsAnAwaitedOperationUnderItsCaller()
     {
         using CaptureSession session = CaptureScenario.Begin("weaver.async");

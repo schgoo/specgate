@@ -21,7 +21,8 @@ but uncapturable operations. Rust has no `ValueTask` equivalent.
 ## Decision
 
 - The weaver keeps the prologue and the synchronous-throw catch of an annotated
-  operation, but replaces the normal-exit epilogue of an async stub with a call
+  operation, but replaces the normal-exit epilogue of an operation returning `Task`/`ValueTask` (selected by return type, whether
+  or not it uses the `async` modifier) with a call
   to a runtime observer (`ObserveTask`, `ObserveTask<T>`, `ObserveValueTask`,
   `ObserveValueTask<T>`). The observer returns a replacement awaitable that
   settles only after the span is completed, so the caller never sees a settled

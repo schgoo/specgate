@@ -55,6 +55,15 @@ public static class AsyncOperations
         return value;
     }
 
+    /// <summary>Completed by tests to settle <see cref="Forward"/>.</summary>
+    public static TaskCompletionSource<int> Pending { get; set; } = new();
+
+    [SpecOperation("forward", Spec = "weaver.async")]
+    public static Task<int> Forward([SpecInput("value")] int value) => Pending.Task;
+
+    [SpecOperation("forward_unit", Spec = "weaver.async")]
+    public static Task ForwardUnit([SpecInput("value")] int value) => Pending.Task;
+
     [SpecOperation("outer", Spec = "weaver.async")]
     public static async Task<int> OuterAsync([SpecInput("value")] int value)
     {

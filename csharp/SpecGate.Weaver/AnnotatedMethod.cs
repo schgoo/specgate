@@ -28,11 +28,8 @@ internal static class AnnotatedMethod
     /// </summary>
     internal static AsyncShape ShapeOf(MethodDefinition method)
     {
-        if (!HasAttribute(method, AsyncStateMachineAttribute))
-        {
-            return AsyncShape.None;
-        }
-
+        // Selected by return type, not by the async modifier: a forwarding
+        // method returning a Task is still pending when it returns.
         TypeReference type = method.ReturnType;
         return (type.Namespace, type.Name, type.IsGenericInstance) switch
         {
@@ -40,7 +37,9 @@ internal static class AnnotatedMethod
             ("System.Threading.Tasks", "Task`1", true) => AsyncShape.TaskOfT,
             ("System.Threading.Tasks", "ValueTask", false) => AsyncShape.ValueTask,
             ("System.Threading.Tasks", "ValueTask`1", true) => AsyncShape.ValueTaskOfT,
-            _ => AsyncShape.Unsupported,
+            _ => HasAttribute(method, AsyncStateMachineAttribute)
+                ? AsyncShape.Unsupported
+                : AsyncShape.None,
         };
     }
 
