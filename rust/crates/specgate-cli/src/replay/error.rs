@@ -35,7 +35,7 @@ type ReplayErrorKind = FailureStage;
 /// # Examples
 /// ```
 /// use specgate_cli::replay::{Paths, Request};
-/// let error = Request::builder(Paths::new("", "binding.yaml", "out.json"))
+/// let error = Request::builder(Paths::new("", "binding.yaml"))
 ///     .build().unwrap_err();
 /// assert!(!error.to_string().is_empty());
 /// ```

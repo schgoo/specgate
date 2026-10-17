@@ -2,12 +2,7 @@
   "format": "specgate.ctsc-golden-matrix",
   "formatVersion": "0.1.0",
   "artifactRoot": "test/goldens/ctsc",
-  "bindings": {
-    "csharp": "test/bindings/csharp.yaml",
-    "rust": "test/bindings/rust.yaml",
-    "rust-negative": "test/rust/negative-fixtures/specgate-ctsc-negative-fixtures.binding.yaml",
-    "rust-umbrella": "test/bindings/rust-umbrella.yaml"
-  },
+  "binding": "test/bindings/specgate.yaml",
   "sources": {
     "roots": [
       "test/csharp/SpecGate.CtscFixtures",
@@ -834,7 +829,7 @@
         "test/rust/crates/specgate-facade-umbrella/src/lib.rs"
       ],
       "rust": {
-        "binding": "rust-umbrella",
+        "binding": "rust",
         "phases": [
           "discover",
           "capture"
@@ -2721,7 +2716,7 @@
         "test/rust/negative-fixtures/specgate-ctsc-negative-fixtures/src/lib.rs"
       ],
       "rust": {
-        "binding": "rust-negative",
+        "binding": "rust",
         "phases": [
           "discover"
         ],
@@ -2755,7 +2750,7 @@
         "test/rust/negative-fixtures/specgate-ctsc-negative-fixtures/src/lib.rs"
       ],
       "rust": {
-        "binding": "rust-negative",
+        "binding": "rust",
         "phases": [
           "discover"
         ],
@@ -2789,7 +2784,7 @@
         "test/rust/negative-fixtures/specgate-ctsc-negative-fixtures/src/lib.rs"
       ],
       "rust": {
-        "binding": "rust-negative",
+        "binding": "rust",
         "phases": [
           "discover"
         ],
@@ -2823,7 +2818,7 @@
         "test/rust/negative-fixtures/specgate-ctsc-negative-fixtures/src/lib.rs"
       ],
       "rust": {
-        "binding": "rust-negative",
+        "binding": "rust",
         "phases": [
           "discover"
         ],
@@ -2857,7 +2852,7 @@
         "test/rust/negative-fixtures/specgate-ctsc-negative-fixtures/src/lib.rs"
       ],
       "rust": {
-        "binding": "rust-negative",
+        "binding": "rust",
         "phases": [
           "discover"
         ],
@@ -2891,7 +2886,7 @@
         "test/rust/negative-fixtures/specgate-ctsc-negative-fixtures/src/lib.rs"
       ],
       "rust": {
-        "binding": "rust-negative",
+        "binding": "rust",
         "phases": [
           "discover"
         ],
@@ -2925,7 +2920,7 @@
         "test/rust/negative-fixtures/specgate-ctsc-negative-fixtures/src/lib.rs"
       ],
       "rust": {
-        "binding": "rust-negative",
+        "binding": "rust",
         "phases": [
           "discover"
         ],
@@ -2959,7 +2954,7 @@
         "test/rust/negative-fixtures/specgate-ctsc-negative-fixtures/src/lib.rs"
       ],
       "rust": {
-        "binding": "rust-negative",
+        "binding": "rust",
         "phases": [
           "discover"
         ],
@@ -2993,7 +2988,7 @@
         "test/rust/negative-fixtures/specgate-ctsc-negative-fixtures/src/value_surfaces.rs"
       ],
       "rust": {
-        "binding": "rust-negative",
+        "binding": "rust",
         "phases": [
           "discover"
         ],
@@ -3027,7 +3022,7 @@
         "test/rust/negative-fixtures/specgate-ctsc-negative-fixtures/src/unresolved_type.rs"
       ],
       "rust": {
-        "binding": "rust-negative",
+        "binding": "rust",
         "phases": [
           "discover"
         ],
@@ -3061,7 +3056,7 @@
         "test/rust/negative-fixtures/specgate-ctsc-negative-fixtures/src/templates/compile_error.rs.in"
       ],
       "rust": {
-        "binding": "rust-negative",
+        "binding": "rust",
         "phases": [
           "build"
         ],
@@ -3210,15 +3205,15 @@
       "limitations": [],
       "replacement": {
         "feature": "spec-declared target routing and per-case target selection",
-        "rationale": "Case-level target routing was replaced by strict binding resolution plus an explicit divergence witness. One binding target is resolved per invocation, and cross-target divergence is observed by comparing captured traces rather than by routing declarations.",
+        "rationale": "Case-level target routing was replaced by strict binding resolution plus an explicit divergence witness. The binding parser validates the component, implementation, and path shape strictly, and cross-target divergence is observed by comparing captured traces rather than by routing declarations.",
         "references": [
           {
             "path": "rust/crates/specgate-discovery/src/binding.rs",
-            "test": "parses_all_retained_target_fields"
+            "test": "parses_valid_binding_with_resolved_paths"
           },
           {
             "path": "rust/crates/specgate-discovery/src/binding.rs",
-            "test": "rejects_unknown_fields"
+            "test": "rejects_unknown_fields_at_every_level"
           },
           {
             "path": "test/rust/crates/specgate-ctsc-fixtures/src/conformance/witness/divergence_witness.rs",

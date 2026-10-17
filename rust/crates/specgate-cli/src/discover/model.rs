@@ -8,12 +8,12 @@
 //!     component: ComponentName::parse("example.math")?,
 //!     registry_id: RegistryId::parse("registry-id")?,
 //!     registry_version: RegistryVersion::parse("1")?,
-//! }).target("rust").build()?;
+//! }).implementation("rust").build()?;
 //! assert_eq!(request.component(), "example.math");
 //! # Ok::<(), specgate_cli::discover::Error>(())
 //! ```
 use super::{Error, Path, PathBuf};
-use specgate::{ComponentId, SpecEvent, TargetName};
+use specgate::{ComponentId, ImplementationLabel, SpecEvent};
 
 /// Component identity supplied to discovery.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -110,7 +110,7 @@ pub struct Params {
     pub binding: PathBuf,
     /// Destination registry path.
     pub out: PathBuf,
-    /// Component selected from the binding target.
+    /// Component selected from the binding.
     pub component: ComponentName,
     /// Published registry identity.
     pub registry_id: RegistryId,
@@ -125,7 +125,7 @@ pub struct Request {
     #[spec_event(path)]
     binding: PathBuf,
     #[spec_event]
-    target: TargetName,
+    implementation: ImplementationLabel,
     #[spec_event]
     component: ComponentId,
     registry_id: RegistryId,
@@ -143,7 +143,7 @@ pub struct Request {
 #[must_use]
 pub struct RequestBuilder {
     binding: PathBuf,
-    target: TargetName,
+    implementation: ImplementationLabel,
     component: ComponentId,
     registry_id: RegistryId,
     registry_version: RegistryVersion,
@@ -156,7 +156,7 @@ impl Request {
         let params = params.into();
         RequestBuilder {
             binding: params.binding,
-            target: TargetName::default(),
+            implementation: ImplementationLabel::default(),
             component: ComponentId::from(params.component.as_str()),
             registry_id: params.registry_id,
             registry_version: params.registry_version,
@@ -168,10 +168,10 @@ impl Request {
     pub fn binding(&self) -> &Path {
         &self.binding
     }
-    /// Target name, empty for the binding default.
+    /// Implementation label, empty to auto-select the component's sole implementation.
     #[must_use]
-    pub fn target(&self) -> &str {
-        self.target.as_str()
+    pub fn implementation(&self) -> &str {
+        self.implementation.as_str()
     }
     /// Component identifier.
     #[must_use]
@@ -199,9 +199,9 @@ impl Request {
 }
 
 impl RequestBuilder {
-    /// Select a binding target.
-    pub fn target(mut self, value: impl AsRef<str>) -> Self {
-        self.target = TargetName::from(value.as_ref());
+    /// Select a binding implementation by label.
+    pub fn implementation(mut self, value: impl AsRef<str>) -> Self {
+        self.implementation = ImplementationLabel::from(value.as_ref());
         self
     }
     /// Validate and construct the request.
@@ -217,7 +217,7 @@ impl RequestBuilder {
         }
         Ok(Request {
             binding: self.binding,
-            target: self.target,
+            implementation: self.implementation,
             component: self.component,
             id_event: self.registry_id.to_string(),
             version_event: self.registry_version.to_string(),

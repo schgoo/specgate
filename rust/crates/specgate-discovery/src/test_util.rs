@@ -7,36 +7,40 @@
 //! use specgate_discovery::test_util::Binding;
 //!
 //! let binding = Binding::builder(
-//!     "language: rust\ntargets:\n  default:\n    package_root: fixture\n",
+//!     "components:\n  demo.component:\n    implementations:\n      main:\n        language: rust\n        sources: fixture\n        tests:\n          command: cargo test\n",
 //! )
 //! .build()
 //! .load("virtual/binding.yaml")?;
-//! assert_eq!(binding.language.as_str(), "rust");
+//! let resolved = binding.resolve_implementation("demo.component", None)?;
+//! assert_eq!(resolved.language().as_str(), "rust");
 //! # Ok::<(), specgate_discovery::Error>(())
 //! ```
 //!
 //! Discovery failures use a built [`Discovery`] and the ordinary
-//! resolved target:
+//! resolved implementation:
 //!
 //! ```
-//! use specgate_discovery::binding::{ResolvedTarget, Target};
-//! use specgate_discovery::binding::Language;
+//! use specgate_discovery::binding::{Implementation, LanguageOptions, ResolvedImplementation, Runtime, Tests};
 //! use specgate_discovery::test_util::Discovery;
-//! use specgate_discovery::identity::{ComponentId, TargetName};
+//! use specgate_discovery::identity::{ComponentId, ImplementationLabel};
 //! use std::path::PathBuf;
 //!
-//! let target = ResolvedTarget {
+//! let implementation = ResolvedImplementation {
 //!     binding_path: PathBuf::from("binding.yaml"),
-//!     name: TargetName::from("default"),
-//!     language: Language::Rust,
-//!     target: Target::builder("candidate").build()?,
+//!     component: ComponentId::from("demo.component"),
+//!     label: ImplementationLabel::from("main"),
+//!     implementation: Implementation::new(
+//!         "candidate",
+//!         Tests::Command("cargo test".to_string()),
+//!         LanguageOptions::Rust { runtime: Runtime::Smol },
+//!     )?,
 //! };
 //! let system = Discovery::builder().process_failure("cargo unavailable").build();
-//! assert!(system.discover(target, &[ComponentId::from("demo.component")]).is_err());
+//! assert!(system.discover(implementation, &[ComponentId::from("demo.component")]).is_err());
 //! # Ok::<(), specgate_discovery::Error>(())
 //! ```
 
-use crate::binding::{Binding as LoadedBinding, ResolvedTarget};
+use crate::binding::{Binding as LoadedBinding, ResolvedImplementation};
 use crate::discovery::model::Batch;
 use crate::error::Error;
 use crate::runner::system::{FailureKey, FakeFs, FakeProcess, System as InnerSystem};
@@ -138,9 +142,13 @@ impl Discovery {
     ///
     /// # Errors
     ///
-    /// Returns the ordinary [`Error`] produced by resolved-target discovery.
-    pub fn discover(&self, target: ResolvedTarget, components: impl AsRef<[crate::identity::ComponentId]>) -> Result<Batch, Error> {
-        discover_with(target, components.as_ref(), self)
+    /// Returns the ordinary [`Error`] produced by resolved-implementation discovery.
+    pub fn discover(
+        &self,
+        implementation: ResolvedImplementation,
+        components: impl AsRef<[crate::identity::ComponentId]>,
+    ) -> Result<Batch, Error> {
+        discover_with(implementation, components.as_ref(), self)
     }
 
     /// Resolve candidate and runtime package identity through the fake system.
@@ -159,34 +167,34 @@ impl Discovery {
 ///
 /// # Errors
 ///
-/// Returns the ordinary [`Error`] produced by resolved-target discovery.
+/// Returns the ordinary [`Error`] produced by resolved-implementation discovery.
 pub fn discover_with(
-    target: ResolvedTarget,
+    implementation: ResolvedImplementation,
     components: impl AsRef<[crate::identity::ComponentId]>,
     system: &Discovery,
 ) -> Result<Batch, Error> {
-    crate::discovery::discover_in(target, components.as_ref(), &system.inner)
+    crate::discovery::discover_in(implementation, components.as_ref(), &system.inner)
 }
 
 /// Load, resolve, and discover one component through fake binding and system I/O.
 ///
-/// This is the feature-gated injection counterpart to [`crate::discover`].
+/// This is the feature-gated injection counterpart to [`crate::discover_batch`].
 ///
 /// # Errors
 ///
-/// Returns ordinary binding, target-selection, and discovery errors.
+/// Returns ordinary binding, implementation-selection, and discovery errors.
 ///
 pub fn discover_fake(
     binding: &Binding,
     path: impl AsRef<Path>,
-    target_name: Option<&crate::identity::TargetName>,
     component: crate::identity::ComponentId,
+    implementation: Option<&crate::identity::ImplementationLabel>,
     system: &Discovery,
 ) -> Result<Batch, Error> {
-    let target = binding
+    let resolved = binding
         .load(path)?
-        .resolve_target(target_name.map(crate::identity::TargetName::as_str))?;
-    system.discover(target, &[component])
+        .resolve_implementation(component.as_str(), implementation.map(crate::identity::ImplementationLabel::as_str))?;
+    system.discover(resolved, &[component])
 }
 
 /// Resolve candidate and runtime package identity through a concrete fake system.

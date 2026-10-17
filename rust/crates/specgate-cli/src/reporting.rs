@@ -81,7 +81,7 @@ pub(super) fn format_validation(report: &ValidationReport) -> String {
 /// ```
 /// # use crate::reporting::format_capture;
 /// use specgate_cli::{CapturePaths, CaptureRequest};
-/// let outcome = CaptureRequest::builder(CapturePaths { binding: "".into(), out: "out".into() }).build();
+/// let outcome = CaptureRequest::builder(CapturePaths { binding: "".into() }).build();
 /// assert!(format_capture(&outcome).starts_with("Error("));
 /// ```
 pub(super) fn format_capture(outcome: &Result<specgate_cli::CaptureReport, specgate_cli::CaptureError>) -> String {
@@ -93,7 +93,7 @@ pub(super) fn format_capture(outcome: &Result<specgate_cli::CaptureReport, specg
 /// ```
 /// # use crate::reporting::format_replay;
 /// use specgate_cli::replay::{Paths, Request};
-/// let outcome = Request::builder(Paths::new("", "binding.yaml", "candidate.json")).build();
+/// let outcome = Request::builder(Paths::new("", "binding.yaml")).build();
 /// let rendered = format_replay(&outcome);
 /// assert!(rendered.starts_with("Error("));
 /// assert!(rendered.ends_with("\n"));

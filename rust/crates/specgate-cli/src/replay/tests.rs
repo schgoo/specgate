@@ -24,24 +24,14 @@ mod cases {
             .to_path_buf()
     }
 
-    fn rust_binding() -> PathBuf {
+    fn fixture_binding() -> PathBuf {
         repo_root()
             .join("rust")
             .join("crates")
             .join("specgate-cli")
             .join("tests")
             .join("fixtures")
-            .join("rust.binding.yaml")
-    }
-
-    fn csharp_binding() -> PathBuf {
-        repo_root()
-            .join("rust")
-            .join("crates")
-            .join("specgate-cli")
-            .join("tests")
-            .join("fixtures")
-            .join("csharp.binding.yaml")
+            .join("specgate.yaml")
     }
 
     fn output_dir(label: impl AsRef<str>) -> PathBuf {
@@ -112,8 +102,9 @@ mod cases {
         std::fs::write(
             &binding,
             format!(
-                "language: rust\ntargets:\n  default:\n    package_root: {}\n",
-                cargo_path(&candidate)
+                "components:\n  fixture.configured:\n    implementations:\n      rust:\n        language: rust\n        sources: {}\n        tests:\n          projects:\n            - {}\n",
+                cargo_path(&candidate),
+                cargo_path(candidate.join("Cargo.toml"))
             ),
         )
         .unwrap();
@@ -123,28 +114,32 @@ mod cases {
     #[test]
     fn replay_contract() {
         let capture_dir = output_dir("capture");
-        let first_output = output_dir("first").with_extension("otlp.json");
-        let second_output = output_dir("second").with_extension("otlp.json");
+        let first_output = output_dir("first").join("candidate.otlp.json");
+        let second_output = output_dir("second").join("candidate.otlp.json");
         let _ = std::fs::remove_dir_all(&capture_dir);
-        let _ = std::fs::remove_file(&first_output);
-        let _ = std::fs::remove_file(&second_output);
+        let _ = std::fs::remove_dir_all(first_output.parent().unwrap());
+        let _ = std::fs::remove_dir_all(second_output.parent().unwrap());
+        std::fs::create_dir_all(first_output.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(second_output.parent().unwrap()).unwrap();
 
         let captured = capture(
             CaptureRequest::builder(CapturePaths {
-                binding: rust_binding(),
-                out: capture_dir.clone(),
+                binding: fixture_binding(),
             })
             .component(ComponentId::from("fixture.cli.replay"))
+            .out(&capture_dir)
+            .implementation("rust")
             .build()
             .unwrap(),
         );
         assert!(captured.is_ok(), "capture failed: {captured:?}");
         let component = specgate_discovery::identity::ComponentId::from("fixture.cli.replay");
-        let candidates = Candidates::discover(rust_binding(), None, std::slice::from_ref(&component)).expect("focused candidate discovery");
+        let candidates = Candidates::discover(fixture_binding(), Some(&"rust".into()), std::slice::from_ref(&component))
+            .expect("focused candidate discovery");
         let candidates = Candidates::discover_with(
             &DiscoveryInput {
                 binding: Path::new("unused"),
-                target: None,
+                implementation: None,
                 components: &[],
             },
             &DiscoveryContext {
@@ -179,7 +174,7 @@ mod cases {
         assert_ne!(reference_trace, candidate_trace);
         let candidate_text = String::from_utf8(first_bytes).unwrap();
         assert!(candidate_text.contains("\"conformance.target.name\""));
-        assert!(candidate_text.contains("candidate:specgate-cli-fixtures:default"));
+        assert!(candidate_text.contains("candidate:specgate-cli-fixtures:candidate"));
         assert!(candidate_text.contains("\"conformance.operation.name\""));
         assert!(candidate_text.contains("\"add\""));
         assert!(candidate_text.contains("\"a\""));
@@ -227,10 +222,21 @@ mod cases {
 
         let unsupported_output = output_dir("unsupported-language").with_extension("otlp.json");
         assert!(matches!(
-            replay(Request::builder(Paths::new(&capture_dir, csharp_binding(), &unsupported_output)).build().unwrap()),
+            replay(Request::builder(Paths::new(&capture_dir, fixture_binding())).out(&unsupported_output).implementation("csharp").build().unwrap()),
             Err(error) if error.to_string().contains("only Rust candidates") && error.to_string().contains("csharp")
         ));
         assert!(!unsupported_output.exists());
+
+        let ambiguous_output = output_dir("ambiguous-implementation").with_extension("otlp.json");
+        let ambiguous = replay(
+            Request::builder(Paths::new(&capture_dir, fixture_binding()))
+                .out(&ambiguous_output)
+                .build()
+                .unwrap(),
+        )
+        .expect_err("a component with several implementations requires --impl");
+        assert!(ambiguous.to_string().contains("csharp, rust"), "{ambiguous}");
+        assert!(!ambiguous_output.exists());
 
         let _ = std::fs::remove_dir_all(capture_dir);
         let _ = std::fs::remove_file(first_output);
@@ -243,17 +249,16 @@ mod cases {
         let capture_dir = cache.path().join("capture");
         let replay_output = cache.path().join("candidate.otlp.json");
         let captured = capture(
-            CaptureRequest::builder(CapturePaths {
-                binding: binding.clone(),
-                out: capture_dir.clone(),
-            })
-            .component(ComponentId::from("fixture.configured"))
-            .build()
-            .unwrap(),
+            CaptureRequest::builder(CapturePaths { binding: binding.clone() })
+                .component(ComponentId::from("fixture.configured"))
+                .out(&capture_dir)
+                .build()
+                .unwrap(),
         );
         assert!(captured.is_ok(), "capture failed: {captured:?}");
         let replayed = replay(
-            Request::builder(Paths::new(&capture_dir, &binding, &replay_output))
+            Request::builder(Paths::new(&capture_dir, &binding))
+                .out(&replay_output)
                 .build()
                 .unwrap(),
         );
@@ -271,7 +276,54 @@ mod cases {
             "replay failed: {replayed:?}"
         );
         let output = std::fs::read_to_string(&replay_output).unwrap();
-        assert!(output.contains("candidate:configured-candidate:default"));
+        assert!(
+            output.contains("candidate:configured-candidate:candidate"),
+            "target label is the output file stem"
+        );
+
+        let refused = replay(
+            Request::builder(Paths::new(&capture_dir, &binding))
+                .out(&replay_output)
+                .build()
+                .unwrap(),
+        )
+        .expect_err("an existing output file is refused");
+        assert!(refused.to_string().contains("already exists; pass --force"), "{refused}");
+        let forced = replay(
+            Request::builder(Paths::new(&capture_dir, &binding))
+                .out(&replay_output)
+                .force(true)
+                .build()
+                .unwrap(),
+        );
+        assert!(forced.is_ok(), "--force overwrites: {forced:?}");
+
+        let empty_dir = output_dir("empty-out");
+        let _ = std::fs::remove_dir_all(&empty_dir);
+        std::fs::create_dir_all(&empty_dir).unwrap();
+        let refused_dir = replay(
+            Request::builder(Paths::new(&capture_dir, &binding))
+                .out(&empty_dir)
+                .build()
+                .unwrap(),
+        )
+        .expect_err("an existing empty directory is refused");
+        assert!(refused_dir.to_string().contains("already exists; pass --force"), "{refused_dir}");
+        std::fs::remove_dir_all(&empty_dir).unwrap();
+
+        let unlabeled = replay(
+            Request::builder(Paths::new(&capture_dir, &binding))
+                .out(capture_dir.join("x").join(".otlp.json"))
+                .build()
+                .unwrap(),
+        )
+        .expect_err("an empty label is refused");
+        assert!(unlabeled.to_string().contains("has no label"), "{unlabeled}");
+
+        let defaulted = replay(Request::builder(Paths::new(&capture_dir, &binding)).build().unwrap()).expect("default output replay");
+        assert_eq!(defaulted.output_path, capture_dir.join("candidate-rust-capture.otlp.json"));
+        let output = std::fs::read_to_string(&defaulted.output_path).unwrap();
+        assert!(output.contains("candidate:configured-candidate:candidate-rust-capture"));
     }
 
     #[test]
@@ -383,7 +435,7 @@ mod cases {
                 ReplayLimitation::AsyncOperation,
             ),
             (
-                "replay currently supports only Rust candidates; binding language is 'csharp'",
+                "replay currently supports only Rust candidates; implementation language is 'csharp'",
                 ReplayLimitation::UnsupportedLanguage,
             ),
         ] {
@@ -545,7 +597,7 @@ mod cases {
     fn candidate_metadata(raw: RawOperation, normalized: Operation) -> Candidate {
         Candidate {
             inner: Arc::new(CandidatesInner {
-                target_name: "default".into(),
+                target_name: "rust".into(),
                 language: specgate_discovery::binding::Language::Rust,
                 package_name: "specgate-ctsc-fixtures".into(),
                 package_version: "0.1.0".into(),

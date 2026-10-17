@@ -1,5 +1,5 @@
 use super::*;
-use specgate::{ComponentId, TargetName};
+use specgate::{ComponentId, ImplementationLabel};
 use specgate_cli::discover::{RegistryId, RegistryVersion};
 use std::path::PathBuf;
 
@@ -7,76 +7,156 @@ fn args(values: impl AsRef<[&'static str]>) -> Vec<String> {
     values.as_ref().iter().map(|value| (*value).to_string()).collect()
 }
 
+fn discover_flags(extra: &[&'static str]) -> Vec<String> {
+    let mut flags = args([
+        "--component",
+        "fixture.add",
+        "--registry-id",
+        "registry",
+        "--registry-version",
+        "1",
+        "--out",
+        "registry.json",
+    ]);
+    flags.extend(extra.iter().map(|value| (*value).to_string()));
+    flags
+}
+
 #[test]
 fn parses_arguments() {
     assert_eq!(
-        parse_capture(args(["binding.yaml", "--out", "capture", "--component", "fixture.add"])).unwrap(),
+        parse_capture(args(["--out", "capture", "--component", "fixture.add"])).unwrap(),
         CaptureArgs {
-            binding: PathBuf::from("binding.yaml"),
-            target: TargetName::default(),
+            binding: PathBuf::from("./specgate.yaml"),
+            implementation: None,
             component: ComponentId::from("fixture.add"),
-            out: PathBuf::from("capture"),
+            out: Some(PathBuf::from("capture")),
+            force: false,
         }
     );
     assert_eq!(
-        parse_discover(args([
-            "binding.yaml",
-            "--target",
+        parse_capture(args([
+            "--binding",
+            "other.yaml",
+            "--impl",
             "rust",
-            "--component",
-            "fixture.add",
-            "--registry-id",
-            "registry",
-            "--registry-version",
-            "1",
             "--out",
-            "registry.json"
+            "capture",
+            "--component",
+            "fixture.add"
         ]))
         .unwrap(),
+        CaptureArgs {
+            binding: PathBuf::from("other.yaml"),
+            implementation: Some(ImplementationLabel::from("rust")),
+            component: ComponentId::from("fixture.add"),
+            out: Some(PathBuf::from("capture")),
+            force: false,
+        }
+    );
+    assert_eq!(
+        parse_discover(discover_flags(&["--binding", "binding.yaml", "--impl", "rust"])).unwrap(),
         DiscoverArgs {
             binding: "binding.yaml".into(),
-            target: TargetName::from("rust"),
+            implementation: Some(ImplementationLabel::from("rust")),
             component: ComponentId::from("fixture.add"),
             registry_id: RegistryId::parse("registry").unwrap(),
             registry_version: RegistryVersion::parse("1").unwrap(),
             out: "registry.json".into()
         }
     );
+    let defaulted = parse_discover(discover_flags(&[])).unwrap();
+    assert_eq!(defaulted.binding, PathBuf::from("./specgate.yaml"));
+    assert_eq!(defaulted.implementation, None);
     assert_eq!(
-        parse_replay(args(["capture", "candidate.yaml", "--out", "candidate.json"])).unwrap(),
+        parse_replay(args(["capture", "--impl", "rust", "--out", "candidate.json"])).unwrap(),
         ReplayArgs {
             capture_dir: PathBuf::from("capture"),
-            binding: PathBuf::from("candidate.yaml"),
-            target: TargetName::default(),
-            out: PathBuf::from("candidate.json"),
+            binding: PathBuf::from("./specgate.yaml"),
+            implementation: Some(ImplementationLabel::from("rust")),
+            out: Some(PathBuf::from("candidate.json")),
+            force: false,
         }
+    );
+    assert_eq!(
+        parse_replay(args(["--binding", "candidate.yaml", "capture", "--out", "candidate.json"]))
+            .unwrap()
+            .binding,
+        PathBuf::from("candidate.yaml")
+    );
+}
+
+#[test]
+fn removed_surfaces_are_rejected() {
+    assert_eq!(
+        parse_discover(discover_flags(&["--target", "rust"])).unwrap_err(),
+        "unexpected argument '--target'"
+    );
+    assert_eq!(
+        parse_discover(discover_flags(&["binding.yaml"])).unwrap_err(),
+        "unexpected argument 'binding.yaml'"
+    );
+    assert_eq!(
+        parse_capture(args(["binding.yaml", "--out", "capture", "--component", "fixture.add"])).unwrap_err(),
+        "unexpected argument 'binding.yaml'"
+    );
+    assert_eq!(
+        parse_capture(args(["--target", "rust", "--out", "capture", "--component", "fixture.add"])).unwrap_err(),
+        "unexpected argument '--target'"
+    );
+    assert_eq!(
+        parse_replay(args(["capture", "candidate.yaml", "--out", "candidate.json"])).unwrap_err(),
+        "unexpected argument 'candidate.yaml'"
+    );
+    assert_eq!(
+        parse_replay(args(["capture", "--target", "rust", "--out", "candidate.json"])).unwrap_err(),
+        "unexpected argument '--target'"
+    );
+    assert_eq!(
+        parse_capture(args(["--impl", "", "--out", "capture", "--component", "fixture.add"])).unwrap_err(),
+        "--impl needs a non-empty implementation label"
     );
 }
 
 #[test]
 fn parser_edges() {
     assert_eq!(parse_capture(args(["--unknown"])).unwrap_err(), "unexpected argument '--unknown'");
+    assert_eq!(parse_discover(args(["--component"])).unwrap_err(), "--component needs an argument");
     assert_eq!(
-        parse_discover(args(["binding.yaml", "--component"])).unwrap_err(),
-        "--component needs an argument"
-    );
-    assert_eq!(
-        parse_discover(args(["binding.yaml"])).unwrap_err(),
+        parse_discover(args(["--registry-id", "registry"])).unwrap_err(),
         "discover requires --component <id>"
     );
     assert_eq!(
-        parse_capture(args(["binding.yaml", "--out"])).unwrap_err(),
-        "--out needs an argument"
+        parse_capture(args(["--out", "first_out"])).unwrap_err(),
+        "capture requires --component <id>"
     );
     assert_eq!(
-        parse_replay(args(["capture", "candidate.yaml", "extra", "--out", "candidate.json"])).unwrap_err(),
-        "replay requires <capture-dir> and <candidate-binding.yaml>"
+        parse_capture(args(["--component", "fixture.add"])).unwrap(),
+        CaptureArgs {
+            binding: PathBuf::from("./specgate.yaml"),
+            implementation: None,
+            component: ComponentId::from("fixture.add"),
+            out: None,
+            force: false,
+        }
+    );
+    assert!(parse_capture(args(["--component", "fixture.add", "--force"])).unwrap().force);
+    assert_eq!(parse_capture(args(["--out"])).unwrap_err(), "--out needs an argument");
+    assert_eq!(
+        parse_replay(args(["capture", "extra", "--out", "candidate.json"])).unwrap_err(),
+        "unexpected argument 'extra'"
     );
     assert_eq!(
-        parse_capture(args(["binding.yaml", "--out", "first", "--out", "second"]))
+        parse_replay(args(["--out", "candidate.json"])).unwrap_err(),
+        "replay requires <capture-dir>"
+    );
+    let defaulted = parse_replay(args(["capture", "--force"])).unwrap();
+    assert_eq!((defaulted.out, defaulted.force), (None, true));
+    assert_eq!(
+        parse_capture(args(["--component", "fixture.add", "--out", "first", "--out", "second"]))
             .unwrap()
             .out,
-        PathBuf::from("second")
+        Some(PathBuf::from("second"))
     );
 }
 
@@ -150,10 +230,7 @@ fn compare_nonunicode() {
 }
 
 #[test]
-fn required_outputs() {
-    assert_eq!(parse_capture(args(["binding.yaml"])).unwrap_err(), "capture requires --out <dir>");
-    assert_eq!(
-        parse_replay(args(["capture", "candidate.yaml"])).unwrap_err(),
-        "replay requires --out <candidate.otlp.json>"
-    );
+fn optional_outputs() {
+    assert_eq!(parse_capture(args(["--component", "fixture.add"])).unwrap().out, None);
+    assert_eq!(parse_replay(args(["capture"])).unwrap().out, None);
 }

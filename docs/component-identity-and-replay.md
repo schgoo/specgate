@@ -27,7 +27,7 @@ ergonomic concern. Stable declared identity already exists to make renames
 unnecessary.
 
 **Artifacts do not expose package organization.** Registry IDs derive from the
-component set, the capture manifest carries the binding target label rather than
+component set, the capture manifest carries the binding implementation label rather than
 a package name, and trace resources carry target, tool, and registry identity
 only. Packages are a build concern, not an artifact concern. This property
 should be preserved.
@@ -152,7 +152,8 @@ Three further constraints apply independently:
 - Native capture records an async operation only while its future stays on the
   calling thread, and a remote call in Rust is almost always async and executor
   driven.
-- `specgate capture` accepts Rust targets only.
+- `specgate capture` accepts Rust implementations only; `tests.command`
+  implementations are rejected as not yet supported (#46).
 - Replay re-invokes an operation in process. Replaying a caller requires the
   callee either replayed in lockstep or substituted from its recorded
   responses. The second turns recorded downstream results into stimuli, which is

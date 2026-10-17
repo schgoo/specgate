@@ -1,63 +1,111 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "SpecGate CTSC Target Binding",
-  "description": "Connects SpecGate discovery, capture, and replay to named Rust or C# implementation targets. Paths are relative to this file.",
+  "title": "SpecGate Component Binding",
+  "description": "Maps each component to the named implementations that provide it. Paths are relative to this file.",
   "type": "object",
-  "required": ["language", "targets"],
+  "required": ["components"],
   "additionalProperties": false,
   "properties": {
-    "language": {
-      "type": "string",
-      "enum": ["rust", "csharp"]
-    },
-    "targets": {
+    "components": {
       "type": "object",
       "minProperties": 1,
-      "description": "Named targets. The target named 'default' is selected when present; otherwise the first sorted name is used.",
+      "description": "Keys are exact spec_component names. A project that declares several components is listed under each.",
+      "propertyNames": { "minLength": 1 },
       "additionalProperties": {
-        "$ref": "#/definitions/target"
+        "$ref": "#/definitions/component"
       }
     }
   },
   "definitions": {
-    "target": {
+    "component": {
       "type": "object",
-      "required": ["package_root"],
+      "required": ["implementations"],
       "additionalProperties": false,
       "properties": {
-        "package_root": {
+        "implementations": {
+          "type": "object",
+          "minProperties": 1,
+          "description": "Named implementations. The label is unique within the component.",
+          "propertyNames": { "minLength": 1 },
+          "additionalProperties": {
+            "$ref": "#/definitions/implementation"
+          }
+        }
+      }
+    },
+    "implementation": {
+      "type": "object",
+      "required": ["language", "sources", "tests"],
+      "additionalProperties": false,
+      "properties": {
+        "language": {
+          "type": "string",
+          "enum": ["rust", "csharp"]
+        },
+        "sources": {
           "type": "string",
           "minLength": 1,
-          "description": "Package, crate, or project root relative to the binding file."
+          "description": "Directory that discovery and replay build, relative to the binding file."
         },
-        "runtime": {
-          "type": "string",
-          "enum": ["smol", "tokio"],
-          "description": "Rust async runtime metadata. Omitted targets default to smol."
+        "tests": {
+          "$ref": "#/definitions/tests"
         },
-        "framework": {
-          "type": "string",
-          "minLength": 1,
-          "description": "C# target framework override, such as net10.0."
+        "rust": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Rust block; valid only when language is rust.",
+          "properties": {
+            "runtime": {
+              "type": "string",
+              "enum": ["smol", "tokio"],
+              "description": "Rust async runtime. Defaults to smol."
+            }
+          }
+        },
+        "csharp": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "C# block; valid only when language is csharp.",
+          "properties": {
+            "framework": {
+              "type": "string",
+              "minLength": 1,
+              "description": "C# target framework, such as net10.0."
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "language": { "const": "rust" } } },
+          "then": { "not": { "required": ["csharp"] } }
+        },
+        {
+          "if": { "properties": { "language": { "const": "csharp" } } },
+          "then": { "not": { "required": ["rust"] } }
+        }
+      ]
+    },
+    "tests": {
+      "type": "object",
+      "description": "Exactly one of projects or command.",
+      "additionalProperties": false,
+      "oneOf": [
+        { "required": ["projects"] },
+        { "required": ["command"] }
+      ],
+      "properties": {
+        "projects": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Test project paths relative to the binding file."
         },
         "command": {
           "type": "string",
           "minLength": 1,
-          "description": "Optional target command retained for command-oriented CTSC producers."
-        },
-        "outputs": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "file": {
-              "type": "string",
-              "minLength": 1
-            },
-            "stdout": {
-              "type": "string",
-              "enum": ["json", "yaml"]
-            }
-          }
+          "pattern": "\\S",
+          "description": "Test command (not yet supported for capture, #46). Must contain a non-whitespace character."
         }
       }
     }

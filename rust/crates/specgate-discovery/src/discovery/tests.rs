@@ -10,6 +10,21 @@ fn registry(json: impl AsRef<str>) -> Registry {
 }
 
 #[test]
+fn undeclared_component_is_reported_with_declared_alternatives() {
+    let resolved = crate::binding::parse_binding(
+        "specgate.yaml",
+        "components:\n  demo.orders:\n    implementations:\n      main:\n        language: rust\n        sources: orders\n        tests:\n          command: cargo test\n",
+    )
+    .unwrap()
+    .resolve_implementation("demo.orders", None)
+    .unwrap();
+    require_declared(&resolved, &[ComponentId::from("demo.orders")]).unwrap();
+    let error = require_declared(&resolved, &[ComponentId::from("demo.users"), ComponentId::from("demo.billing")]).unwrap_err();
+    assert!(error.contains("implementation 'main' of component 'demo.orders' does not declare that component"));
+    assert!(error.contains("declared components: demo.users, demo.billing"));
+}
+
+#[test]
 fn scoped_setups() {
     let registry = registry(
         r#"{"operations":[

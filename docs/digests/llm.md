@@ -22,7 +22,7 @@ Rust.
 - `specgate-annotations-macros` instruments operation boundaries and emits
   setup and type metadata.
 - `specgate` is the sole Rust annotation and runtime facade.
-- `specgate-discovery` owns strict binding resolution, Rust discovery builds,
+- `specgate-discovery` owns strict binding resolution (components and named implementations), Rust discovery builds,
   C# compiled-assembly reflection, raw invocation metadata, and deterministic
   normalization and setup folding. C# reflection runs in the prebuilt
   `csharp/SpecGate.Discovery` tool, invoked as

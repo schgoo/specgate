@@ -59,7 +59,7 @@ pub(crate) struct DiscoveryOutput {
 /// Build the fixture's real C# project into `scratch/artifacts` and return the
 /// woven fixture assembly plus its copy-local output directory.
 fn build_project(
-    target: &crate::binding::Target,
+    implementation: &crate::binding::Implementation,
     scratch: impl AsRef<Path>,
     context: impl AsRef<str>,
     system: &System,
@@ -69,8 +69,8 @@ fn build_project(
     let pkg_abs = strip_prefix(
         system
             .filesystem
-            .canonicalize(&target.package_root)
-            .unwrap_or_else(|_| target.package_root.clone()),
+            .canonicalize(&implementation.sources)
+            .unwrap_or_else(|_| implementation.sources.clone()),
     );
     system
         .filesystem
@@ -143,7 +143,7 @@ fn build_project(
 /// Returns an error string when the scaffold, `dotnet` build/run, or output
 /// read fails.
 pub(crate) fn run_many<F: AsRef<str>, R: AsRef<str>>(
-    target: &crate::binding::Target,
+    implementation: &crate::binding::Implementation,
     first: F,
     rest: &[R],
     system: &System,
@@ -163,10 +163,10 @@ pub(crate) fn run_many<F: AsRef<str>, R: AsRef<str>>(
         crate::runner::cache::CacheLabel::new(format!("{sanitized_label}_{}", components.len())),
         system,
     )?;
-    run_in(target, &components, scratch.path(), system)
+    run_in(implementation, &components, scratch.path(), system)
 }
 
-/// Build and run the C# reflection self-report for `target`/`components`,
+/// Build and run the C# reflection self-report for `implementation`/`components`,
 /// scaffolding into `scratch`. Returns one raw registry JSON document per
 /// requested component, in request order, plus the compiled assembly's
 /// complete operation-component inventory.
@@ -176,7 +176,7 @@ pub(crate) fn run_many<F: AsRef<str>, R: AsRef<str>>(
 /// Returns an error string when the scaffold, `dotnet` build/run, or output
 /// read fails.
 fn run_in(
-    target: &crate::binding::Target,
+    implementation: &crate::binding::Implementation,
     components: &[impl AsRef<str>],
     scratch: impl AsRef<Path>,
     system: &System,
@@ -192,7 +192,7 @@ fn run_in(
     //    `bin/<project>/<config>` and `obj/<project>/<config>` subfolders under
     //    the scratch dir, so concurrent discovery runs never contend on - nor even
     //    touch - the source project's `obj`/`bin`.
-    let built = build_project(target, scratch, "discovery", system)?;
+    let built = build_project(implementation, scratch, "discovery", system)?;
     let fixture_dll = built.fixture_dll;
     let fixture_out = built.fixture_out;
 
@@ -271,12 +271,12 @@ fn run_in(
     })
 }
 
-/// Find the first `.csproj` directly under `package_root` (the fixture project).
-fn find_project(package_root: impl AsRef<Path>, system: &System) -> Option<PathBuf> {
-    let package_root = package_root.as_ref();
+/// Find the first `.csproj` directly under `sources` (the fixture project).
+fn find_project(sources: impl AsRef<Path>, system: &System) -> Option<PathBuf> {
+    let sources = sources.as_ref();
     system
         .filesystem
-        .read_dir(package_root)
+        .read_dir(sources)
         .ok()?
         .into_iter()
         .filter_map(Result::ok)
@@ -298,14 +298,13 @@ mod tests {
     // registry parsing, component inventories, setup selection, and private
     // operation rejection through observed discovery results.
 
-    fn fake_target() -> crate::binding::Target {
-        crate::binding::Target {
-            package_root: PathBuf::from("fixture"),
-            runtime: crate::binding::Runtime::Smol,
-            framework: None,
-            command: None,
-            outputs: None,
-        }
+    fn fake_target() -> crate::binding::Implementation {
+        crate::binding::Implementation::new(
+            "fixture",
+            crate::binding::Tests::Command("dotnet test".to_string()),
+            crate::binding::LanguageOptions::CSharp { framework: None },
+        )
+        .unwrap()
     }
 
     fn fake_system(results: Vec<Result<crate::runner::system::ProcessOutput, String>>) -> System {

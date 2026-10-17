@@ -1,0 +1,101 @@
+# yaml-language-server: $schema=../../../../../binding-schema.json
+components:
+  fixture.cli.replay:
+    implementations:
+      rust:
+        language: rust
+        sources: rust
+        tests:
+          projects: [rust/Cargo.toml]
+      csharp:
+        language: csharp
+        sources: csharp
+        tests:
+          projects: [csharp/SpecGate.CliFixtures.csproj]
+  fixture.cli.multiple:
+    implementations:
+      rust:
+        language: rust
+        sources: rust
+        tests:
+          projects: [rust/Cargo.toml]
+      csharp:
+        language: csharp
+        sources: csharp
+        tests:
+          projects: [csharp/SpecGate.CliFixtures.csproj]
+  fixture.cli.setup:
+    implementations:
+      rust:
+        language: rust
+        sources: rust
+        tests:
+          projects: [rust/Cargo.toml]
+      csharp:
+        language: csharp
+        sources: csharp
+        tests:
+          projects: [csharp/SpecGate.CliFixtures.csproj]
+  fixture.cli.nested_root:
+    implementations:
+      rust:
+        language: rust
+        sources: rust
+        tests:
+          projects: [rust/Cargo.toml]
+  fixture.cli.nested_bridge:
+    implementations:
+      rust:
+        language: rust
+        sources: rust
+        tests:
+          projects: [rust/Cargo.toml]
+  fixture.cli.nested_leaf:
+    implementations:
+      rust:
+        language: rust
+        sources: rust
+        tests:
+          projects: [rust/Cargo.toml]
+  fixture.cli.nested_sibling:
+    implementations:
+      rust:
+        language: rust
+        sources: rust
+        tests:
+          projects: [rust/Cargo.toml]
+  fixture.cli.unused:
+    implementations:
+      rust:
+        language: rust
+        sources: rust
+        tests:
+          projects: [rust/Cargo.toml]
+  fixture.cli.aborted:
+    implementations:
+      rust:
+        language: rust
+        sources: rust-aborted
+        tests:
+          projects: [rust-aborted/Cargo.toml]
+  fixture.cli.survivor:
+    implementations:
+      rust:
+        language: rust
+        sources: rust-aborted
+        tests:
+          projects: [rust-aborted/Cargo.toml]
+  fixture.cli.misbound:
+    implementations:
+      rust:
+        language: rust
+        sources: rust
+        tests:
+          projects: [rust/Cargo.toml]
+  fixture.cli.command:
+    implementations:
+      rust:
+        language: rust
+        sources: rust
+        tests:
+          command: cargo test

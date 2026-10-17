@@ -18,24 +18,24 @@ pub(super) fn verify_replay(
     let root = root.as_ref();
     let out_root = out_root.as_ref();
     let scratch = scratch.as_ref();
-    let mut by_binding: BTreeMap<String, Vec<&Row>> = BTreeMap::new();
-    for row in matrix
-        .rows
-        .iter()
-        .filter(|row| row.classification == Classification::ImplementationComponent && row.captures_rust())
-    {
-        let binding = row
-            .rust
-            .as_ref()
-            .unwrap_or_else(|| panic!("matrix row '{}' capturing Rust must define Rust settings", row.id))
-            .binding
-            .clone();
-        by_binding.entry(binding).or_default().push(row);
+    let mut groups = rust_groups(root, matrix)?;
+    for rows in groups.values_mut() {
+        rows.retain(|row| row.captures_rust());
     }
+    groups.retain(|_sources, rows| !rows.is_empty());
 
     let mut problems = Vec::with_capacity(matrix.rows.len());
-    for (binding_key, rows) in by_binding {
-        let binding = repo_path(root, &matrix.bindings[&binding_key]);
+    for (sources, rows) in groups {
+        let sources_group = sources.display().to_string();
+        let binding = repo_path(root, &matrix.binding);
+        let label = specgate_discovery::identity::ImplementationLabel::from(
+            rows[0]
+                .rust
+                .as_ref()
+                .unwrap_or_else(|| panic!("matrix row '{}' capturing Rust must define Rust settings", rows[0].id))
+                .binding
+                .as_str(),
+        );
         let components = rows
             .iter()
             .map(|row| {
@@ -46,8 +46,8 @@ pub(super) fn verify_replay(
                 )
             })
             .collect::<Vec<_>>();
-        let candidates = Candidates::discover(binding, None, &components)
-            .map_err(|error| GoldenError::message(format!("{binding_key}: candidate discovery failed: {error}")))?;
+        let candidates = Candidates::discover(binding, Some(&label), &components)
+            .map_err(|error| GoldenError::message(format!("{sources_group}: candidate discovery failed: {error}")))?;
 
         let mut planned = Vec::with_capacity(rows.len());
         for row in &rows {
@@ -98,11 +98,11 @@ pub(super) fn verify_replay(
             .collect::<Vec<_>>();
         let reports = candidates
             .execute(&executable)
-            .map_err(|error| GoldenError::message(format!("{binding_key}: batched replay failed: {error}")))?;
+            .map_err(|error| GoldenError::message(format!("{sources_group}: batched replay failed: {error}")))?;
         assert_eq!(
             reports.len(),
             planned.len(),
-            "{binding_key}: replay execution must return one report per plan (reports={}, plans={})",
+            "{sources_group}: replay execution must return one report per plan (reports={}, plans={})",
             reports.len(),
             planned.len()
         );

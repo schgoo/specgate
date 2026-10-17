@@ -2,29 +2,37 @@
 
 #![cfg(feature = "test-util")]
 
-use specgate_discovery::binding::{Language, ResolvedTarget, Target};
-use specgate_discovery::identity::{ComponentId, TargetName};
+use specgate_discovery::binding::{Implementation, LanguageOptions, ResolvedImplementation, Runtime, Tests};
+use specgate_discovery::identity::{ComponentId, ImplementationLabel};
 use specgate_discovery::test_util::{Binding, Discovery, FailurePoint, FileOperation};
 use std::path::PathBuf;
 
-fn rust_target() -> ResolvedTarget {
-    ResolvedTarget {
+fn rust_target() -> ResolvedImplementation {
+    ResolvedImplementation {
         binding_path: PathBuf::from("binding.yaml"),
-        name: TargetName::from("default"),
-        language: Language::Rust,
-        target: Target::builder("candidate").build().unwrap(),
+        component: ComponentId::from("demo.component"),
+        label: ImplementationLabel::from("main"),
+        implementation: Implementation::new(
+            "candidate",
+            Tests::Command("cargo test".to_string()),
+            LanguageOptions::Rust { runtime: Runtime::Smol },
+        )
+        .unwrap(),
     }
 }
 
 #[test]
 fn binding_harness_loads_without_real_filesystem_access() {
-    let binding = Binding::builder("language: rust\ntargets:\n  default:\n    package_root: fixture\n")
-        .canonical_path("virtual/binding.yaml")
-        .build()
-        .load("missing/binding.yaml")
-        .unwrap();
+    let binding = Binding::builder(
+        "components:\n  demo.component:\n    implementations:\n      main:\n        language: rust\n        sources: fixture\n        tests:\n          command: cargo test\n",
+    )
+    .canonical_path("virtual/binding.yaml")
+    .build()
+    .load("missing/binding.yaml")
+    .unwrap();
     assert_eq!(binding.path, PathBuf::from("virtual/binding.yaml"));
-    assert_eq!(binding.targets["default"].package_root, PathBuf::from("virtual/fixture"));
+    let resolved = binding.resolve_implementation("demo.component", None).unwrap();
+    assert_eq!(resolved.implementation.sources, PathBuf::from("virtual/fixture"));
 }
 
 #[test]

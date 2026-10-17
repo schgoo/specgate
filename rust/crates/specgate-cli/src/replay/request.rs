@@ -1,16 +1,21 @@
 //! Validated replay request and public report model.
 //!
 //! `capture_dir` owns the verified CTSC bundle, `binding` selects the candidate,
-//! and `out` is the atomically published candidate trace.
+//! and the optional `out` is the atomically published candidate trace. When
+//! `out` is omitted it defaults to
+//! `<capture-dir>/candidate-<implementation>-<capture-dir name>.otlp.json`.
+//! An existing output file is refused unless `force` is set.
 //!
 //! # Examples
 //! ```
 //! use specgate_cli::replay::{Paths, Request};
-//! let request = Request::builder(Paths::new(
-//!     "capture", "candidate.binding.yaml", "candidate.otlp.json",
-//! )).target("rust").build()?;
-//! assert_eq!(request.target(), Some("rust"));
+//! let request = Request::builder(Paths::new("capture", "candidate.binding.yaml"))
+//!     .implementation("rust")
+//!     .out("candidate.otlp.json")
+//!     .build()?;
+//! assert_eq!(request.implementation(), Some("rust"));
 //! assert_eq!(request.capture_dir(), std::path::Path::new("capture"));
+//! assert_eq!(request.out(), Some(std::path::Path::new("candidate.otlp.json")));
 //! # Ok::<(), specgate_cli::replay::Error>(())
 //! ```
 use super::{Error, ErrorKind, Path, PathBuf, SpecEvent};
@@ -23,15 +28,13 @@ use specgate::ComponentId;
 pub struct Paths {
     capture_dir: PathBuf,
     binding: PathBuf,
-    out: PathBuf,
 }
 impl Paths {
-    /// Construct replay paths from capture, candidate binding, and output locations.
-    pub fn new(capture_dir: impl AsRef<Path>, binding: impl AsRef<Path>, out: impl AsRef<Path>) -> Self {
+    /// Construct replay paths from capture and candidate binding locations.
+    pub fn new(capture_dir: impl AsRef<Path>, binding: impl AsRef<Path>) -> Self {
         Self {
             capture_dir: capture_dir.as_ref().to_path_buf(),
             binding: binding.as_ref().to_path_buf(),
-            out: out.as_ref().to_path_buf(),
         }
     }
 }
@@ -44,9 +47,12 @@ pub struct Request {
     #[spec_event(path)]
     binding: PathBuf,
     #[spec_event]
-    target: Option<specgate::TargetName>,
-    #[spec_event(path)]
-    out: PathBuf,
+    implementation: Option<specgate::ImplementationLabel>,
+    // Optional paths cannot use the `path` projection, so the validated UTF-8 spelling is recorded.
+    #[spec_event]
+    out: Option<String>,
+    #[spec_event]
+    force: bool,
 }
 /// Staged construction for [`Request`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,17 +60,19 @@ pub struct Request {
 pub struct RequestBuilder {
     capture_dir: PathBuf,
     binding: PathBuf,
-    target: Option<specgate::TargetName>,
-    out: PathBuf,
+    implementation: Option<specgate::ImplementationLabel>,
+    out: Option<PathBuf>,
+    force: bool,
 }
 impl Request {
-    /// Begin a request with capture, candidate binding, and output paths.
+    /// Begin a request with capture and candidate binding paths.
     pub fn builder(paths: Paths) -> RequestBuilder {
         RequestBuilder {
             capture_dir: paths.capture_dir,
             binding: paths.binding,
-            target: None,
-            out: paths.out,
+            implementation: None,
+            out: None,
+            force: false,
         }
     }
     /// Capture bundle directory.
@@ -77,27 +85,42 @@ impl Request {
     pub fn binding(&self) -> &Path {
         &self.binding
     }
-    /// Candidate target name.
+    /// Candidate implementation label; `None` auto-selects the sole implementation.
     #[must_use]
-    pub fn target(&self) -> Option<&str> {
-        self.target.as_ref().map(specgate::TargetName::as_str)
+    pub fn implementation(&self) -> Option<&str> {
+        self.implementation.as_ref().map(specgate::ImplementationLabel::as_str)
     }
-    /// Candidate trace output path.
+    /// Explicit candidate trace output path; `None` selects the default beside the capture bundle.
     #[must_use]
-    pub fn out(&self) -> &Path {
-        &self.out
+    pub fn out(&self) -> Option<&Path> {
+        self.out.as_deref().map(Path::new)
+    }
+    /// Whether an existing output file may be overwritten.
+    #[must_use]
+    pub fn force(&self) -> bool {
+        self.force
     }
 }
 impl RequestBuilder {
-    /// Select a named candidate target.
-    pub fn target(mut self, value: impl AsRef<str>) -> Self {
-        self.target = Some(specgate::TargetName::from(value.as_ref()));
+    /// Select a named candidate implementation.
+    pub fn implementation(mut self, value: impl AsRef<str>) -> Self {
+        self.implementation = Some(specgate::ImplementationLabel::from(value.as_ref()));
+        self
+    }
+    /// Set the candidate trace output path.
+    pub fn out(mut self, value: impl AsRef<Path>) -> Self {
+        self.out = Some(value.as_ref().to_path_buf());
+        self
+    }
+    /// Allow an existing output file to be overwritten.
+    pub fn force(mut self, value: bool) -> Self {
+        self.force = value;
         self
     }
     /// Validate and construct the request.
     ///
     /// # Errors
-    /// Returns [`Error`] when a required path is empty or the binding is not Unicode.
+    /// Returns [`Error`] when a required path is empty or a path is not Unicode.
     pub fn build(self) -> Result<Request, Error> {
         if self.capture_dir.as_os_str().is_empty() {
             return Err(Error::new_message(
@@ -111,14 +134,27 @@ impl RequestBuilder {
         if self.binding.to_str().is_none() {
             return Err(Error::new_message(ErrorKind::Request, "replay binding path must be valid UTF-8"));
         }
-        if self.out.as_os_str().is_empty() {
-            return Err(Error::new_message(ErrorKind::Request, "replay requires a non-empty output path"));
-        }
+        let out = match self.out {
+            None => None,
+            Some(out) => {
+                let Some(text) = out.to_str().filter(|text| !text.is_empty()) else {
+                    return Err(Error::new_message(
+                        ErrorKind::Request,
+                        "replay output path must be non-empty valid UTF-8",
+                    ));
+                };
+                if out.file_name().is_none() {
+                    return Err(Error::new_message(ErrorKind::Request, "replay output path must end in a file name"));
+                }
+                Some(text.to_string())
+            }
+        };
         Ok(Request {
             capture_dir: self.capture_dir,
             binding: self.binding,
-            target: self.target,
-            out: self.out,
+            implementation: self.implementation,
+            out,
+            force: self.force,
         })
     }
 }

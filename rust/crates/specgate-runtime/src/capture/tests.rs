@@ -466,7 +466,7 @@ fn identity_projection() {
     for raw in ["", "fixture.valid", " spaces / punctuation ! "] {
         let component = ComponentId::new(raw);
         let operation = OperationName::from(raw);
-        let target = TargetName::from(raw.to_string());
+        let target = ImplementationLabel::from(raw.to_string());
 
         assert_eq!(component.as_str(), raw);
         assert_eq!(operation.as_str(), raw);

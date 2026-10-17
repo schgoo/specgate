@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use specgate_ctsc::compare;
 use specgate_ctsc::registry::encode as encode_registry;
 use specgate_ctsc::validation::{validate_bundle, validate_linked, validate_registry, validate_trace};
-use specgate_discovery::binding::resolve_target;
+use specgate_discovery::binding::resolve_implementation;
 use specgate_discovery::registry::Registry;
 use specgate_discovery::runner::cargo_bin;
 use specgate_discovery::schema::normalize_registry;

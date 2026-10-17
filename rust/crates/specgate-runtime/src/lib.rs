@@ -30,7 +30,7 @@
 //!
 //! Companion to the `specgate-annotations-macros` proc-macro crate: the macros expand
 //! into calls into this runtime, so user code never references it directly.
-//! `ComponentId`, `OperationName`, and `TargetName` provide semantic
+//! `ComponentId`, `OperationName`, and `ImplementationLabel` provide semantic
 //! string identities without imposing lexical validation.
 
 use serde::{Deserialize, Serialize};
@@ -261,8 +261,8 @@ identity_string!(
     "A semantic CTSC operation name.\n\nConstruct with `From`, borrow with `as_str` or `AsRef<str>`, and consume with `into_inner`."
 );
 identity_string!(
-    TargetName,
-    "A binding-target selector name.\n\nConstruct with `From`, borrow with `as_str` or `AsRef<str>`, and consume with `into_inner`."
+    ImplementationLabel,
+    "A binding implementation label.\n\nConstruct with `From`, borrow with `as_str` or `AsRef<str>`, and consume with `into_inner`."
 );
 
 /// Link-time operation and type metadata.

@@ -1,4 +1,4 @@
-//! `specgate capture <binding.yaml> --out <dir>` — capture passing Rust tests
+//! `specgate capture --component <id> [--out <dir>]` — capture passing Rust tests
 //! as one deterministic native CTSC reference bundle.
 //!
 //! Build a validated [`CaptureRequest`] from [`CapturePaths`], then call [`capture`].
@@ -11,8 +11,8 @@
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! use specgate_cli::{CapturePaths, CaptureRequest, capture};
 //! let request = CaptureRequest::builder(CapturePaths {
-//!     binding: "binding.yaml".into(), out: "capture".into(),
-//! }).component("example.math").build()?;
+//!     binding: "binding.yaml".into(),
+//! }).component("example.math").out("capture").build()?;
 //! let report = capture(request)?;
 //! assert!(report.manifest_path.ends_with("manifest.json"));
 //! # Ok(())
@@ -21,13 +21,13 @@
 
 use crate::capture_failure::CaptureError;
 use crate::capture_failure::FailureStage as CaptureErrorKind;
-use crate::system::{CommandEnvironment, Discovery, Execution, ProcessRequest};
+use crate::system::{CommandEnvironment, Discovery, Execution, ProcessRequest, run_id};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use specgate::__rt::{Capture, Completion, Config, ConfigDeps, EnvConfig, FAILURE_MARKER, SpanId, TraceId};
-use specgate::{ComponentId, SpecEvent, TargetName, spec_operation};
+use specgate::{ComponentId, ImplementationLabel, SpecEvent, spec_operation};
 use specgate_ctsc::{capture as ctsc_capture, registry::encode_many as encode_registries};
-use specgate_discovery::output::Target;
+use specgate_discovery::output::Discovered;
 use specgate_discovery::registry::Registry;
 use specgate_discovery::runner::cargo_bin;
 use specgate_discovery::schema::normalize_registry;
@@ -140,7 +140,7 @@ pub use facade::{capture, capture_with};
 mod encoding;
 use encoding::encode_bundle;
 mod filter;
-use filter::{select_component, validate_setups};
+use filter::validate_setups;
 mod execution;
 use execution::{
     ExecutedTests, artifact_path, build_binaries, enumerate_tests, reject_failures, run_tests, scratch_dir, sha256_digest, write_artifact,

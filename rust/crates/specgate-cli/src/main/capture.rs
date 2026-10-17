@@ -1,5 +1,5 @@
-use super::{ArgumentError, argument_error, format_capture, operation_status};
-use specgate::{ComponentId, TargetName};
+use super::{ArgumentError, DEFAULT_BINDING, argument_error, flag_text, format_capture, implementation_label, operation_status};
+use specgate::{ComponentId, ImplementationLabel};
 use specgate_cli::{CaptureError, CapturePaths, CaptureReport, CaptureRequest, capture};
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -7,61 +7,47 @@ use std::process::ExitCode;
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct CaptureArgs {
     pub(super) binding: PathBuf,
-    pub(super) target: TargetName,
+    pub(super) implementation: Option<ImplementationLabel>,
     pub(super) component: ComponentId,
-    pub(super) out: PathBuf,
+    pub(super) out: Option<PathBuf>,
+    pub(super) force: bool,
 }
 
 pub(super) fn parse_capture<T: AsRef<std::ffi::OsStr>>(args: impl AsRef<[T]>) -> Result<CaptureArgs, ArgumentError> {
     let args = args.as_ref();
     let mut binding = None;
-    let mut target = TargetName::default();
-    let mut component = ComponentId::default();
+    let mut implementation = None;
+    let mut component = None;
     let mut out = None;
+    let mut force = false;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_ref().to_str() {
-            Some(flag @ ("--target" | "--component" | "--out")) => {
-                let value = args.get(index + 1).ok_or_else(|| format!("{flag} needs an argument"))?;
+            Some("--force") => {
+                force = true;
+                index += 1;
+            }
+            Some(flag @ ("--binding" | "--impl" | "--component" | "--out")) => {
+                let value = args.get(index + 1).ok_or_else(|| format!("{flag} needs an argument"))?.as_ref();
                 match flag {
-                    "--target" => {
-                        target = TargetName::from(
-                            value
-                                .as_ref()
-                                .to_str()
-                                .ok_or_else(|| "--target value is not valid UTF-8".to_string())?,
-                        );
-                    }
-                    "--component" => {
-                        component = ComponentId::from(
-                            value
-                                .as_ref()
-                                .to_str()
-                                .ok_or_else(|| "--component value is not valid UTF-8".to_string())?,
-                        );
-                    }
-                    "--out" => out = Some(PathBuf::from(value.as_ref())),
+                    "--binding" => binding = Some(PathBuf::from(value)),
+                    "--impl" => implementation = Some(implementation_label(flag, value)?),
+                    "--component" => component = Some(ComponentId::from(flag_text(flag, value)?)),
+                    "--out" => out = Some(PathBuf::from(value)),
                     _ => unreachable!("capture parser matched a flag outside its declared flag set"),
                 }
                 index += 2;
             }
-            Some(value) if !value.starts_with('-') && binding.is_none() => {
-                binding = Some(PathBuf::from(args[index].as_ref()));
-                index += 1;
-            }
             Some(value) => return Err(ArgumentError::from(format!("unexpected argument '{value}'"))),
-            None if binding.is_none() => {
-                binding = Some(PathBuf::from(args[index].as_ref()));
-                index += 1;
-            }
             None => return Err(ArgumentError::from("unexpected non-UTF-8 argument")),
         }
     }
     Ok(CaptureArgs {
-        binding: binding.ok_or_else(|| "capture requires a binding file argument".to_string())?,
-        target,
-        component,
-        out: out.ok_or_else(|| "capture requires --out <dir>".to_string())?,
+        binding: binding.unwrap_or_else(|| PathBuf::from(DEFAULT_BINDING)),
+        implementation,
+        component: component.ok_or_else(|| "capture requires --component <id>".to_string())?,
+        out,
+        force,
     })
 }
 
@@ -84,14 +70,18 @@ fn run_with<T: AsRef<std::ffi::OsStr>>(
         Ok(parsed) => parsed,
         Err(error) => return argument_error(&error, errors),
     };
-    let outcome = CaptureRequest::builder(CapturePaths {
-        binding: parsed.binding,
-        out: parsed.out,
-    })
-    .target(parsed.target)
-    .component(parsed.component)
-    .build()
-    .and_then(execute);
+    let builder = CaptureRequest::builder(CapturePaths { binding: parsed.binding })
+        .component(parsed.component)
+        .force(parsed.force);
+    let builder = match parsed.out {
+        Some(out) => builder.out(out),
+        None => builder,
+    };
+    let builder = match parsed.implementation {
+        Some(label) => builder.implementation(label),
+        None => builder,
+    };
+    let outcome = builder.build().and_then(execute);
     if write!(output, "{}", format_capture(&outcome)).is_err() {
         return super::output_error("failed to write capture report", errors);
     }

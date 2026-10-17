@@ -1,9 +1,9 @@
 //! Command-line interface for `SpecGate`'s CTSC-native workflow.
 //!
 //! ```text
-//! specgate discover <binding.yaml> --component <id> --registry-id <id> --registry-version <version> --out <registry.ctsc.json> [--target <name>]
-//! specgate capture <binding.yaml> --out <dir> [--target <name>] [--component <id>]
-//! specgate replay <capture-dir> <candidate-binding.yaml> --out <candidate.otlp.json> [--target <name>]
+//! specgate discover --component <id> [--binding <specgate.yaml>] [--impl <label>] --registry-id <id> --registry-version <version> --out <registry.ctsc.json>
+//! specgate capture --component <id> [--binding <specgate.yaml>] [--impl <label>] [--out <dir>] [--force]
+//! specgate replay <capture-dir> [--binding <specgate.yaml>] [--impl <label>] [--out <candidate.otlp.json>] [--force]
 //! specgate validate registry <registry.json> [--import <registry.json>]...
 //! specgate validate trace <trace.otlp.json|trace.otlp.jsonl>
 //! specgate validate linked <trace> <root-registry> [--import <registry.json>]...
@@ -24,16 +24,25 @@
 //! one owned [`CaptureRequest`], constructed with a validated builder, and
 //! returns `Result<CaptureReport, CaptureError>`.
 //!
+//! Without `--out`, `capture` writes to
+//! `./.specgate/captures/<component>/<impl>/<UTC run id>/` (for example
+//! `20261016T153100Z`) and refuses a non-empty output directory unless
+//! `--force` is given. The output directory's final name is recorded as the
+//! artifact `target.name` in the manifest and trace. `replay` without `--out`
+//! writes `<capture-dir>/candidate-<impl>-<capture-dir name>.otlp.json`,
+//! refuses any existing output path unless `--force`, and labels the candidate target
+//! with the output file name minus its `.otlp.json` suffix.
+//!
 //! # Examples
 //!
 //! ```no_run
 //! use specgate_cli::{CapturePaths, CaptureRequest, capture};
 //!
 //! let request = CaptureRequest::builder(CapturePaths {
-//!     binding: "binding.yaml".into(),
-//!     out: "capture".into(),
+//!     binding: "specgate.yaml".into(),
 //! })
 //!     .component("example.math")
+//!     .out("capture")
 //!     .build()?;
 //! let report = capture(request)?;
 //! println!("registry: {}", report.registry_path.display());

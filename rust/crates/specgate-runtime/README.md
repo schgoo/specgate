@@ -36,7 +36,7 @@ scope.unit()?;
 
 Companion to the `specgate-annotations-macros` proc-macro crate: the macros expand
 into calls into this runtime, so user code never references it directly.
-`ComponentId`, `OperationName`, and `TargetName` provide semantic
+`ComponentId`, `OperationName`, and `ImplementationLabel` provide semantic
 string identities without imposing lexical validation.
 
 

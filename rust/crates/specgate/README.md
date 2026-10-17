@@ -12,7 +12,7 @@ operations/setups/types, and exercise behavior through ordinary tests.
 `specgate capture` records those real invocations as deterministic CTSC
 reference traces; `specgate replay` invokes a candidate from the captured
 semantic inputs. Async operations open at first poll and preserve their construction parent across executor-thread migration and same-thread interleaving. Async setups remain unsupported. `ComponentId`,
-`OperationName`, and `TargetName` distinguish semantic identities while
+`OperationName`, and `ImplementationLabel` distinguish semantic identities while
 retaining transparent CTSC string projection and unrestricted string input.
 
 ```rust

@@ -2,7 +2,7 @@
 use super::{ArtifactName, ComponentId, FailureContext, PathBuf, Serialize};
 /// Hexadecimal width of a 32-byte SHA-256 digest.
 const SHA256_WIDTH: usize = 64;
-use specgate_discovery::identity::TargetName;
+use specgate_discovery::identity::ImplementationLabel;
 
 #[derive(Debug, Serialize)]
 #[serde(transparent)]
@@ -96,7 +96,7 @@ pub(super) struct CaptureManifest {
 
 #[derive(Debug, Serialize)]
 pub(super) struct TargetDto {
-    pub(super) name: TargetName,
+    pub(super) name: ImplementationLabel,
     pub(super) language: Language,
 }
 

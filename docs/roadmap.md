@@ -249,7 +249,7 @@ Scope:
    Weaving is the only mechanism whose capture semantics match Rust: Roslyn
    source generators cannot rewrite an existing method body, and C# 12
    interceptors record the call site rather than the callee.
-4. Capture support for non-Rust binding targets, which `capture.rs` currently
+4. Capture support for non-Rust implementations, which `capture.rs` currently
    rejects outright.
 
 The first slice captures one annotated C# fixture end to end. The runtime it

@@ -1,30 +1,28 @@
-//! Strict CTSC target-binding parsing and path resolution.
+//! Strict CTSC implementation-binding parsing and path resolution.
+//!
+//! A binding file maps each component to the implementations that provide it:
+//! `components.<componentId>.implementations.<label>`. Every implementation
+//! names its `language`, the `sources` directory discovery and replay build,
+//! and exactly one way to run its `tests`.
 //!
 //! # Examples
 //! ```
-//! use specgate_discovery::binding::parse_binding;
-//! let binding = parse_binding("specgate.yaml", "language: rust\ntargets:\n  default:\n    package_root: .\n").unwrap();
-//! assert_eq!(binding.language.as_str(), "rust");
-//! assert_eq!(binding.resolve_target(None).unwrap().name.as_str(), "default");
+//! use specgate_discovery::binding::{Language, parse_binding};
+//! let yaml = "components:\n  example.orders:\n    implementations:\n      main:\n        language: rust\n        sources: orders\n        tests:\n          command: cargo test\n";
+//! let binding = parse_binding("specgate.yaml", yaml).unwrap();
+//! let resolved = binding.resolve_implementation("example.orders", None).unwrap();
+//! assert_eq!(resolved.label.as_str(), "main");
+//! assert_eq!(resolved.language(), Language::Rust);
 //! ```
 //!
-//! Builders validate required target state and retain structured output declarations:
-//! ```
-//! use specgate_discovery::binding::{OutputFormat, Runtime, Target, TargetOutputs};
-//! let target = Target::builder("crate")
-//!     .runtime(Runtime::Tokio)
-//!     .outputs(Some(TargetOutputs { file: Some("result.json".into()), stdout: Some(OutputFormat::Json) }))
-//!     .build().unwrap();
-//! assert_eq!(target.runtime, Runtime::Tokio);
-//! assert!(Target::builder("").build().is_err());
-//! ```
-//!
-//! Explicit target selection reports unknown names rather than silently falling back:
+//! Selection reports unknown or ambiguous choices rather than silently falling back:
 //! ```
 //! use specgate_discovery::binding::parse_binding;
-//! let binding = parse_binding("specgate.yaml", "language: rust\ntargets:\n  first:\n    package_root: .\n").unwrap();
-//! assert_eq!(binding.resolve_target(None).unwrap().name.as_str(), "first");
-//! assert!(binding.resolve_target(Some("missing")).is_err());
+//! let yaml = "components:\n  example.orders:\n    implementations:\n      a: { language: rust, sources: a, tests: { command: t } }\n      b: { language: rust, sources: b, tests: { command: t } }\n";
+//! let binding = parse_binding("specgate.yaml", yaml).unwrap();
+//! assert!(binding.resolve_implementation("example.orders", None).is_err());
+//! assert!(binding.resolve_implementation("example.orders", Some("b")).is_ok());
+//! assert!(binding.resolve_implementation("example.users", None).is_err());
 //! ```
 
 use serde::Deserialize;
@@ -32,15 +30,13 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::error::{Error, ErrorKind};
-use crate::identity::TargetName;
+use crate::identity::{ComponentId, ImplementationLabel};
 
 // Binding schema protocol values shared with discovery dispatch.
 const RUST_LANGUAGE: &str = "rust";
 const CSHARP_LANGUAGE: &str = "csharp";
-/// Reserved schema target selected when callers omit an explicit target name.
-const DEFAULT_TARGET: &str = "default";
 
-/// Async runtime selected by a Rust target.
+/// Async runtime selected by a Rust implementation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[expect(clippy::exhaustive_enums, reason = "the binding schema defines a closed runtime vocabulary")]
 pub enum Runtime {
@@ -51,164 +47,84 @@ pub enum Runtime {
     Tokio,
 }
 
-/// Structured command output declaration retained by CTSC target bindings.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+/// How an implementation's tests are run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[expect(clippy::exhaustive_enums, reason = "the binding schema defines exactly two test declarations")]
+pub enum Tests {
+    /// Test project paths, resolved relative to the binding file.
+    Projects(Vec<PathBuf>),
+    /// A shell command that runs the tests.
+    Command(String),
+}
+
+/// Language-specific implementation settings.
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[expect(
-    clippy::exhaustive_structs,
-    reason = "binding DTOs intentionally expose the complete parsed schema"
+    clippy::exhaustive_enums,
+    reason = "the binding schema defines a closed implementation-language vocabulary"
 )]
-pub struct TargetOutputs {
-    /// Optional output file declaration.
-    pub file: Option<PathBuf>,
-    /// Optional structured standard-output format.
-    pub stdout: Option<OutputFormat>,
+pub enum LanguageOptions {
+    /// Settings of the `rust` block.
+    Rust {
+        /// Selected async runtime.
+        runtime: Runtime,
+    },
+    /// Settings of the `csharp` block.
+    CSharp {
+        /// Optional target framework.
+        framework: Option<String>,
+    },
 }
 
-/// Supported structured stdout formats.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[expect(clippy::exhaustive_enums, reason = "the binding schema defines a closed output-format vocabulary")]
-pub enum OutputFormat {
-    /// JSON output.
-    Json,
-    /// YAML output.
-    Yaml,
-}
-
-/// One unresolved target exactly as represented in YAML.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct TargetFile {
-    package_root: PathBuf,
-    #[serde(default)]
-    runtime: RuntimeFile,
-    framework: Option<String>,
-    command: Option<String>,
-    outputs: Option<WireOutputs>,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum RuntimeFile {
-    #[default]
-    Smol,
-    Tokio,
-}
-
-impl From<RuntimeFile> for Runtime {
-    fn from(value: RuntimeFile) -> Self {
-        match value {
-            RuntimeFile::Smol => Self::Smol,
-            RuntimeFile::Tokio => Self::Tokio,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct WireOutputs {
-    file: Option<PathBuf>,
-    stdout: Option<WireFormat>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum WireFormat {
-    Json,
-    Yaml,
-}
-
-impl From<WireOutputs> for TargetOutputs {
-    fn from(value: WireOutputs) -> Self {
-        Self {
-            file: value.file,
-            stdout: value.stdout.map(|format| match format {
-                WireFormat::Json => OutputFormat::Json,
-                WireFormat::Yaml => OutputFormat::Yaml,
-            }),
-        }
-    }
-}
-
-/// One resolved implementation target.
+/// One implementation of a component with every path resolved relative to the binding file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[expect(
     clippy::exhaustive_structs,
     reason = "binding DTOs intentionally expose the complete parsed schema"
 )]
-pub struct Target {
-    /// Resolved package root.
-    pub package_root: PathBuf,
-    /// Selected async runtime.
-    pub runtime: Runtime,
-    /// Optional target framework.
-    pub framework: Option<String>,
-    /// Optional target command.
-    pub command: Option<String>,
-    /// Optional structured output declaration.
-    pub outputs: Option<TargetOutputs>,
+pub struct Implementation {
+    /// Directory that discovery and replay build.
+    pub sources: PathBuf,
+    /// How the implementation's tests are run.
+    pub tests: Tests,
+    /// Language-specific settings; the variant fixes the implementation language.
+    pub options: LanguageOptions,
 }
 
-/// Builder for a resolved implementation [`Target`].
-#[must_use]
-#[derive(Debug)]
-pub struct TargetBuilder {
-    package_root: PathBuf,
-    runtime: Runtime,
-    framework: Option<String>,
-    command: Option<String>,
-    outputs: Option<TargetOutputs>,
-}
-
-impl Target {
-    /// Start a target builder with the required package root.
-    pub fn builder(package_root: impl Into<PathBuf>) -> TargetBuilder {
-        TargetBuilder {
-            package_root: package_root.into(),
-            runtime: Runtime::default(),
-            framework: None,
-            command: None,
-            outputs: None,
-        }
-    }
-}
-
-impl TargetBuilder {
-    /// Select the async runtime.
-    pub const fn runtime(mut self, runtime: Runtime) -> Self {
-        self.runtime = runtime;
-        self
-    }
-    /// Set the optional target framework.
-    pub fn framework(mut self, framework: Option<String>) -> Self {
-        self.framework = framework;
-        self
-    }
-    /// Set the optional target command.
-    pub fn command(mut self, command: Option<String>) -> Self {
-        self.command = command;
-        self
-    }
-    /// Set the optional output declaration.
-    pub fn outputs(mut self, outputs: Option<TargetOutputs>) -> Self {
-        self.outputs = outputs;
-        self
-    }
-    /// Build the target.
+impl Implementation {
+    /// Create an implementation, validating the declarations.
     ///
     /// # Errors
     ///
-    /// Returns an error when the package root is empty.
-    pub fn build(self) -> Result<Target, Error> {
-        if self.package_root.as_os_str().is_empty() {
-            return Err(Error::message(ErrorKind::Binding, "target package_root must not be empty"));
+    /// Returns an error when `sources` is empty, a test project path is empty,
+    /// the project list is empty, or the test command is blank.
+    pub fn new(sources: impl Into<PathBuf>, tests: Tests, options: LanguageOptions) -> Result<Self, Error> {
+        let sources = sources.into();
+        if sources.as_os_str().is_empty() {
+            return Err(Error::message(ErrorKind::Binding, "implementation sources must not be empty"));
         }
-        Ok(Target {
-            package_root: self.package_root,
-            runtime: self.runtime,
-            framework: self.framework,
-            command: self.command,
-            outputs: self.outputs,
-        })
+        match &tests {
+            Tests::Projects(projects) if projects.is_empty() => {
+                return Err(Error::message(ErrorKind::Binding, "tests.projects must list at least one path"));
+            }
+            Tests::Projects(projects) if projects.iter().any(|project| project.as_os_str().is_empty()) => {
+                return Err(Error::message(ErrorKind::Binding, "tests.projects must not contain an empty path"));
+            }
+            Tests::Command(command) if command.trim().is_empty() => {
+                return Err(Error::message(ErrorKind::Binding, "tests.command must not be blank"));
+            }
+            Tests::Projects(_) | Tests::Command(_) => {}
+        }
+        Ok(Self { sources, tests, options })
+    }
+
+    /// The implementation language.
+    #[must_use]
+    pub const fn language(&self) -> Language {
+        match self.options {
+            LanguageOptions::Rust { .. } => Language::Rust,
+            LanguageOptions::CSharp { .. } => Language::CSharp,
+        }
     }
 }
 
@@ -221,17 +137,8 @@ impl TargetBuilder {
 pub struct Binding {
     /// Absolute binding-file path.
     pub path: PathBuf,
-    /// Implementation language.
-    pub language: Language,
-    /// Named resolved targets.
-    pub targets: BTreeMap<TargetName, Target>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct BindingFile {
-    language: LanguageFile,
-    targets: BTreeMap<String, TargetFile>,
+    /// Implementations of every component, keyed by component and label.
+    pub components: BTreeMap<ComponentId, BTreeMap<ImplementationLabel, Implementation>>,
 }
 
 /// Supported implementation language.
@@ -276,20 +183,97 @@ impl PartialEq<str> for Language {
     }
 }
 
+/// A mapping whose entries keep file order so duplicate keys stay detectable.
+struct Entries<T>(Vec<(String, T)>);
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for Entries<T> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct EntriesVisitor<T>(std::marker::PhantomData<T>);
+
+        impl<'de, T: Deserialize<'de>> serde::de::Visitor<'de> for EntriesVisitor<T> {
+            type Value = Entries<T>;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a mapping")
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let mut entries = Vec::new();
+                while let Some(entry) = map.next_entry::<String, T>()? {
+                    entries.push(entry);
+                }
+                Ok(Entries(entries))
+            }
+        }
+
+        deserializer.deserialize_map(EntriesVisitor(std::marker::PhantomData))
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BindingFile {
+    components: Entries<ComponentFile>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ComponentFile {
+    implementations: Entries<ImplementationFile>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ImplementationFile {
+    language: LanguageFile,
+    sources: PathBuf,
+    tests: TestsFile,
+    rust: Option<RustFile>,
+    csharp: Option<CSharpFile>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TestsFile {
+    projects: Option<Vec<PathBuf>>,
+    command: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RustFile {
+    #[serde(default)]
+    runtime: RuntimeFile,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CSharpFile {
+    framework: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum RuntimeFile {
+    #[default]
+    Smol,
+    Tokio,
+}
+
+impl From<RuntimeFile> for Runtime {
+    fn from(value: RuntimeFile) -> Self {
+        match value {
+            RuntimeFile::Smol => Self::Smol,
+            RuntimeFile::Tokio => Self::Tokio,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum LanguageFile {
     Rust,
     CSharp,
-}
-
-impl From<LanguageFile> for Language {
-    fn from(value: LanguageFile) -> Self {
-        match value {
-            LanguageFile::Rust => Self::Rust,
-            LanguageFile::CSharp => Self::CSharp,
-        }
-    }
 }
 
 struct Filesystem {
@@ -340,52 +324,88 @@ impl Filesystem {
     }
 }
 
-/// A selected binding target.
+/// A selected component implementation.
 #[derive(Debug, Clone)]
 #[expect(
     clippy::exhaustive_structs,
-    reason = "resolved binding DTOs intentionally expose all selected target evidence"
+    reason = "resolved binding DTOs intentionally expose all selected implementation evidence"
 )]
-pub struct ResolvedTarget {
+pub struct ResolvedImplementation {
     /// Absolute source binding path.
     pub binding_path: PathBuf,
-    /// Selected target name.
-    pub name: TargetName,
-    /// Implementation language.
-    pub language: Language,
-    /// Selected target configuration.
-    pub target: Target,
+    /// Component the implementation was selected for.
+    pub component: ComponentId,
+    /// Selected implementation label.
+    pub label: ImplementationLabel,
+    /// Selected implementation configuration.
+    pub implementation: Implementation,
+}
+
+impl ResolvedImplementation {
+    /// The implementation language.
+    #[must_use]
+    pub const fn language(&self) -> Language {
+        self.implementation.language()
+    }
 }
 
 impl Binding {
-    /// Select a named target, or `default` and then the first sorted target.
+    /// Select one implementation of `component`.
+    ///
+    /// An omitted or empty `label` selects the component's only implementation.
     ///
     /// # Errors
     ///
-    /// Returns an actionable error for an unknown target or when the binding
-    /// has no target that can be selected.
-    pub fn resolve_target(&self, requested: Option<&str>) -> Result<ResolvedTarget, Error> {
-        let (name, target) = match requested.filter(|name| !name.is_empty()) {
-            Some(name) => self.targets.get_key_value(name).ok_or_else(|| {
+    /// Returns an actionable error for an unknown component or label, or when
+    /// `label` is omitted and the component has several implementations.
+    pub fn resolve_implementation(&self, component: &str, label: Option<&str>) -> Result<ResolvedImplementation, Error> {
+        let (component_id, implementations) = self.components.get_key_value(component).ok_or_else(|| {
+            Error::message(
+                ErrorKind::Binding,
+                format!(
+                    "component '{component}' not found in binding '{}'; available components: {}",
+                    self.path.display(),
+                    self.components.keys().map(ComponentId::as_str).collect::<Vec<_>>().join(", ")
+                ),
+            )
+        })?;
+        let labels = || {
+            implementations
+                .keys()
+                .map(ImplementationLabel::as_str)
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let (label, implementation) = if let Some(label) = label {
+            implementations.get_key_value(label).ok_or_else(|| {
                 Error::message(
                     ErrorKind::Binding,
                     format!(
-                        "target '{name}' not found in binding; available targets: {}",
-                        self.targets.keys().map(TargetName::as_str).collect::<Vec<_>>().join(", ")
+                        "implementation '{label}' not found for component '{component}'; available implementations: {}",
+                        labels()
                     ),
                 )
-            })?,
-            None => self
-                .targets
-                .get_key_value(DEFAULT_TARGET)
-                .or_else(|| self.targets.first_key_value())
-                .ok_or_else(|| Error::message(ErrorKind::Binding, format!("binding '{}' contains no targets", self.path.display())))?,
+            })?
+        } else {
+            let mut entries = implementations.iter();
+            match (entries.next(), entries.next()) {
+                (Some(only), None) => only,
+                _ => {
+                    return Err(Error::message(
+                        ErrorKind::Binding,
+                        format!(
+                            "component '{component}' has several implementations; select one by label: {}",
+                            labels()
+                        ),
+                    ));
+                }
+            }
         };
-        Ok(ResolvedTarget {
+        Ok(ResolvedImplementation {
             binding_path: self.path.clone(),
-            name: name.clone(),
-            language: self.language,
-            target: target.clone(),
+            component: component_id.clone(),
+            label: label.clone(),
+            implementation: implementation.clone(),
         })
     }
 }
@@ -394,8 +414,8 @@ impl Binding {
 ///
 /// # Errors
 ///
-/// Rejects I/O/YAML errors, unknown fields, unsupported languages, empty
-/// target sets and empty paths.
+/// Rejects I/O/YAML errors, unknown fields, mismatched language blocks,
+/// invalid test declarations, empty or duplicate identifiers, and empty paths.
 pub fn load_binding(path: impl AsRef<Path>) -> Result<Binding, Error> {
     load_with(path.as_ref(), &Filesystem::real())
 }
@@ -439,15 +459,21 @@ fn load_with(path: &Path, filesystem: &Filesystem) -> Result<Binding, Error> {
 
 /// Parse and resolve a binding from supplied YAML content.
 ///
-/// Relative package roots are resolved against `path` exactly as they are in
+/// Relative paths are resolved against `path` exactly as they are in
 /// [`load_binding`], without reading or canonicalizing the filesystem.
 ///
 /// # Errors
 ///
-/// Rejects YAML errors, unknown fields, unsupported languages, empty target
-/// sets and empty paths.
+/// Rejects YAML errors, unknown fields, mismatched language blocks, invalid
+/// test declarations, empty or duplicate identifiers, and empty paths.
 pub fn parse_binding(path: impl AsRef<Path>, text: impl AsRef<str>) -> Result<Binding, Error> {
     let path = path.as_ref();
+    let invalid = |message: String| {
+        Error::message(
+            ErrorKind::Binding,
+            format!("binding '{}' not found or invalid: {message}", path.display()),
+        )
+    };
     let file: BindingFile = serde_yaml::from_str(text.as_ref()).map_err(|source| {
         Error::cause(
             ErrorKind::Binding,
@@ -455,56 +481,93 @@ pub fn parse_binding(path: impl AsRef<Path>, text: impl AsRef<str>) -> Result<Bi
             source,
         )
     })?;
-    if file.targets.is_empty() {
-        return Err(Error::message(
-            ErrorKind::Binding,
-            format!("binding '{}' contains no targets", path.display()),
-        ));
+    if file.components.0.is_empty() {
+        return Err(invalid("components must list at least one component".to_string()));
     }
 
     let base = path.parent().unwrap_or_else(|| Path::new("."));
-    let targets = file
-        .targets
-        .into_iter()
-        .map(|(name, target)| {
-            if name.trim().is_empty() {
-                return Err(Error::message(
-                    ErrorKind::Binding,
-                    format!("binding '{}' contains an empty target name", path.display()),
-                ));
+    let mut components = BTreeMap::new();
+    for (component, entry) in file.components.0 {
+        if component.trim().is_empty() {
+            return Err(invalid("component ids must not be empty".to_string()));
+        }
+        if entry.implementations.0.is_empty() {
+            return Err(invalid(format!("component '{component}' must list at least one implementation")));
+        }
+        let mut implementations = BTreeMap::new();
+        for (label, implementation) in entry.implementations.0 {
+            if label.trim().is_empty() {
+                return Err(invalid(format!("component '{component}' has an empty implementation label")));
             }
-            if target.package_root.as_os_str().is_empty() {
-                return Err(Error::message(
+            let context = format!("implementation '{label}' of component '{component}'");
+            let resolved = resolve_implementation_file(base, &context, implementation).map_err(|source| {
+                Error::cause(
                     ErrorKind::Binding,
-                    format!("binding target '{name}' has an empty package_root"),
-                ));
+                    format!("binding '{}' not found or invalid: {source}", path.display()),
+                    source,
+                )
+            })?;
+            if implementations
+                .insert(ImplementationLabel::from(label.as_str()), resolved)
+                .is_some()
+            {
+                return Err(invalid(format!("component '{component}' repeats implementation label '{label}'")));
             }
-            let package_root = normalize(base.join(&target.package_root));
-            Ok((
-                TargetName::from(name),
-                Target::builder(package_root)
-                    .runtime(target.runtime.into())
-                    .framework(target.framework)
-                    .command(target.command)
-                    .outputs(target.outputs.map(TargetOutputs::from))
-                    .build()?,
-            ))
-        })
-        .collect::<Result<BTreeMap<_, _>, Error>>()?;
+        }
+        if components.insert(ComponentId::from(component.as_str()), implementations).is_some() {
+            return Err(invalid(format!("component '{component}' is listed more than once")));
+        }
+    }
     Ok(Binding {
         path: path.to_path_buf(),
-        language: file.language.into(),
-        targets,
+        components,
     })
 }
 
-/// Load a binding and select one target using the shared defaulting rules.
+fn resolve_implementation_file(base: &Path, context: &str, file: ImplementationFile) -> Result<Implementation, Error> {
+    let fail = |message: &str| Error::message(ErrorKind::Binding, format!("{context} {message}"));
+    let options = match (file.language, file.rust, file.csharp) {
+        (LanguageFile::Rust, rust, None) => LanguageOptions::Rust {
+            runtime: rust.map(|block| block.runtime).unwrap_or_default().into(),
+        },
+        (LanguageFile::CSharp, None, csharp) => LanguageOptions::CSharp {
+            framework: csharp.and_then(|block| block.framework),
+        },
+        (LanguageFile::Rust, _, Some(_)) => return Err(fail("declares language rust but has a csharp block")),
+        (LanguageFile::CSharp, Some(_), _) => return Err(fail("declares language csharp but has a rust block")),
+    };
+    let tests = match (file.tests.projects, file.tests.command) {
+        (Some(projects), None) => Tests::Projects(
+            projects
+                .into_iter()
+                .map(|project| {
+                    if project.as_os_str().is_empty() {
+                        project
+                    } else {
+                        normalize(base.join(project))
+                    }
+                })
+                .collect(),
+        ),
+        (None, Some(command)) => Tests::Command(command),
+        (Some(_), Some(_)) => return Err(fail("tests must declare exactly one of projects or command, not both")),
+        (None, None) => return Err(fail("tests must declare exactly one of projects or command")),
+    };
+    let sources = if file.sources.as_os_str().is_empty() {
+        file.sources
+    } else {
+        normalize(base.join(file.sources))
+    };
+    Implementation::new(sources, tests, options).map_err(|source| fail(&source.to_string()))
+}
+
+/// Load a binding and select one implementation of `component`.
 ///
 /// # Errors
 ///
-/// Returns binding parsing or target-selection errors.
-pub fn resolve_target(path: impl AsRef<Path>, requested: Option<&str>) -> Result<ResolvedTarget, Error> {
-    load_binding(path)?.resolve_target(requested)
+/// Returns binding parsing or implementation-selection errors.
+pub fn resolve_implementation(path: impl AsRef<Path>, component: &str, label: Option<&str>) -> Result<ResolvedImplementation, Error> {
+    load_binding(path)?.resolve_implementation(component, label)
 }
 
 fn normalize(path: impl AsRef<Path>) -> PathBuf {
@@ -547,31 +610,192 @@ mod tests {
         BindingFixture { _cache: cache, path }
     }
 
-    #[test]
-    fn parses_all_retained_target_fields() {
-        let path = binding_file(
-            "language: csharp\ntargets:\n  default:\n    package_root: fixture\n    runtime: tokio\n    framework: net8.0\n    command: dotnet run\n    outputs: { file: result.json, stdout: json }\n",
-        );
-        let binding = load_binding(&path.path).unwrap();
-        let resolved = binding.resolve_target(None).unwrap();
-        assert_eq!(resolved.name, "default");
-        assert_eq!(resolved.target.runtime, Runtime::Tokio);
-        assert_eq!(resolved.target.framework.as_deref(), Some("net8.0"));
-        assert_eq!(resolved.target.outputs.unwrap().stdout, Some(OutputFormat::Json));
+    const VALID: &str = "components:
+  example.orders:
+    implementations:
+      rust-main:
+        language: rust
+        sources: crates/orders
+        tests:
+          projects: [crates/orders/tests, ../shared/tests]
+        rust:
+          runtime: tokio
+      cs-main:
+        language: csharp
+        sources: dotnet/Orders
+        tests:
+          command: dotnet test
+        csharp:
+          framework: net8.0
+  example.users:
+    implementations:
+      only:
+        language: rust
+        sources: users
+        tests:
+          command: cargo test
+";
+
+    fn implementation(yaml: &str) -> String {
+        format!(
+            "components:\n  c:\n    implementations:\n      i:\n        language: rust\n        sources: s\n        tests:\n          command: t\n{yaml}"
+        )
+    }
+
+    fn rejects(yaml: &str, expected: &str) {
+        let error = parse_binding("specgate.yaml", yaml).unwrap_err();
+        assert!(error.to_string().contains(expected), "expected '{expected}' in: {error}");
     }
 
     #[test]
-    fn rejects_unknown_fields() {
-        let unknown = binding_file("language: rust\ntargets:\n  default:\n    package_root: .\n    surprise: true\n");
-        assert!(load_binding(&unknown.path).unwrap_err().contains("unknown field"));
+    fn parses_valid_binding_with_resolved_paths() {
+        let binding = parse_binding("base/specgate.yaml", VALID).unwrap();
+        assert_eq!(binding.components.len(), 2);
+        let rust = binding.resolve_implementation("example.orders", Some("rust-main")).unwrap();
+        assert_eq!(rust.label, "rust-main");
+        assert_eq!(rust.language(), Language::Rust);
+        assert_eq!(rust.implementation.sources, PathBuf::from("base/crates/orders"));
+        assert_eq!(
+            rust.implementation.tests,
+            Tests::Projects(vec![PathBuf::from("base/crates/orders/tests"), PathBuf::from("shared/tests")])
+        );
+        assert_eq!(rust.implementation.options, LanguageOptions::Rust { runtime: Runtime::Tokio });
+        let csharp = binding.resolve_implementation("example.orders", Some("cs-main")).unwrap();
+        assert_eq!(csharp.language(), Language::CSharp);
+        assert_eq!(csharp.implementation.tests, Tests::Command("dotnet test".to_string()));
+        assert_eq!(
+            csharp.implementation.options,
+            LanguageOptions::CSharp {
+                framework: Some("net8.0".to_string())
+            }
+        );
+    }
+
+    #[test]
+    fn rust_runtime_defaults_to_smol() {
+        let binding = parse_binding("specgate.yaml", VALID).unwrap();
+        let users = binding.resolve_implementation("example.users", None).unwrap();
+        assert_eq!(users.implementation.options, LanguageOptions::Rust { runtime: Runtime::Smol });
+    }
+
+    #[test]
+    fn rejects_missing_components() {
+        rejects("{}\n", "missing field `components`");
+        rejects("components: {}\n", "components must list at least one component");
+        rejects("components:\n  c: {}\n", "missing field `implementations`");
+        rejects(
+            "components:\n  c:\n    implementations: {}\n",
+            "must list at least one implementation",
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_fields_at_every_level() {
+        rejects(
+            "version: 1\ncomponents:\n  c:\n    implementations: {}\n",
+            "unknown field `version`",
+        );
+        rejects(
+            "components:\n  c:\n    surprise: true\n    implementations: {}\n",
+            "unknown field `surprise`",
+        );
+        rejects(&implementation("        surprise: true\n"), "unknown field `surprise`");
+        rejects(
+            &implementation("        rust:\n          surprise: true\n"),
+            "unknown field `surprise`",
+        );
+    }
+
+    #[test]
+    fn rejects_wrong_language_block() {
+        rejects(
+            &implementation("        csharp:\n          framework: net8.0\n"),
+            "language rust but has a csharp block",
+        );
+        let csharp = "components:\n  c:\n    implementations:\n      i:\n        language: csharp\n        sources: s\n        tests:\n          command: t\n        rust:\n          runtime: tokio\n";
+        rejects(csharp, "language csharp but has a rust block");
+    }
+
+    #[test]
+    fn rejects_invalid_tests_declarations() {
+        let with_tests = |tests: &str| {
+            format!(
+                "components:\n  c:\n    implementations:\n      i:\n        language: rust\n        sources: s\n        tests:\n{tests}"
+            )
+        };
+        rejects(&with_tests("          projects: [p]\n          command: t\n"), "not both");
+        rejects(&with_tests("          {}\n"), "exactly one of projects or command");
+        rejects(&with_tests("          projects: []\n"), "at least one path");
+        rejects(&with_tests("          projects: ['']\n"), "empty path");
+        rejects(&with_tests("          command: '  '\n"), "must not be blank");
+    }
+
+    #[test]
+    fn rejects_empty_and_duplicate_identifiers() {
+        rejects("components:\n  '':\n    implementations: {}\n", "component ids must not be empty");
+        let labelled = |label: &str| {
+            format!(
+                "components:\n  c:\n    implementations:\n      {label}:\n        language: rust\n        sources: s\n        tests:\n          command: t\n"
+            )
+        };
+        rejects(&labelled("''"), "empty implementation label");
+        let duplicate_label = format!(
+            "{}      i:\n        language: rust\n        sources: s\n        tests:\n          command: t\n",
+            labelled("i")
+        );
+        rejects(&duplicate_label, "repeats implementation label 'i'");
+        let duplicate_component = format!(
+            "{}  c:\n    implementations:\n      i:\n        language: rust\n        sources: s\n        tests:\n          command: t\n",
+            labelled("i")
+        );
+        rejects(&duplicate_component, "listed more than once");
+    }
+
+    #[test]
+    fn rejects_empty_sources() {
+        rejects(
+            &implementation("").replace("sources: s", "sources: ''"),
+            "sources must not be empty",
+        );
+    }
+
+    #[test]
+    fn rejects_old_format_files() {
+        rejects(
+            "language: rust\ntargets:\n  default:\n    package_root: .\n",
+            "unknown field `language`",
+        );
+    }
+
+    #[test]
+    fn selection_auto_selects_a_sole_implementation() {
+        let binding = parse_binding("specgate.yaml", VALID).unwrap();
+        let resolved = binding.resolve_implementation("example.users", None).unwrap();
+        assert_eq!(resolved.label, "only");
+        assert_eq!(resolved.component, "example.users");
+    }
+
+    #[test]
+    fn selection_reports_ambiguity_and_unknown_choices() {
+        let binding = parse_binding("specgate.yaml", VALID).unwrap();
+        let ambiguous = binding.resolve_implementation("example.orders", None).unwrap_err();
+        assert!(ambiguous.to_string().contains("several implementations"));
+        assert!(ambiguous.to_string().contains("cs-main, rust-main"));
+        let unknown_label = binding.resolve_implementation("example.orders", Some("nope")).unwrap_err();
+        assert!(unknown_label.to_string().contains("implementation 'nope' not found"));
+        assert!(unknown_label.to_string().contains("cs-main, rust-main"));
+        let empty_label = binding.resolve_implementation("example.orders", Some("")).unwrap_err();
+        assert!(empty_label.to_string().contains("implementation '' not found"));
+        let unknown_component = binding.resolve_implementation("missing", None).unwrap_err();
+        assert!(unknown_component.to_string().contains("component 'missing' not found"));
+        assert!(unknown_component.to_string().contains("example.orders, example.users"));
     }
 
     #[test]
     fn content_and_path_loading_have_identical_results() {
-        let yaml = "language: rust\ntargets:\n  default:\n    package_root: fixture\n";
-        let fixture = binding_file(yaml);
+        let fixture = binding_file(VALID);
         let loaded = load_binding(&fixture.path).unwrap();
-        let parsed = parse_binding(&loaded.path, yaml).unwrap();
+        let parsed = parse_binding(&loaded.path, VALID).unwrap();
         assert_eq!(loaded, parsed);
     }
 
@@ -585,11 +809,10 @@ mod tests {
     fn fake_filesystem_injects_canonicalization_and_read_failures() {
         let original = Path::new("relative/binding.yaml");
         let canonical = PathBuf::from("canonical/binding.yaml");
-        let yaml = "language: rust\ntargets:\n  default:\n    package_root: fixture\n";
         let filesystem = Filesystem {
             inner: FilesystemKind::Fake(FakeFs {
                 canonicalize: Ok(canonical.clone()),
-                read_to_string: Ok(yaml.to_string()),
+                read_to_string: Ok(VALID.to_string()),
             }),
         };
         let loaded = load_with(original, &filesystem).unwrap();

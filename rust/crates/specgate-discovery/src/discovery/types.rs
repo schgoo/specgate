@@ -114,7 +114,7 @@ fn map_rust(t: &RustType, type_names: &[&str]) -> SpecType {
 fn map_named(name: &str, args: &[RustType], type_names: &[&str]) -> SpecType {
     let m = |t: &RustType| map_rust(t, type_names);
     match (name, args.len()) {
-        ("String" | "str" | "ComponentId" | "OperationName" | "TargetName", _) => SpecType::scalar("string".to_string()),
+        ("String" | "str" | "ComponentId" | "OperationName" | "ImplementationLabel", _) => SpecType::scalar("string".to_string()),
         ("()", 0) => SpecType::scalar("unit".to_string()),
         // The runtime `Value` is the spec's built-in universal structured value.
         (_, 0) if runtime_value(name) => SpecType::scalar("value".to_string()),
@@ -148,7 +148,7 @@ pub fn builtin(name: impl AsRef<str>) -> bool {
                 | "str"
                 | "ComponentId"
                 | "OperationName"
-                | "TargetName"
+                | "ImplementationLabel"
                 | "char"
                 | "bool"
                 | "i8"

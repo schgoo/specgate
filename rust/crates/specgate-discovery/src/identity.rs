@@ -93,7 +93,7 @@ macro_rules! string_identity {
 
 string_identity!(ComponentId, "A CTSC component identity.");
 string_identity!(OperationName, "A semantic operation name.");
-string_identity!(TargetName, "A binding target name.");
+string_identity!(ImplementationLabel, "A binding implementation label.");
 string_identity!(TypeName, "A named semantic type.");
 string_identity!(FieldName, "A semantic field or input name.");
 string_identity!(ErrorName, "A declared operation error name.");

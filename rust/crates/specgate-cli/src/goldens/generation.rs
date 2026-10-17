@@ -27,40 +27,59 @@ pub(super) fn registry_bytes(schema: &specgate_discovery::schema::Schema, compon
     Ok(encoded.registry_json.into_bytes())
 }
 
-/// Empty component selection asks discovery to return every component in the binding.
-const ALL_COMPONENTS: &str = "";
-
-/// Generate and validate Rust artifacts for one matrix binding group.
-pub(super) fn generate_rust(
-    root: impl AsRef<Path>,
-    matrix: &Matrix,
-    out_root: impl AsRef<Path>,
-    binding_key: impl AsRef<str>,
-) -> Result<(), GoldenError> {
-    let root = root.as_ref();
-    let out_root = out_root.as_ref();
-    let binding_key = binding_key.as_ref();
-    let rows = matrix
+/// Rust matrix rows grouped by the sources directory their implementation builds.
+///
+/// One discovery and one batched capture run per group, so every component in a
+/// group must resolve to the same source root through the shared binding.
+pub(super) fn rust_groups(root: impl AsRef<Path>, matrix: &Matrix) -> Result<BTreeMap<PathBuf, Vec<&Row>>, GoldenError> {
+    let binding = repo_path(root.as_ref(), &matrix.binding);
+    let mut groups = BTreeMap::<PathBuf, Vec<&Row>>::new();
+    for row in matrix
         .rows
         .iter()
         .filter(|row| row.classification == Classification::ImplementationComponent)
-        .filter(|row| row.rust.as_ref().is_some_and(|language| language.binding == binding_key))
-        .collect::<Vec<_>>();
-    if rows.is_empty() {
-        return Ok(());
+    {
+        let Some(language) = row.rust.as_ref() else {
+            continue;
+        };
+        let component = row
+            .component
+            .as_deref()
+            .expect("implementation-component matrix row must declare a component identity");
+        let resolved = resolve_implementation(&binding, component, Some(&language.binding))
+            .map_err(|error| GoldenError::message(format!("{component}: binding resolution failed: {error}")))?;
+        groups.entry(resolved.implementation.sources).or_default().push(row);
     }
-    let binding = repo_path(root, &matrix.bindings[binding_key]);
-    let discovered = discover(&binding, ALL_COMPONENTS)
-        .map_err(|error| GoldenError::message(format!("{binding_key}: discovery failed: {}", error.diagnostic())))?;
+    Ok(groups)
+}
+
+/// Generate and validate Rust artifacts for one group of rows sharing a sources directory.
+pub(super) fn generate_rust(root: impl AsRef<Path>, matrix: &Matrix, out_root: impl AsRef<Path>, rows: &[&Row]) -> Result<(), GoldenError> {
+    let root = root.as_ref();
+    let out_root = out_root.as_ref();
+    let Some(first) = rows.first() else {
+        return Ok(());
+    };
+    let binding = repo_path(root, &matrix.binding);
+    let first_language = first.rust.as_ref().expect("grouped Rust matrix row must declare Rust metadata");
+    let implementation_label = first_language.binding.as_str();
+    let first_component = ComponentId::from(
+        first
+            .component
+            .clone()
+            .expect("implementation-component matrix row must declare a component identity"),
+    );
+    let discovered = discover(&binding, &first_component, Some(implementation_label))
+        .map_err(|error| GoldenError::message(format!("{implementation_label}: discovery failed: {}", error.diagnostic())))?;
     let present = discovered.registry.present_components();
-    for row in &rows {
+    for row in rows {
         let component = row
             .component
             .as_ref()
             .expect("implementation-component matrix row must declare a component identity");
         if !present.iter().any(|candidate| candidate.as_str() == component) {
             return Err(GoldenError::message(format!(
-                "{binding_key}: matrix component '{component}' is absent from discovery; available: {}",
+                "{implementation_label}: matrix component '{component}' is absent from discovery; available: {}",
                 present
                     .iter()
                     .map(specgate_discovery::identity::ComponentId::as_str)
@@ -77,18 +96,18 @@ pub(super) fn generate_rust(
     unmatched.sort();
     if !unmatched.is_empty() {
         return Err(GoldenError::message(format!(
-            "{binding_key}: discovered components missing from the matrix: {}",
+            "{implementation_label}: discovered components missing from the matrix: {}",
             unmatched.join(", ")
         )));
     }
-    assert_sync(binding_key, &discovered.registry, &rows)?;
+    assert_sync(implementation_label, &discovered.registry, rows)?;
 
     for row in rows.iter().filter(|row| !row.captures_rust()) {
         let component = row
             .component
             .as_ref()
             .expect("implementation-component matrix row must declare a component identity");
-        let schema = normalize_registry(&discovered.registry, discovered.target.language, component.as_str())
+        let schema = normalize_registry(&discovered.registry, discovered.implementation.language(), component.as_str())
             .map_err(|error| GoldenError::message(format!("{component}: discovery-only normalization failed: {error}")))?;
         let bytes = registry_bytes(&schema, component)?;
         write_bytes(row.rust_dir(out_root).join(registry_file()), &bytes)?;
@@ -111,13 +130,13 @@ pub(super) fn generate_rust(
         return Ok(());
     }
     let reports = capture_strict(&discovered, &requests)
-        .map_err(|error| GoldenError::message(format!("{binding_key}: batched capture failed: {}", error.diagnostic())))?;
+        .map_err(|error| GoldenError::message(format!("{implementation_label}: batched capture failed: {}", error.diagnostic())))?;
     assert_eq!(
         reports.len(),
         requests.len(),
-        "{binding_key}: capture must return exactly one report per request"
+        "{implementation_label}: capture must return exactly one report per request"
     );
-    assert_coverage(binding_key, &discovered.registry, &rows, out_root)?;
+    assert_coverage(implementation_label, &discovered.registry, rows, out_root)?;
     Ok(())
 }
 
@@ -148,12 +167,12 @@ impl OperationIdentity {
 const PROBLEM_CAP: usize = 4;
 
 pub(super) fn assert_coverage(
-    binding_key: impl AsRef<str>,
+    implementation_label: impl AsRef<str>,
     registry: &Registry,
     rows: &[&Row],
     out_root: impl AsRef<Path>,
 ) -> Result<(), GoldenError> {
-    let binding_key = binding_key.as_ref();
+    let implementation_label = implementation_label.as_ref();
     let out_root = out_root.as_ref();
     let mut problems = Vec::with_capacity(rows.len().saturating_mul(PROBLEM_CAP));
     for row in rows.iter().filter(|row| row.captures_rust()) {
@@ -182,7 +201,7 @@ pub(super) fn assert_coverage(
         Ok(())
     } else {
         Err(GoldenError::message(format!(
-            "{binding_key}: golden capture operation coverage failed:\n  {}",
+            "{implementation_label}: golden capture operation coverage failed:\n  {}",
             problems.join("\n  ")
         )))
     }
@@ -281,8 +300,8 @@ pub(super) fn operation_identity(identity: &OperationIdentity) -> String {
 /// Async operations are capturable because their futures carry the synchronized
 /// collector context. Setup staging remains thread-local, so an async setup
 /// would silently omit construction inputs without this preflight rejection.
-pub(super) fn assert_sync(binding_key: impl AsRef<str>, registry: &Registry, rows: &[&Row]) -> Result<(), GoldenError> {
-    let binding_key = binding_key.as_ref();
+pub(super) fn assert_sync(implementation_label: impl AsRef<str>, registry: &Registry, rows: &[&Row]) -> Result<(), GoldenError> {
+    let implementation_label = implementation_label.as_ref();
     for row in rows.iter().filter(|row| row.captures_rust()) {
         let component = row
             .component
@@ -302,7 +321,7 @@ pub(super) fn assert_sync(binding_key: impl AsRef<str>, registry: &Registry, row
         asynchronous.sort();
         if !asynchronous.is_empty() {
             return Err(GoldenError::message(format!(
-                "row '{}' captures component '{component}', which declares async {}; async setups require exact captureExclusions because setup staging remains thread-local ({binding_key})",
+                "row '{}' captures component '{component}', which declares async {}; async setups require exact captureExclusions because setup staging remains thread-local ({implementation_label})",
                 row.id,
                 asynchronous.join(", ")
             )));
@@ -323,22 +342,22 @@ pub(super) fn generate_csharp(root: impl AsRef<Path>, matrix: &Matrix, out_root:
     if rows.is_empty() {
         return Ok(());
     }
-    let binding_key = rows[0]
+    let implementation_label = rows[0]
         .csharp
         .as_ref()
-        .expect("selected C# matrix row must declare C# binding metadata")
+        .expect("selected C# matrix row must declare C# implementation metadata")
         .binding
         .clone();
     if !rows.iter().all(|row| {
         row.csharp
             .as_ref()
-            .expect("selected C# matrix row must declare C# binding metadata")
+            .expect("selected C# matrix row must declare C# implementation metadata")
             .binding
-            == binding_key
+            == implementation_label
     }) {
-        return Err(GoldenError::message("every C# component row must use one binding"));
+        return Err(GoldenError::message("every C# component row must use one implementation label"));
     }
-    let binding = repo_path(root, &matrix.bindings[&binding_key]);
+    let binding = repo_path(root, &matrix.binding);
     let components = rows
         .iter()
         .map(|row| {
@@ -353,10 +372,13 @@ pub(super) fn generate_csharp(root: impl AsRef<Path>, matrix: &Matrix, out_root:
         .map(specgate_discovery::identity::ComponentId::from)
         .collect::<Vec<_>>();
 
-    let discovered = discover_batch(binding, None, &component_ids)
-        .map_err(|error| GoldenError::message(format!("{binding_key}: batched C# discovery failed: {error}")))?;
+    let anchor = component_ids
+        .first()
+        .expect("non-empty C# matrix rows must yield at least one component");
+    let discovered = discover_batch(binding, anchor, Some(&implementation_label), &component_ids)
+        .map_err(|error| GoldenError::message(format!("{implementation_label}: batched C# discovery failed: {error}")))?;
     if let Some(diagnostic) = inventory_mismatch(
-        &binding_key,
+        &implementation_label,
         &components.iter().map(|component| (*component).to_string()).collect(),
         &discovered.present_components,
     ) {

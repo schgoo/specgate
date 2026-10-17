@@ -1,7 +1,7 @@
 //! Discover-command parsing, execution injection, and stable CLI reporting.
 
-use super::{ArgumentError, EXIT_FAILURE, argument_error};
-use specgate::{ComponentId, TargetName};
+use super::{ArgumentError, DEFAULT_BINDING, EXIT_FAILURE, argument_error, flag_text, implementation_label};
+use specgate::{ComponentId, ImplementationLabel};
 use specgate_cli::discover::{
     self, ComponentName, Error as DiscoverError, Params, RegistryId, RegistryVersion, Report as DiscoverReport, Request as DiscoverRequest,
     discover,
@@ -13,20 +13,20 @@ use std::process::ExitCode;
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct DiscoverArgs {
     pub(super) binding: PathBuf,
-    pub(super) target: TargetName,
+    pub(super) implementation: Option<ImplementationLabel>,
     pub(super) component: ComponentId,
     pub(super) registry_id: RegistryId,
     pub(super) registry_version: RegistryVersion,
     pub(super) out: PathBuf,
 }
 
-/// Parse discover flags and the required binding path.
+/// Parse discover flags.
 ///
-/// Returns an argument error for missing, duplicate-position, non-UTF-8, or unknown input.
+/// Returns an argument error for missing, positional, non-UTF-8, or unknown input.
 pub(super) fn parse_discover<T: AsRef<std::ffi::OsStr>>(args: impl AsRef<[T]>) -> Result<DiscoverArgs, ArgumentError> {
     let args = args.as_ref();
     let mut binding = None;
-    let mut target = TargetName::default();
+    let mut implementation = None;
     let mut component = None;
     let mut registry_id = None;
     let mut registry_version = None;
@@ -34,61 +34,26 @@ pub(super) fn parse_discover<T: AsRef<std::ffi::OsStr>>(args: impl AsRef<[T]>) -
     let mut index = 0;
     while index < args.len() {
         match args[index].as_ref().to_str() {
-            Some(flag @ ("--target" | "--component" | "--registry-id" | "--registry-version" | "-o" | "--out")) => {
-                let value = args.get(index + 1).ok_or_else(|| format!("{flag} needs an argument"))?;
+            Some(flag @ ("--binding" | "--impl" | "--component" | "--registry-id" | "--registry-version" | "-o" | "--out")) => {
+                let value = args.get(index + 1).ok_or_else(|| format!("{flag} needs an argument"))?.as_ref();
                 match flag {
-                    "--target" => {
-                        target = TargetName::from(
-                            value
-                                .as_ref()
-                                .to_str()
-                                .ok_or_else(|| "--target value is not valid UTF-8".to_string())?,
-                        );
-                    }
-                    "--component" => {
-                        component = Some(ComponentId::from(
-                            value
-                                .as_ref()
-                                .to_str()
-                                .ok_or_else(|| "--component value is not valid UTF-8".to_string())?,
-                        ));
-                    }
-                    "--registry-id" => {
-                        registry_id = Some(RegistryId::parse(
-                            value
-                                .as_ref()
-                                .to_str()
-                                .ok_or_else(|| "--registry-id value is not valid UTF-8".to_string())?,
-                        )?);
-                    }
-                    "--registry-version" => {
-                        registry_version = Some(RegistryVersion::parse(
-                            value
-                                .as_ref()
-                                .to_str()
-                                .ok_or_else(|| "--registry-version value is not valid UTF-8".to_string())?,
-                        )?);
-                    }
-                    "-o" | "--out" => out = Some(PathBuf::from(value.as_ref())),
+                    "--binding" => binding = Some(PathBuf::from(value)),
+                    "--impl" => implementation = Some(implementation_label(flag, value)?),
+                    "--component" => component = Some(ComponentId::from(flag_text(flag, value)?)),
+                    "--registry-id" => registry_id = Some(RegistryId::parse(flag_text(flag, value)?)?),
+                    "--registry-version" => registry_version = Some(RegistryVersion::parse(flag_text(flag, value)?)?),
+                    "-o" | "--out" => out = Some(PathBuf::from(value)),
                     _ => unreachable!("discover parser matched a flag outside its declared flag set"),
                 }
                 index += 2;
             }
-            Some(value) if !value.starts_with('-') && binding.is_none() => {
-                binding = Some(PathBuf::from(args[index].as_ref()));
-                index += 1;
-            }
             Some(value) => return Err(format!("unexpected argument '{value}'").into()),
-            None if binding.is_none() => {
-                binding = Some(PathBuf::from(args[index].as_ref()));
-                index += 1;
-            }
             None => return Err("unexpected non-UTF-8 argument".into()),
         }
     }
     Ok(DiscoverArgs {
-        binding: binding.ok_or("discover requires a binding file argument")?,
-        target,
+        binding: binding.unwrap_or_else(|| PathBuf::from(DEFAULT_BINDING)),
+        implementation,
         component: component.ok_or("discover requires --component <id>")?,
         registry_id: registry_id.ok_or("discover requires --registry-id <id>")?,
         registry_version: registry_version.ok_or("discover requires --registry-version <version>")?,
@@ -117,16 +82,18 @@ fn run_discover<T: AsRef<std::ffi::OsStr>>(
         Err(error) => return argument_error(error, errors),
     };
     let outcome = (|| {
-        DiscoverRequest::builder(Params {
+        let builder = DiscoverRequest::builder(Params {
             binding: parsed.binding,
             out: parsed.out,
             component: ComponentName::parse(parsed.component.as_str())?,
             registry_id: parsed.registry_id,
             registry_version: parsed.registry_version,
-        })
-        .target(parsed.target)
-        .build()
-        .and_then(execute)
+        });
+        let builder = match parsed.implementation {
+            Some(label) => builder.implementation(label),
+            None => builder,
+        };
+        builder.build().and_then(execute)
     })();
     if let Err(error) = write!(output, "{}", discover::format_outcome(&outcome)) {
         return super::output_error(error, errors);
