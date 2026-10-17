@@ -81,6 +81,25 @@ impl PartialEq<&str> for ArgumentError {
     }
 }
 
+// Binding file used when a command does not pass `--binding`.
+const DEFAULT_BINDING: &str = "./specgate.yaml";
+
+/// Decode one flag value as UTF-8 text.
+fn flag_text<'a>(flag: &str, value: &'a std::ffi::OsStr) -> Result<&'a str, ArgumentError> {
+    value
+        .to_str()
+        .ok_or_else(|| ArgumentError::from(format!("{flag} value is not valid UTF-8")))
+}
+
+/// Decode an implementation label, rejecting an empty one.
+fn implementation_label(flag: &str, value: &std::ffi::OsStr) -> Result<specgate::ImplementationLabel, ArgumentError> {
+    let text = flag_text(flag, value)?;
+    if text.is_empty() {
+        return Err(ArgumentError::from(format!("{flag} needs a non-empty implementation label")));
+    }
+    Ok(specgate::ImplementationLabel::from(text))
+}
+
 fn operation_status(succeeded: bool) -> ExitCode {
     if succeeded {
         ExitCode::SUCCESS
@@ -98,7 +117,7 @@ fn print_usage(writer: &mut impl std::io::Write) -> std::io::Result<()> {
         writer,
         "usage: specgate <command> [options] <args>\n\
          \n\
-         commands:\n  discover <binding.yaml> --component <id> --registry-id <id> --registry-version <version> -o|--out <registry.ctsc.json> [--target <name>]\n  capture <binding.yaml> --out <dir> [--target <name>] [--component <id>]\n  replay <capture-dir> <candidate-binding.yaml> --out <candidate.otlp.json> [--target <name>]\n  validate registry <registry.json> [--import <registry.json>]...\n  validate trace <trace.otlp.json|trace.otlp.jsonl>\n  validate linked <trace> <root-registry> [--import <registry.json>]...\n  validate bundle <capture-dir>\n  compare <reference-trace> <candidate-trace> [--registry <root-registry>] [--import <registry.json>]..."
+         commands:\n  discover --component <id> [--binding <specgate.yaml>] [--impl <label>] --registry-id <id> --registry-version <version> -o|--out <registry.ctsc.json>\n  capture --component <id> [--binding <specgate.yaml>] [--impl <label>] [--out <dir>] [--force]\n  replay <capture-dir> [--binding <specgate.yaml>] [--impl <label>] [--out <candidate.otlp.json>] [--force]\n  validate registry <registry.json> [--import <registry.json>]...\n  validate trace <trace.otlp.json|trace.otlp.jsonl>\n  validate linked <trace> <root-registry> [--import <registry.json>]...\n  validate bundle <capture-dir>\n  compare <reference-trace> <candidate-trace> [--registry <root-registry>] [--import <registry.json>]..."
     )
 }
 

@@ -5,7 +5,7 @@
 #[cfg(test)]
 mod cases {
     use super::super::execution::{FailureReason, failure_summary, reject_persistence, unfinalized_operation, unfinalized_summary};
-    use super::super::facade::{capture_many, execute_tests, write_bundles};
+    use super::super::facade::{capture_many, default_out, execute_tests, write_bundles};
     use super::super::filter::filter;
     use super::super::*;
     use specgate_ctsc::validation::{validate_bundle, validate_linked};
@@ -19,34 +19,14 @@ mod cases {
             .to_path_buf()
     }
 
-    fn rust_binding() -> PathBuf {
+    fn fixture_binding() -> PathBuf {
         repo_root()
             .join("rust")
             .join("crates")
             .join("specgate-cli")
             .join("tests")
             .join("fixtures")
-            .join("rust.binding.yaml")
-    }
-
-    fn aborted_binding() -> PathBuf {
-        repo_root()
-            .join("rust")
-            .join("crates")
-            .join("specgate-cli")
-            .join("tests")
-            .join("fixtures")
-            .join("rust-aborted.binding.yaml")
-    }
-
-    fn csharp_binding() -> PathBuf {
-        repo_root()
-            .join("rust")
-            .join("crates")
-            .join("specgate-cli")
-            .join("tests")
-            .join("fixtures")
-            .join("csharp.binding.yaml")
+            .join("specgate.yaml")
     }
 
     fn output_dir(label: impl AsRef<str>) -> PathBuf {
@@ -87,13 +67,19 @@ mod cases {
     fn stable_bundle() {
         let root = output_dir("focused");
         let _ = std::fs::remove_dir_all(&root);
+        // The target label is the out directory's name, so byte-comparison needs equal names under different parents.
         let requests = vec![
-            request_at("fixture.cli.replay", root.join("batch-replay")),
-            request_at("fixture.cli.replay", root.join("repeat-replay")),
+            request_at("fixture.cli.replay", root.join("batch").join("replay")),
+            request_at("fixture.cli.replay", root.join("repeat").join("replay")),
             request_at("fixture.cli.setup", root.join("setup")),
             request_at("fixture.cli.multiple", root.join("multiple")),
         ];
-        let discovered = discover(rust_binding().to_str().unwrap(), "").expect("focused fixture discovery");
+        let discovered = discover(
+            fixture_binding().to_str().unwrap(),
+            &ComponentId::from("fixture.cli.replay"),
+            Some("rust"),
+        )
+        .expect("focused fixture discovery");
         let executed = execute_tests(&discovered, &requests).expect("focused fixture execution");
         assert_eq!(executed.failures.len(), 1);
         assert_eq!(executed.failures[0].scenario_name, "tests::deliberately_fails_for_strict_capture");
@@ -136,7 +122,7 @@ mod cases {
         assert_eq!(manifest["format"], "specgate.capture-manifest");
         assert_eq!(manifest["formatVersion"], "0.1.0");
         assert_eq!(manifest["componentId"], "fixture.cli.replay");
-        assert_eq!(manifest["target"], serde_json::json!({"name":"default","language":"rust"}));
+        assert_eq!(manifest["target"], serde_json::json!({"name":"replay","language":"rust"}));
         assert_eq!(
             manifest["tool"],
             serde_json::json!({"name":"specgate","version":env!("CARGO_PKG_VERSION")})
@@ -156,7 +142,7 @@ mod cases {
         // `capture` and `capture_many` differ only in request cardinality after
         // this shared execution phase. Compare both encodings without rebuilding
         // or rerunning the real fixture toolchain.
-        let single = request_at("fixture.cli.replay", root.join("single-replay"));
+        let single = request_at("fixture.cli.replay", root.join("single").join("replay"));
         write_bundles(&discovered, std::slice::from_ref(&single), &executed, false).expect("single capture encoding");
         for filename in [REGISTRY_FILE, TRACE_FILE, MANIFEST_FILE] {
             assert_eq!(
@@ -368,9 +354,10 @@ mod cases {
 
         let request = CaptureRequest::builder(CapturePaths {
             binding: "bindings/reference.yaml".into(),
-            out: "capture/output".into(),
         })
         .component(" arbitrary component ! ")
+        .out("capture/output")
+        .force(true)
         .build()
         .unwrap();
         assert_eq!(
@@ -384,8 +371,15 @@ mod cases {
                     "component".to_string(),
                     specgate::Value::String(" arbitrary component ! ".to_string())
                 ),
-                ("out".to_string(), specgate::Value::String("capture/output".to_string())),
-                ("target".to_string(), specgate::Value::String(String::new())),
+                (
+                    "out".to_string(),
+                    specgate::Value::Map(std::collections::BTreeMap::from([(
+                        "Some".to_string(),
+                        specgate::Value::String("capture/output".to_string())
+                    )]))
+                ),
+                ("force".to_string(), specgate::Value::Bool(true)),
+                ("implementation".to_string(), specgate::Value::String(String::new())),
             ]))
         );
 
@@ -416,9 +410,10 @@ mod cases {
                 .collect::<Vec<_>>(),
             vec![
                 ("binding", "string"),
-                ("target", "string"),
+                ("implementation", "string"),
                 ("component", "string"),
-                ("out", "string")
+                ("out", "Option<string>"),
+                ("force", "bool")
             ]
         );
         assert!(
@@ -442,49 +437,89 @@ mod cases {
 
     #[test]
     fn validates_defaults() {
-        let binding_error = CaptureRequest::builder(CapturePaths {
-            binding: PathBuf::new(),
-            out: "capture/output".into(),
-        })
-        .build()
-        .unwrap_err();
+        let binding_error = CaptureRequest::builder(CapturePaths { binding: PathBuf::new() })
+            .out("capture/output")
+            .build()
+            .unwrap_err();
         assert_eq!(binding_error.stage(), CaptureErrorKind::Request);
         assert_eq!(binding_error.to_string(), "capture requires a non-empty binding path");
 
         let output_error = CaptureRequest::builder(CapturePaths {
             binding: "bindings/reference.yaml".into(),
-            out: PathBuf::new(),
         })
+        .out(PathBuf::new())
         .build()
         .unwrap_err();
         assert_eq!(output_error.stage(), CaptureErrorKind::Request);
         assert_eq!(output_error.to_string(), "capture requires a non-empty output directory");
 
-        let request = CaptureRequest::builder(CapturePaths {
+        let unnamed_error = CaptureRequest::builder(CapturePaths {
             binding: "bindings/reference.yaml".into(),
-            out: "capture/output".into(),
         })
+        .component("fixture.cli.replay")
+        .out("..")
+        .build()
+        .unwrap_err();
+        assert_eq!(unnamed_error.stage(), CaptureErrorKind::Request);
+        assert_eq!(unnamed_error.to_string(), "capture output directory must end in a named directory");
+
+        for unnamed in [".", "..", "/", "a/.."] {
+            let error = CaptureRequest::builder(CapturePaths {
+                binding: "bindings/reference.yaml".into(),
+            })
+            .component("fixture.cli.replay")
+            .out(unnamed)
+            .build()
+            .unwrap_err();
+            assert_eq!(
+                error.to_string(),
+                "capture output directory must end in a named directory",
+                "{unnamed:?}"
+            );
+        }
+        let trailing = CaptureRequest::builder(CapturePaths {
+            binding: "bindings/reference.yaml".into(),
+        })
+        .component("fixture.cli.replay")
+        .out("capture/run-9/")
         .build()
         .unwrap();
-        assert_eq!(request.target(), "");
-        assert_eq!(request.component(), "");
+        assert_eq!(trailing.out().and_then(Path::file_name), Some(std::ffi::OsStr::new("run-9")));
+
+        let missing_component = CaptureRequest::builder(CapturePaths {
+            binding: "bindings/reference.yaml".into(),
+        })
+        .out("capture/output")
+        .build()
+        .unwrap_err();
+        assert_eq!(missing_component.stage(), CaptureErrorKind::Request);
+        assert_eq!(missing_component.to_string(), "capture requires a component identifier");
+
+        let request = CaptureRequest::builder(CapturePaths {
+            binding: "bindings/reference.yaml".into(),
+        })
+        .component("fixture.cli.replay")
+        .build()
+        .unwrap();
+        assert_eq!(request.implementation(), "");
+        assert_eq!(request.component(), "fixture.cli.replay");
+        assert_eq!(request.out(), None);
+        assert!(!request.force());
     }
 
     #[test]
     fn unicode_rejection() {
-        let binding_error = CaptureRequest::builder(CapturePaths {
-            binding: non_unicode(),
-            out: "capture/output".into(),
-        })
-        .build()
-        .unwrap_err();
+        let binding_error = CaptureRequest::builder(CapturePaths { binding: non_unicode() })
+            .out("capture/output")
+            .build()
+            .unwrap_err();
         assert_eq!(binding_error.stage(), CaptureErrorKind::Request);
         assert_eq!(binding_error.to_string(), "capture binding path must be valid UTF-8");
 
         let output_error = CaptureRequest::builder(CapturePaths {
             binding: "bindings/reference.yaml".into(),
-            out: non_unicode(),
         })
+        .out(non_unicode())
         .build()
         .unwrap_err();
         assert_eq!(output_error.stage(), CaptureErrorKind::Request);
@@ -509,29 +544,86 @@ mod cases {
             Some("disk unavailable")
         );
 
-        let domain = public_error(CaptureErrorKind::Selection)(FailureContext::domain("select a component"));
+        let domain = public_error(CaptureErrorKind::Request)(FailureContext::domain("select a component"));
         assert!(domain.source().is_none(), "domain diagnostics must not synthesize sources");
     }
 
     #[test]
-    fn actionable_errors() {
-        let registry = async_registry(false);
-        let ambiguous = select_component(&registry, "").unwrap_err();
-        assert!(ambiguous.diagnostic().contains("multiple components present") && ambiguous.diagnostic().contains("--component"));
-        let unknown = select_component(&registry, "fixture.absent").unwrap_err();
-        assert!(unknown.diagnostic().contains("component 'fixture.absent' not found"));
+    fn default_path_shape() {
+        let system = CommandEnvironment::fake();
+        system.seed_clock(std::time::UNIX_EPOCH + std::time::Duration::from_hours(365 * 24));
+        let out = default_out(
+            &ComponentId::from("fixture.cli.replay"),
+            &specgate_discovery::identity::ImplementationLabel::from("rust"),
+            &system,
+        );
+        assert_eq!(
+            out,
+            Path::new(".specgate")
+                .join("captures")
+                .join("fixture.cli.replay")
+                .join("rust")
+                .join("19710101T000000Z")
+        );
+    }
 
-        let unsupported = discover(csharp_binding().to_str().unwrap(), "").unwrap_err();
+    #[test]
+    fn occupied_output_needs_force() {
+        let root = output_dir("force");
+        let _ = std::fs::remove_dir_all(&root);
+        let out = root.join("run-1");
+        let build = |force| {
+            CaptureRequest::builder(CapturePaths {
+                binding: fixture_binding(),
+            })
+            .component("fixture.cli.replay")
+            .implementation("rust")
+            .out(&out)
+            .force(force)
+            .build()
+            .unwrap()
+        };
+
+        std::fs::create_dir_all(&out).unwrap();
+        std::fs::write(out.join("stale.txt"), "stale").unwrap();
+        let refused = capture(build(false)).expect_err("a non-empty output directory is refused");
+        assert_eq!(refused.stage(), CaptureErrorKind::Request);
+        assert!(refused.to_string().contains("is not empty; pass --force"), "{refused}");
+        assert!(out.join("stale.txt").exists(), "a refused capture leaves the directory untouched");
+
+        capture(build(true)).expect("--force publishes into the occupied directory");
+        let manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(out.join(MANIFEST_FILE)).unwrap()).unwrap();
+        assert_eq!(manifest["target"]["name"], "run-1", "the label is the output directory name");
+        let trace = String::from_utf8(std::fs::read(out.join(TRACE_FILE)).unwrap()).unwrap();
+        assert!(trace.contains("\"conformance.target.name\""));
+        assert!(trace.contains("\"run-1\""));
+
+        let refused = capture(build(false)).expect_err("a published bundle is non-empty");
+        assert!(refused.to_string().contains("pass --force"), "{refused}");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn actionable_errors() {
+        let binding = fixture_binding();
+        let binding = binding.to_str().unwrap();
+        let unsupported = discover(binding, &ComponentId::from("fixture.cli.replay"), Some("csharp")).unwrap_err();
         assert!(
-            unsupported.diagnostic().contains("only Rust targets") && unsupported.diagnostic().contains("csharp"),
+            unsupported.diagnostic().contains("only Rust implementations")
+                && unsupported.diagnostic().contains("'csharp'")
+                && unsupported.diagnostic().contains("fixture.cli.replay"),
             "{}",
             unsupported.diagnostic()
         );
+        let command = discover(binding, &ComponentId::from("fixture.cli.command"), Some("rust")).unwrap_err();
+        assert!(command.diagnostic().contains("not yet supported (#46)"), "{}", command.diagnostic());
+        let ambiguous = discover(binding, &ComponentId::from("fixture.cli.replay"), None).unwrap_err();
+        assert!(ambiguous.diagnostic().contains("csharp, rust"), "{}", ambiguous.diagnostic());
         let error = CaptureRequest::builder(CapturePaths {
-            binding: rust_binding(),
-            out: PathBuf::new(),
+            binding: fixture_binding(),
         })
         .component("fixture.cli.replay")
+        .out(PathBuf::new())
         .build()
         .expect_err("an empty output path must fail");
         assert_eq!(error.stage(), CaptureErrorKind::Request);
@@ -541,7 +633,12 @@ mod cases {
     #[test]
     #[should_panic(expected = "capture_many requires at least one bundle request")]
     fn empty_batch() {
-        let _ = capture_many(rust_binding().to_str().unwrap(), "", &[]);
+        let _ = capture_many(
+            fixture_binding().to_str().unwrap(),
+            &ComponentId::from("fixture.cli.replay"),
+            Some("rust"),
+            &[],
+        );
     }
 
     /// One component whose only setup is async, plus a synchronous sibling
@@ -806,8 +903,13 @@ mod cases {
     fn exiting_inside_an_open_operation_yields_no_scenario() {
         let root = output_dir("aborted");
         let request = request_at("fixture.cli.aborted", root.join("aborted"));
-        let error = capture_many(aborted_binding().to_str().unwrap(), "", std::slice::from_ref(&request))
-            .expect_err("a component whose only test cannot be finalized must fail");
+        let error = capture_many(
+            fixture_binding().to_str().unwrap(),
+            &ComponentId::from("fixture.cli.aborted"),
+            Some("rust"),
+            std::slice::from_ref(&request),
+        )
+        .expect_err("a component whose only test cannot be finalized must fail");
         let diagnostic = error.diagnostic();
         assert!(diagnostic.contains("fixture.cli.aborted"), "{diagnostic}");
         assert!(
@@ -831,7 +933,12 @@ mod cases {
         let root = output_dir("survivor");
         let _ = std::fs::remove_dir_all(&root);
         let requests = vec![request_at("fixture.cli.survivor", root.join("survivor"))];
-        let discovered = discover(aborted_binding().to_str().unwrap(), "").expect("aborted fixture discovery");
+        let discovered = discover(
+            fixture_binding().to_str().unwrap(),
+            &ComponentId::from("fixture.cli.survivor"),
+            Some("rust"),
+        )
+        .expect("aborted fixture discovery");
         let executed = execute_tests(&discovered, &requests).expect("aborted fixture execution");
 
         assert_eq!(executed.failures.len(), 1);
@@ -862,7 +969,12 @@ mod cases {
         let root = output_dir("survivor-strict");
         let _ = std::fs::remove_dir_all(&root);
         let requests = vec![request_at("fixture.cli.survivor", root.join("survivor"))];
-        let discovered = discover(aborted_binding().to_str().unwrap(), "").expect("aborted fixture discovery");
+        let discovered = discover(
+            fixture_binding().to_str().unwrap(),
+            &ComponentId::from("fixture.cli.survivor"),
+            Some("rust"),
+        )
+        .expect("aborted fixture discovery");
         let executed = execute_tests(&discovered, &requests).expect("aborted fixture execution");
 
         let error = write_bundles(&discovered, &requests, &executed, true).expect_err("strict capture must reject the dropped scenario");

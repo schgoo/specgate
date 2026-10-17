@@ -6,7 +6,7 @@
 //! values from being exchanged accidentally while transparent serialization
 //! preserves the established replay-plan JSON.
 use super::*;
-use specgate_discovery::identity::{ComponentId, OperationName, PackageName, PackageVersion, TargetName};
+use specgate_discovery::identity::{ComponentId, OperationName, PackageName, PackageVersion};
 
 /// Candidate implementation language encoded in replay plans.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -125,8 +125,6 @@ impl std::fmt::Display for RegistryDigest {
 /// One candidate target described by a serializable replay plan.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Target {
-    /// Binding target name.
-    pub(crate) name: TargetName,
     /// Candidate implementation language.
     pub(crate) language: Language,
     /// Cargo package name.
@@ -224,7 +222,7 @@ impl Candidate {
 #[cfg(test)]
 mod tests {
     use super::{Language, Plan, RegistryDigest, RegistryId, RegistryVersion, SHA256_WIDTH, Target};
-    use specgate_discovery::identity::{ComponentId, PackageName, PackageVersion, TargetName};
+    use specgate_discovery::identity::{ComponentId, PackageName, PackageVersion};
     use specgate_discovery::runner::PackageSource;
     use std::path::PathBuf;
 
@@ -268,7 +266,6 @@ mod tests {
             registry_version: RegistryVersion::from("0.1.0".to_string()),
             registry_digest: RegistryDigest::try_new(format!("sha256:{}", "a".repeat(64))).unwrap(),
             target: Target {
-                name: TargetName::from("fixture"),
                 language: Language::Rust,
                 package_name: PackageName::from("fixture"),
                 package_version: PackageVersion::from("1.0.0"),

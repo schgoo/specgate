@@ -14,7 +14,7 @@ mod model;
 pub use model::{ComponentName, Params, RegistryId, RegistryVersion, Report, Request, RequestBuilder};
 use model::{DiscoverReport, DiscoverRequest};
 
-/// Discover one target and publish compact CTSC registry JSON.
+/// Discover one component's implementation and publish compact CTSC registry JSON.
 ///
 /// # Errors
 /// Returns an opaque error enriched with request, discovery, encoding, or
@@ -24,7 +24,7 @@ use model::{DiscoverReport, DiscoverRequest};
 /// ```no_run
 /// use specgate_cli::discover::{ComponentName, Params, Request, RegistryId, RegistryVersion, discover};
 /// let request = Request::builder(Params {
-///     binding: "binding.yaml".into(),
+///     binding: "specgate.yaml".into(),
 ///     out: "registry.ctsc.json".into(),
 ///     component: ComponentName::parse("example.math")?,
 ///     registry_id: RegistryId::parse("urn:ctsc:registry:example.math")?,
@@ -43,7 +43,7 @@ pub fn discover(request: DiscoverRequest) -> Result<DiscoverReport, failure::Dis
 /// Discover through caller-supplied concrete services.
 ///
 /// `system` publishes the registry while `discovery` resolves and inspects the
-/// target. Use [`CommandEnvironment::real`] and [`Discovery::real`] in production, or
+/// implementation. Use [`CommandEnvironment::real`] and [`Discovery::real`] in production, or
 /// enable `test-util` and queue a result on [`Discovery::fake`] in tests.
 ///
 /// # Examples
@@ -59,28 +59,30 @@ pub fn discover(request: DiscoverRequest) -> Result<DiscoverReport, failure::Dis
 /// # Errors
 /// Returns request, discovery, registry-encoding, or publication errors.
 pub fn discover_with(request: &Request, system: &CommandEnvironment, discovery: &Discovery) -> Result<Report, Error> {
-    let target = selected_target(request.target());
+    let label = selected_implementation(request.implementation());
     let component = specgate_discovery::identity::ComponentId::from(request.component());
-    let discovered = discovery.target(request.binding(), target, &component)?;
+    let discovered = discovery.discover(request.binding(), &component, label)?;
     publish_schema(request, &discovered.schema, system)
 }
 
-/// Discover and publish multiple components from one shared binding target.
+/// Discover and publish multiple components from one shared binding implementation.
 ///
-/// The batch must use one binding and target; discovery loads that target once,
+/// The batch must use one binding and implementation label, and every requested
+/// component must bind to the same sources; discovery loads those sources once,
 /// then each request retains its own registry identity, version, and output.
+/// The first request's component selects the implementation.
 ///
 /// # Examples
 /// ```no_run
 /// use specgate_cli::discover::{ComponentName, Params, RegistryId, RegistryVersion, Request, batch};
 /// fn request(component: &str, output: &str) -> Result<Request, specgate_cli::discover::Error> {
 ///     Request::builder(Params {
-///         binding: "binding.yaml".into(),
+///         binding: "specgate.yaml".into(),
 ///         out: output.into(),
 ///         component: ComponentName::parse(component)?,
 ///         registry_id: RegistryId::parse(format!("registry:{component}"))?,
 ///         registry_version: RegistryVersion::parse("1")?,
-///     }).target("release").build()
+///     }).implementation("release").build()
 /// }
 /// let reports = batch([
 ///     request("example.math", "math.registry.json")?,
@@ -98,7 +100,7 @@ pub fn batch(requests: impl IntoIterator<Item = Request>) -> Result<Vec<Report>,
 
 /// Discover a batch through caller-supplied concrete services.
 ///
-/// All requests must share a binding and target. The concrete discovery service
+/// All requests must share a binding and implementation label. The concrete discovery service
 /// performs one batch lookup and the system service publishes each registry.
 /// Tests can inject the same feature-gated fakes accepted by [`discover_with`].
 ///
@@ -108,12 +110,12 @@ pub fn batch(requests: impl IntoIterator<Item = Request>) -> Result<Vec<Report>,
 /// use specgate_cli::{CommandEnvironment, Discovery};
 /// let make = |component: &str, output: &str| -> Result<Request, specgate_cli::discover::Error> {
 ///     Request::builder(Params {
-///         binding: "binding.yaml".into(),
+///         binding: "specgate.yaml".into(),
 ///         out: output.into(),
 ///         component: ComponentName::parse(component)?,
 ///         registry_id: RegistryId::parse(format!("registry:{component}"))?,
 ///         registry_version: RegistryVersion::parse("1")?,
-///     }).target("release").build()
+///     }).implementation("release").build()
 /// };
 /// let requests = [make("example.math", "math.json")?, make("example.text", "text.json")?];
 /// let reports = batch_with(requests, &CommandEnvironment::real(), &Discovery::real())?;
@@ -122,7 +124,7 @@ pub fn batch(requests: impl IntoIterator<Item = Request>) -> Result<Vec<Report>,
 /// ```
 ///
 /// # Errors
-/// Returns request errors for mixed bindings or targets, plus discovery, registry-encoding, or publication errors.
+/// Returns request errors for mixed bindings or implementation labels, plus discovery, registry-encoding, or publication errors.
 pub fn batch_with(
     requests: impl IntoIterator<Item = Request>,
     system: &CommandEnvironment,
@@ -132,16 +134,19 @@ pub fn batch_with(
     let Some(first) = requests.first() else { return Ok(Vec::new()) };
     if requests
         .iter()
-        .any(|request| request.binding() != first.binding() || request.target() != first.target())
+        .any(|request| request.binding() != first.binding() || request.implementation() != first.implementation())
     {
-        return Err(Error::request("batched discovery requires one shared binding and target"));
+        return Err(Error::request(
+            "batched discovery requires one shared binding and implementation label",
+        ));
     }
-    let target = selected_target(first.target());
+    let label = selected_implementation(first.implementation());
+    let anchor = specgate_discovery::identity::ComponentId::from(first.component());
     let components = requests
         .iter()
         .map(|request| specgate_discovery::identity::ComponentId::from(request.component()))
         .collect::<Vec<_>>();
-    let batch = discovery.batch(first.binding(), target, &components)?;
+    let batch = discovery.batch(first.binding(), &anchor, label, &components)?;
     requests
         .into_iter()
         .map(|request| {
@@ -162,12 +167,12 @@ pub fn batch_with(
         .collect()
 }
 
-/// Convert the request convention into optional target selection.
+/// Convert the request convention into optional implementation selection.
 ///
-/// An empty target means "use the binding default"; non-empty names select an
-/// explicit target.
-fn selected_target(target: &str) -> Option<&str> {
-    (!target.is_empty()).then_some(target)
+/// An empty label means "auto-select the component's sole implementation";
+/// non-empty labels select an explicit implementation.
+fn selected_implementation(label: &str) -> Option<&str> {
+    (!label.is_empty()).then_some(label)
 }
 
 fn publish_schema(request: &Request, schema: &specgate_discovery::schema::Schema, system: &CommandEnvironment) -> Result<Report, Error> {
@@ -238,15 +243,14 @@ mod tests {
             .join(format!("specgate-cli-{label}-{}.json", std::process::id()))
     }
 
-    fn focused_binding(language: impl AsRef<str>) -> PathBuf {
-        let language = language.as_ref();
+    fn focused_binding() -> PathBuf {
         repo_root()
             .join("rust")
             .join("crates")
             .join("specgate-cli")
             .join("tests")
             .join("fixtures")
-            .join(format!("{language}.binding.yaml"))
+            .join("specgate.yaml")
     }
 
     fn fixture_request(component: &str, binding: PathBuf, out: impl Into<PathBuf>) -> Request {
@@ -264,7 +268,7 @@ mod tests {
     fn clone_batch(batch: &specgate_discovery::output::Batch) -> specgate_discovery::output::Batch {
         use specgate_discovery::output::Component;
         specgate_discovery::output::Batch {
-            target: batch.target.clone(),
+            implementation: batch.implementation.clone(),
             cargo_context: batch.cargo_context.clone(),
             registry_json: batch.registry_json.clone(),
             registries: batch.registries.clone(),
@@ -290,10 +294,15 @@ mod tests {
         use specgate_discovery::discover_batch as discover_components;
 
         assert!(batch(Vec::<Request>::new()).expect("empty public batch").is_empty());
-        let binding = focused_binding("rust");
+        let binding = focused_binding();
         let component = specgate_discovery::identity::ComponentId::from("fixture.cli.replay");
-        let discovered =
-            discover_components(binding.to_str().expect("fixture path"), None, std::slice::from_ref(&component)).expect("fixture batch");
+        let discovered = discover_components(
+            binding.to_str().expect("fixture path"),
+            &component,
+            Some("rust"),
+            std::slice::from_ref(&component),
+        )
+        .expect("fixture batch");
 
         let discovery = Discovery::fake();
         discovery.push_batch(Ok(clone_batch(&discovered)));
@@ -356,7 +365,9 @@ mod tests {
 
         let components =
             ["fixture.cli.multiple", "fixture.cli.replay", "fixture.cli.setup"].map(specgate_discovery::identity::ComponentId::from);
-        let rust = discover_components(focused_binding("rust").to_str().unwrap(), None, &components).expect("batched Rust discovery");
+        let anchor = &components[0];
+        let rust =
+            discover_components(focused_binding().to_str().unwrap(), anchor, Some("rust"), &components).expect("batched Rust discovery");
         assert_eq!(rust.registry_json.len(), 1, "Rust link-time discovery self-reports once");
         assert_eq!(rust.registries.len(), 1);
         for component in &components {
@@ -389,7 +400,8 @@ mod tests {
             vec!["unexercised", "used"]
         );
 
-        let csharp = discover_components(focused_binding("csharp").to_str().unwrap(), None, &components).expect("batched C# discovery");
+        let csharp =
+            discover_components(focused_binding().to_str().unwrap(), anchor, Some("csharp"), &components).expect("batched C# discovery");
         assert_eq!(
             csharp.registry_json.len(),
             components.len(),
@@ -435,6 +447,55 @@ mod tests {
     }
 
     #[test]
+    fn selection_and_declaration_errors() {
+        let output = output_path("discover-selection");
+        let binding = focused_binding();
+        let system = CommandEnvironment::fake();
+        let discovery = Discovery::real();
+
+        let labelled = |component: &str, label: &str| {
+            Request::builder(Params {
+                binding: binding.clone(),
+                out: output.clone(),
+                component: ComponentName::parse(component).unwrap(),
+                registry_id: RegistryId::parse("registry").unwrap(),
+                registry_version: RegistryVersion::parse("1").unwrap(),
+            })
+            .implementation(label)
+            .build()
+            .unwrap()
+        };
+
+        // Several implementations and no label: the error lists the labels.
+        let ambiguous = discover_with(
+            &fixture_request("fixture.cli.replay", binding.clone(), &output),
+            &system,
+            &discovery,
+        )
+        .unwrap_err();
+        assert!(ambiguous.diagnostic().contains("csharp, rust"), "{}", ambiguous.diagnostic());
+
+        let unknown_label = discover_with(&labelled("fixture.cli.replay", "go"), &system, &discovery).unwrap_err();
+        assert!(unknown_label.diagnostic().contains("go"), "{}", unknown_label.diagnostic());
+
+        let unknown_component = discover_with(&labelled("fixture.cli.absent", "rust"), &system, &discovery).unwrap_err();
+        assert!(
+            unknown_component.diagnostic().contains("fixture.cli.absent"),
+            "{}",
+            unknown_component.diagnostic()
+        );
+
+        // The selected sources must actually declare the bound component.
+        let mismatch = discover_with(&labelled("fixture.cli.misbound", "rust"), &system, &discovery).unwrap_err();
+        assert!(
+            mismatch.diagnostic().contains("does not declare that component"),
+            "{}",
+            mismatch.diagnostic()
+        );
+        assert!(!output.exists());
+    }
+
+    #[test]
     fn error_without_panic() {
         let output = output_path("discover-error");
         let request = Request::builder(Params {
@@ -459,7 +520,7 @@ mod tests {
             registry_id: RegistryId::parse("urn:ctsc:registry:example.math")?,
             registry_version: RegistryVersion::parse("1")?,
         })
-        .target("rust")
+        .implementation("rust")
         .build()
     }
 
@@ -470,7 +531,7 @@ mod tests {
         let empty_component = ComponentName::parse("").unwrap_err();
         assert_eq!(empty_component.stage(), ErrorKind::Request);
         let built = request("binding.yaml", "registry.json").unwrap();
-        assert_eq!(built.target(), "rust");
+        assert_eq!(built.implementation(), "rust");
         assert_eq!(built.component(), "example.math");
     }
 }

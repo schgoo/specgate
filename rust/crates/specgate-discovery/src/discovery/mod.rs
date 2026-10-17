@@ -4,17 +4,17 @@
 //! ```no_run
 //! use specgate_discovery::discover;
 //! let component = specgate_discovery::identity::ComponentId::from("demo");
-//! let discovered = discover("specgate.yaml", None, &component)?;
+//! let discovered = discover("specgate.yaml", &component, None)?;
 //! assert!(!discovered.registry_json.is_empty());
 //! # Ok::<(), specgate_discovery::Error>(())
 //! ```
 
 //! CTSC implementation metadata discovery and semantic normalization.
 //!
-//! Rust targets self-report link-time operation/type metadata. C# targets are
-//! built normally and reflected from their compiled assembly. Both retain raw
-//! native invocation metadata and normalize the same semantic schema, including
-//! deterministic setup folding.
+//! Rust implementations self-report link-time operation/type metadata. C#
+//! implementations are built normally and reflected from their compiled
+//! assembly. Both retain raw native invocation metadata and normalize the same
+//! semantic schema, including deterministic setup folding.
 
 use crate::error::{Error, ErrorKind};
 use crate::identity::ComponentId;
@@ -25,16 +25,18 @@ fn failure(kind: ErrorKind, message: impl Into<String>) -> Error {
     Error::message(kind, message)
 }
 
-/// Discover raw and normalized metadata for one target.
+/// Discover raw and normalized metadata for one component implementation.
 ///
-/// Rust targets use link-time registration and C# targets use reflection over
-/// the compiled target assembly. Empty `component` is allowed for Rust callers
-/// that need to select from the raw registry before normalization.
+/// The implementation is selected from the binding by `component` and the
+/// optional `implementation` label (omitted selects a sole implementation).
+/// Rust implementations use link-time registration and C# implementations use
+/// reflection over the compiled assembly. Discovery fails when the selected
+/// sources do not declare `component`.
 ///
 /// # Errors
 ///
-/// Returns binding, target, build, reflection, registry, normalization, or
-/// setup-ambiguity errors.
+/// Returns binding, selection, build, reflection, registry, normalization,
+/// declared-component, or setup-ambiguity errors.
 ///
 /// With the `test-util` feature, [`crate::test_util::discover_fake`] exercises
 /// this complete load, resolve, and discovery workflow through concrete fake
@@ -42,45 +44,34 @@ fn failure(kind: ErrorKind, message: impl Into<String>) -> Error {
 ///
 /// # Panics
 ///
-/// Panics if successful single-target discovery violates its non-empty
+/// Panics if successful single-component discovery violates its non-empty
 /// registry invariant.
-pub fn discover(binding_path: impl AsRef<Path>, target_name: Option<&str>, component: &ComponentId) -> Result<Target, Error> {
-    let target = crate::binding::resolve_target(binding_path, target_name)?;
-    discover_resolved(target, component)
+pub fn discover(binding_path: impl AsRef<Path>, component: &ComponentId, implementation: Option<&str>) -> Result<Discovered, Error> {
+    let resolved = crate::binding::resolve_implementation(binding_path, component.as_str(), implementation)?;
+    discover_resolved(resolved)
 }
 
-/// Discover raw and normalized metadata from an already resolved target.
+/// Discover raw and normalized metadata from an already resolved implementation.
 ///
 /// # Errors
 ///
-/// Returns build, reflection, registry, normalization, or setup errors.
+/// Returns build, reflection, registry, normalization, declared-component, or
+/// setup errors.
 ///
 /// # Panics
 ///
-/// Panics if successful single-target discovery violates its non-empty
+/// Panics if successful single-component discovery violates its non-empty
 /// registry invariant.
-pub fn discover_resolved(target: crate::binding::ResolvedTarget, component: &ComponentId) -> Result<Target, Error> {
-    let component = component.as_str();
-    let requested = if component.is_empty() {
-        Vec::new()
-    } else {
-        vec![ComponentId::from(component)]
-    };
-    let mut many = discover_many(target, &requested)?;
-    let schema = if component.is_empty() {
-        Schema {
-            component: ComponentId::default(),
-            dependencies: Vec::new(),
-            dependency_types: Vec::new(),
-            operations: Vec::new(),
-            types: Vec::new(),
-        }
-    } else {
-        many.components
-            .remove(component)
-            .expect("successful discovery must contain every deduplicated requested component")
-            .schema?
-    };
+pub fn discover_resolved(implementation: crate::binding::ResolvedImplementation) -> Result<Discovered, Error> {
+    let component = implementation.component.clone();
+    let mut many = discover_many(implementation, std::slice::from_ref(&component))?;
+    require_declared(&many.implementation, &many.present_components)?;
+    let component = many.implementation.component.clone();
+    let schema = many
+        .components
+        .remove(&component)
+        .expect("successful discovery must contain every deduplicated requested component")
+        .schema?;
     let registry_json = many
         .registry_json
         .into_iter()
@@ -91,8 +82,8 @@ pub fn discover_resolved(target: crate::binding::ResolvedTarget, component: &Com
         .into_iter()
         .next()
         .expect("successful single-component discovery contains a parsed registry");
-    Ok(Target {
-        target: many.target,
+    Ok(Discovered {
+        implementation: many.implementation,
         cargo_context: many.cargo_context,
         registry_json,
         registry,
@@ -100,11 +91,36 @@ pub fn discover_resolved(target: crate::binding::ResolvedTarget, component: &Com
     })
 }
 
-/// Discover raw and normalized metadata for many components of one target.
+/// Fail clearly when the selected sources do not declare the bound component.
 ///
 /// # Errors
 ///
-/// Returns binding, target, build, reflection, or registry parse errors. A
+/// Returns a binding error naming the implementation and the components the
+/// sources do declare.
+pub(crate) fn require_declared(implementation: &crate::binding::ResolvedImplementation, declared: &[ComponentId]) -> Result<(), Error> {
+    if declared.contains(&implementation.component) {
+        return Ok(());
+    }
+    Err(failure(
+        ErrorKind::Binding,
+        format!(
+            "implementation '{}' of component '{}' does not declare that component in sources '{}'; declared components: {}",
+            implementation.label,
+            implementation.component,
+            implementation.implementation.sources.display(),
+            declared.iter().map(ComponentId::as_str).collect::<Vec<_>>().join(", ")
+        ),
+    ))
+}
+
+/// Discover raw and normalized metadata for many components of one implementation.
+///
+/// The implementation is selected by `component` and the optional label, and
+/// then serves every component in `components`.
+///
+/// # Errors
+///
+/// Returns binding, selection, build, reflection, or registry parse errors. A
 /// component whose metadata cannot be normalized is reported in its own
 /// [`Component::schema`] rather than failing the whole batch.
 ///
@@ -113,26 +129,30 @@ pub fn discover_resolved(target: crate::binding::ResolvedTarget, component: &Com
 /// ```no_run
 /// use specgate_discovery::{discover_batch, identity::ComponentId, output::SchemaLookup};
 /// let selected = [ComponentId::from("example.orders"), ComponentId::from("example.users")];
-/// let batch = discover_batch("specgate.yaml", None, &selected)?;
+/// let batch = discover_batch("specgate.yaml", &selected[0], None, &selected)?;
 /// match batch.schema("example.orders") {
 ///     SchemaLookup::Found(schema) => assert_eq!(schema.component.as_str(), "example.orders"),
 ///     SchemaLookup::Invalid(error) => eprintln!("orders metadata is invalid: {error}"),
-///     SchemaLookup::Missing => eprintln!("orders was not published by the target"),
+///     SchemaLookup::Missing => eprintln!("orders was not published by the implementation"),
 /// }
 /// # Ok::<(), specgate_discovery::Error>(())
 /// ```
 pub fn discover_batch(
     binding_path: impl AsRef<Path>,
-    target_name: Option<&str>,
+    component: &ComponentId,
+    implementation: Option<&str>,
     components: impl AsRef<[ComponentId]>,
 ) -> Result<Batch, Error> {
-    let target = crate::binding::resolve_target(binding_path, target_name)?;
-    discover_many(target, components)
+    let resolved = crate::binding::resolve_implementation(binding_path, component.as_str(), implementation)?;
+    discover_many(resolved, components)
 }
 
-/// Discover metadata for many components of one resolved target.
+/// Discover metadata for many components of one resolved implementation.
 ///
-/// The implementation pays the build and reflection cost once.
+/// The implementation pays the build and reflection cost once. Unlike
+/// [`discover_resolved`], a requested component the sources do not declare is
+/// reported through [`Batch::present_components`] and [`Batch::schema`] rather
+/// than as an error.
 ///
 /// # Errors
 ///
@@ -145,12 +165,15 @@ pub fn discover_batch(
 /// [`crate::test_util::discover_with`] and a
 /// [`crate::test_util::Discovery`] to inject process, filesystem, and
 /// environment outcomes without performing real system calls.
-pub fn discover_many(target: crate::binding::ResolvedTarget, components: impl AsRef<[ComponentId]>) -> Result<Batch, Error> {
-    discover_in(target, components.as_ref(), &crate::runner::system::System::real())
+pub fn discover_many(
+    implementation: crate::binding::ResolvedImplementation,
+    components: impl AsRef<[ComponentId]>,
+) -> Result<Batch, Error> {
+    discover_in(implementation, components.as_ref(), &crate::runner::system::System::real())
 }
 
 pub(crate) fn discover_in(
-    target: crate::binding::ResolvedTarget,
+    implementation: crate::binding::ResolvedImplementation,
     components: &[ComponentId],
     system: &crate::runner::system::System,
 ) -> Result<Batch, Error> {
@@ -161,9 +184,10 @@ pub(crate) fn discover_in(
         .collect::<Vec<_>>();
     requested.sort_unstable();
     requested.dedup();
-    let (registry_json, cargo_context, shared_document, reported_components) = match target.language {
+    let language = implementation.language();
+    let (registry_json, cargo_context, shared_document, reported_components) = match language {
         crate::binding::Language::Rust => {
-            let context = crate::runner::candidate_in(&target.target.package_root, system)?;
+            let context = crate::runner::candidate_in(&implementation.implementation.sources, system)?;
             (vec![runner::run_in(&context, system)?], Some(context), true, None)
         }
         crate::binding::Language::CSharp => {
@@ -171,7 +195,7 @@ pub(crate) fn discover_in(
                 return Err(failure(ErrorKind::CSharp, "C# discovery requires a non-empty component"));
             }
             let (first, rest) = requested.split_first().expect("requested components were checked as non-empty");
-            let discovered = crate::csharp_discovery::run_many(&target.target, first, rest, system)?;
+            let discovered = crate::csharp_discovery::run_many(&implementation.implementation, first, rest, system)?;
             (discovered.documents, None, false, Some(discovered.present_components))
         }
     };
@@ -194,12 +218,12 @@ pub(crate) fn discover_in(
                     format!("discovery emitted no registry document for component '{component}'"),
                 )
             })?;
-            let schema = normalize_registry(registry, target.language, *component);
+            let schema = normalize_registry(registry, language, *component);
             Ok((ComponentId::from(*component), Component { registry_index, schema }))
         })
         .collect::<Result<BTreeMap<_, _>, Error>>()?;
     Ok(Batch {
-        target,
+        implementation,
         cargo_context,
         registry_json,
         registries,
@@ -208,7 +232,7 @@ pub(crate) fn discover_in(
     })
 }
 
-/// Discover only the raw registry JSON for one target.
+/// Discover only the raw registry JSON for one component implementation.
 ///
 /// # Errors
 ///
@@ -216,13 +240,13 @@ pub(crate) fn discover_in(
 ///
 /// # Panics
 ///
-/// Panics if successful single-target discovery violates its non-empty
+/// Panics if successful single-component discovery violates its non-empty
 /// registry invariant.
-pub fn registry_json(binding_path: impl AsRef<Path>, target_name: Option<&str>, component: &ComponentId) -> Result<String, Error> {
-    Ok(discover(binding_path, target_name, component)?.registry_json)
+pub fn registry_json(binding_path: impl AsRef<Path>, component: &ComponentId, implementation: Option<&str>) -> Result<String, Error> {
+    Ok(discover(binding_path, component, implementation)?.registry_json)
 }
 
-/// Discover one target's normalized, setup-folded component schema.
+/// Discover one component's normalized, setup-folded schema.
 ///
 /// # Errors
 ///
@@ -230,10 +254,10 @@ pub fn registry_json(binding_path: impl AsRef<Path>, target_name: Option<&str>, 
 ///
 /// # Panics
 ///
-/// Panics if successful single-target discovery violates its non-empty
+/// Panics if successful single-component discovery violates its non-empty
 /// registry invariant.
-pub fn schema(binding_path: impl AsRef<Path>, target_name: Option<&str>, component: &ComponentId) -> Result<Schema, Error> {
-    Ok(discover(binding_path, target_name, component)?.schema)
+pub fn schema(binding_path: impl AsRef<Path>, component: &ComponentId, implementation: Option<&str>) -> Result<Schema, Error> {
+    Ok(discover(binding_path, component, implementation)?.schema)
 }
 
 /// Normalize a previously parsed raw registry for one language and component.
@@ -247,7 +271,7 @@ pub fn schema(binding_path: impl AsRef<Path>, target_name: Option<&str>, compone
 /// ```no_run
 /// use specgate_discovery::{binding::Language, discover, identity::ComponentId, schema::normalize_registry};
 /// let component = ComponentId::from("example.orders");
-/// let discovered = discover("specgate.yaml", None, &component)?;
+/// let discovered = discover("specgate.yaml", &component, None)?;
 /// let normalized = normalize_registry(&discovered.registry, Language::Rust, component)?;
 /// assert!(!normalized.operations.is_empty());
 /// # Ok::<(), specgate_discovery::Error>(())
@@ -269,7 +293,7 @@ pub fn normalize_registry(
 }
 
 pub(crate) mod model;
-use model::{Batch, Component, Schema, Target};
+use model::{Batch, Component, Discovered, Schema};
 mod normalize;
 use normalize::{build_normalized, build_schema, reject_ambiguous_variants, reject_dynamic, validate_surface};
 pub(crate) mod registry;

@@ -39,14 +39,9 @@ pub(super) fn run(mode: Mode) -> Result<(), GoldenError> {
     clear_artifacts(&generated).map_err(|source| GoldenError::wrap("failed to clear generated artifacts", source))?;
     std::fs::create_dir_all(&generated).map_err(|source| GoldenError::wrap("failed to create generated artifact directory", source))?;
 
-    let binding_keys = matrix
-        .rows
-        .iter()
-        .filter(|row| row.classification == Classification::ImplementationComponent)
-        .filter_map(|row| row.rust.as_ref().map(|language| language.binding.clone()))
-        .collect::<BTreeSet<_>>();
-    for binding_key in &binding_keys {
-        generate_rust(&root, &matrix, &generated, binding_key)?;
+    let rust_groups = rust_groups(&root, &matrix)?;
+    for rows in rust_groups.values() {
+        generate_rust(&root, &matrix, &generated, rows)?;
     }
     generate_csharp(&root, &matrix, &generated)?;
     generate_negatives(&root, &matrix, &generated, &scratch)?;

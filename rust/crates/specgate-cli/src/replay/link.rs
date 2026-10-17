@@ -21,7 +21,7 @@ use super::{Error, failure};
 
 pub(super) fn discover_candidate(
     binding: impl AsRef<Path>,
-    target: Option<&specgate_discovery::identity::TargetName>,
+    implementation: Option<&specgate_discovery::identity::ImplementationLabel>,
     component: impl AsRef<str>,
     discovery: &Discovery,
     system: &CommandEnvironment,
@@ -32,7 +32,7 @@ pub(super) fn discover_candidate(
     Candidates::discover_with(
         &DiscoveryInput {
             binding,
-            target,
+            implementation,
             components: std::slice::from_ref(&component),
         },
         &DiscoveryContext {
@@ -93,7 +93,6 @@ pub(super) fn build_plan(bundle: &ReplayBundle, candidate: &Candidate) -> Result
         registry_version: bundle.registry.identity.version.as_str().to_string().into(),
         registry_digest: RegistryDigest::try_from(bundle.registry.identity.digest.as_str().to_string())?,
         target: Target {
-            name: candidate.metadata().target_name.clone(),
             language: candidate.metadata().language.into(),
             package_name: candidate.metadata().package_name.clone(),
             package_version: candidate.metadata().package_version.clone(),

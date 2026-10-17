@@ -12,17 +12,20 @@ reference stimuli + candidate metadata -> candidate replay
 ## Commands
 
 ```powershell
-specgate discover test\bindings\rust.yaml `
+specgate discover --binding test\bindings\specgate.yaml `
   --component fixture.stateless_add `
+  --impl rust `
   --registry-id urn:ctsc:registry:fixture.stateless_add `
   --registry-version 0.1.0 `
   --out registry.ctsc.json
 
-specgate capture test\bindings\rust.yaml `
+specgate capture --binding test\bindings\specgate.yaml `
   --component fixture.stateless_add `
+  --impl rust `
   --out capture
 
-specgate replay capture test\bindings\rust.yaml `
+specgate replay capture --binding test\bindings\specgate.yaml `
+  --impl rust `
   --out candidate.otlp.json
 
 specgate validate bundle capture
@@ -30,6 +33,12 @@ specgate validate bundle capture
 specgate compare capture\reference.otlp.json candidate.otlp.json `
   --registry capture\registry.ctsc.json
 ```
+
+`capture --out` and `replay --out` are optional. Capture defaults to
+`.specgate/captures/<component>/<impl>/<UTC run id>/`; replay defaults to
+`<capture-dir>/candidate-<impl>-<run id>.otlp.json`. Both refuse existing
+output unless `--force`, and the output name becomes the artifact's
+`target.name`.
 
 `discover` supports Rust link-time metadata and C# compiled-assembly reflection.
 `capture` and `replay` currently support Rust. `validate` natively checks CTSC

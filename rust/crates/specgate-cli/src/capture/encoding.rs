@@ -2,10 +2,10 @@
 use super::facade::BundleRequest;
 use super::filter::filter;
 use super::{
-    BTreeSet, CaptureManifest, CaptureReport, ComponentId, ExecutedTests, FORMAT_VERSION, FailureContext, Language, MANIFEST_FILE,
-    MANIFEST_FORMAT, PathBuf, REGISTRY_FILE, REGISTRY_PREFIX, REGISTRY_VERSION, Reference, RegistryDto, RegistryId, Scenarios, TRACE_FILE,
-    Target, TargetDto, Tool, Version, WireDigest, artifact_path, ctsc_capture, encode_otlp, encode_registries, normalize_registry,
-    sha256_digest,
+    BTreeSet, CaptureManifest, CaptureReport, ComponentId, Discovered, ExecutedTests, FORMAT_VERSION, FailureContext, Language,
+    MANIFEST_FILE, MANIFEST_FORMAT, PathBuf, REGISTRY_FILE, REGISTRY_PREFIX, REGISTRY_VERSION, Reference, RegistryDto, RegistryId,
+    Scenarios, TRACE_FILE, TargetDto, Tool, Version, WireDigest, artifact_path, ctsc_capture, encode_otlp, encode_registries,
+    normalize_registry, sha256_digest,
 };
 
 /// Stable capture-manifest producer identity; changing it breaks consumers that identify `SpecGate` artifacts.
@@ -20,11 +20,19 @@ pub(super) struct EncodedBundle {
 }
 
 pub(super) fn encode_bundle(
-    discovered: &Target,
+    discovered: &Discovered,
     request: &BundleRequest,
     executed: &ExecutedTests,
 ) -> Result<EncodedBundle, FailureContext> {
-    let resolved = &discovered.target;
+    let resolved = &discovered.implementation;
+    let language = resolved.language();
+    // The artifact label is the bundle directory's name, so label and path always agree.
+    let target_name = request
+        .out
+        .file_name()
+        .and_then(std::ffi::OsStr::to_str)
+        .map(specgate_discovery::identity::ImplementationLabel::from)
+        .ok_or_else(|| FailureContext::domain("capture output directory must end in a named UTF-8 directory"))?;
     let selected_id = &request.component;
     let selected = selected_id.as_str();
     let captures = filter(&executed.captures, selected_id);
@@ -60,7 +68,7 @@ pub(super) fn encode_bundle(
     }
     let mut schemas = Vec::with_capacity(components.len());
     for component in &components {
-        let schema = normalize_registry(&discovered.registry, resolved.language, *component)?;
+        let schema = normalize_registry(&discovered.registry, language, *component)?;
         schemas
             .push(serde_json::to_string(&schema).map_err(|error| {
                 FailureContext::with_source(format!("failed to serialize normalized discovery schema: {error}"), error)
@@ -80,7 +88,7 @@ pub(super) fn encode_bundle(
     })?;
     let metadata = ctsc_capture::Metadata::new(
         env!("CARGO_PKG_VERSION"),
-        ctsc_capture::Target::new(resolved.name.as_str(), resolved.language.as_str()),
+        ctsc_capture::Target::new(target_name.as_str(), language.as_str()),
         ctsc_capture::Registry::new(&registry_id, REGISTRY_VERSION, &registry_digest),
     );
     let trace_encoding = encode_otlp(&captures, &metadata)?;
@@ -94,8 +102,8 @@ pub(super) fn encode_bundle(
         format_version: Version::try_from(FORMAT_VERSION).expect("FORMAT_VERSION must be a non-empty manifest version"),
         component_id: selected_id.clone(),
         target: TargetDto {
-            name: resolved.name.clone(),
-            language: Language::from(resolved.language),
+            name: target_name,
+            language: Language::from(language),
         },
         tool: Tool {
             name: TOOL_NAME,

@@ -40,7 +40,7 @@ form. Resolution remains local-only and preserves the existing percent-decoding,
 platform path, and diagnostic behavior. See
 [the ratified decision](decisions/templated-uri-for-registry-imports.md).
 
-Rust exposes `ComponentId`, `OperationName`, and `TargetName` as unrestricted
+Rust exposes `ComponentId`, `OperationName`, and `ImplementationLabel` as unrestricted
 semantic string identities. The public capture library API accepts one owned
 `CaptureRequest`, whose constructor validates that its `PathBuf` filesystem
 inputs are UTF-8 representable, and returns `Result<CaptureReport, CaptureError>`. Capture failures retain actionable text
@@ -188,9 +188,24 @@ validators, byte-compares parity registries, replays every replayable row and
 strictly compares it against its reference, and rejects missing, stale, or
 undeclared goldens.
 
+The matrix declares one shared binding, `test/bindings/specgate.yaml`
+(shape per [the binding ADR](decisions/binding-schema-v1.md)), in place of
+the earlier per-language `bindings` map of binding files. Each language row
+names its implementation label, which must equal the row's language, and the
+component is the row's component. The harness resolves rows through the
+binding and groups them by implementation `sources`, so rows that share
+sources still share one discovery and capture batch. Every other matrix
+invariant (parity `allowedDifferences`, replayable and unsupported rows,
+`captureExclusions`, negative rows) is unchanged. The label now appears in
+the capture manifest `target.name` and the `conformance.target.name` trace
+attribute only through the output directory name: that name is the artifact
+label, and the harness uses fixed output directories ending in the label.
+`capture --out` is optional (default
+`.specgate/captures/<component>/<impl>/<UTC run id>/`) and capture and replay
+refuse existing output unless `--force`.
 Coverage is checked from the product's side, not only from the matrix's. Each
 discovery pass reports the components the compiled target actually declares —
-the Rust link-time registry for the Rust and negative bindings, and the C#
+the Rust link-time registry for the Rust and negative implementations, and the C#
 reflection run's own inventory of every `[SpecOperation]` component in the
 built assembly — and the harness fails when that inventory and the matrix rows
 differ in either direction. Golden capture is likewise strict: any enumerated

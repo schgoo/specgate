@@ -166,8 +166,8 @@ pub(super) struct Matrix {
     pub(super) format_version: String,
     /// Checked-in generated artifact root.
     pub(super) artifact_root: RepoPath,
-    /// Language binding paths keyed by matrix name.
-    pub(super) bindings: BTreeMap<String, RepoPath>,
+    /// Shared binding file whose implementations the rows select by component and label.
+    pub(super) binding: RepoPath,
     /// Source coverage policy.
     pub(super) sources: SourceCoverage,
     /// Ordered conformance rows.

@@ -180,10 +180,15 @@ fn add_two_and_three() {
 '@
     $binding = Join-Path $scratch 'binding.yaml'
     Set-Content -Path $binding -NoNewline -Value @"
-language: rust
-targets:
-  default:
-    package_root: $(Cargo-Path $candidate)
+components:
+  fixture.packaged:
+    implementations:
+      rust:
+        language: rust
+        sources: $(Cargo-Path $candidate)
+        tests:
+          projects:
+            - $(Cargo-Path (Join-Path $candidate 'Cargo.toml'))
 "@
 
     $binary = Join-Path $install 'bin/specgate'
@@ -191,14 +196,14 @@ targets:
         $binary += '.exe'
     }
     Invoke-Checked $binary @(
-        'discover', $binding,
+        'discover', '--binding', $binding,
         '--component', 'fixture.packaged',
         '--registry-id', 'urn:ctsc:registry:fixture.packaged',
         '--registry-version', '0.1.0',
         '--out', $registry
     )
-    Invoke-Checked $binary @('capture', $binding, '--component', 'fixture.packaged', '--out', $capture)
-    Invoke-Checked $binary @('replay', $capture, $binding, '--out', $replay)
+    Invoke-Checked $binary @('capture', '--binding', $binding, '--component', 'fixture.packaged', '--out', $capture)
+    Invoke-Checked $binary @('replay', $capture, '--binding', $binding, '--out', $replay)
 
     Invoke-Checked $binary @('validate', 'registry', $registry)
     Invoke-Checked $binary @('validate', 'linked', (Join-Path $capture 'reference.otlp.json'), (Join-Path $capture 'registry.ctsc.json'))

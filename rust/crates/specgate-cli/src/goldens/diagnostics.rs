@@ -77,11 +77,12 @@ struct OperationFns {
 #[cfg(test)]
 type DiscoverFn = fn(
     &Path,
+    &specgate_discovery::identity::ComponentId,
     Option<&str>,
     &[specgate_discovery::identity::ComponentId],
 ) -> Result<specgate_discovery::output::Batch, specgate_discovery::Error>;
 #[cfg(test)]
-type ResolveFn = fn(&Path, Option<&str>) -> Result<specgate_discovery::binding::ResolvedTarget, specgate_discovery::Error>;
+type ResolveFn = fn(&Path, &str, Option<&str>) -> Result<specgate_discovery::binding::ResolvedImplementation, specgate_discovery::Error>;
 #[cfg(test)]
 type WriteFn = fn(&Path, &[u8]) -> Result<(), GoldenError>;
 #[cfg(test)]
@@ -104,25 +105,27 @@ impl NegativeOperations {
     fn discover(
         self,
         binding: &Path,
-        target: Option<&str>,
+        anchor: &specgate_discovery::identity::ComponentId,
+        label: Option<&str>,
         components: &[specgate_discovery::identity::ComponentId],
     ) -> Result<specgate_discovery::output::Batch, specgate_discovery::Error> {
         match self.inner {
-            OperationMode::Real => discover_batch(binding, target, components),
+            OperationMode::Real => discover_batch(binding, anchor, label, components),
             #[cfg(test)]
-            OperationMode::Fake(functions) => (functions.discover)(binding, target, components),
+            OperationMode::Fake(functions) => (functions.discover)(binding, anchor, label, components),
         }
     }
 
     fn resolve(
         self,
         binding: &Path,
-        target: Option<&str>,
-    ) -> Result<specgate_discovery::binding::ResolvedTarget, specgate_discovery::Error> {
+        component: &str,
+        label: Option<&str>,
+    ) -> Result<specgate_discovery::binding::ResolvedImplementation, specgate_discovery::Error> {
         match self.inner {
-            OperationMode::Real => resolve_target(binding, target),
+            OperationMode::Real => resolve_implementation(binding, component, label),
             #[cfg(test)]
-            OperationMode::Fake(functions) => (functions.resolve)(binding, target),
+            OperationMode::Fake(functions) => (functions.resolve)(binding, component, label),
         }
     }
 
@@ -252,12 +255,8 @@ fn generate_with(
         }
     }
     if !discovery_rows.is_empty() {
-        let binding_key = rust_language(discovery_rows[0])?.binding.clone();
-        let binding_relative = matrix
-            .bindings
-            .get(&binding_key)
-            .ok_or_else(|| GoldenError::message(format!("{binding_key}: matrix references an undeclared binding")))?;
-        let binding = repo_path(root, binding_relative);
+        let implementation_label = rust_language(discovery_rows[0])?.binding.clone();
+        let binding = repo_path(root, &matrix.binding);
         let components = discovery_rows
             .iter()
             .map(|row| negative_component(row))
@@ -268,13 +267,13 @@ fn generate_with(
             .map(specgate_discovery::identity::ComponentId::from)
             .collect::<Vec<_>>();
         let discovered = operations
-            .discover(&binding, None, &component_ids)
-            .map_err(|source| GoldenError::wrap(format!("{binding_key}: negative discovery failed"), source))?;
+            .discover(&binding, &component_ids[0], Some(&implementation_label), &component_ids)
+            .map_err(|source| GoldenError::wrap(format!("{implementation_label}: negative discovery failed"), source))?;
         // The compile-error row is deliberately excluded: its component only
         // exists behind a Cargo feature that does not compile, so the shared
         // discovery build never links it.
         if let Some(diagnostic) = inventory_mismatch(
-            format!("{binding_key} (discovery negatives)"),
+            format!("{implementation_label} (discovery negatives)"),
             &components.iter().map(|component| (*component).to_string()).collect(),
             &discovered.present_components,
         ) {
@@ -320,15 +319,11 @@ fn generate_with(
             .feature
             .as_deref()
             .ok_or_else(|| GoldenError::message(format!("{}: build-negative row must name a Cargo feature", row.id)))?;
-        let binding_relative = matrix
-            .bindings
-            .get(&language.binding)
-            .ok_or_else(|| GoldenError::message(format!("{}: matrix references undeclared binding '{}'", row.id, language.binding)))?;
-        let binding = repo_path(root, binding_relative);
+        let binding = repo_path(root, &matrix.binding);
         let resolved = operations
-            .resolve(&binding, None)
+            .resolve(&binding, negative_component(row)?, Some(&language.binding))
             .map_err(|source| GoldenError::wrap(format!("{}: binding resolution failed", row.id), source))?;
-        let manifest = resolved.target.package_root.join("Cargo.toml");
+        let manifest = resolved.implementation.sources.join("Cargo.toml");
         let target_dir = scratch.join("negative-build").join(feature);
         let output = operations
             .build(&manifest, &target_dir, feature)
@@ -388,7 +383,8 @@ mod operation_tests {
 
     fn unused_discover(
         _binding: &Path,
-        _target: Option<&str>,
+        _anchor: &specgate_discovery::identity::ComponentId,
+        _label: Option<&str>,
         _components: &[specgate_discovery::identity::ComponentId],
     ) -> Result<specgate_discovery::output::Batch, specgate_discovery::Error> {
         unreachable!("discovery is not used by this boundary test")
@@ -396,8 +392,9 @@ mod operation_tests {
 
     fn unused_resolve(
         _binding: &Path,
-        _target: Option<&str>,
-    ) -> Result<specgate_discovery::binding::ResolvedTarget, specgate_discovery::Error> {
+        _component: &str,
+        _label: Option<&str>,
+    ) -> Result<specgate_discovery::binding::ResolvedImplementation, specgate_discovery::Error> {
         unreachable!("resolution is not used by this boundary test")
     }
 

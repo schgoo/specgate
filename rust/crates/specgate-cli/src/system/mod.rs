@@ -6,6 +6,7 @@
 mod discovery;
 mod execution;
 mod filesystem;
+mod timestamp;
 
 pub use discovery::Discovery;
 pub(crate) use discovery::Failure as DiscoveryFailure;
@@ -13,6 +14,7 @@ pub use execution::Execution;
 pub(crate) use execution::Request as ProcessRequest;
 pub use filesystem::CommandEnvironment;
 pub(crate) use filesystem::Scratch;
+pub(crate) use timestamp::run_id;
 
 #[cfg(test)]
 mod tests {
@@ -63,6 +65,23 @@ mod tests {
         let request = ProcessRequest::builder("cargo").arg("check").build();
         assert_eq!(execution.run(&request).unwrap_err().to_string(), "launch failed");
         assert_eq!(execution.requests(), vec![request]);
+    }
+    #[test]
+    fn occupancy_and_clock() {
+        let system = CommandEnvironment::fake();
+        let out = std::path::Path::new("bundle");
+        assert!(!system.is_occupied(out));
+        system.seed_directory(out);
+        assert!(!system.is_occupied(out), "an empty directory is free");
+        assert!(system.exists(out), "an empty directory still exists");
+        assert!(!system.exists("elsewhere"));
+        system.seed_file(out.join("manifest.json"), b"{}");
+        assert!(system.is_occupied(out));
+        assert!(system.is_occupied(out.join("manifest.json")));
+        assert_eq!(system.now(), std::time::UNIX_EPOCH);
+        let instant = std::time::UNIX_EPOCH + std::time::Duration::from_mins(1);
+        system.seed_clock(instant);
+        assert_eq!(system.now(), instant);
     }
     #[test]
     fn fake_state() {

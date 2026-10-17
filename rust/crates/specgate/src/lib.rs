@@ -5,7 +5,7 @@
 //! `specgate capture` records those real invocations as deterministic CTSC
 //! reference traces; `specgate replay` invokes a candidate from the captured
 //! semantic inputs. Async operations open at first poll and preserve their construction parent across executor-thread migration and same-thread interleaving. Async setups remain unsupported. `ComponentId`,
-//! `OperationName`, and `TargetName` distinguish semantic identities while
+//! `OperationName`, and `ImplementationLabel` distinguish semantic identities while
 //! retaining transparent CTSC string projection and unrestricted string input.
 //!
 //! ```rust
@@ -33,7 +33,7 @@ extern crate self as specgate;
 
 pub use specgate_annotations_macros::{SpecEvent, spec_operation, spec_setup};
 pub use specgate_runtime::value::Value;
-pub use specgate_runtime::{ComponentId, OperationName, SpecEvent, TargetName, ToNativeValue};
+pub use specgate_runtime::{ComponentId, ImplementationLabel, OperationName, SpecEvent, ToNativeValue};
 
 /// Declare the crate's default component identifier.
 #[macro_export]
@@ -81,5 +81,5 @@ pub mod __rt {
         TYPES as SPECGATE_TYPES, TypeDeps, TypeKind, TypeMeta, TypeName, VariantMeta, VariantName, discovery,
     };
     pub use specgate_runtime::value::Value;
-    pub use specgate_runtime::{ComponentId, OperationName, SpecEvent, TargetName, ToNativeValue, emit_event, emit_lazy};
+    pub use specgate_runtime::{ComponentId, ImplementationLabel, OperationName, SpecEvent, ToNativeValue, emit_event, emit_lazy};
 }

@@ -1,12 +1,12 @@
 //! Native implementation discovery for `SpecGate`'s CTSC workflow.
 //!
-//! This crate owns strict target binding, Rust link-time metadata discovery,
+//! This crate owns strict implementation binding, Rust link-time metadata discovery,
 //! C# compiled-assembly reflection, raw invocation metadata, and deterministic
 //! semantic schema normalization. The four crate-root `discover_*` functions
 //! are the canonical primary workflow. Supporting APIs and result models use
 //! cohesive module paths:
 //!
-//! - [`binding`] parses and resolves target bindings;
+//! - [`binding`] parses and resolves implementation bindings;
 //! - [`identity`] defines strongly typed semantic identities;
 //! - [`output`] exposes workflow result models;
 //! - [`registry`] parses and queries raw discovery registries;
@@ -15,9 +15,11 @@
 //! - [`runner`] provides generated-runner Cargo and execution support;
 //! - the `test-util` feature exposes [`test_util`] failure-injection harnesses.
 //!
-//! A caller can resolve a binding with [`binding::resolve_target`] and
-//! pass it to [`discover_resolved`]. The example compiles without
-//! invoking Cargo or requiring a fixture at documentation-test time.
+//! A caller can resolve a component implementation with
+//! [`binding::resolve_implementation`] and pass it to [`discover_resolved`].
+//! Discovery verifies that the selected sources actually declare the component.
+//! The example compiles without invoking Cargo or requiring a fixture at
+//! documentation-test time.
 //!
 //! # Examples
 //!
@@ -25,9 +27,8 @@
 //! use specgate_discovery::{binding, discover_resolved};
 //!
 //! # fn example() -> Result<(), specgate_discovery::Error> {
-//! let target = binding::resolve_target("binding.yaml", None)?;
-//! let component = specgate_discovery::identity::ComponentId::from("com.example.component");
-//! let discovered = discover_resolved(target, &component)?;
+//! let implementation = binding::resolve_implementation("specgate.yaml", "com.example.component", None)?;
+//! let discovered = discover_resolved(implementation)?;
 //! println!("{}", discovered.schema.component);
 //! # Ok(())
 //! # }
@@ -40,7 +41,7 @@ mod error;
 /// Strong semantic identities used throughout discovery.
 pub mod identity;
 
-/// Strict target-binding parsing and resolution.
+/// Strict implementation-binding parsing and resolution.
 pub mod binding;
 /// Generated-runner Cargo identity and execution support.
 pub mod runner;
@@ -57,7 +58,7 @@ pub mod output {
     //! Result models returned by discovery workflows.
 
     #[doc(inline)]
-    pub use crate::discovery::model::{Batch, Component, SchemaLookup, Target};
+    pub use crate::discovery::model::{Batch, Component, Discovered, SchemaLookup};
 }
 #[cfg(feature = "raw-registry")]
 pub mod registry {

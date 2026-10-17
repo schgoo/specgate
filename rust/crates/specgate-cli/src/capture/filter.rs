@@ -46,35 +46,6 @@ pub(super) fn filter(scenarios: impl AsRef<[Capture]>, component: &ComponentId) 
     captures
 }
 
-pub(super) fn select_component(registry: &Registry, component: impl AsRef<str>) -> Result<ComponentId, FailureContext> {
-    let component = component.as_ref();
-    let components = registry.present_components();
-    if component.is_empty() {
-        return match components.len() {
-            0 => Err(FailureContext::domain(
-                "no components found: target has no annotated operations or types",
-            )),
-            1 => Ok(ComponentId::from(components[0].as_str())),
-            _ => Err(FailureContext::domain(format!(
-                "multiple components present ({}); select one with --component <id>",
-                components
-                    .iter()
-                    .map(specgate_discovery::identity::ComponentId::as_str)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ))),
-        };
-    }
-    if components.iter().any(|candidate| candidate == component) {
-        Ok(ComponentId::from(component))
-    } else {
-        Err(FailureContext::domain(format!(
-            "component '{component}' not found; available components: {}",
-            components.join(", ")
-        )))
-    }
-}
-
 /// Reject a capture batch that selects a component with an async setup.
 ///
 /// Async `#[spec_operation]` capture carries its synchronized collector across

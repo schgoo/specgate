@@ -22,7 +22,7 @@ pub(crate) struct Candidates {
 /// runtime source, preserving package identity throughout linking and execution.
 #[derive(Debug, Clone)]
 pub(crate) struct CandidatesInner {
-    pub(super) target_name: specgate_discovery::identity::TargetName,
+    pub(super) target_name: specgate_discovery::identity::ImplementationLabel,
     pub(super) language: specgate_discovery::binding::Language,
     pub(super) package_name: specgate_discovery::identity::PackageName,
     pub(super) package_version: specgate_discovery::identity::PackageVersion,
@@ -41,7 +41,7 @@ impl std::ops::Deref for Candidates {
 /// Borrowed candidate-selection inputs for one discovery pass.
 pub(super) struct DiscoveryInput<'a> {
     pub(super) binding: &'a Path,
-    pub(super) target: Option<&'a specgate_discovery::identity::TargetName>,
+    pub(super) implementation: Option<&'a specgate_discovery::identity::ImplementationLabel>,
     pub(super) components: &'a [specgate_discovery::identity::ComponentId],
 }
 
@@ -59,14 +59,14 @@ impl Candidates {
     #[cfg_attr(not(test), expect(dead_code, reason = "test-util support is consumed by external test builds"))]
     pub(crate) fn discover(
         binding: impl AsRef<Path>,
-        target: Option<&specgate_discovery::identity::TargetName>,
+        implementation: Option<&specgate_discovery::identity::ImplementationLabel>,
         components: &[specgate_discovery::identity::ComponentId],
     ) -> Result<Self, Error> {
         let binding = binding.as_ref();
         Self::discover_with(
             &DiscoveryInput {
                 binding,
-                target,
+                implementation,
                 components,
             },
             &DiscoveryContext {
@@ -83,21 +83,25 @@ impl Candidates {
             return Ok(candidate.clone());
         }
         let components = input.components;
+        let anchor = components
+            .first()
+            .ok_or_else(|| Error::new_message(ErrorKind::Linking, "candidate discovery requires at least one component"))?;
         let discovered = context
             .discovery
             .batch(
                 input.binding,
-                input.target.map(specgate_discovery::identity::TargetName::as_str),
+                anchor,
+                input.implementation.map(specgate_discovery::identity::ImplementationLabel::as_str),
                 components,
             )
             .map_err(|error| Error::wrap(ErrorKind::Linking, "candidate discovery failed", error))?;
-        let language = discovered.target.language;
+        let language = discovered.implementation.language();
         if language != specgate_discovery::binding::Language::Rust {
             return failure(format!(
-                "replay currently supports only Rust candidates; binding language is '{language}'"
+                "replay currently supports only Rust candidates; implementation language is '{language}'"
             ));
         }
-        let target_name = discovered.target.name.clone();
+        let target_name = discovered.implementation.label.clone();
         let cargo = discovered
             .cargo_context
             .clone()
@@ -105,7 +109,7 @@ impl Candidates {
         let package_root = cargo.path;
         if !context.system.is_file(package_root.join("Cargo.toml")) {
             return failure(format!(
-                "candidate target '{target_name}' is not a Rust package (no Cargo.toml at {})",
+                "candidate implementation '{target_name}' is not a Rust package (no Cargo.toml at {})",
                 package_root.display()
             ));
         }

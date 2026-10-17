@@ -26,6 +26,25 @@ under `docs/decisions/`, or `docs/roadmap.md`. Generate with `just changelog`.
 
 ### Changed
 
+- Bindings use `components.<id>.implementations.<label>` with `language`,
+  `sources`, `tests`, and a language block; the CLI takes `--binding`
+  (default `./specgate.yaml`), `--component`, and `--impl`, and `replay`
+  takes the component from the bundle. The `package_root`, `targets`,
+  `outputs`, file-wide `language`, `--target`, and positional binding are
+  removed.
+- The public Rust API renames `Target`, `ResolvedTarget`, and `TargetName` to
+  `Implementation`, `ResolvedImplementation`, and `ImplementationLabel`, and
+  `resolve_target` to `resolve_implementation`.
+- `capture --out` is optional (default
+  `./.specgate/captures/<component>/<impl>/<UTC run id>/`, gitignored) and
+  `replay --out` defaults to `<capture-dir>/candidate-<impl>-<run id>.otlp.json`;
+  both refuse existing output unless `--force`. The manifest `target.name` and
+  trace `conformance.target.name` are the output directory name, and the
+  replay candidate label is the output file stem. Rust goldens were
+  regenerated with `target.name` `rust` (was `default`) and their digests
+  changed; C# goldens are unchanged. `CapturePaths` carries only
+  the binding; `out` and `force` are builder options, as for replay.
+- The unused public `CaptureErrorKind::Selection` variant is removed.
 - C# discovery runs the prebuilt `SpecGate.Discovery` tool instead of a C#
   program generated and compiled on every run, so the reflection code is built,
   analyzed, formatted, and unit tested by the ordinary C# gate.

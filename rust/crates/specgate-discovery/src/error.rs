@@ -25,10 +25,10 @@ pub(crate) enum ErrorKind {
 /// # Examples
 ///
 /// ```no_run
-/// use specgate_discovery::binding::resolve_target;
+/// use specgate_discovery::binding::resolve_implementation;
 /// use std::error::Error as _;
 ///
-/// let error = resolve_target("missing-binding.yaml", None).unwrap_err();
+/// let error = resolve_implementation("missing-binding.yaml", "example.orders", None).unwrap_err();
 /// eprintln!("{error}");
 /// if let Some(source) = error.source() {
 ///     eprintln!("caused by: {source}");

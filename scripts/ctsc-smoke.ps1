@@ -2,12 +2,13 @@ $ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
 $scratch = Join-Path $root "rust/target/ctsc-smoke-$PID"
-$firstCapture = Join-Path $scratch 'capture-a'
-$secondCapture = Join-Path $scratch 'capture-b'
-$firstReplay = Join-Path $scratch 'candidate-a.otlp.json'
-$secondReplay = Join-Path $scratch 'candidate-b.otlp.json'
+$firstCapture = Join-Path $scratch 'a/capture'
+$secondCapture = Join-Path $scratch 'b/capture'
+# The target label is the output name, so repeated artifacts share a name and differ only by parent directory.
+$firstReplay = Join-Path $scratch 'a/candidate.otlp.json'
+$secondReplay = Join-Path $scratch 'b/candidate.otlp.json'
 $changedReplay = Join-Path $scratch 'candidate-changed.otlp.json'
-$binding = Join-Path $root 'test/bindings/rust.yaml'
+$binding = Join-Path $root 'test/bindings/specgate.yaml'
 $manifest = Join-Path $root 'rust/Cargo.toml'
 
 function Invoke-SpecGate {
@@ -22,8 +23,8 @@ function Invoke-SpecGate {
 try {
     New-Item -ItemType Directory -Force $scratch | Out-Null
 
-    Invoke-SpecGate @('capture', $binding, '--component', 'fixture.stateless_add', '--out', $firstCapture)
-    Invoke-SpecGate @('capture', $binding, '--component', 'fixture.stateless_add', '--out', $secondCapture)
+    Invoke-SpecGate @('capture', '--binding', $binding, '--component', 'fixture.stateless_add', '--impl', 'rust', '--out', $firstCapture)
+    Invoke-SpecGate @('capture', '--binding', $binding, '--component', 'fixture.stateless_add', '--impl', 'rust', '--out', $secondCapture)
 
     foreach ($name in @('manifest.json', 'registry.ctsc.json', 'reference.otlp.json')) {
         $first = [System.IO.File]::ReadAllBytes((Join-Path $firstCapture $name))
@@ -33,8 +34,8 @@ try {
         }
     }
 
-    Invoke-SpecGate @('replay', $firstCapture, $binding, '--out', $firstReplay)
-    Invoke-SpecGate @('replay', $firstCapture, $binding, '--out', $secondReplay)
+    Invoke-SpecGate @('replay', $firstCapture, '--binding', $binding, '--impl', 'rust', '--out', $firstReplay)
+    Invoke-SpecGate @('replay', $firstCapture, '--binding', $binding, '--impl', 'rust', '--out', $secondReplay)
     $firstReplayBytes = [System.IO.File]::ReadAllBytes($firstReplay)
     $secondReplayBytes = [System.IO.File]::ReadAllBytes($secondReplay)
     if ([Convert]::ToHexString($firstReplayBytes) -ne [Convert]::ToHexString($secondReplayBytes)) {

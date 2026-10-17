@@ -153,12 +153,14 @@ pub(super) fn check_shape(matrix: &Matrix) {
             "row '{}' must declare linkage 'linked' exactly when it captures a Rust bundle",
             row.id
         );
-        for language in [row.rust.as_ref(), row.csharp.as_ref()].into_iter().flatten() {
-            assert!(
-                matrix.bindings.contains_key(&language.binding),
-                "row '{}' references unknown binding '{}'",
-                row.id,
-                language.binding
+        for (language_name, language) in [("rust", row.rust.as_ref()), ("csharp", row.csharp.as_ref())]
+            .into_iter()
+            .filter_map(|(name, language)| language.map(|language| (name, language)))
+        {
+            assert_eq!(
+                language.binding, language_name,
+                "row '{}' must select the '{language_name}' implementation label in its {language_name} block",
+                row.id
             );
             assert!(!language.phases.is_empty(), "row '{}' must declare at least one phase", row.id);
             if language.expect == Expectation::Failure {

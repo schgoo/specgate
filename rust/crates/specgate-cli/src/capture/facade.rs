@@ -4,19 +4,28 @@
 #[cfg(any(test, feature = "test-util"))]
 use super::BTreeSet;
 use super::{
-    CaptureError, CaptureErrorKind, CaptureReport, CaptureRequest, CommandEnvironment, ComponentId, Discovery, ExecutedTests, Execution,
-    FailureContext, MANIFEST_FILE, Path, PathBuf, REGISTRY_FILE, TRACE_FILE, Target, build_binaries, encode_bundle, enumerate_tests,
-    public_error, reject_failures, run_tests, scratch_dir, select_component, spec_operation, validate_setups, write_artifact,
+    CaptureError, CaptureErrorKind, CaptureReport, CaptureRequest, CommandEnvironment, ComponentId, Discovered, Discovery, ExecutedTests,
+    Execution, FailureContext, MANIFEST_FILE, Path, PathBuf, REGISTRY_FILE, TRACE_FILE, build_binaries, encode_bundle, enumerate_tests,
+    public_error, reject_failures, run_id, run_tests, scratch_dir, spec_operation, validate_setups, write_artifact,
 };
+
+// Default capture bundles live beside the project, outside version control via `.gitignore`.
+const DEFAULT_CAPTURE_ROOT: &str = ".specgate/captures";
 
 // Ordinary capture publishes evidence from failing tests; golden generation opts into rejecting them.
 const REJECT_FAILURES: bool = false;
 
-/// Capture passing tests for one Rust binding target as a native CTSC bundle.
+/// Capture passing tests for one Rust implementation of a component as a native CTSC bundle.
 ///
-/// An empty [`TargetName`] selects the binding default. An empty
-/// [`ComponentId`] selects the sole discovered component and errors when
-/// discovery is ambiguous.
+/// An empty implementation label auto-selects the component's sole
+/// implementation and errors when several are declared. The component is
+/// required.
+///
+/// Without an explicit output directory the bundle is written to
+/// `.specgate/captures/<component>/<implementation>/<UTC run id>/` under the
+/// current directory. The capture target name recorded in the manifest and
+/// trace is the output directory's final path component. A non-empty output
+/// directory is refused unless the request sets `force`.
 ///
 /// # Errors
 ///
@@ -33,11 +42,11 @@ const REJECT_FAILURES: bool = false;
 /// use specgate_cli::{CapturePaths, CaptureRequest, capture};
 ///
 /// let request = CaptureRequest::builder(CapturePaths {
-///     binding: "binding.yaml".into(),
-///     out: "capture".into(),
+///     binding: "specgate.yaml".into(),
 /// })
-///     .target("rust")
+///     .implementation("rust")
 ///     .component("example.math")
+///     .out("capture")
 ///     .build()?;
 /// let report = capture(request)?;
 /// println!("{}", report.manifest_path.display());
@@ -59,7 +68,7 @@ pub fn capture(request: CaptureRequest) -> Result<CaptureReport, CaptureError> {
 /// # Examples
 /// ```no_run
 /// use specgate_cli::{capture_with, CapturePaths, CaptureRequest, Discovery, Execution, CommandEnvironment};
-/// let request = CaptureRequest::builder(CapturePaths { binding: "binding.yaml".into(), out: "capture".into() }).build()?;
+/// let request = CaptureRequest::builder(CapturePaths { binding: "specgate.yaml".into() }).component("example.math").out("capture").build()?;
 /// let report = capture_with(&request, &CommandEnvironment::real(), &Execution::real(), &Discovery::real())?;
 /// assert!(report.manifest_path.ends_with("manifest.json"));
 /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -76,12 +85,23 @@ pub fn capture_with(
     execution: &Execution,
     discovery: &Discovery,
 ) -> Result<CaptureReport, CaptureError> {
-    let discovered =
-        discover_target(request.binding_str(), request.target(), system, discovery).map_err(public_error(CaptureErrorKind::Discovery))?;
-    let selected = select_component(&discovered.registry, request.component()).map_err(public_error(CaptureErrorKind::Selection))?;
+    let component = ComponentId::from(request.component());
+    let label = Some(request.implementation()).filter(|label| !label.is_empty());
+    let discovered = discover_implementation(request.binding_str(), &component, label, system, discovery)
+        .map_err(public_error(CaptureErrorKind::Discovery))?;
+    let out = request.out().map_or_else(
+        || default_out(&component, &discovered.implementation.label, system),
+        Path::to_path_buf,
+    );
+    if !request.force() && system.is_occupied(&out) {
+        return Err(public_error(CaptureErrorKind::Request)(FailureContext::domain(format!(
+            "capture output directory {} is not empty; pass --force to overwrite it",
+            out.display()
+        ))));
+    }
     let requests = [BundleRequest {
-        component: selected,
-        out: request.out().to_path_buf(),
+        component,
+        out,
         #[cfg(any(test, feature = "test-util"))]
         excluded_operations: BTreeSet::new(),
     }];
@@ -92,6 +112,21 @@ pub fn capture_with(
         .into_iter()
         .next()
         .expect("one capture bundle request must produce one publication report"))
+}
+
+/// Default bundle directory: `.specgate/captures/<component>/<implementation>/<UTC run id>`.
+///
+/// The run id comes from the injected system clock, so the path is
+/// deterministic under a fake clock.
+pub(super) fn default_out(
+    component: &ComponentId,
+    label: &specgate_discovery::identity::ImplementationLabel,
+    system: &CommandEnvironment,
+) -> PathBuf {
+    Path::new(DEFAULT_CAPTURE_ROOT)
+        .join(component.as_str())
+        .join(label.as_str())
+        .join(run_id(system.now()))
 }
 
 /// One requested component bundle within a batched capture.
@@ -105,23 +140,24 @@ pub(crate) struct BundleRequest {
     pub(crate) excluded_operations: BTreeSet<String>,
 }
 
-/// Capture many components from one Rust binding target in a single pass.
+/// Capture many components from one Rust implementation in a single pass.
 ///
 /// Discovery, the libtest build, test enumeration, and test execution each
 /// happen exactly once for the whole batch; only bundle encoding is per
 /// component. [`capture`] is the one-component case of this same path, so
 /// batched and single bundles are byte-identical.
 ///
-/// Callers that already hold a [`Target`] should use
+/// Callers that already hold a [`Discovered`] should use
 /// [`capture_discovered`] directly and pay discovery once for the whole run.
 #[cfg(any(test, feature = "test-util"))]
 pub(crate) fn capture_many(
     binding: impl AsRef<Path>,
-    target: impl AsRef<str>,
+    component: &ComponentId,
+    label: Option<&str>,
     requests: &[BundleRequest],
 ) -> Result<Vec<CaptureReport>, FailureContext> {
     assert!(!requests.is_empty(), "capture_many requires at least one bundle request");
-    let discovered = discover(binding, target)?;
+    let discovered = discover(binding, component, label)?;
     let present = discovered.registry.present_components();
     for request in requests {
         if !present.iter().any(|candidate| candidate == request.component.as_str()) {
@@ -136,34 +172,30 @@ pub(crate) fn capture_many(
 }
 
 #[cfg(any(test, feature = "test-util"))]
-pub(crate) fn discover(binding: impl AsRef<Path>, target: impl AsRef<str>) -> Result<Target, FailureContext> {
-    discover_target(binding, target, &CommandEnvironment::real(), &Discovery::real())
+pub(crate) fn discover(binding: impl AsRef<Path>, component: &ComponentId, label: Option<&str>) -> Result<Discovered, FailureContext> {
+    discover_implementation(binding, component, label, &CommandEnvironment::real(), &Discovery::real())
 }
 
-fn discover_target(
+fn discover_implementation(
     binding: impl AsRef<Path>,
-    target: impl AsRef<str>,
+    component: &ComponentId,
+    label: Option<&str>,
     system: &CommandEnvironment,
     discovery: &Discovery,
-) -> Result<Target, FailureContext> {
-    let binding = binding.as_ref();
-    let target = target.as_ref();
-    let target_name = if target.is_empty() { None } else { Some(target) };
+) -> Result<Discovered, FailureContext> {
     let discovered = discovery
-        .capture_target(binding, target_name, &specgate_discovery::identity::ComponentId::default())
+        .capture_discover(
+            binding.as_ref(),
+            &specgate_discovery::identity::ComponentId::from(component.as_str()),
+            label,
+        )
         .map_err(|error| FailureContext::with_source(error.to_string(), error))?;
-    let resolved = &discovered.target;
-    if resolved.language != specgate_discovery::binding::Language::Rust {
+    let resolved = &discovered.implementation;
+    if !system.is_file(resolved.implementation.sources.join("Cargo.toml")) {
         return Err(FailureContext::domain(format!(
-            "capture currently supports only Rust targets; binding language is '{}'",
-            resolved.language
-        )));
-    }
-    if !system.is_file(resolved.target.package_root.join("Cargo.toml")) {
-        return Err(FailureContext::domain(format!(
-            "capture target '{}' is not a Rust package (no Cargo.toml at {})",
-            resolved.name,
-            resolved.target.package_root.display()
+            "implementation '{}' is not a Rust package (no Cargo.toml at {})",
+            resolved.label,
+            resolved.implementation.sources.display()
         )));
     }
     Ok(discovered)
@@ -174,7 +206,7 @@ fn discover_target(
 /// This is `specgate capture`'s behavior: a failing test contributes no
 /// scenario, and a component left with no scenario at all still errors.
 #[cfg(any(test, feature = "test-util"))]
-pub(crate) fn capture_discovered(discovered: &Target, requests: &[BundleRequest]) -> Result<Vec<CaptureReport>, FailureContext> {
+pub(crate) fn capture_discovered(discovered: &Discovered, requests: &[BundleRequest]) -> Result<Vec<CaptureReport>, FailureContext> {
     discovered_with(discovered, requests, FailureMode::Allow)
 }
 
@@ -185,7 +217,7 @@ pub(crate) fn capture_discovered(discovered: &Target, requests: &[BundleRequest]
 /// to be the corpus's real behavior, so a red test must not be hidden by a
 /// sibling test that happens to cover the same component.
 #[cfg(any(test, feature = "test-util"))]
-pub(crate) fn capture_strict(discovered: &Target, requests: &[BundleRequest]) -> Result<Vec<CaptureReport>, FailureContext> {
+pub(crate) fn capture_strict(discovered: &Discovered, requests: &[BundleRequest]) -> Result<Vec<CaptureReport>, FailureContext> {
     discovered_with(discovered, requests, FailureMode::Reject)
 }
 
@@ -198,7 +230,7 @@ pub(super) enum FailureMode {
 
 #[cfg(any(test, feature = "test-util"))]
 pub(super) fn discovered_with(
-    discovered: &Target,
+    discovered: &Discovered,
     requests: &[BundleRequest],
     failure_mode: FailureMode,
 ) -> Result<Vec<CaptureReport>, FailureContext> {
@@ -207,27 +239,28 @@ pub(super) fn discovered_with(
 }
 
 #[cfg(any(test, feature = "test-util"))]
-pub(super) fn execute_tests(discovered: &Target, requests: &[BundleRequest]) -> Result<ExecutedTests, FailureContext> {
+pub(super) fn execute_tests(discovered: &Discovered, requests: &[BundleRequest]) -> Result<ExecutedTests, FailureContext> {
     execute_with(discovered, requests, &CommandEnvironment::real(), &Execution::real())
 }
 
 fn execute_with(
-    discovered: &Target,
+    discovered: &Discovered,
     requests: &[BundleRequest],
     system: &CommandEnvironment,
     execution: &Execution,
 ) -> Result<ExecutedTests, FailureContext> {
-    let resolved = &discovered.target;
+    let resolved = &discovered.implementation;
     validate_setups(&discovered.registry, requests)?;
-    let scratch = scratch_dir(system, &resolved.target.package_root)?;
-    let test_binaries = build_binaries(execution, &resolved.target.package_root, scratch.path())?;
+    let sources = &resolved.implementation.sources;
+    let scratch = scratch_dir(system, sources)?;
+    let test_binaries = build_binaries(execution, sources, scratch.path())?;
     let tests = enumerate_tests(execution, &test_binaries)?;
     run_tests(system, execution, &tests, scratch.path())
 }
 
 #[cfg(any(test, feature = "test-util"))]
 pub(super) fn write_bundles(
-    discovered: &Target,
+    discovered: &Discovered,
     requests: &[BundleRequest],
     executed: &ExecutedTests,
     reject_failed: bool,
@@ -236,7 +269,7 @@ pub(super) fn write_bundles(
 }
 
 fn write_with(
-    discovered: &Target,
+    discovered: &Discovered,
     requests: &[BundleRequest],
     executed: &ExecutedTests,
     reject_failed: bool,

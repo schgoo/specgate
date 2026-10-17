@@ -4,14 +4,15 @@
 //! ```
 //! use specgate_cli::{CapturePaths, CaptureRequest};
 //! let request = CaptureRequest::builder(CapturePaths {
-//!     binding: "binding.yaml".into(), out: "capture".into(),
-//! }).target("rust").component("example.math").build()?;
-//! assert_eq!(request.target(), "rust");
+//!     binding: "binding.yaml".into(),
+//! }).implementation("rust").component("example.math").out("capture").build()?;
+//! assert_eq!(request.implementation(), "rust");
 //! assert_eq!(request.component(), "example.math");
+//! assert_eq!(request.out(), Some(std::path::Path::new("capture")));
 //! assert_eq!(request.binding(), std::path::Path::new("binding.yaml"));
 //! # Ok::<(), specgate_cli::CaptureError>(())
 //! ```
-use super::{CaptureError, CaptureErrorKind, ComponentId, Path, PathBuf, SpecEvent, TargetName};
+use super::{CaptureError, CaptureErrorKind, ComponentId, ImplementationLabel, Path, PathBuf, SpecEvent};
 
 /// Summary of a capture run.
 #[derive(Debug, Clone, PartialEq, Eq, SpecEvent)]
@@ -64,28 +65,34 @@ pub struct CaptureRequest {
     /// Target binding file.
     #[spec_event(path)]
     binding: PathBuf,
-    /// Binding target name, or empty to select the binding default.
+    /// Implementation label, or empty to auto-select the component's sole implementation.
     #[spec_event]
-    target: TargetName,
-    /// Component identifier, or empty to select the sole discovered component.
+    implementation: ImplementationLabel,
+    /// Component identifier.
     #[spec_event]
     component: ComponentId,
-    /// Output directory for the capture bundle.
-    #[spec_event(path)]
-    out: PathBuf,
+    /// Explicit output directory, or `None` for the timestamped default.
+    #[spec_event]
+    out: Option<String>,
+    /// Whether a non-empty output directory may be overwritten.
+    #[spec_event]
+    force: bool,
 }
 
 impl CaptureRequest {
-    /// Begin constructing a request for the required binding and output paths.
+    /// Begin constructing a request for the required binding path.
     ///
-    /// Target and component default to empty identities, retaining default
-    /// target and sole-component selection.
+    /// The component is required before [`CaptureRequestBuilder::build`]; the
+    /// implementation label defaults to empty, which auto-selects a sole
+    /// implementation. Without [`CaptureRequestBuilder::out`] the bundle goes to
+    /// `./.specgate/captures/<component>/<implementation>/<UTC run id>/`.
     pub fn builder(paths: CapturePaths) -> CaptureRequestBuilder {
         CaptureRequestBuilder {
             binding: paths.binding,
-            target: TargetName::default(),
+            implementation: ImplementationLabel::default(),
             component: ComponentId::default(),
-            out: paths.out,
+            out: None,
+            force: false,
         }
     }
 
@@ -95,22 +102,28 @@ impl CaptureRequest {
         &self.binding
     }
 
-    /// Binding target name, or empty to select the binding default.
+    /// Implementation label, or empty to auto-select the component's sole implementation.
     #[must_use]
-    pub fn target(&self) -> &str {
-        self.target.as_str()
+    pub fn implementation(&self) -> &str {
+        self.implementation.as_str()
     }
 
-    /// Component identifier, or empty to select the sole discovered component.
+    /// Component identifier.
     #[must_use]
     pub fn component(&self) -> &str {
         self.component.as_str()
     }
 
-    /// Output directory for the capture bundle.
+    /// Explicit output directory, or `None` for the timestamped default.
     #[must_use]
-    pub fn out(&self) -> &Path {
-        &self.out
+    pub fn out(&self) -> Option<&Path> {
+        self.out.as_deref().map(Path::new)
+    }
+
+    /// Whether a non-empty output directory may be overwritten.
+    #[must_use]
+    pub fn force(&self) -> bool {
+        self.force
     }
 
     pub(super) fn binding_str(&self) -> &str {
@@ -129,8 +142,6 @@ impl CaptureRequest {
 pub struct CapturePaths {
     /// Target binding file.
     pub binding: PathBuf,
-    /// Output directory for the capture bundle.
-    pub out: PathBuf,
 }
 
 /// Staged construction for a [`CaptureRequest`].
@@ -138,21 +149,35 @@ pub struct CapturePaths {
 #[must_use]
 pub struct CaptureRequestBuilder {
     binding: PathBuf,
-    target: TargetName,
+    implementation: ImplementationLabel,
     component: ComponentId,
-    out: PathBuf,
+    out: Option<PathBuf>,
+    force: bool,
 }
 
 impl CaptureRequestBuilder {
-    /// Select a named binding target. The default is an empty identity.
-    pub fn target(mut self, target: impl AsRef<str>) -> Self {
-        self.target = TargetName::from(target.as_ref());
+    /// Select a binding implementation by label. The default is an empty identity.
+    pub fn implementation(mut self, label: impl AsRef<str>) -> Self {
+        self.implementation = ImplementationLabel::from(label.as_ref());
         self
     }
 
-    /// Select a component. The default is an empty identity.
+    /// Select the component to capture. Required.
     pub fn component(mut self, component: impl AsRef<str>) -> Self {
         self.component = ComponentId::from(component.as_ref());
+        self
+    }
+
+    /// Write the bundle to this directory. Its final path component becomes the
+    /// capture target name recorded in the artifacts.
+    pub fn out(mut self, out: impl AsRef<Path>) -> Self {
+        self.out = Some(out.as_ref().to_path_buf());
+        self
+    }
+
+    /// Allow publishing into a non-empty output directory.
+    pub fn force(mut self, force: bool) -> Self {
+        self.force = force;
         self
     }
 
@@ -160,7 +185,9 @@ impl CaptureRequestBuilder {
     ///
     /// # Errors
     ///
-    /// Returns a request error when either path is not Unicode or is empty.
+    /// Returns a request error when a path is not Unicode or is empty, when
+    /// the output directory has no final name component, or when no component
+    /// was selected.
     pub fn build(self) -> Result<CaptureRequest, CaptureError> {
         validate_utf8(&self.binding, "binding")?;
         if self.binding.as_os_str().is_empty() {
@@ -169,18 +196,41 @@ impl CaptureRequestBuilder {
                 "capture requires a non-empty binding path",
             ));
         }
-        validate_utf8(&self.out, "output")?;
-        if self.out.as_os_str().is_empty() {
+        let out = match self.out {
+            Some(out) => {
+                validate_utf8(&out, "output")?;
+                if out.as_os_str().is_empty() {
+                    return Err(CaptureError::message(
+                        CaptureErrorKind::Request,
+                        "capture requires a non-empty output directory",
+                    ));
+                }
+                if out.file_name().is_none() {
+                    return Err(CaptureError::message(
+                        CaptureErrorKind::Request,
+                        "capture output directory must end in a named directory",
+                    ));
+                }
+                Some(
+                    out.to_str()
+                        .map(str::to_owned)
+                        .ok_or_else(|| CaptureError::message(CaptureErrorKind::Request, "capture output path must be Unicode"))?,
+                )
+            }
+            None => None,
+        };
+        if self.component.as_str().is_empty() {
             return Err(CaptureError::message(
                 CaptureErrorKind::Request,
-                "capture requires a non-empty output directory",
+                "capture requires a component identifier",
             ));
         }
         Ok(CaptureRequest {
             binding: self.binding,
-            target: self.target,
+            implementation: self.implementation,
             component: self.component,
-            out: self.out,
+            out,
+            force: self.force,
         })
     }
 }

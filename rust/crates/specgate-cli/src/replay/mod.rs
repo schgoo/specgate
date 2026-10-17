@@ -1,10 +1,10 @@
-//! `specgate replay <capture-dir> <binding.yaml> --out <candidate.otlp.json>` —
+//! `specgate replay <capture-dir> [--binding <specgate.yaml>] [--impl <label>] [--out <candidate.otlp.json>] [--force]` —
 //! statically link CTSC stimuli to a Rust candidate and replay them.
 //!
 //! # Examples
 //! ```no_run
 //! use specgate_cli::replay::{Paths, Request, replay};
-//! let request = Request::builder(Paths::new("capture", "candidate.yaml", "candidate.json")).build()?;
+//! let request = Request::builder(Paths::new("capture", "candidate.yaml")).out("candidate.json").build()?;
 //! let report = replay(request)?;
 //! assert_eq!(report.output_path, std::path::Path::new("candidate.json"));
 //! # Ok::<(), Box<dyn std::error::Error>>(())

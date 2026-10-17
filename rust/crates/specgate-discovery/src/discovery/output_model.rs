@@ -6,19 +6,18 @@ use crate::error::Error;
 use crate::identity::ComponentId;
 use std::collections::BTreeMap;
 
-/// Raw and normalized metadata for one selected binding target.
+/// Raw and normalized metadata for one selected component implementation.
 #[derive(Debug, Clone)]
 #[expect(
     clippy::exhaustive_structs,
     reason = "discovery result DTOs expose their complete evidence to workspace consumers"
 )]
-pub struct Target {
-    /// Resolved binding target.
-    #[expect(clippy::struct_field_names, reason = "target is the domain term for this binding value")]
-    pub target: crate::binding::ResolvedTarget,
-    /// Candidate Cargo identity for Rust targets.
+pub struct Discovered {
+    /// Resolved binding implementation.
+    pub implementation: crate::binding::ResolvedImplementation,
+    /// Candidate Cargo identity for Rust implementations.
     pub cargo_context: Option<crate::runner::CandidatePackage>,
-    /// Raw registry JSON emitted by the target.
+    /// Raw registry JSON emitted by the implementation.
     pub registry_json: String,
     /// Parsed raw registry. This producer-interoperability surface is available
     /// only with the `raw-registry` feature.
@@ -90,9 +89,9 @@ pub enum SchemaLookup<'a> {
     reason = "discovery result DTOs expose their complete evidence to workspace consumers"
 )]
 pub struct Batch {
-    /// Resolved binding target.
-    pub target: crate::binding::ResolvedTarget,
-    /// Candidate Cargo identity for Rust targets.
+    /// Resolved binding implementation.
+    pub implementation: crate::binding::ResolvedImplementation,
+    /// Candidate Cargo identity for Rust implementations.
     pub cargo_context: Option<crate::runner::CandidatePackage>,
     /// Raw registry documents in emission order.
     pub registry_json: Vec<String>,

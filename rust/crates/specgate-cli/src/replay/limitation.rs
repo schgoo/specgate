@@ -46,7 +46,7 @@ const ASYNC_OPERATION: &str = "is async; replay supports only synchronous operat
 #[cfg(any(test, feature = "test-util"))]
 const NORMALIZED_ASYNC: &str = "is async in normalized discovery";
 #[cfg(any(test, feature = "test-util"))]
-const RUST_CANDIDATE: &str = "replay currently supports only Rust candidates; binding language is '";
+const RUST_CANDIDATE: &str = "replay currently supports only Rust candidates; implementation language is '";
 
 /// Classify only stable, intentional replay limitations.
 ///

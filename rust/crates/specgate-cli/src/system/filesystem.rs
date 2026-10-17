@@ -5,6 +5,7 @@ use std::io::{self, Write};
 use std::path::Path;
 #[cfg(any(test, feature = "test-util"))]
 use std::path::PathBuf;
+use std::time::SystemTime;
 #[cfg(any(test, feature = "test-util"))]
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -46,6 +47,7 @@ struct Fake {
     directories: HashSet<PathBuf>,
     owned_scratch: HashSet<PathBuf>,
     next_scratch: u64,
+    clock: Option<SystemTime>,
 }
 
 /// Owning invocation-unique scratch directory guard.
@@ -181,6 +183,53 @@ impl CommandEnvironment {
             Kind::Fake(fake) => fake.lock().expect("fake system lock poisoned").files.contains_key(path.as_ref()),
         }
     }
+    /// Test whether a path exists and is not an empty directory.
+    ///
+    /// A regular file, or a directory with any entry, is occupied; a missing
+    /// path or an empty directory is free to receive an artifact bundle.
+    pub(crate) fn is_occupied(&self, path: impl AsRef<Path>) -> bool {
+        let path = path.as_ref();
+        match &self.inner {
+            Kind::Real => match fs::read_dir(path) {
+                Ok(mut entries) => entries.next().is_some(),
+                Err(_not_a_directory) => path.exists(),
+            },
+            #[cfg(any(test, feature = "test-util"))]
+            Kind::Fake(fake) => {
+                let state = fake.lock().expect("fake system lock poisoned");
+                state.files.contains_key(path)
+                    || state.files.keys().any(|candidate| candidate.starts_with(path))
+                    || state
+                        .directories
+                        .iter()
+                        .any(|candidate| candidate != path && candidate.starts_with(path))
+            }
+        }
+    }
+    /// Test whether anything, including an empty directory, exists at a path.
+    pub(crate) fn exists(&self, path: impl AsRef<Path>) -> bool {
+        let path = path.as_ref();
+        match &self.inner {
+            Kind::Real => path.exists(),
+            #[cfg(any(test, feature = "test-util"))]
+            Kind::Fake(fake) => {
+                let state = fake.lock().expect("fake system lock poisoned");
+                state.directories.contains(path) || state.files.keys().any(|candidate| candidate.starts_with(path))
+            }
+        }
+    }
+    /// Read the current wall-clock instant.
+    pub(crate) fn now(&self) -> SystemTime {
+        match &self.inner {
+            Kind::Real => SystemTime::now(),
+            #[cfg(any(test, feature = "test-util"))]
+            Kind::Fake(fake) => fake
+                .lock()
+                .expect("fake system lock poisoned")
+                .clock
+                .unwrap_or(SystemTime::UNIX_EPOCH),
+        }
+    }
     /// Read one environment value without Unicode conversion.
     pub(crate) fn environment(&self, name: impl AsRef<OsStr>) -> Option<OsString> {
         self.take_error().is_none().then_some(())?;
@@ -295,6 +344,17 @@ impl CommandEnvironment {
             .expect("fake system lock poisoned")
             .environment
             .insert(name.into(), value.into());
+    }
+    /// Fix the fake wall clock; it defaults to the Unix epoch.
+    ///
+    /// # Panics
+    /// Panics when called on a real backend or when fake state is poisoned.
+    #[cfg(any(test, feature = "test-util"))]
+    pub fn seed_clock(&self, instant: SystemTime) {
+        let Kind::Fake(fake) = &self.inner else {
+            panic!("seed_clock requires fake system")
+        };
+        fake.lock().expect("fake system lock poisoned").clock = Some(instant);
     }
     /// Seed one pre-existing fake directory.
     ///

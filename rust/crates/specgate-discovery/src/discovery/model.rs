@@ -34,7 +34,7 @@ use std::fmt;
 
 #[path = "output_model.rs"]
 mod output;
-pub use output::{Batch, Component, SchemaLookup, Target};
+pub use output::{Batch, Component, Discovered, SchemaLookup};
 
 /// One black-box operation input, with any setup construction params folded in.
 #[derive(Debug, Clone, PartialEq, Eq)]

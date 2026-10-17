@@ -25,8 +25,6 @@ pub(crate) enum FailureStage {
     Request,
     /// Binding resolution or target discovery failed.
     Discovery,
-    /// Component selection failed.
-    Selection,
     /// Building, enumerating, or running tests failed.
     Execution,
     /// Bundle encoding or artifact writing failed.
@@ -48,9 +46,10 @@ type CaptureErrorKind = FailureStage;
 /// use specgate_cli::{CapturePaths, CaptureRequest};
 ///
 /// let error = CaptureRequest::builder(CapturePaths {
-///     binding: "binding.yaml".into(),
-///     out: "".into(),
+///     binding: "specgate.yaml".into(),
 /// })
+/// .component("example.math")
+/// .out("")
 /// .build()
 /// .unwrap_err();
 /// assert_eq!(error.to_string(), "capture requires a non-empty output directory");
@@ -99,7 +98,7 @@ mod tests {
     fn error_contract() {
         use std::error::Error as _;
 
-        let plain = CaptureError::message(CaptureErrorKind::Selection, "select a component");
+        let plain = CaptureError::message(CaptureErrorKind::Request, "select a component");
         assert_eq!(plain.to_string(), "select a component");
         assert!(plain.source().is_none());
         let _status = ohno::ErrorExt::backtrace(&plain);

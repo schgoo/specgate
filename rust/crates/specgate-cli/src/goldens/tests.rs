@@ -391,7 +391,7 @@ mod cases {
             format: MATRIX_FORMAT.to_string(),
             format_version: MATRIX_VERSION.to_string(),
             artifact_root: RepoPath::try_from("test/goldens/ctsc").unwrap(),
-            bindings: BTreeMap::from([("rust".to_string(), RepoPath::try_from("test/bindings/rust.yaml").unwrap())]),
+            binding: RepoPath::try_from("test/bindings/specgate.yaml").unwrap(),
             sources: SourceCoverage {
                 roots: Vec::new(),
                 exclusions: Vec::new(),
