@@ -1,5 +1,5 @@
 //! Private capture manifest and execution data transfer objects.
-use super::{ArtifactName, ComponentId, FailureContext, PathBuf, Serialize};
+use super::{ArtifactName, ComponentId, FailureContext, Serialize};
 /// Hexadecimal width of a 32-byte SHA-256 digest.
 const SHA256_WIDTH: usize = 64;
 use specgate_discovery::identity::ImplementationLabel;
@@ -65,20 +65,6 @@ impl TryFrom<&'static str> for Version {
     fn try_from(value: &'static str) -> Result<Self, Self::Error> {
         Self::try_new(value)
     }
-}
-
-#[derive(Debug)]
-pub(super) struct TestBinary {
-    pub(super) label: String,
-    pub(super) executable: PathBuf,
-    pub(super) is_library: bool,
-}
-
-#[derive(Debug)]
-pub(super) struct IsolatedTest {
-    pub(super) scenario_name: String,
-    pub(super) test_name: String,
-    pub(super) executable: PathBuf,
 }
 
 #[derive(Debug, Serialize)]

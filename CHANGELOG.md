@@ -7,6 +7,13 @@ under `docs/decisions/`, or `docs/roadmap.md`. Generate with `just changelog`.
 
 ### Added
 
+- `specgate capture --impl csharp` builds the binding's `tests.projects` with the
+  capture weaver injected, runs each listed test in its own `dotnet test`
+  process, and emits validated bundles; the weaver, net8.0 runtime, and
+  `SpecGateCapture.targets` ship beside the executable (`SPECGATE_WEAVER_PATH`
+  overrides), and woven capture needs .NET 8+ (#46).
+- `SpecGate.Runtime` targets net8.0 and net10.0 and starts capture from
+  `SPECGATE_NATIVE_CAPTURE` through its own module initializer (#46).
 - A plain CLR enum maps onto a CTSC tagged union of payload-free variants in
   declaration order, in both C# capture and C# discovery.
 - Two declarations that resolve to one CTSC variant name are rejected, in C#

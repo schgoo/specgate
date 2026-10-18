@@ -4,8 +4,9 @@
 
 The repository now uses CTSC-native discovery, capture, and replay. The former
 spec parser, behavioral matcher, generated runners, case extraction, coverage,
-self-hosting, flat event buffer, record-mode JSONL sink, mock runtime, C#
-weaver/runtime, and associated product commands have been removed.
+self-hosting, flat event buffer, record-mode JSONL sink, mock runtime, and
+associated product commands have been removed. The C# weaver and runtime were
+removed with them and have since been rebuilt for CTSC-native capture.
 
 The active flow is:
 
@@ -33,6 +34,15 @@ reference target
   Trace Core, Linked, and bundle validation, typed replay decoding,
   deterministic IDs, and strict differential comparison.
 - `specgate-cli`: `discover`, `capture`, `replay`, `validate`, and `compare`.
+  `capture` runs Rust through `cargo` and C# through `dotnet` (see
+  `docs/decisions/csharp-capture-cli.md`). C# capture builds each
+  `tests.projects` entry once with the capture weaver injected into the build,
+  lists its tests, and runs each listed display name as one scenario in its own
+  `dotnet test` process. It requires the .NET 8+ runtime and SDK; the weaver,
+  the net8.0 runtime, and `SpecGateCapture.targets` ship beside the `specgate`
+  executable, and `SPECGATE_WEAVER_PATH` overrides that directory.
+  `replay` still supports Rust only, and `tests.command` capture is not yet
+  supported.
 
 Registry import hints use the approved `templated_uri` dependency for authority
 validation while retaining a file-specific adapter for CTSC's relative `file:`

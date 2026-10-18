@@ -84,8 +84,9 @@ implementation choice. This record closes it.
 - The epic [#48](https://github.com/schgoo/specgate/issues/48) and its children
   are no longer scoped synchronous-only; async C# capture moves out of their
   deferred lists.
-- `specgate capture` must accept non-Rust bindings, which it currently rejects
-  with "only Rust targets".
+- `specgate capture` must accept non-Rust bindings, which it previously
+  rejected with "only Rust targets". Implemented by #46; see
+  `csharp-capture-cli.md`.
 
 ## Validation
 

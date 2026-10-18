@@ -29,10 +29,7 @@ public static class CaptureJson
     /// <returns>The UTF-8 encoded sidecar document.</returns>
     public static byte[] Serialize(Capture capture)
     {
-        if (capture is null)
-        {
-            throw new ArgumentNullException(nameof(capture));
-        }
+        ArgumentNullException.ThrowIfNull(capture);
 
         JsonText writer = new();
         WriteCapture(writer, capture);
@@ -257,7 +254,7 @@ public static class CaptureJson
 
         string text = Math.Abs(value).ToString("R", CultureInfo.InvariantCulture);
         int exponentAt = text.IndexOf('E');
-        int exponent = exponentAt >= 0 ? int.Parse(text.Substring(exponentAt + 1), CultureInfo.InvariantCulture) : 0;
+        int exponent = exponentAt >= 0 ? int.Parse(text.AsSpan(exponentAt + 1), provider: CultureInfo.InvariantCulture) : 0;
         string mantissa = exponentAt >= 0 ? text.Substring(0, exponentAt) : text;
         int pointAt = mantissa.IndexOf('.');
         int integerLength = pointAt >= 0 ? pointAt : mantissa.Length;
@@ -278,7 +275,7 @@ public static class CaptureJson
         }
         else if (point > 0 && point <= 16)
         {
-            body = significant.Substring(0, point) + "." + significant.Substring(point);
+            body = string.Concat(significant.AsSpan(0, point), ".", significant.AsSpan(point));
         }
         else if (point > -5 && point <= 0)
         {

@@ -46,7 +46,7 @@ public sealed class SetupStaging
 
         SetupDeclaration[] declarations = SetupRegistry
             .For(producer.DeclaringType!.Assembly)
-            .DeclarationsOf(method, session.Component);
+            .DeclarationsOf(method, session.RecordsAllComponents ? null : session.Component);
         if (declarations.Length == 0)
         {
             return null;

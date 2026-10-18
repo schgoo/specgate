@@ -24,8 +24,9 @@ namespace SpecGate.Runtime;
 /// collapse to a constant fallback here.
 /// </para>
 /// <para>
-/// <c>NullabilityInfoContext</c> would do this, but it only exists on .NET 6 and
-/// later, and the capture runtime targets netstandard2.0.
+/// <c>NullabilityInfoContext</c> would do this, but it does not expose the
+/// declared flag of a generic type argument the way the metadata encoding here
+/// does, so the metadata is read directly.
 /// </para>
 /// </remarks>
 internal sealed class NullableFlagReader

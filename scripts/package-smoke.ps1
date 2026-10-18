@@ -211,6 +211,23 @@ components:
     Invoke-Checked $binary @('validate', 'bundle', $capture)
     Invoke-Checked $binary @('compare', (Join-Path $capture 'reference.otlp.json'), $replay, '--registry', (Join-Path $capture 'registry.ctsc.json'))
 
+    # C# discovery and capture find their tools beside the executable. Lay them
+    # out exactly as the release does and drop the source-checkout overrides so
+    # the installed layout alone has to work.
+    $layout = Split-Path -Parent $binary
+    Remove-Item Env:SPECGATE_DISCOVERY_PATH -ErrorAction SilentlyContinue
+    Remove-Item Env:SPECGATE_WEAVER_PATH -ErrorAction SilentlyContinue
+    Invoke-Checked dotnet @('publish', (Join-Path $root 'csharp/SpecGate.Discovery/SpecGate.Discovery.csproj'), '-c', 'Release', '--no-self-contained', '-o', $layout)
+    Invoke-Checked dotnet @('build', (Join-Path $root 'csharp/SpecGate.Weaver/SpecGate.Weaver.csproj'), '-c', 'Release', '--output', $layout)
+    Invoke-Checked dotnet @('build', (Join-Path $root 'csharp/SpecGate.Runtime/SpecGate.Runtime.csproj'), '-c', 'Release', '--framework', 'net8.0', '--output', $layout)
+    $csharpCapture = Join-Path $scratch 'csharp-capture'
+    Invoke-Checked $binary @(
+        'capture', '--binding', (Join-Path $root 'rust/crates/specgate-cli/tests/fixtures/csharp-capture/specgate.yaml'),
+        '--component', 'fixture.cli_capture.add', '--impl', 'csharp',
+        '--out', $csharpCapture
+    )
+    Invoke-Checked $binary @('validate', 'bundle', $csharpCapture)
+
     $nuget = Join-Path $scratch 'nuget-a'
     $nugetRepeat = Join-Path $scratch 'nuget-b'
     $env:SOURCE_DATE_EPOCH = '315532800'

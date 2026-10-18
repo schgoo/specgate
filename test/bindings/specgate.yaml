@@ -17,7 +17,7 @@ components:
         sources: ../csharp/SpecGate.CtscFixtures
         tests:
           projects:
-            - ../csharp/SpecGate.CtscFixtures/SpecGate.CtscFixtures.csproj
+            - ../csharp/SpecGate.CtscFixtures.Tests/SpecGate.CtscFixtures.Tests.csproj
   comp.core:
     implementations:
       rust: *rust_fixtures

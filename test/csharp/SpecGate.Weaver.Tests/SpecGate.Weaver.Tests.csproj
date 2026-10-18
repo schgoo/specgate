@@ -15,6 +15,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Laid out beside the weaver, runtime, and Cecil, as the shipped weaver directory is. -->
+    <Content Include="..\..\..\csharp\SpecGate.Weaver\SpecGateCapture.targets;..\..\..\csharp\SpecGate.Weaver\SpecGateWeave.targets" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\..\csharp\SpecGate.Runtime\SpecGate.Runtime.csproj" />
     <ProjectReference Include="..\SpecGate.TestSupport\SpecGate.TestSupport.csproj" />
     <ProjectReference Include="..\..\..\csharp\SpecGate.Weaver\SpecGate.Weaver.csproj" />

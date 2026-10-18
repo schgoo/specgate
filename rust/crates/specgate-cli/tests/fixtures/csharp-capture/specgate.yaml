@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../../../../binding-schema.json
+components:
+  fixture.cli_capture.add:
+    implementations:
+      csharp:
+        language: csharp
+        sources: sources
+        tests:
+          projects: [tests/SpecGate.CliCaptureFixtures.Tests.csproj]
+  fixture.cli_capture.fetch:
+    implementations:
+      csharp:
+        language: csharp
+        sources: sources
+        tests:
+          projects: [tests/SpecGate.CliCaptureFixtures.Tests.csproj]

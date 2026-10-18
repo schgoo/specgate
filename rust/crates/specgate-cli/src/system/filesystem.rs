@@ -2,9 +2,7 @@
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::{self, Write};
-use std::path::Path;
-#[cfg(any(test, feature = "test-util"))]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 #[cfg(any(test, feature = "test-util"))]
 use std::{
@@ -216,6 +214,74 @@ impl CommandEnvironment {
                 let state = fake.lock().expect("fake system lock poisoned");
                 state.directories.contains(path) || state.files.keys().any(|candidate| candidate.starts_with(path))
             }
+        }
+    }
+    /// List the regular files directly inside a directory that carry `extension`, sorted by path.
+    pub(crate) fn files_with_extension(&self, directory: impl AsRef<Path>, extension: impl AsRef<OsStr>) -> io::Result<Vec<PathBuf>> {
+        if let Some(error) = self.take_error() {
+            return Err(error);
+        }
+        let directory = directory.as_ref();
+        let extension = extension.as_ref();
+        let mut files = match &self.inner {
+            Kind::Real => fs::read_dir(directory)?
+                .collect::<io::Result<Vec<_>>>()?
+                .into_iter()
+                .map(|entry| entry.path())
+                .filter(|path| path.is_file() && path.extension() == Some(extension))
+                .collect::<Vec<_>>(),
+            #[cfg(any(test, feature = "test-util"))]
+            Kind::Fake(fake) => fake
+                .lock()
+                .expect("fake system lock poisoned")
+                .files
+                .keys()
+                .filter(|path| path.parent() == Some(directory) && path.extension() == Some(extension))
+                .cloned()
+                .collect::<Vec<_>>(),
+        };
+        files.sort();
+        Ok(files)
+    }
+    /// Resolve a path to its absolute, symlink-free form without a Windows verbatim prefix.
+    ///
+    /// External build tools compare project paths textually, and they do not
+    /// understand the `\\?\` form that [`fs::canonicalize`] returns on Windows.
+    /// The fake leaves paths unchanged.
+    pub(crate) fn canonical(&self, path: impl AsRef<Path>) -> io::Result<PathBuf> {
+        if let Some(error) = self.take_error() {
+            return Err(error);
+        }
+        match &self.inner {
+            Kind::Real => {
+                let resolved = fs::canonicalize(path)?;
+                let text = resolved.to_string_lossy();
+                Ok(match text.strip_prefix(r"\\?\") {
+                    Some(rest) if !rest.starts_with("UNC\\") => PathBuf::from(rest),
+                    _ => resolved,
+                })
+            }
+            #[cfg(any(test, feature = "test-util"))]
+            Kind::Fake(_) => Ok(path.as_ref().to_path_buf()),
+        }
+    }
+    /// Locate the directory of the running executable.
+    ///
+    /// The fake reports `fake-bin`.
+    pub(crate) fn executable_directory(&self) -> io::Result<PathBuf> {
+        if let Some(error) = self.take_error() {
+            return Err(error);
+        }
+        match &self.inner {
+            Kind::Real => {
+                let executable = std::env::current_exe()?;
+                executable
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .ok_or_else(|| io::Error::other("the running executable has no parent directory"))
+            }
+            #[cfg(any(test, feature = "test-util"))]
+            Kind::Fake(_) => Ok(PathBuf::from("fake-bin")),
         }
     }
     /// Read the current wall-clock instant.

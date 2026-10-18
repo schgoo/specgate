@@ -138,11 +138,12 @@ internal sealed class SetupRegistry
     }
 
     /// <summary>
-    /// The declarations one setup method carries for <paramref name="component"/>.
+    /// The declarations one setup method carries for <paramref name="component"/>,
+    /// or for every component when it is <see langword="null"/>.
     /// A single method may declare several, so one invocation records provenance
     /// for each of them.
     /// </summary>
-    internal SetupDeclaration[] DeclarationsOf(RuntimeMethodHandle method, string component)
+    internal SetupDeclaration[] DeclarationsOf(RuntimeMethodHandle method, string? component)
     {
         if (_setups.Length == 0)
         {
@@ -153,7 +154,7 @@ internal sealed class SetupRegistry
         [
             .. _setups.Where(setup =>
                 setup.Method.MethodHandle.Equals(method)
-                && string.Equals(setup.Key.Component, component, StringComparison.Ordinal)),
+                && (component is null || string.Equals(setup.Key.Component, component, StringComparison.Ordinal))),
         ];
     }
 

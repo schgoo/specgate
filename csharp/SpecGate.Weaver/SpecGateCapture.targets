@@ -1,0 +1,26 @@
+<Project>
+  <!--
+    Injected by `specgate capture` through
+    -p:CustomAfterMicrosoftCommonTargets=<this file>, so it is imported into every
+    project of a build. It does nothing except in the one project the command
+    names with -p:SpecGateWeaveProject=<csproj>: the project that holds the
+    operations. That project is woven in place, with SpecGate.Runtime copied
+    beside it for the weaver to bind to and for the capture to load.
+
+    The command ships this file, the weaver, and the runtime in one directory, so
+    every path below resolves from here.
+  -->
+  <PropertyGroup Condition="'$(SpecGateWeaveProject)' != '' and '$(MSBuildProjectFullPath)' == '$(SpecGateWeaveProject)'">
+    <SpecGateWeaverTaskAssembly>$(MSBuildThisFileDirectory)SpecGate.Weaver.dll</SpecGateWeaverTaskAssembly>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(SpecGateWeaveProject)' != '' and '$(MSBuildProjectFullPath)' == '$(SpecGateWeaveProject)'">
+    <Reference Include="SpecGate.Runtime">
+      <HintPath>$(MSBuildThisFileDirectory)SpecGate.Runtime.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)SpecGateWeave.targets"
+          Condition="'$(SpecGateWeaveProject)' != '' and '$(MSBuildProjectFullPath)' == '$(SpecGateWeaveProject)'" />
+</Project>

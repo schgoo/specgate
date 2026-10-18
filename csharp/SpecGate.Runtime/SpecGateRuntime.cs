@@ -39,12 +39,32 @@ public static class SpecGateRuntime
             throw new ArgumentException("specgate: a capture session requires a component.", nameof(component));
         }
 
-        if (config is null)
+        ArgumentNullException.ThrowIfNull(config);
+
+        CaptureSession session = new(component, config, sidecar: null);
+        return Attach(session);
+    }
+
+    /// <summary>
+    /// Attaches a session driven by the native-capture environment protocol.
+    /// It records every component, as the Rust runtime does, and rewrites its
+    /// sidecar after each completed operation.
+    /// </summary>
+    /// <returns>The attached session, or <see langword="null"/> when a session is already active.</returns>
+    internal static CaptureSession? BeginEnvironmentSession(CaptureConfig config, SidecarWriter sidecar)
+    {
+        CaptureSession session = new(component: null, config, sidecar);
+        if (Interlocked.CompareExchange(ref _session, session, null) is not null)
         {
-            throw new ArgumentNullException(nameof(config));
+            return null;
         }
 
-        CaptureSession session = new(component, config);
+        CurrentScope.Value = null;
+        return session;
+    }
+
+    private static CaptureSession Attach(CaptureSession session)
+    {
         if (Interlocked.CompareExchange(ref _session, session, null) is not null)
         {
             throw new InvalidOperationException(
@@ -67,7 +87,7 @@ public static class SpecGateRuntime
         RuntimeMethodHandle method, string operation, string component)
     {
         CaptureSession? session = Volatile.Read(ref _session);
-        if (session is null || !string.Equals(session.Component, component, StringComparison.Ordinal))
+        if (session is null || !session.Records(component))
         {
             return OperationScope.Disabled;
         }
@@ -89,14 +109,11 @@ public static class SpecGateRuntime
             return OperationScope.Disabled;
         }
 
-        if (components is null)
-        {
-            throw new ArgumentNullException(nameof(components));
-        }
+        ArgumentNullException.ThrowIfNull(components);
 
         foreach (string component in components)
         {
-            if (string.Equals(session.Component, component, StringComparison.Ordinal))
+            if (session.Records(component))
             {
                 return Open(session, operation, component, method);
             }
@@ -146,10 +163,7 @@ public static class SpecGateRuntime
     [EditorBrowsable(EditorBrowsableState.Never)]
     public static void RecordInputs(OperationScope scope, object?[] arguments)
     {
-        if (scope is null)
-        {
-            throw new ArgumentNullException(nameof(scope));
-        }
+        ArgumentNullException.ThrowIfNull(scope);
 
         try
         {
@@ -169,10 +183,7 @@ public static class SpecGateRuntime
     [EditorBrowsable(EditorBrowsableState.Never)]
     public static void ExitOk(OperationScope scope, object? result)
     {
-        if (scope is null)
-        {
-            throw new ArgumentNullException(nameof(scope));
-        }
+        ArgumentNullException.ThrowIfNull(scope);
 
         try
         {
@@ -190,10 +201,7 @@ public static class SpecGateRuntime
     [EditorBrowsable(EditorBrowsableState.Never)]
     public static void ExitVoid(OperationScope scope)
     {
-        if (scope is null)
-        {
-            throw new ArgumentNullException(nameof(scope));
-        }
+        ArgumentNullException.ThrowIfNull(scope);
 
         try
         {
@@ -209,10 +217,7 @@ public static class SpecGateRuntime
     [EditorBrowsable(EditorBrowsableState.Never)]
     public static void ExitError(OperationScope scope, Exception exception)
     {
-        if (scope is null)
-        {
-            throw new ArgumentNullException(nameof(scope));
-        }
+        ArgumentNullException.ThrowIfNull(scope);
 
         try
         {
@@ -422,19 +427,10 @@ public static class SpecGateRuntime
     private static void RequireObservable(OperationScope scope, Task task)
     {
         RequireScope(scope);
-        if (task is null)
-        {
-            throw new ArgumentNullException(nameof(task));
-        }
+        ArgumentNullException.ThrowIfNull(task);
     }
 
-    private static void RequireScope(OperationScope scope)
-    {
-        if (scope is null)
-        {
-            throw new ArgumentNullException(nameof(scope));
-        }
-    }
+    private static void RequireScope(OperationScope scope) => ArgumentNullException.ThrowIfNull(scope);
 
     private static void Restore(OperationScope scope)
     {

@@ -4,7 +4,6 @@
 
 #[cfg(test)]
 mod cases {
-    use super::super::execution::{FailureReason, failure_summary, reject_persistence, unfinalized_operation, unfinalized_summary};
     use super::super::facade::{capture_many, default_out, execute_tests, write_bundles};
     use super::super::filter::filter;
     use super::super::*;
@@ -17,6 +16,10 @@ mod cases {
             .find(|path| path.join("rust").join("Cargo.toml").is_file())
             .expect("repository root")
             .to_path_buf()
+    }
+
+    fn csharp_capture_binding() -> PathBuf {
+        fixture_binding().parent().unwrap().join("csharp-capture").join("specgate.yaml")
     }
 
     fn fixture_binding() -> PathBuf {
@@ -607,14 +610,6 @@ mod cases {
     fn actionable_errors() {
         let binding = fixture_binding();
         let binding = binding.to_str().unwrap();
-        let unsupported = discover(binding, &ComponentId::from("fixture.cli.replay"), Some("csharp")).unwrap_err();
-        assert!(
-            unsupported.diagnostic().contains("only Rust implementations")
-                && unsupported.diagnostic().contains("'csharp'")
-                && unsupported.diagnostic().contains("fixture.cli.replay"),
-            "{}",
-            unsupported.diagnostic()
-        );
         let command = discover(binding, &ComponentId::from("fixture.cli.command"), Some("rust")).unwrap_err();
         assert!(command.diagnostic().contains("not yet supported (#46)"), "{}", command.diagnostic());
         let ambiguous = discover(binding, &ComponentId::from("fixture.cli.replay"), None).unwrap_err();
@@ -987,6 +982,136 @@ mod cases {
         assert!(diagnostic.contains("could not be finalized"), "{diagnostic}");
 
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Capture the small C# capture fixture through the shipped weaver and
+    /// runtime: one synchronous component (a plain test plus a two-case
+    /// Theory) and one asynchronous component, twice, with every bundle
+    /// validated and byte-identical across the runs. A sibling project whose
+    /// only test fails must be reported as a failed test and refused by strict
+    /// capture. A woven runtime must also be inert when the same tests run
+    /// unwoven.
+    #[test]
+    fn csharp_capture_is_validated_deterministic_and_transparent() {
+        let root = output_dir("csharp");
+        let _ = std::fs::remove_dir_all(&root);
+        let binding = csharp_capture_binding();
+        let components = ["fixture.cli_capture.add", "fixture.cli_capture.fetch"];
+        let requests = ["first", "second"]
+            .into_iter()
+            .flat_map(|run| components.map(|component| request_at(component, root.join(run).join(component))))
+            .collect::<Vec<_>>();
+        // C# discovery reports the requested component only, so each component is discovered
+        // on its own; one execution of the tests records every component and serves both.
+        let discovered = components.map(|component| {
+            discover(binding.to_str().unwrap(), &ComponentId::from(component), Some("csharp")).expect("C# fixture discovery")
+        });
+
+        // Three independent dotnet runs use separate scratch directories, so they run side by
+        // side to keep the test short: the two woven captures, the unwoven control, and the
+        // fixture whose only test fails.
+        let unwoven_root = root.join("unwoven");
+        let failing_binding = binding.with_file_name("specgate-failing.yaml");
+        let failing_request = request_at(components[0], root.join("failing").join(components[0]));
+        let failing_discovered = discover(failing_binding.to_str().unwrap(), &ComponentId::from(components[0]), Some("csharp"))
+            .expect("failing C# fixture discovery");
+        let (executions, output, failing) = std::thread::scope(|scope| {
+            let runs = requests
+                .chunks(components.len())
+                .map(|run| scope.spawn(|| execute_tests(&discovered[0], &run[..1]).expect("C# execution")))
+                .collect::<Vec<_>>();
+            let unwoven = scope.spawn(|| unwoven_run(&unwoven_root));
+            let failing =
+                scope.spawn(|| execute_tests(&failing_discovered, std::slice::from_ref(&failing_request)).expect("failing C# execution"));
+            let executions = runs.into_iter().map(|run| run.join().expect("capture thread")).collect::<Vec<_>>();
+            (
+                executions,
+                unwoven.join().expect("unwoven thread"),
+                failing.join().expect("failing thread"),
+            )
+        });
+
+        // A failed test is reported, and strict capture refuses the batch rather than drop it.
+        assert_eq!(failing.failures.len(), 1, "{:#?}", failing.failures);
+        assert!(
+            failing.failures[0]
+                .scenario_name
+                .ends_with("FailingCaptureTests.DeliberatelyFailsAfterRecording"),
+            "{:?}",
+            failing.failures[0]
+        );
+        assert_eq!(failing.failures[0].reason, FailureReason::TestFailed);
+        let error = write_bundles(&failing_discovered, std::slice::from_ref(&failing_request), &failing, true)
+            .expect_err("strict capture must refuse the failed test");
+        assert!(
+            error.diagnostic().contains("DeliberatelyFailsAfterRecording"),
+            "{}",
+            error.diagnostic()
+        );
+
+        for (run, executed) in requests.chunks(components.len()).zip(&executions) {
+            assert!(executed.failures.is_empty(), "{:#?}", executed.failures);
+            // The plain test and both Theory cases are separate scenarios; the async component has one.
+            for ((request, discovered), expected) in run.iter().zip(&discovered).zip([3, 1]) {
+                let report = write_bundles(discovered, std::slice::from_ref(request), executed, false)
+                    .expect("C# capture encoding")
+                    .remove(0);
+                assert_eq!(report.scenarios, expected, "{} scenarios: {report:?}", request.component);
+                assert_eq!(report.operations, expected, "{} operations: {report:?}", request.component);
+                let linked = validate_linked(request.out.join(TRACE_FILE), request.out.join(REGISTRY_FILE), &[]);
+                assert!(linked.valid, "{} linked validation failed: {:#?}", request.component, linked.issues);
+                let bundle = validate_bundle(&request.out);
+                assert!(bundle.valid, "{} bundle validation failed: {:#?}", request.component, bundle.issues);
+            }
+        }
+        for component in components {
+            for filename in [REGISTRY_FILE, TRACE_FILE, MANIFEST_FILE] {
+                // The target label is the out directory's name, which is the component in both runs.
+                assert_eq!(
+                    std::fs::read(root.join("first").join(component).join(filename)).unwrap(),
+                    std::fs::read(root.join("second").join(component).join(filename)).unwrap(),
+                    "{component} {filename} must be byte-identical across repeated capture"
+                );
+            }
+        }
+
+        // Unwoven: the runtime is referenced but nothing is instrumented, so a
+        // configured capture environment must neither fail the test nor leave a sidecar.
+        assert!(
+            output.status.success(),
+            "unwoven tests must pass:\n{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        assert!(
+            !root.join("unwoven").join("sidecars").join("00000000.json").exists(),
+            "an unwoven run must record nothing"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Run one fixture test through `dotnet test` with the capture environment
+    /// configured but no weaving, returning the process output.
+    fn unwoven_run(root: &Path) -> std::process::Output {
+        let system = CommandEnvironment::real();
+        let sidecars = sidecar::Sidecars::prepare(&system, root).unwrap();
+        let issued = sidecars.issue(&system, 0, "unwoven").unwrap();
+        let project = csharp_capture_binding()
+            .parent()
+            .unwrap()
+            .join("tests")
+            .join("SpecGate.CliCaptureFixtures.Tests.csproj");
+        let request = ProcessRequest::builder("dotnet")
+            .arg("test")
+            .arg(&project)
+            .args(["-c", "Debug", "--artifacts-path"])
+            .arg(root.join("artifacts"))
+            .args(["--filter", "FullyQualifiedName~AddsTwoNumbers"])
+            .env("DOTNET_NOLOGO", "1")
+            .env("DOTNET_CLI_TELEMETRY_OPTOUT", "1")
+            .env(sidecar::Issued::variable(), issued.environment())
+            .build();
+        Execution::real().run(&request).expect("unwoven dotnet test starts")
     }
 
     fn request_at(component: impl AsRef<str>, out: PathBuf) -> BundleRequest {

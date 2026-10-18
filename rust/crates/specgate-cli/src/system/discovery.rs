@@ -10,17 +10,10 @@ use specgate_discovery::output::{Batch, Discovered};
 
 /// Reject implementations that capture cannot run yet.
 ///
-/// Capture builds and runs the Rust `sources` directory with Cargo. Other
-/// languages, and implementations whose tests are declared as a free-form
-/// `tests.command`, are rejected before any discovery work begins.
+/// Implementations whose tests are declared as a free-form `tests.command` are
+/// rejected before any discovery work begins; language support is decided by
+/// the capture runner that owns the language.
 fn require_capturable(resolved: &specgate_discovery::binding::ResolvedImplementation) -> Result<(), Failure> {
-    let language = resolved.language();
-    if language != specgate_discovery::binding::Language::Rust {
-        return Err(Failure::domain(format!(
-            "capture currently supports only Rust implementations; implementation '{}' of component '{}' is '{language}'",
-            resolved.label, resolved.component
-        )));
-    }
     if matches!(resolved.implementation.tests, specgate_discovery::binding::Tests::Command(_)) {
         return Err(Failure::domain(format!(
             "capture of implementation '{}' of component '{}' declares tests.command, which is not yet supported (#46)",

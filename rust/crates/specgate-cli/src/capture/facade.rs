@@ -5,8 +5,8 @@
 use super::BTreeSet;
 use super::{
     CaptureError, CaptureErrorKind, CaptureReport, CaptureRequest, CommandEnvironment, ComponentId, Discovered, Discovery, ExecutedTests,
-    Execution, FailureContext, MANIFEST_FILE, Path, PathBuf, REGISTRY_FILE, TRACE_FILE, build_binaries, encode_bundle, enumerate_tests,
-    public_error, reject_failures, run_id, run_tests, scratch_dir, spec_operation, validate_setups, write_artifact,
+    Execution, FailureContext, MANIFEST_FILE, Path, PathBuf, REGISTRY_FILE, TRACE_FILE, csharp, encode_bundle, public_error,
+    reject_failures, run_id, rust, scratch_dir, spec_operation, validate_setups, write_artifact,
 };
 
 // Default capture bundles live beside the project, outside version control via `.gitignore`.
@@ -191,7 +191,9 @@ fn discover_implementation(
         )
         .map_err(|error| FailureContext::with_source(error.to_string(), error))?;
     let resolved = &discovered.implementation;
-    if !system.is_file(resolved.implementation.sources.join("Cargo.toml")) {
+    if resolved.language() == specgate_discovery::binding::Language::Rust
+        && !system.is_file(resolved.implementation.sources.join("Cargo.toml"))
+    {
         return Err(FailureContext::domain(format!(
             "implementation '{}' is not a Rust package (no Cargo.toml at {})",
             resolved.label,
@@ -252,10 +254,16 @@ fn execute_with(
     let resolved = &discovered.implementation;
     validate_setups(&discovered.registry, requests)?;
     let sources = &resolved.implementation.sources;
-    let scratch = scratch_dir(system, sources)?;
-    let test_binaries = build_binaries(execution, sources, scratch.path())?;
-    let tests = enumerate_tests(execution, &test_binaries)?;
-    run_tests(system, execution, &tests, scratch.path())
+    match resolved.language() {
+        specgate_discovery::binding::Language::Rust => {
+            let scratch = scratch_dir(system, sources)?;
+            rust::execute(system, execution, sources, scratch.path())
+        }
+        specgate_discovery::binding::Language::CSharp => {
+            let scratch = scratch_dir(system, sources)?;
+            csharp::execute(system, execution, discovered, scratch.path())
+        }
+    }
 }
 
 #[cfg(any(test, feature = "test-util"))]

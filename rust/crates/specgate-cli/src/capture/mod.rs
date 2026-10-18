@@ -1,5 +1,7 @@
-//! `specgate capture --component <id> [--out <dir>]` — capture passing Rust tests
-//! as one deterministic native CTSC reference bundle.
+//! `specgate capture --component <id> [--out <dir>]` — capture passing Rust or C#
+//! tests as one deterministic native CTSC reference bundle. Rust tests run through
+//! `cargo`; C# tests run through `dotnet` with the capture weaver injected into the
+//! build, one test process per listed test.
 //!
 //! Build a validated [`CaptureRequest`] from [`CapturePaths`], then call [`capture`].
 //! The report identifies the three published bundle artifacts; failures retain
@@ -125,10 +127,7 @@ pub use request::{CapturePaths, CaptureReport, CaptureRequest, CaptureRequestBui
 mod failure;
 use failure::{FailureContext, public_error};
 mod model;
-use model::{
-    CaptureManifest, IsolatedTest, Language, Reference, RegistryDto, RegistryId, Scenarios, TargetDto, TestBinary, Tool, Version,
-    WireDigest,
-};
+use model::{CaptureManifest, Language, Reference, RegistryDto, RegistryId, Scenarios, TargetDto, Tool, Version, WireDigest};
 mod facade;
 #[cfg(any(test, feature = "test-util"))]
 #[cfg_attr(
@@ -143,7 +142,11 @@ mod filter;
 use filter::validate_setups;
 mod execution;
 use execution::{
-    ExecutedTests, artifact_path, build_binaries, enumerate_tests, reject_failures, run_tests, scratch_dir, sha256_digest, write_artifact,
+    ExecutedTests, FailedTest, FailureReason, artifact_path, failure_summary, reject_failures, reject_persistence, scratch_dir,
+    sha256_digest, unfinalized_operation, unfinalized_summary, write_artifact,
 };
+mod csharp;
+mod rust;
+mod sidecar;
 #[cfg(test)]
 mod tests;
