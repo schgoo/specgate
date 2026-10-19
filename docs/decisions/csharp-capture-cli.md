@@ -89,10 +89,26 @@ non-Rust implementation in `require_capturable`.
     one project is declared, duplicate names are rejected, and ordering is
     ordinal on bytes.
 14. **Theory and data-driven cases are separate scenarios.** The scenario name is
-    the listed display name. The runner filters on `DisplayName=` with the VSTest
-    filter specials (`\ ( ) & | = ! ~`) backslash-escaped, `,` as `%2C` and `;`
-    as `%3B`, and requires a TRX log showing exactly one executed test. A name
-    that matches zero or several tests fails the whole batch.
+    the listed name. The runner filters on that name with the VSTest filter
+    specials (`\ ( ) & | = ! ~`) backslash-escaped, `%` as `%25`, `,` as `%2C`
+    and `;` as `%3B`, and requires a TRX log showing exactly one executed test.
+    A name that matches zero or several tests fails the whole batch.
+    **Test frameworks: xUnit, MSTest and NUnit.** The adapter is detected per
+    tests project from the evaluated `PackageReference` items
+    (`dotnet msbuild -getItem:PackageReference`, under `-p:TargetFramework`
+    when `csharp.framework` is set), so the binding gains no field. `xunit`,
+    `xunit.core`, `xunit.v3*` and `xunit.runner.visualstudio` select xUnit;
+    `MSTest`, `MSTest.TestFramework` and `MSTest.TestAdapter` select MSTest;
+    `NUnit` and `NUnit3TestAdapter` select NUnit (package ids compare
+    case-insensitively). No match, or packages of several frameworks, fails
+    closed before anything is built. The filter grammar and its escaping are
+    VSTest's and identical for all three; only the property differs: xUnit
+    matches the listed name with `DisplayName`, while the MSTest and NUnit
+    adapters implement no `DisplayName` and list `Name` (the method name plus
+    its arguments, without the class). Two classes that share a method name
+    therefore list the same name and are rejected as a duplicate scenario
+    rather than run together. Other frameworks (Expecto, TUnit, Microsoft
+    Testing Platform runners) are not supported.
 15. **Sidecar failure modes** (all covered by fake-driven tests):
 
     | Situation | Result |
@@ -136,9 +152,56 @@ A throwaway xunit.v3 project with a `[ModuleInitializer]` that logs when
   code. A missing or truncated TRX (crashed test host, bad filter) stops the
   whole batch with an error naming the test, in strict and non-strict capture
   alike; only a complete TRX recording a failed result is an ordinary failed
-  test.
+  test. The recorded outcome gates publication: only `Passed` keeps a
+  finalized sidecar's scenario. `NotExecuted`, `Skipped` and other non-passed
+  outcomes are not captured, and strict capture fails the batch on them
+  (`FailureReason::NotPassed`), as it does for any failed test.
+- Capture and discovery pick the sources project by the same rule: the
+  ordinally first `.csproj` in the directory, independent of listing order.
 - One `dotnet test --no-build` costs about 3 s on this machine, so capturing the
   36-test fixture project costs about two minutes per run.
+
+## MSTest and NUnit findings (Windows, SDK 10.0.402, MSTest 3.10.4, NUnit 3.13.3 with NUnit3TestAdapter 4.6.0, VSTest)
+
+Small fixture projects (`tests-mstest`, `tests-nunit` beside the xUnit one in
+`rust/crates/specgate-cli/tests/fixtures/csharp-capture`) restore from the local
+package cache and build in seconds, and the integration test
+`csharp_capture_selects_mstest_and_nunit_cases` captures both end to end
+(about 40 s for the two together, run in parallel, so it adds about that much
+to `just check`; `package-smoke` and `release.yml` still use the xUnit fixture
+and are unchanged):
+
+- `--list-tests` prints `AddsEveryCase (1,2,3)` for an MSTest `DataRow` (with a
+  space) and `AddsEveryCase(1,2,3)` for an NUnit `TestCase`: one line per case,
+  without the class.
+- `Name=AddsEveryCase \(1%2C2%2C3\)` selects exactly that MSTest row and
+  `Name=AddsEveryCase\(1%2C2%2C3\)` exactly that NUnit case, one TRX result each.
+  The method name alone selects nothing for MSTest and both cases for NUnit,
+  and an unescaped `(` is a VSTest filter format error, so the escaping above is
+  required for both.
+- `FullyQualifiedName=` with the method name selects nothing for MSTest, so
+  `Name` is the property to use.
+
+Verification gap: only these three frameworks at these versions were run, on
+Windows. Parameterized names that contain filter specials were verified live
+for xUnit only; MSTest and NUnit share the escaping code and have fake-driven
+tests, but no live case with a literal `;`, `&` or `%`. MSTest's data-row
+unfolding is version dependent (older adapters list one test for all rows, which
+the one-result TRX check then rejects). Nothing here was run on Linux.
+
+## One build per batch
+
+The sources project is compiled once per capture batch: the woven build the tests
+run against. Reflection reads that woven assembly
+(`specgate_discovery::discover_built`) instead of building the sources again, so
+an A→B capture went from three builds (initial discovery, woven build, isolated
+nested-schema discovery) to one. The discovery tool, run with no component
+names, publishes every inventoried component; the CLI keeps those schemas on
+`ExecutedTests` and encodes each bundle from them, so nested foreign components
+are linked-validated from the same metadata. Consequence: an unknown component
+now fails after the build rather than before. The tool's command line is
+internal; no CLI flag, binding field or CTSC shape changed. A fake-driven test
+asserts exactly one `build` request for an A→B batch.
 
 ## Consequences
 

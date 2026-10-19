@@ -137,13 +137,13 @@ mod facade;
 pub(crate) use facade::{BundleRequest, capture_strict, discover};
 pub use facade::{capture, capture_with};
 mod encoding;
-use encoding::{NestedSchemas, encode_bundle};
+use encoding::encode_bundle;
 mod filter;
 use filter::validate_setups;
 mod execution;
 use execution::{
-    ExecutedTests, FailedTest, FailureReason, artifact_path, failure_summary, reject_failures, reject_persistence, scratch_dir,
-    sha256_digest, unfinalized_operation, unfinalized_summary, write_artifact,
+    ComponentSchemas, ExecutedTests, FailedTest, FailureReason, artifact_path, failure_summary, reject_failures, reject_persistence,
+    scratch_dir, sha256_digest, unfinalized_operation, unfinalized_summary, write_artifact,
 };
 mod csharp;
 mod rust;

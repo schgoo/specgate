@@ -5,7 +5,8 @@
 //! failures, persistence markers, and recordings that were never finalized. The
 //! language runners that produce those results live beside it.
 use super::{
-    Capture, CommandEnvironment, Completion, Digest, FAILURE_MARKER, FailureContext, Path, PathBuf, Sha256, TAIL_CHARS, TAIL_LINES,
+    BTreeMap, Capture, CommandEnvironment, Completion, Digest, FAILURE_MARKER, FailureContext, Path, PathBuf, Sha256, TAIL_CHARS,
+    TAIL_LINES,
 };
 
 /// Allocate the command-scoped scratch directory used by build and sidecar artifacts.
@@ -27,7 +28,15 @@ pub(super) fn scratch_dir(system: &CommandEnvironment, package_root: impl AsRef<
 pub(super) struct ExecutedTests {
     pub(super) captures: Vec<Capture>,
     pub(super) failures: Vec<FailedTest>,
+    /// Normalized schemas of every component the capture build's metadata
+    /// declared, as serialized JSON, or why one could not be normalized. Empty
+    /// for a language whose discovery registry already describes every
+    /// component.
+    pub(super) schemas: ComponentSchemas,
 }
+
+/// Normalized schemas, as serialized JSON, keyed by component id.
+pub(super) type ComponentSchemas = BTreeMap<String, Result<String, String>>;
 
 /// Why an enumerated test contributed no scenario to the batch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,6 +47,10 @@ pub(super) enum FailureReason {
     /// cannot be encoded. See
     /// `docs/decisions/top-level-abandonment-unsupported.md`.
     Unfinalized,
+    /// The runner finished the test without a passing result (skipped, not
+    /// executed, inconclusive, aborted), so whatever it recorded must not be
+    /// published as a scenario.
+    NotPassed,
 }
 
 /// One enumerated test that produced no usable capture.

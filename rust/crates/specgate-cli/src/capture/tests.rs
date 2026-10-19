@@ -4,7 +4,7 @@
 
 #[cfg(test)]
 mod cases {
-    use super::super::facade::{capture_many, default_out, execute_tests, write_bundles};
+    use super::super::facade::{capture_csharp_tests, capture_many, default_out, execute_tests, write_bundles};
     use super::super::filter::filter;
     use super::super::*;
     use specgate_ctsc::validation::{validate_bundle, validate_linked};
@@ -1053,11 +1053,9 @@ mod cases {
             .into_iter()
             .flat_map(|run| components.map(|component| request_at(component, root.join(run).join(component))))
             .collect::<Vec<_>>();
-        // C# discovery reports the requested component only, so each component is discovered
-        // on its own; one execution of the tests records every component and serves both.
-        let discovered = components.map(|component| {
-            discover(binding.to_str().unwrap(), &ComponentId::from(component), Some("csharp")).expect("C# fixture discovery")
-        });
+        // One capture build reflects every component and one execution of the tests records
+        // every component, so a single capture serves all of a run's bundles.
+        let binding_path = binding.to_str().unwrap();
 
         // Three independent dotnet runs use separate scratch directories, so they run side by
         // side to keep the test short: the two woven captures, the unwoven control, and the
@@ -1065,19 +1063,29 @@ mod cases {
         let unwoven_root = root.join("unwoven");
         let failing_binding = binding.with_file_name("specgate-failing.yaml");
         let failing_request = request_at(components[0], root.join("failing").join(components[0]));
-        let failing_discovered = discover(failing_binding.to_str().unwrap(), &ComponentId::from(components[0]), Some("csharp"))
-            .expect("failing C# fixture discovery");
-        let (executions, output, failing) = std::thread::scope(|scope| {
+        let (captures, output, (failing_discovered, failing)) = std::thread::scope(|scope| {
             let runs = requests
                 .chunks(components.len())
-                .map(|run| scope.spawn(|| execute_tests(&discovered[0], &run[..1]).expect("C# execution")))
+                .map(|run| {
+                    scope.spawn(|| {
+                        capture_csharp_tests(binding_path, &ComponentId::from(components[0]), Some("csharp"), &run[..1])
+                            .expect("C# capture")
+                    })
+                })
                 .collect::<Vec<_>>();
             let unwoven = scope.spawn(|| unwoven_run(&unwoven_root));
-            let failing =
-                scope.spawn(|| execute_tests(&failing_discovered, std::slice::from_ref(&failing_request)).expect("failing C# execution"));
-            let executions = runs.into_iter().map(|run| run.join().expect("capture thread")).collect::<Vec<_>>();
+            let failing = scope.spawn(|| {
+                capture_csharp_tests(
+                    failing_binding.to_str().unwrap(),
+                    &ComponentId::from(components[0]),
+                    Some("csharp"),
+                    std::slice::from_ref(&failing_request),
+                )
+                .expect("failing C# capture")
+            });
+            let captures = runs.into_iter().map(|run| run.join().expect("capture thread")).collect::<Vec<_>>();
             (
-                executions,
+                captures,
                 unwoven.join().expect("unwoven thread"),
                 failing.join().expect("failing thread"),
             )
@@ -1101,12 +1109,12 @@ mod cases {
             error.diagnostic()
         );
 
-        for (run, executed) in requests.chunks(components.len()).zip(&executions) {
+        for (run, (discovered, executed)) in requests.chunks(components.len()).zip(&captures) {
             assert!(executed.failures.is_empty(), "{:#?}", executed.failures);
             // The plain test, both Theory cases and the awkwardly named case are separate scenarios;
             // the async component has one, and the pipeline's one scenario also retains its nested
             // call into the add component.
-            for ((request, discovered), (scenarios, operations)) in run.iter().zip(&discovered).zip([(4, 4), (1, 1), (1, 2)]) {
+            for (request, (scenarios, operations)) in run.iter().zip([(4, 4), (1, 1), (1, 2)]) {
                 let report = write_bundles(discovered, std::slice::from_ref(request), executed, false)
                     .expect("C# capture encoding")
                     .remove(0);
@@ -1141,6 +1149,52 @@ mod cases {
             "an unwoven run must record nothing"
         );
 
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Capture the same operations through `MSTest` and `NUnit` tests projects, which
+    /// are detected from their package references and selected with the `Name`
+    /// filter: each data-driven case is its own scenario and each bundle
+    /// validates.
+    #[test]
+    fn csharp_capture_selects_mstest_and_nunit_cases() {
+        let root = output_dir("csharp-adapters");
+        let _ = std::fs::remove_dir_all(&root);
+        let components = [("fixture.cli_capture.add", 3, 3), ("fixture.cli_capture.fetch", 1, 1)];
+        let runs = ["specgate-mstest.yaml", "specgate-nunit.yaml"];
+        let captures = std::thread::scope(|scope| {
+            runs.iter()
+                .map(|name| {
+                    let binding = csharp_capture_binding().with_file_name(name);
+                    let request = request_at(components[0].0, root.join(name).join("scratch"));
+                    scope.spawn(move || {
+                        capture_csharp_tests(
+                            binding.to_str().unwrap(),
+                            &ComponentId::from(components[0].0),
+                            Some("csharp"),
+                            std::slice::from_ref(&request),
+                        )
+                        .expect("C# capture")
+                    })
+                })
+                .collect::<Vec<_>>()
+                .into_iter()
+                .map(|run| run.join().expect("capture thread"))
+                .collect::<Vec<_>>()
+        });
+        for (name, (discovered, executed)) in runs.iter().zip(&captures) {
+            assert!(executed.failures.is_empty(), "{name}: {:#?}", executed.failures);
+            for (component, scenarios, operations) in &components {
+                let request = request_at(component, root.join(name).join(component));
+                let report = write_bundles(discovered, std::slice::from_ref(&request), executed, false)
+                    .expect("C# capture encoding")
+                    .remove(0);
+                assert_eq!(report.scenarios, *scenarios, "{name} {component} scenarios: {report:?}");
+                assert_eq!(report.operations, *operations, "{name} {component} operations: {report:?}");
+                let bundle = validate_bundle(&request.out);
+                assert!(bundle.valid, "{name} {component} bundle validation failed: {:#?}", bundle.issues);
+            }
+        }
         let _ = std::fs::remove_dir_all(root);
     }
 

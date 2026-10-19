@@ -27,6 +27,8 @@ internal static class DiscoveryRunner
     /// <c>[0]</c> output directory, <c>[1]</c> candidate assembly path,
     /// <c>[2]</c> the candidate's build output directory holding its copy-local
     /// dependency assemblies, and <c>[3..]</c> the requested component names.
+    /// With no component names, every inventoried component is published, in
+    /// inventory order.
     /// </param>
     /// <param name="runnerSystem">Filesystem and assembly-loading adapter.</param>
     /// <returns>Zero on success.</returns>
@@ -96,6 +98,11 @@ internal static class DiscoveryRunner
         runnerSystem.WriteAllText(
             Path.Combine(outputDirectory, "components.json"),
             JsonSerializer.Serialize(inventory));
+
+        if (requestedComponents.Length == 0)
+        {
+            requestedComponents = inventory;
+        }
 
         for (int componentIndex = 0; componentIndex < requestedComponents.Length; componentIndex++)
         {

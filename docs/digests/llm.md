@@ -34,7 +34,8 @@ Rust.
 - C# capture (`specgate-cli`, `capture/csharp.rs`) builds each tests project once
   with `SpecGateCapture.targets` injected through
   `-p:CustomAfterMicrosoftCommonTargets`, so the sources project is IL-woven
-  during that build and no project file is edited. Each listed test display name
+  during that build and no project file is edited. Each listed test name
+  (xUnit, MSTest or NUnit, detected from the tests project's package references)
   is one scenario, run by an exact `--filter` in its own `dotnet test` process
   with `SPECGATE_NATIVE_CAPTURE` set; a test-result log proves the filter
   selected exactly one test. The runtime-owned `[ModuleInitializer]` in

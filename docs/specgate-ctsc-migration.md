@@ -37,7 +37,8 @@ reference target
   `capture` runs Rust through `cargo` and C# through `dotnet` (see
   `docs/decisions/csharp-capture-cli.md`). C# capture builds each
   `tests.projects` entry once with the capture weaver injected into the build,
-  lists its tests, and runs each listed display name as one scenario in its own
+  lists its tests, and runs each listed test as one scenario (xUnit, MSTest and
+  NUnit are supported and detected from package references) in its own
   `dotnet test` process. It requires the .NET 8+ runtime and SDK; the weaver,
   the net8.0 runtime, and `SpecGateCapture.targets` ship beside the `specgate`
   executable, and `SPECGATE_WEAVER_PATH` overrides that directory.

@@ -106,19 +106,53 @@ impl Discovery {
         }
     }
 
-    /// Discover a capture implementation after enforcing capture's supported-implementation constraints.
-    pub(crate) fn capture_discover(
+    /// Resolve the implementation a capture will run, without building it.
+    ///
+    /// Rejects what capture cannot run yet. The fake backend reports the
+    /// implementation of its next queued result, or that result's failure.
+    pub(crate) fn capture_resolve(
         &self,
         binding: impl AsRef<Path>,
         component: &ComponentId,
         label: Option<&str>,
-    ) -> Result<Discovered, Failure> {
+    ) -> Result<specgate_discovery::binding::ResolvedImplementation, Failure> {
         match &self.inner {
             Kind::Real => {
                 let resolved = specgate_discovery::binding::resolve_implementation(binding.as_ref(), component, label)?;
                 require_capturable(&resolved)?;
-                Ok(specgate_discovery::discover_resolved(resolved)?)
+                Ok(resolved)
             }
+            #[cfg(any(test, feature = "test-util"))]
+            Kind::Fake(state) => {
+                let mut fake = state.lock().expect("fake discovery lock poisoned");
+                if let Some(front) = fake.discovered.front() {
+                    let Ok(discovered) = front else {
+                        return match fake.discovered.pop_front() {
+                            Some(Err(error)) => Err(error),
+                            _ => unreachable!("front was just seen as an error"),
+                        };
+                    };
+                    return Ok(discovered.implementation.clone());
+                }
+                let front = fake
+                    .batches
+                    .front()
+                    .expect("fake discovery result queue must be configured before discovery");
+                let Ok(batch) = front else {
+                    return match fake.batches.pop_front() {
+                        Some(Err(error)) => Err(error),
+                        _ => unreachable!("front was just seen as an error"),
+                    };
+                };
+                Ok(batch.implementation.clone())
+            }
+        }
+    }
+
+    /// Build and discover one resolved implementation.
+    pub(crate) fn discover_resolved(&self, resolved: specgate_discovery::binding::ResolvedImplementation) -> Result<Discovered, Failure> {
+        match &self.inner {
+            Kind::Real => Ok(specgate_discovery::discover_resolved(resolved)?),
             #[cfg(any(test, feature = "test-util"))]
             Kind::Fake(state) => state
                 .lock()
@@ -126,6 +160,25 @@ impl Discovery {
                 .discovered
                 .pop_front()
                 .expect("fake discovery result queue must be configured before discovery"),
+        }
+    }
+
+    /// Reflect every component of a C# implementation from an assembly a
+    /// capture build already produced under `artifacts`, building nothing.
+    pub(crate) fn discover_built(
+        &self,
+        resolved: specgate_discovery::binding::ResolvedImplementation,
+        artifacts: &Path,
+    ) -> Result<Batch, Failure> {
+        match &self.inner {
+            Kind::Real => Ok(specgate_discovery::discover_built(resolved, artifacts)?),
+            #[cfg(any(test, feature = "test-util"))]
+            Kind::Fake(state) => state
+                .lock()
+                .expect("fake discovery lock poisoned")
+                .batches
+                .pop_front()
+                .expect("fake batch result queue must be configured before discovery"),
         }
     }
 

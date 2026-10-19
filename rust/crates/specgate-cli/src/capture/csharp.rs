@@ -6,14 +6,17 @@
 //! `docs/decisions/csharp-capture-cli.md`. In short: the sources project is
 //! woven during the build of each tests project through an `MSBuild` targets file
 //! injected from the command line, so no project file is edited; every
-//! enumerated test display name is one scenario; and a test-result log proves
-//! that each exact-name filter selected exactly one test.
-use super::sidecar::{Issued, Sidecars};
+//! enumerated test name is one scenario, selected with the filter property of
+//! the project's detected test framework (xUnit, `MSTest`, or `NUnit`); and a
+//! test-result log proves that each exact-name filter selected exactly one test.
+use super::facade::BundleRequest;
+use super::sidecar::{Issued, Settled, Sidecars};
 use super::{
-    CommandEnvironment, Discovered, ExecutedTests, Execution, FailureContext, INDEX_WIDTH, Path, PathBuf, ProcessRequest,
-    ProcessRequestBuilder,
+    CommandEnvironment, ComponentSchemas, Discovered, Discovery, ExecutedTests, Execution, FailedTest, FailureContext, FailureReason,
+    INDEX_WIDTH, Path, PathBuf, ProcessRequest, ProcessRequestBuilder, validate_setups,
 };
-use specgate_discovery::binding::{LanguageOptions, Tests};
+use specgate_discovery::binding::{LanguageOptions, ResolvedImplementation, Tests};
+use specgate_discovery::output::SchemaLookup;
 use std::ffi::OsString;
 
 // The weaver ships these files in one directory beside the `specgate`
@@ -32,6 +35,9 @@ const LIST_INDENT: &str = "    ";
 // Every test result in a Visual Studio test-result log opens with this element.
 const RESULT_ELEMENT: &str = "<UnitTestResult ";
 const RUN_END: &str = "</TestRun>";
+const OUTCOME_ATTRIBUTE: &str = "outcome=\"";
+const PASSED: &str = "Passed";
+const FAILED: &str = "Failed";
 // Keep the SDK's output identical across machines so diagnostics and parsing do
 // not depend on the user's locale, telemetry, or first-run banner.
 const TOOL_ENVIRONMENT: [(&str, &str); 3] = [
@@ -45,6 +51,9 @@ const DIAGNOSTIC_LINES: usize = 40;
 #[cfg(test)]
 mod tests;
 
+mod adapter;
+use adapter::Adapter;
+
 /// One tests project built and run by the batch.
 #[derive(Debug)]
 struct Project {
@@ -52,6 +61,7 @@ struct Project {
     path: PathBuf,
     artifacts: PathBuf,
     report: PathBuf,
+    adapter: Adapter,
 }
 
 /// One enumerated test and the project that runs it.
@@ -71,55 +81,62 @@ struct Batch<'a> {
     results: PathBuf,
 }
 
-/// What one C# batch needs from discovery and the binding.
+/// What one C# batch needs from the binding and the capture request.
 #[derive(Debug)]
 struct Plan<'a> {
-    sources: &'a Path,
-    declared: &'a [PathBuf],
-    framework: Option<&'a str>,
-    operations_discovered: bool,
+    resolved: &'a ResolvedImplementation,
+    requests: &'a [BundleRequest],
 }
 
-/// Build, enumerate, and run every test of the C# tests projects of `discovered`.
+/// Build, enumerate, and run every test of the C# tests projects of `resolved`.
 ///
-/// Returns the first build, enumeration, weaving, or capture-stage failure.
-pub(super) fn execute(
+/// The sources are compiled exactly once per tests project, by the capture
+/// build that weaves them. The metadata of the bound component and of every
+/// component nested inside its captures is reflected from that build's output,
+/// so no second compilation is needed; the result keeps every component's
+/// normalized schema for publication.
+///
+/// Returns the selected component's discovery result and the executed tests, or
+/// the first build, enumeration, weaving, or capture-stage failure.
+pub(super) fn capture(
     system: &CommandEnvironment,
     execution: &Execution,
-    discovered: &Discovered,
+    discovery: &Discovery,
+    resolved: &ResolvedImplementation,
+    requests: &[BundleRequest],
     scratch: impl AsRef<Path>,
-) -> Result<ExecutedTests, FailureContext> {
-    let implementation = &discovered.implementation.implementation;
+) -> Result<(Discovered, ExecutedTests), FailureContext> {
+    run_batch(system, execution, discovery, &Plan { resolved, requests }, scratch.as_ref())
+}
+
+/// Run one planned batch: build and enumerate each project once, reflect the
+/// built assembly, then run each listed test in its own process.
+fn run_batch(
+    system: &CommandEnvironment,
+    execution: &Execution,
+    discovery: &Discovery,
+    plan: &Plan<'_>,
+    scratch: &Path,
+) -> Result<(Discovered, ExecutedTests), FailureContext> {
+    let implementation = &plan.resolved.implementation;
     let Tests::Projects(declared) = &implementation.tests else {
         return Err(FailureContext::domain("C# capture requires tests.projects"));
     };
     let LanguageOptions::CSharp { framework } = &implementation.options else {
         return Err(FailureContext::domain("C# capture requires a C# implementation"));
     };
-    let plan = Plan {
-        sources: &implementation.sources,
-        declared,
-        framework: framework.as_deref(),
-        operations_discovered: !discovered.registry.present_components().is_empty(),
-    };
-    run_batch(system, execution, &plan, scratch.as_ref())
-}
-
-/// Run one planned batch: build and enumerate each project once, then run each
-/// listed test in its own process.
-fn run_batch(system: &CommandEnvironment, execution: &Execution, plan: &Plan<'_>, scratch: &Path) -> Result<ExecutedTests, FailureContext> {
     let batch = Batch {
-        sources_project: sources_project(system, plan.sources)?,
+        sources_project: sources_project(system, &implementation.sources)?,
         targets: weaver_targets(system)?,
-        framework: plan.framework,
+        framework: framework.as_deref(),
         results: scratch.join("results"),
     };
-    let projects = resolve_projects(system, execution, plan.declared, batch.framework, scratch)?;
-    let operations_discovered = plan.operations_discovered;
+    let projects = resolve_projects(system, execution, declared, batch.framework, scratch)?;
 
     let mut listed = Vec::new();
+    let mut woven = Vec::with_capacity(projects.len());
     for (index, project) in projects.iter().enumerate() {
-        build(system, execution, &batch, project, operations_discovered)?;
+        woven.push(build(system, execution, &batch, project)?);
         let names = list_tests(execution, &batch, project)?;
         listed.extend(names.into_iter().map(|display_name| Listed {
             scenario_name: if projects.len() > 1 {
@@ -139,6 +156,21 @@ fn run_batch(system: &CommandEnvironment, execution: &Execution, plan: &Plan<'_>
         )));
     }
 
+    // Every project's build wove the same sources, so any one of them holds the
+    // assembly to reflect.
+    let reflected = discovery
+        .discover_built(plan.resolved.clone(), &projects[0].artifacts)
+        .map_err(|error| FailureContext::with_source(error.to_string(), error))?;
+    let schemas = component_schemas(&reflected)?;
+    let operations_discovered = !reflected.present_components.is_empty();
+    let discovered = reflected
+        .into_selected()
+        .map_err(|error| FailureContext::with_source(error.to_string(), error))?;
+    validate_setups(&discovered.registry, plan.requests)?;
+    for (project, woven) in projects.iter().zip(woven) {
+        require_woven(&batch, project, woven, operations_discovered)?;
+    }
+
     system.create_dir_all(&batch.results).map_err(|error| {
         FailureContext::with_source(
             format!("failed to create test result directory {}: {error}", batch.results.display()),
@@ -146,7 +178,10 @@ fn run_batch(system: &CommandEnvironment, execution: &Execution, plan: &Plan<'_>
         )
     })?;
     let sidecars = Sidecars::prepare(system, scratch)?;
-    let mut executed = ExecutedTests::default();
+    let mut executed = ExecutedTests {
+        schemas,
+        ..ExecutedTests::default()
+    };
     for (index, test) in listed.iter().enumerate() {
         let issued = sidecars.issue(system, index, &test.scenario_name)?;
         let log = format!("{index:0INDEX_WIDTH$}.trx");
@@ -157,7 +192,7 @@ fn run_batch(system: &CommandEnvironment, execution: &Execution, plan: &Plan<'_>
             [
                 OsString::from("--no-build"),
                 OsString::from("--filter"),
-                OsString::from(exact_filter(&test.display_name)),
+                OsString::from(exact_filter(projects[test.project].adapter, &test.display_name)),
                 OsString::from("--logger"),
                 OsString::from(format!("trx;LogFileName={log}")),
                 OsString::from("--results-directory"),
@@ -168,10 +203,38 @@ fn run_batch(system: &CommandEnvironment, execution: &Execution, plan: &Plan<'_>
         let output = execution
             .run(&request)
             .map_err(|error| FailureContext::with_source(format!("failed to run test '{}': {error}", test.scenario_name), error))?;
-        verify_selection(system, &batch.results.join(&log), &test.scenario_name)?;
-        executed.record(issued.settle(system, &test.scenario_name, &output)?);
+        let outcome = verify_selection(system, &batch.results.join(&log), &test.scenario_name)?;
+        let settled = issued.settle(system, &test.scenario_name, &output)?;
+        executed.record(apply_outcome(settled, &outcome, &test.scenario_name));
     }
-    Ok(executed)
+    Ok((discovered, executed))
+}
+
+/// Keep the normalized schema of every component the built assembly declares.
+///
+/// A filtered capture keeps nested calls into other annotated components, and
+/// the published registry must declare each of them, so every component's
+/// outcome is retained until publication; one that failed to normalize stays an
+/// error and only fails a bundle that actually contains it.
+fn component_schemas(reflected: &specgate_discovery::output::Batch) -> Result<ComponentSchemas, FailureContext> {
+    let mut schemas = ComponentSchemas::new();
+    for component in &reflected.present_components {
+        let schema = match reflected.schema(component.as_str()) {
+            SchemaLookup::Found(schema) => serde_json::to_string(schema)
+                .map_err(|error| FailureContext::with_source(format!("failed to serialize normalized discovery schema: {error}"), error))?,
+            SchemaLookup::Invalid(error) => {
+                schemas.insert(component.as_str().to_owned(), Err(error.to_string()));
+                continue;
+            }
+            SchemaLookup::Missing => {
+                return Err(FailureContext::domain(format!(
+                    "component '{component}' is declared by the built assembly but discovery reported no metadata for it"
+                )));
+            }
+        };
+        schemas.insert(component.as_str().to_owned(), Ok(schema));
+    }
+    Ok(schemas)
 }
 
 /// Locate the weaver's targets file.
@@ -230,9 +293,7 @@ fn resolve_projects(
         let path = system
             .canonical(path)
             .map_err(|error| FailureContext::with_source(format!("tests project {} is not readable: {error}", path.display()), error))?;
-        if framework.is_none() {
-            require_single_framework(execution, &path)?;
-        }
+        let adapter = inspect_project(execution, &path, framework)?;
         let stem = path
             .file_stem()
             .and_then(|stem| stem.to_str())
@@ -247,29 +308,36 @@ fn resolve_projects(
             path,
             artifacts: root.join("artifacts"),
             report: root.join("weave.json"),
+            adapter,
         });
     }
     Ok(projects)
 }
 
-/// Ask `MSBuild` which frameworks a project targets and require at most one.
+/// Ask `MSBuild` what a tests project targets and which test framework it uses.
 ///
-/// A project that builds several target frameworks produces one test process
-/// per framework and duplicate display names, so the binding must pick one.
-fn require_single_framework(execution: &Execution, project: &Path) -> Result<(), FailureContext> {
-    let request = pinned(
-        ProcessRequest::builder("dotnet")
-            .arg("msbuild")
-            .arg(project)
-            .args(["-getProperty:TargetFramework", "-getProperty:TargetFrameworks"]),
-    )
-    .build();
+/// Both come from the project's *evaluated* state, so values inherited from
+/// `Directory.Build.props`, an imported file, or central package management
+/// count. When the binding chose a framework the project is evaluated under it,
+/// because package references may be conditioned on the framework; otherwise
+/// the project must target at most one, since several target frameworks
+/// produce one test process each and duplicate display names.
+fn inspect_project(execution: &Execution, project: &Path, framework: Option<&str>) -> Result<Adapter, FailureContext> {
+    let mut builder = ProcessRequest::builder("dotnet").arg("msbuild").arg(project).args([
+        "-getProperty:TargetFramework",
+        "-getProperty:TargetFrameworks",
+        "-getItem:PackageReference",
+    ]);
+    if let Some(framework) = framework {
+        builder = builder.arg(format!("-p:TargetFramework={framework}"));
+    }
+    let request = pinned(builder).build();
     let output = execution
         .run(&request)
-        .map_err(|error| FailureContext::with_source(format!("failed to query the frameworks of {}: {error}", project.display()), error))?;
+        .map_err(|error| FailureContext::with_source(format!("failed to query {}: {error}", project.display()), error))?;
     if !output.status.success() {
         return Err(FailureContext::domain(format!(
-            "querying the target frameworks of {} failed:\n{}",
+            "querying the target frameworks and test framework of {} failed:\n{}",
             project.display(),
             diagnostic(&output.stdout, &output.stderr)
         )));
@@ -289,27 +357,27 @@ fn require_single_framework(execution: &Execution, project: &Path) -> Result<(),
         .split(';')
         .filter(|framework| !framework.trim().is_empty())
         .count();
-    if frameworks > 1 {
+    if framework.is_none() && frameworks > 1 {
         return Err(FailureContext::domain(format!(
             "tests project {} targets several frameworks; set csharp.framework in the binding to choose one",
             project.display()
         )));
     }
-    Ok(())
+    let packages = report["Items"]["PackageReference"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|item| item["Identity"].as_str());
+    Adapter::detect(packages, project)
 }
 
-/// Build one tests project once, weaving the sources project as part of it.
+/// Build one tests project once, weaving the sources project as part of it, and
+/// return how many methods the weaver instrumented.
 ///
-/// After a successful build the weaver's report must exist; a batch whose
-/// discovery found operations but whose weaver wove no method would otherwise
-/// look like tests that simply never reached an instrumented operation.
-fn build(
-    system: &CommandEnvironment,
-    execution: &Execution,
-    batch: &Batch<'_>,
-    project: &Project,
-    operations_discovered: bool,
-) -> Result<(), FailureContext> {
+/// After a successful build the weaver's report must exist; without it a batch
+/// whose weaver never ran would look like tests that simply never reached an
+/// instrumented operation.
+fn build(system: &CommandEnvironment, execution: &Execution, batch: &Batch<'_>, project: &Project) -> Result<u64, FailureContext> {
     let request = tool_request(
         "build",
         batch,
@@ -343,14 +411,20 @@ fn build(
             error,
         )
     })?;
-    let woven = serde_json::from_slice::<serde_json::Value>(&report)
+    serde_json::from_slice::<serde_json::Value>(&report)
         .ok()
         .and_then(|report| report["woven_method_count"].as_u64())
-        .ok_or_else(|| FailureContext::domain(format!("the capture weaver report for {} is malformed", project.path.display())))?;
+        .ok_or_else(|| FailureContext::domain(format!("the capture weaver report for {} is malformed", project.path.display())))
+}
+
+/// A batch whose discovery found operations but whose weaver wove no method
+/// would look like tests that simply never reached an instrumented operation.
+fn require_woven(batch: &Batch<'_>, project: &Project, woven: u64, operations_discovered: bool) -> Result<(), FailureContext> {
     if woven == 0 && operations_discovered {
         return Err(FailureContext::domain(format!(
-            "the capture weaver wove no method of {} although discovery found operations there; tests would capture nothing",
-            batch.sources_project.display()
+            "the capture weaver wove no method of {} in the build of {} although discovery found operations there; tests would capture nothing",
+            batch.sources_project.display(),
+            project.path.display()
         )));
     }
     Ok(())
@@ -398,7 +472,8 @@ fn list_tests(execution: &Execution, batch: &Batch<'_>, project: &Project) -> Re
     Ok(names)
 }
 
-/// Prove that one exact-name filter selected exactly one test.
+/// Prove that one exact-name filter selected exactly one test, and return its
+/// recorded outcome (`Passed`, `Failed`, `NotExecuted`, ...).
 ///
 /// A filter that matches nothing exits successfully and logs no result, and a
 /// name that is not unique selects several tests; either would silently
@@ -406,7 +481,7 @@ fn list_tests(execution: &Execution, batch: &Batch<'_>, project: &Project) -> Re
 /// log is a crashed test host or a bad filter and stops the batch too, even
 /// when the process succeeded: only a complete log that records a failed
 /// result is an ordinary failed test.
-fn verify_selection(system: &CommandEnvironment, log: &Path, scenario_name: &str) -> Result<(), FailureContext> {
+fn verify_selection(system: &CommandEnvironment, log: &Path, scenario_name: &str) -> Result<String, FailureContext> {
     match system.read(log) {
         Ok(bytes) => {
             let text = String::from_utf8_lossy(&bytes);
@@ -415,14 +490,19 @@ fn verify_selection(system: &CommandEnvironment, log: &Path, scenario_name: &str
                     "the test result for '{scenario_name}' is incomplete; the test host likely crashed before finishing"
                 )));
             }
-            let selected = text.matches(RESULT_ELEMENT).count();
-            if selected == 1 {
-                Ok(())
-            } else {
-                Err(FailureContext::domain(format!(
+            let mut results = text.match_indices(RESULT_ELEMENT);
+            let selected = results.clone().count();
+            let Some((start, _)) = results.next().filter(|_| selected == 1) else {
+                return Err(FailureContext::domain(format!(
                     "the filter for '{scenario_name}' selected {selected} tests; a scenario name must match exactly one test"
-                )))
-            }
+                )));
+            };
+            text[start..]
+                .split_once('>')
+                .and_then(|(element, _)| element.split_once(OUTCOME_ATTRIBUTE))
+                .and_then(|(_, rest)| rest.split_once('"'))
+                .map(|(outcome, _)| outcome.to_string())
+                .ok_or_else(|| FailureContext::domain(format!("the test result for '{scenario_name}' records no outcome")))
         }
         Err(error) => Err(FailureContext::with_source(
             format!("no result was logged for '{scenario_name}': the filter selected no test or the test host crashed ({error})"),
@@ -431,16 +511,44 @@ fn verify_selection(system: &CommandEnvironment, log: &Path, scenario_name: &str
     }
 }
 
-/// Build the exact-match test filter for one display name.
+/// Let the runner's recorded outcome veto a capture.
 ///
-/// The filter grammar reserves `\ ( ) & | = ! ~` behind a backslash. The value
-/// then passes through `MSBuild`, which decodes `%XX` escapes and splits property
-/// lists on `,` and `;`, so those separators, the quote that confuses the
-/// command-line hand-off, and the escape character `%` itself are written as
-/// percent escapes (`%` first, so a literal `%2C` stays literal).
-fn exact_filter(display_name: &str) -> String {
-    let mut filter = String::from("DisplayName=");
-    for character in display_name.chars() {
+/// A finalized sidecar only proves the operations finished, not that the test
+/// passed: a test can complete an operation and then skip or abort. Only a
+/// `Passed` result keeps its capture; a `Failed` one is an ordinary failed test
+/// and any other outcome is [`FailureReason::NotPassed`]. A test that recorded
+/// nothing, or already failed, is left as settled.
+fn apply_outcome(settled: Settled, outcome: &str, scenario_name: &str) -> Settled {
+    if outcome == PASSED || !matches!(settled, Settled::Captured(_)) {
+        return settled;
+    }
+    let (reason, summary) = if outcome == FAILED {
+        (FailureReason::TestFailed, "the test result records a failed outcome".to_string())
+    } else {
+        (
+            FailureReason::NotPassed,
+            format!("the test finished with outcome {outcome} instead of Passed, so its recording was not published"),
+        )
+    };
+    Settled::Failed(FailedTest {
+        scenario_name: scenario_name.to_string(),
+        reason,
+        summary,
+    })
+}
+
+/// Build the exact-match test filter for one listed name.
+///
+/// The filter grammar reserves `\ ( ) & | = ! ~` behind a backslash; that
+/// grammar belongs to `VSTest`, not to a test framework, so it is the same for
+/// every adapter. The value then passes through `MSBuild`, which decodes `%XX`
+/// escapes and splits property lists on `,` and `;`, so those separators, the
+/// quote that confuses the command-line hand-off, and the escape character `%`
+/// itself are written as percent escapes (`%` first, so a literal `%2C` stays
+/// literal). Only the property on the left differs per adapter.
+fn exact_filter(adapter: Adapter, listed_name: &str) -> String {
+    let mut filter = format!("{}=", adapter.filter_property());
+    for character in listed_name.chars() {
         match character {
             '\\' | '(' | ')' | '&' | '|' | '=' | '!' | '~' => {
                 filter.push('\\');

@@ -66,33 +66,15 @@ fn build_project(
 ) -> Result<BuildOutput, Error> {
     let scratch = scratch.as_ref();
     let context = context.as_ref();
-    let pkg_abs = strip_prefix(
-        system
-            .filesystem
-            .canonicalize(&implementation.sources)
-            .unwrap_or_else(|_| implementation.sources.clone()),
-    );
     system
         .filesystem
         .create_dir_all(scratch)
         .map_err(|source| with_source(format!("failed to scaffold C# {context} dir: {source}"), source))?;
 
-    let csproj = find_project(&pkg_abs, system).ok_or_else(|| failure(format!("no .csproj found under {}", pkg_abs.display())))?;
-    let project_name = csproj
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .ok_or_else(|| failure("could not read fixture .csproj file name"))?
-        .to_string();
-    let csproj_text = system
-        .filesystem
-        .read_to_string(&csproj)
-        .map_err(|source| with_source(format!("failed to read fixture .csproj: {source}"), source))?;
-    let assembly_name = extract_tag(&csproj_text, "AssemblyName").unwrap_or_else(|| project_name.clone());
-
     let artifacts_dir = scratch.join("artifacts");
     let build = ProcessRequest::builder("dotnet")
         .arg("build")
-        .arg(&csproj)
+        .arg(sources_project(implementation, system)?)
         .arg("-c")
         .arg(BUILD_CONFIGURATION)
         .arg("--artifacts-path")
@@ -112,6 +94,40 @@ fn build_project(
             combined.lines().take(DIAGNOSTIC_LIMIT).collect::<Vec<_>>().join("\n")
         )));
     }
+
+    locate_assembly(implementation, &artifacts_dir, context, system)
+}
+
+/// The project file of the implementation's sources, in its canonical location.
+fn sources_project(implementation: &crate::binding::Implementation, system: &System) -> Result<PathBuf, Error> {
+    let pkg_abs = strip_prefix(
+        system
+            .filesystem
+            .canonicalize(&implementation.sources)
+            .unwrap_or_else(|_| implementation.sources.clone()),
+    );
+    find_project(&pkg_abs, system).ok_or_else(|| failure(format!("no .csproj found under {}", pkg_abs.display())))
+}
+
+/// Locate the assembly a build of the sources project left under
+/// `artifacts_dir`, an `--artifacts-path` layout.
+fn locate_assembly(
+    implementation: &crate::binding::Implementation,
+    artifacts_dir: &Path,
+    context: &str,
+    system: &System,
+) -> Result<BuildOutput, Error> {
+    let csproj = sources_project(implementation, system)?;
+    let project_name = csproj
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| failure("could not read fixture .csproj file name"))?
+        .to_string();
+    let csproj_text = system
+        .filesystem
+        .read_to_string(&csproj)
+        .map_err(|source| with_source(format!("failed to read fixture .csproj: {source}"), source))?;
+    let assembly_name = extract_tag(&csproj_text, "AssemblyName").unwrap_or_else(|| project_name.clone());
 
     let fixture_out = artifacts_dir.join("bin").join(&project_name).join(CONFIGURATION_DIR);
     let fixture_dll = fixture_out.join(format!("{assembly_name}.dll"));
@@ -193,12 +209,41 @@ fn run_in(
     //    the scratch dir, so concurrent discovery runs never contend on - nor even
     //    touch - the source project's `obj`/`bin`.
     let built = build_project(implementation, scratch, "discovery", system)?;
-    let fixture_dll = built.fixture_dll;
-    let fixture_out = built.fixture_out;
+    reflect(&built, components, scratch, system)
+}
 
-    // 2. Locate the prebuilt reflection tool. It is a normal compiled C# project
-    //    in this repository, so it is analyzed, formatted, and unit-tested like
-    //    any other source - unlike a program generated at discovery time.
+/// Reflect over an assembly a build of the sources project already produced,
+/// returning one raw registry document for every component it declares plus the
+/// complete inventory; the documents align with the sorted inventory.
+///
+/// `artifacts` is the `--artifacts-path` of that build. Nothing is compiled
+/// here; only the prebuilt reflection tool runs.
+pub(crate) fn reflect_built(
+    implementation: &crate::binding::Implementation,
+    artifacts: &Path,
+    system: &System,
+) -> Result<DiscoveryOutput, Error> {
+    let built = locate_assembly(implementation, artifacts, "capture", system)?;
+    let scratch = crate::runner::cache::InvocationCache::create_with(
+        crate::runner::cache::CacheScope::new("csharp-discovery"),
+        crate::runner::cache::CacheLabel::new("built"),
+        system,
+    )?;
+    let everything: [&str; 0] = [];
+    reflect(&built, &everything, scratch.path(), system)
+}
+
+/// Run the prebuilt reflection tool over `built`, scaffolding into `scratch`.
+///
+/// With no `components` every inventoried component is reflected, in
+/// inventory order.
+fn reflect(built: &BuildOutput, components: &[impl AsRef<str>], scratch: &Path, system: &System) -> Result<DiscoveryOutput, Error> {
+    let fixture_dll = &built.fixture_dll;
+    let fixture_out = &built.fixture_out;
+
+    // Locate the prebuilt reflection tool. It is a normal compiled C# project
+    // in this repository, so it is analyzed, formatted, and unit-tested like
+    // any other source - unlike a program generated at discovery time.
     let discovery_assembly = tool::discovery_assembly(system)?;
 
     let out_dir = scratch.join("discovery");
@@ -208,14 +253,14 @@ fn run_in(
         .create_dir_all(&out_dir)
         .map_err(|source| with_source(format!("failed to create C# discovery output directory: {source}"), source))?;
 
-    // 3. Reflect. The tool takes the output directory, the compiled fixture
+    // Reflect. The tool takes the output directory, the compiled fixture
     //    assembly, the fixture's copy-local output directory, and then one
     //    argument per requested component, in request order.
     let mut request = ProcessRequest::builder("dotnet")
         .arg(&discovery_assembly)
         .arg(&out_dir)
-        .arg(&fixture_dll)
-        .arg(&fixture_out);
+        .arg(fixture_dll)
+        .arg(fixture_out);
     for component in components {
         request = request.arg(component.as_ref());
     }
@@ -234,44 +279,61 @@ fn run_in(
         )));
     }
 
-    let mut documents = Vec::with_capacity(components.len());
-    for (index, component) in components.iter().enumerate() {
+    // The documents of an unnamed request are named by the inventory.
+    let inventory = if components.is_empty() {
+        Some(read_inventory(&out_dir, system)?)
+    } else {
+        None
+    };
+    let names = inventory.as_ref().map_or_else(
+        || components.iter().map(|component| component.as_ref().to_owned()).collect::<Vec<_>>(),
+        Clone::clone,
+    );
+    let mut documents = Vec::with_capacity(names.len());
+    for (index, component) in names.iter().enumerate() {
         let out_file = out_dir.join(format!("{index}.json"));
         let json = system.filesystem.read_to_string(&out_file).map_err(|source| {
             with_source(
-                format!("C# discovery produced no output for component '{}': {source}", component.as_ref()),
+                format!("C# discovery produced no output for component '{component}': {source}"),
                 source,
             )
         })?;
         if json.trim().is_empty() {
-            return Err(failure(format!(
-                "C# discovery produced empty output for component '{}'",
-                component.as_ref()
-            )));
+            return Err(failure(format!("C# discovery produced empty output for component '{component}'")));
         }
         documents.push(json);
     }
 
-    let inventory_file = out_dir.join("components.json");
-    let inventory_json = system
-        .filesystem
-        .read_to_string(&inventory_file)
-        .map_err(|source| with_source(format!("C# discovery produced no component inventory: {source}"), source))?;
-    let present_components: Vec<String> = serde_json::from_str(&inventory_json).map_err(|source| {
-        Error::cause(
-            ErrorKind::CSharp,
-            format!("C# discovery emitted an unreadable component inventory: {source}"),
-            source,
-        )
-    })?;
-
+    let present_components = match inventory {
+        Some(inventory) => inventory,
+        None => read_inventory(&out_dir, system)?,
+    };
     Ok(DiscoveryOutput {
         documents,
         present_components,
     })
 }
 
+/// Read the component inventory the reflection tool wrote beside its documents.
+fn read_inventory(out_dir: &Path, system: &System) -> Result<Vec<String>, Error> {
+    let inventory_file = out_dir.join("components.json");
+    let inventory_json = system
+        .filesystem
+        .read_to_string(&inventory_file)
+        .map_err(|source| with_source(format!("C# discovery produced no component inventory: {source}"), source))?;
+    serde_json::from_str(&inventory_json).map_err(|source| {
+        Error::cause(
+            ErrorKind::CSharp,
+            format!("C# discovery emitted an unreadable component inventory: {source}"),
+            source,
+        )
+    })
+}
+
 /// Find the first `.csproj` directly under `sources` (the fixture project).
+///
+/// "First" means first in sorted path order, the rule capture applies too, so
+/// both stages pick the same project however the directory is listed.
 fn find_project(sources: impl AsRef<Path>, system: &System) -> Option<PathBuf> {
     let sources = sources.as_ref();
     system
@@ -280,7 +342,8 @@ fn find_project(sources: impl AsRef<Path>, system: &System) -> Option<PathBuf> {
         .ok()?
         .into_iter()
         .filter_map(Result::ok)
-        .find(|path| path.extension().and_then(|extension| extension.to_str()) == Some("csproj"))
+        .filter(|path| path.extension().and_then(|extension| extension.to_str()) == Some("csproj"))
+        .min()
 }
 
 mod project;
@@ -554,6 +617,28 @@ mod tests {
     }
 
     #[test]
+    fn project_selection_is_independent_of_directory_order() {
+        use crate::runner::system::{FakeFs, FakeProcess};
+        use std::collections::BTreeMap;
+        // The capture stage takes the first project in sorted order; discovery
+        // must pick the same one however the directory happens to be listed.
+        let listing = |names: &[&str]| {
+            let entries = names.iter().map(|name| Ok(PathBuf::from("fixture").join(name))).collect();
+            System::builder((
+                FakeFs::builder()
+                    .directory_results(BTreeMap::from([(PathBuf::from("fixture"), entries)]))
+                    .build(),
+                FakeProcess::default(),
+            ))
+            .process_id(1)
+            .build()
+        };
+        let expected = Some(PathBuf::from("fixture").join("A.csproj"));
+        assert_eq!(find_project(Path::new("fixture"), &listing(&["B.csproj", "A.csproj"])), expected);
+        assert_eq!(find_project(Path::new("fixture"), &listing(&["A.csproj", "B.csproj"])), expected);
+    }
+
+    #[test]
     fn diagnostic_truncation() {
         use std::fmt::Write as _;
         let stderr = (0..45).fold(String::new(), |mut diagnostics, index| {
@@ -604,6 +689,48 @@ mod tests {
                 .unwrap_err()
                 .contains("C# discovery produced no component inventory")
         );
+    }
+
+    #[test]
+    fn built_reflection_compiles_nothing_and_reads_every_inventoried_component() {
+        // Reflection over a finished build runs the prebuilt tool only: a second
+        // compilation of the sources is what capture must never pay for.
+        let system = fake_system(vec![Ok(success())]);
+        let built = locate_assembly(&fake_target(), Path::new("scratch/artifacts"), "capture", &system).unwrap();
+        let none: [&str; 0] = [];
+        let state = system.filesystem.fake_state();
+        state
+            .borrow_mut()
+            .insert_file("scratch/discovery/components.json", br#"["fixture.a","fixture.b"]"#.to_vec());
+        state
+            .borrow_mut()
+            .insert_file("scratch/discovery/1.json", br#"{"operations":[],"types":[]}"#.to_vec());
+        let output = reflect(&built, &none, Path::new("scratch"), &system).unwrap();
+        assert_eq!(output.documents.len(), 2, "one document per inventoried component");
+        assert_eq!(output.present_components, ["fixture.a", "fixture.b"]);
+
+        let process = system.process.fake_state();
+        let process = process.lock().unwrap();
+        assert_eq!(process.requests.len(), 1, "only the reflection tool runs");
+        assert!(
+            !process.requests[0].args.iter().any(|arg| arg == "build"),
+            "{:?}",
+            process.requests[0].args
+        );
+        assert_eq!(
+            process.requests[0].args.len(),
+            4,
+            "tool, output, assembly, and its directory; no component names"
+        );
+    }
+
+    #[test]
+    fn built_reflection_needs_the_assembly_the_build_produced() {
+        let system = fake_system(vec![]);
+        let error = locate_assembly(&fake_target(), Path::new("elsewhere"), "capture", &system)
+            .err()
+            .expect("no assembly under that path");
+        assert!(error.contains("C# capture build produced no assembly"), "{error}");
     }
 
     #[test]

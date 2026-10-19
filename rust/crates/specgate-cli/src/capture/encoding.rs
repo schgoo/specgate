@@ -2,7 +2,7 @@
 use super::facade::BundleRequest;
 use super::filter::filter;
 use super::{
-    BTreeMap, BTreeSet, CaptureManifest, CaptureReport, ComponentId, Discovered, ExecutedTests, FORMAT_VERSION, FailureContext, Language,
+    BTreeSet, CaptureManifest, CaptureReport, ComponentId, Discovered, ExecutedTests, FORMAT_VERSION, FailureContext, Language,
     MANIFEST_FILE, MANIFEST_FORMAT, Path, PathBuf, REGISTRY_FILE, REGISTRY_PREFIX, REGISTRY_VERSION, Reference, RegistryDto, RegistryId,
     Scenarios, TRACE_FILE, TargetDto, Tool, Version, WireDigest, artifact_path, ctsc_capture, encode_otlp, encode_registries,
     normalize_registry, sha256_digest,
@@ -19,10 +19,6 @@ pub(super) struct EncodedBundle {
     pub(super) manifest_bytes: Vec<u8>,
     pub(super) report: CaptureReport,
 }
-
-/// Normalized schemas, as serialized JSON, of the components nested inside a
-/// capture, keyed by component id.
-pub(super) type NestedSchemas = BTreeMap<String, String>;
 
 /// Refuse to publish a bundle whose trace does not link to its own registry.
 fn reject_unlinked(trace: &[u8], registry: &[u8], component: &str) -> Result<(), FailureContext> {
@@ -49,7 +45,6 @@ pub(super) fn encode_bundle(
     discovered: &Discovered,
     request: &BundleRequest,
     executed: &ExecutedTests,
-    nested: &NestedSchemas,
 ) -> Result<EncodedBundle, FailureContext> {
     let resolved = &discovered.implementation;
     let language = resolved.language();
@@ -95,11 +90,23 @@ pub(super) fn encode_bundle(
     }
     let mut schemas = Vec::with_capacity(components.len());
     for component in &components {
-        // A language whose discovery reports one component at a time supplies the
-        // nested components' normalized schemas explicitly; otherwise the selected
-        // discovery registry describes every component.
-        let schema = if let Some(schema) = nested.get(*component).filter(|_| *component != selected) {
-            schema.clone()
+        // A C# capture build reflects every component's schema once and keeps it
+        // beside the executed tests; the Rust discovery registry already
+        // describes every component of the linked target.
+        let schema = if language == specgate_discovery::binding::Language::CSharp {
+            match executed.schemas.get(*component) {
+                Some(Ok(schema)) => schema.clone(),
+                Some(Err(error)) => {
+                    return Err(FailureContext::domain(format!(
+                        "metadata of component '{component}' is invalid: {error}"
+                    )));
+                }
+                None => {
+                    return Err(FailureContext::domain(format!(
+                        "component '{component}' was captured but the built assembly's metadata does not declare it"
+                    )));
+                }
+            }
         } else {
             let schema = normalize_registry(&discovered.registry, language, *component)?;
             serde_json::to_string(&schema)
