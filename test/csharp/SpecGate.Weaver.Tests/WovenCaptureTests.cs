@@ -42,17 +42,6 @@ public sealed class WovenCaptureTests
     }
 
     [Fact]
-    public void RecordsOnlyTheSessionComponentForMultiComponentOperation()
-    {
-        using CaptureSession session = CaptureScenario.Begin("weaver.alternate");
-
-        Arithmetic.Add(1, 1);
-
-        OperationSpan span = Assert.Single(session.Finish().Operations);
-        Assert.Equal("weaver.alternate", span.ComponentId);
-    }
-
-    [Fact]
     public void RecordsNothingForUntargetedComponent()
     {
         using CaptureSession session = CaptureScenario.Begin("weaver.absent");

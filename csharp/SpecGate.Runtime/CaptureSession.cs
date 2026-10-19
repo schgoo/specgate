@@ -29,6 +29,7 @@ public sealed class CaptureSession : IDisposable
     private readonly object _gate = new();
     private readonly object _persistGate = new();
     private readonly SidecarWriter? _sidecar;
+    private SpecGateCaptureException? _persistenceFailure;
     private readonly long _runStartNs;
     private readonly long _scenarioStartNs;
     private long _nextTimeNs;
@@ -129,7 +130,8 @@ public sealed class CaptureSession : IDisposable
 
     /// <summary>
     /// Projects the capture as it stands without ending the session. An
-    /// operation that has not reached a terminal channel is shown as an
+    /// operation that has not reached a terminal channel — or, when
+    /// <paramref name="untrusted"/>, every operation — is shown as an
     /// <c>incomplete_capture</c> fault, the same evidence <see cref="Finish"/>
     /// records, so a reader can tell a finished capture from an interrupted one.
     /// </summary>
@@ -137,7 +139,7 @@ public sealed class CaptureSession : IDisposable
     /// The clock and order counters are copied, so projecting never shifts the
     /// timestamps of operations that run afterwards.
     /// </remarks>
-    private Capture Snapshot()
+    private Capture Snapshot(bool untrusted)
     {
         lock (_gate)
         {
@@ -147,7 +149,7 @@ public sealed class CaptureSession : IDisposable
             for (int index = _operations.Count - 1; index >= 0; index--)
             {
                 PendingOperation operation = _operations[index];
-                if (operation.Status is not null)
+                if (!untrusted && operation.Status is not null)
                 {
                     continue;
                 }
@@ -191,7 +193,29 @@ public sealed class CaptureSession : IDisposable
         // snapshot with an older one.
         lock (_persistGate)
         {
-            _sidecar.Write(CaptureJson.Serialize(Snapshot()));
+            // A failed write is terminal. The operation whose snapshot was lost
+            // is already complete in memory, so if application code caught the
+            // exception and a later write succeeded, the sidecar would present
+            // that operation as an ordinary success. Refusing every later write
+            // keeps the lost evidence from being papered over.
+            if (_persistenceFailure is not null)
+            {
+                throw new SpecGateCaptureException(
+                    CaptureRejection.PersistenceFailed,
+                    $"{SidecarWriter.FailureMarker} specgate: native capture persistence already failed in this "
+                    + $"process ({_persistenceFailure.Message}); the capture can no longer be trusted.",
+                    _persistenceFailure);
+            }
+
+            try
+            {
+                _sidecar.Write(CaptureJson.Serialize(Snapshot(untrusted: false)));
+            }
+            catch (SpecGateCaptureException error)
+            {
+                _persistenceFailure = error;
+                throw;
+            }
         }
     }
 
@@ -199,8 +223,22 @@ public sealed class CaptureSession : IDisposable
     /// Final flush at process exit. Never throws: the process is ending and the
     /// previous sidecar already shows every outstanding operation as incomplete.
     /// </summary>
-    internal void PersistAtExit()
+    /// <remarks>
+    /// A session whose persistence failed earlier reports that here even if the
+    /// application swallowed the exception: the persistence marker goes to
+    /// <paramref name="diagnostics"/> for the command-line tool to find in the
+    /// test output, and a last best-effort write shows every operation as
+    /// <c>incomplete_capture</c>, which the tool refuses to treat as evidence.
+    /// </remarks>
+    internal void PersistAtExit(System.IO.TextWriter diagnostics)
     {
+        ArgumentNullException.ThrowIfNull(diagnostics);
+
+        if (ReportPoisonedSession(diagnostics))
+        {
+            return;
+        }
+
         bool outstanding;
         lock (_gate)
         {
@@ -220,6 +258,43 @@ public sealed class CaptureSession : IDisposable
         {
             // The earlier persisted snapshot stands; a failure here has nobody to report to.
         }
+    }
+
+    private bool ReportPoisonedSession(System.IO.TextWriter diagnostics)
+    {
+        SpecGateCaptureException? failure;
+        lock (_persistGate)
+        {
+            failure = _persistenceFailure;
+        }
+
+        if (failure is null || _sidecar is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            diagnostics.WriteLine(failure.Message);
+        }
+        catch (Exception error) when (error is System.IO.IOException or ObjectDisposedException)
+        {
+            // The process is ending; the sidecar below is the remaining channel.
+        }
+
+        try
+        {
+            lock (_persistGate)
+            {
+                _sidecar.Write(CaptureJson.Serialize(Snapshot(untrusted: true)));
+            }
+        }
+        catch (SpecGateCaptureException)
+        {
+            // Nothing more can be reported; the failure message above already was.
+        }
+
+        return true;
     }
 
     private void CloseOutstanding(List<PendingOperation> outstanding)

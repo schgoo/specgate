@@ -80,6 +80,29 @@ public sealed class ExplodingAttribute : Attribute
 public class DiscoveryRunnerTests
 {
     [Fact]
+    public void AMethodDeclaringSeveralComponentsIsRejected()
+    {
+        MethodInfo method = typeof(Fixtures).GetMethod(nameof(Fixtures.BetaOnly))!;
+        AnnotatedMethod[] methods =
+        [
+            new(method, [new SpecOperationAttribute("beta_only") { Spec = "fixtures.beta" }], []),
+            new(
+                method,
+                [
+                    new SpecOperationAttribute("beta_only") { Spec = "fixtures.beta" },
+                    new SpecOperationAttribute("beta_only") { Spec = "fixtures.other" },
+                ],
+                []),
+        ];
+
+        string message = Assert.IsType<string>(DiscoveryRunner.MultiComponentConflict(methods));
+
+        Assert.Contains("BetaOnly", message, StringComparison.Ordinal);
+        Assert.Contains("'fixtures.beta', 'fixtures.other'", message, StringComparison.Ordinal);
+        Assert.Null(DiscoveryRunner.MultiComponentConflict(methods.Take(1)));
+    }
+
+    [Fact]
     public void TooFewArgumentsAreRejected()
     {
         RecordingSystem system = new();

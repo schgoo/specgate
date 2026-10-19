@@ -9,7 +9,10 @@
 //! enumerated test display name is one scenario; and a test-result log proves
 //! that each exact-name filter selected exactly one test.
 use super::sidecar::{Issued, Sidecars};
-use super::{CommandEnvironment, Discovered, ExecutedTests, Execution, FailureContext, INDEX_WIDTH, Path, PathBuf, ProcessRequest};
+use super::{
+    CommandEnvironment, Discovered, ExecutedTests, Execution, FailureContext, INDEX_WIDTH, Path, PathBuf, ProcessRequest,
+    ProcessRequestBuilder,
+};
 use specgate_discovery::binding::{LanguageOptions, Tests};
 use std::ffi::OsString;
 
@@ -22,15 +25,13 @@ const TARGETS_FILE: &str = "SpecGateCapture.targets";
 // directory name, so capture builds the same configuration.
 const CONFIGURATION: &str = "Debug";
 const PROJECT_EXTENSION: &str = "csproj";
-// A project that builds several target frameworks produces one test process
-// per framework and duplicate display names, so the binding must pick one.
-const MULTI_TARGET_TAG: &str = "<TargetFrameworks>";
 // `dotnet test --list-tests` prints this line, then one test per line indented
 // by exactly four spaces.
 const LIST_HEADER: &str = "The following Tests are available:";
 const LIST_INDENT: &str = "    ";
 // Every test result in a Visual Studio test-result log opens with this element.
 const RESULT_ELEMENT: &str = "<UnitTestResult ";
+const RUN_END: &str = "</TestRun>";
 // Keep the SDK's output identical across machines so diagnostics and parsing do
 // not depend on the user's locale, telemetry, or first-run banner.
 const TOOL_ENVIRONMENT: [(&str, &str); 3] = [
@@ -70,6 +71,15 @@ struct Batch<'a> {
     results: PathBuf,
 }
 
+/// What one C# batch needs from discovery and the binding.
+#[derive(Debug)]
+struct Plan<'a> {
+    sources: &'a Path,
+    declared: &'a [PathBuf],
+    framework: Option<&'a str>,
+    operations_discovered: bool,
+}
+
 /// Build, enumerate, and run every test of the C# tests projects of `discovered`.
 ///
 /// Returns the first build, enumeration, weaving, or capture-stage failure.
@@ -79,7 +89,6 @@ pub(super) fn execute(
     discovered: &Discovered,
     scratch: impl AsRef<Path>,
 ) -> Result<ExecutedTests, FailureContext> {
-    let scratch = scratch.as_ref();
     let implementation = &discovered.implementation.implementation;
     let Tests::Projects(declared) = &implementation.tests else {
         return Err(FailureContext::domain("C# capture requires tests.projects"));
@@ -87,14 +96,26 @@ pub(super) fn execute(
     let LanguageOptions::CSharp { framework } = &implementation.options else {
         return Err(FailureContext::domain("C# capture requires a C# implementation"));
     };
-    let batch = Batch {
-        sources_project: sources_project(system, &implementation.sources)?,
-        targets: weaver_targets(system)?,
+    let plan = Plan {
+        sources: &implementation.sources,
+        declared,
         framework: framework.as_deref(),
+        operations_discovered: !discovered.registry.present_components().is_empty(),
+    };
+    run_batch(system, execution, &plan, scratch.as_ref())
+}
+
+/// Run one planned batch: build and enumerate each project once, then run each
+/// listed test in its own process.
+fn run_batch(system: &CommandEnvironment, execution: &Execution, plan: &Plan<'_>, scratch: &Path) -> Result<ExecutedTests, FailureContext> {
+    let batch = Batch {
+        sources_project: sources_project(system, plan.sources)?,
+        targets: weaver_targets(system)?,
+        framework: plan.framework,
         results: scratch.join("results"),
     };
-    let projects = resolve_projects(system, declared, batch.framework, scratch)?;
-    let operations_discovered = !discovered.registry.present_components().is_empty();
+    let projects = resolve_projects(system, execution, plan.declared, batch.framework, scratch)?;
+    let operations_discovered = plan.operations_discovered;
 
     let mut listed = Vec::new();
     for (index, project) in projects.iter().enumerate() {
@@ -147,7 +168,7 @@ pub(super) fn execute(
         let output = execution
             .run(&request)
             .map_err(|error| FailureContext::with_source(format!("failed to run test '{}': {error}", test.scenario_name), error))?;
-        verify_selection(system, &batch.results.join(&log), &test.scenario_name, output.status.success())?;
+        verify_selection(system, &batch.results.join(&log), &test.scenario_name)?;
         executed.record(issued.settle(system, &test.scenario_name, &output)?);
     }
     Ok(executed)
@@ -194,8 +215,12 @@ fn sources_project(system: &CommandEnvironment, sources: &Path) -> Result<PathBu
 
 /// Resolve each declared tests project and reject a multi-targeted one when the
 /// binding does not name a framework.
+///
+/// The framework list is read from the project's *evaluated* properties, so a
+/// list inherited from `Directory.Build.props` or an imported file counts too.
 fn resolve_projects(
     system: &CommandEnvironment,
+    execution: &Execution,
     declared: &[PathBuf],
     framework: Option<&str>,
     scratch: &Path,
@@ -205,14 +230,8 @@ fn resolve_projects(
         let path = system
             .canonical(path)
             .map_err(|error| FailureContext::with_source(format!("tests project {} is not readable: {error}", path.display()), error))?;
-        let text = system
-            .read(&path)
-            .map_err(|error| FailureContext::with_source(format!("failed to read {}: {error}", path.display()), error))?;
-        if framework.is_none() && String::from_utf8_lossy(&text).contains(MULTI_TARGET_TAG) {
-            return Err(FailureContext::domain(format!(
-                "tests project {} targets several frameworks; set csharp.framework in the binding to choose one",
-                path.display()
-            )));
+        if framework.is_none() {
+            require_single_framework(execution, &path)?;
         }
         let stem = path
             .file_stem()
@@ -231,6 +250,52 @@ fn resolve_projects(
         });
     }
     Ok(projects)
+}
+
+/// Ask `MSBuild` which frameworks a project targets and require at most one.
+///
+/// A project that builds several target frameworks produces one test process
+/// per framework and duplicate display names, so the binding must pick one.
+fn require_single_framework(execution: &Execution, project: &Path) -> Result<(), FailureContext> {
+    let request = pinned(
+        ProcessRequest::builder("dotnet")
+            .arg("msbuild")
+            .arg(project)
+            .args(["-getProperty:TargetFramework", "-getProperty:TargetFrameworks"]),
+    )
+    .build();
+    let output = execution
+        .run(&request)
+        .map_err(|error| FailureContext::with_source(format!("failed to query the frameworks of {}: {error}", project.display()), error))?;
+    if !output.status.success() {
+        return Err(FailureContext::domain(format!(
+            "querying the target frameworks of {} failed:\n{}",
+            project.display(),
+            diagnostic(&output.stdout, &output.stderr)
+        )));
+    }
+    let report = serde_json::from_slice::<serde_json::Value>(&output.stdout)
+        .ok()
+        .filter(|report| report["Properties"].is_object())
+        .ok_or_else(|| {
+            FailureContext::domain(format!(
+                "the target frameworks of {} could not be read from the MSBuild property report",
+                project.display()
+            ))
+        })?;
+    let frameworks = report["Properties"]["TargetFrameworks"]
+        .as_str()
+        .unwrap_or_default()
+        .split(';')
+        .filter(|framework| !framework.trim().is_empty())
+        .count();
+    if frameworks > 1 {
+        return Err(FailureContext::domain(format!(
+            "tests project {} targets several frameworks; set csharp.framework in the binding to choose one",
+            project.display()
+        )));
+    }
+    Ok(())
 }
 
 /// Build one tests project once, weaving the sources project as part of it.
@@ -318,20 +383,39 @@ fn list_tests(execution: &Execution, batch: &Batch<'_>, project: &Project) -> Re
             project.path.display()
         )));
     }
-    Ok(lines.map_while(|line| line.strip_prefix(LIST_INDENT)).map(str::to_string).collect())
+    // Everything after the header is scanned: warnings and blank lines between
+    // entries are noise, and only indented lines name tests.
+    let names: Vec<String> = lines
+        .filter_map(|line| line.strip_prefix(LIST_INDENT))
+        .map(str::to_string)
+        .collect();
+    if names.is_empty() {
+        return Err(FailureContext::domain(format!(
+            "C# capture test enumeration of {} listed no tests; a capture project must contain tests",
+            project.path.display()
+        )));
+    }
+    Ok(names)
 }
 
 /// Prove that one exact-name filter selected exactly one test.
 ///
 /// A filter that matches nothing exits successfully and logs no result, and a
 /// name that is not unique selects several tests; either would silently
-/// misattribute the sidecar, so both stop the batch. A missing log after a
-/// failed process is a crashed test host and is left to the caller as a failed
-/// test.
-fn verify_selection(system: &CommandEnvironment, log: &Path, scenario_name: &str, succeeded: bool) -> Result<(), FailureContext> {
+/// misattribute the sidecar, so both stop the batch. A missing or truncated
+/// log is a crashed test host or a bad filter and stops the batch too, even
+/// when the process succeeded: only a complete log that records a failed
+/// result is an ordinary failed test.
+fn verify_selection(system: &CommandEnvironment, log: &Path, scenario_name: &str) -> Result<(), FailureContext> {
     match system.read(log) {
         Ok(bytes) => {
-            let selected = String::from_utf8_lossy(&bytes).matches(RESULT_ELEMENT).count();
+            let text = String::from_utf8_lossy(&bytes);
+            if !text.contains(RUN_END) {
+                return Err(FailureContext::domain(format!(
+                    "the test result for '{scenario_name}' is incomplete; the test host likely crashed before finishing"
+                )));
+            }
+            let selected = text.matches(RESULT_ELEMENT).count();
             if selected == 1 {
                 Ok(())
             } else {
@@ -340,9 +424,8 @@ fn verify_selection(system: &CommandEnvironment, log: &Path, scenario_name: &str
                 )))
             }
         }
-        Err(_) if !succeeded => Ok(()),
         Err(error) => Err(FailureContext::with_source(
-            format!("the filter for '{scenario_name}' selected no test: no result was logged ({error})"),
+            format!("no result was logged for '{scenario_name}': the filter selected no test or the test host crashed ({error})"),
             error,
         )),
     }
@@ -350,8 +433,11 @@ fn verify_selection(system: &CommandEnvironment, log: &Path, scenario_name: &str
 
 /// Build the exact-match test filter for one display name.
 ///
-/// The filter grammar reserves `\ ( ) & | = ! ~` behind a backslash, and the
-/// separators `,` and `;` are written as percent escapes.
+/// The filter grammar reserves `\ ( ) & | = ! ~` behind a backslash. The value
+/// then passes through `MSBuild`, which decodes `%XX` escapes and splits property
+/// lists on `,` and `;`, so those separators, the quote that confuses the
+/// command-line hand-off, and the escape character `%` itself are written as
+/// percent escapes (`%` first, so a literal `%2C` stays literal).
 fn exact_filter(display_name: &str) -> String {
     let mut filter = String::from("DisplayName=");
     for character in display_name.chars() {
@@ -360,6 +446,8 @@ fn exact_filter(display_name: &str) -> String {
                 filter.push('\\');
                 filter.push(character);
             }
+            '%' => filter.push_str("%25"),
+            '"' => filter.push_str("%22"),
             ',' => filter.push_str("%2C"),
             ';' => filter.push_str("%3B"),
             other => filter.push(other),
@@ -386,13 +474,20 @@ fn tool_request(
         builder = builder.args(["--framework", framework]);
     }
     builder = builder.args(extra);
-    for (name, value) in TOOL_ENVIRONMENT {
-        builder = builder.env(name, value);
-    }
+    builder = pinned(builder);
     if let Some(issued) = issued {
         builder = builder.env(Issued::variable(), issued.environment());
     }
     builder.build()
+}
+
+/// Pin the SDK's output and keep any inherited capture configuration out of
+/// the child: only the one test that was issued a configuration may see one.
+fn pinned(mut builder: ProcessRequestBuilder) -> ProcessRequestBuilder {
+    for (name, value) in TOOL_ENVIRONMENT {
+        builder = builder.env(name, value);
+    }
+    builder.env_remove(Issued::variable())
 }
 
 /// Keep the first lines of a failed invocation's output.

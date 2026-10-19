@@ -44,7 +44,7 @@ internal static class NativeCaptureActivation
             Environment.GetEnvironmentVariable(EnvironmentVariable), DiskSidecarFileSystem.Instance);
         if (session is not null)
         {
-            AppDomain.CurrentDomain.ProcessExit += (_, _) => session.PersistAtExit();
+            AppDomain.CurrentDomain.ProcessExit += (_, _) => session.PersistAtExit(Console.Error);
         }
     }
 

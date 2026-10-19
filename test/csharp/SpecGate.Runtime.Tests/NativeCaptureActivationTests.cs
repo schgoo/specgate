@@ -82,20 +82,6 @@ public sealed class NativeCaptureActivationTests
     }
 
     [Fact]
-    public void AMultiComponentOperationRecordsUnderItsFirstDeclaredComponent()
-    {
-        FakeSidecarFileSystem files = new();
-        using CaptureSession session = Started(files);
-
-        OperationScope scope = SpecGateRuntime.EnterOperation(
-            Boundaries.Of("Add"), "add", ["fixture.first", "fixture.second"]);
-        SpecGateRuntime.RecordInputs(scope, [1, 2]);
-        SpecGateRuntime.ExitOk(scope, 3);
-
-        Assert.Equal("fixture.first", Assert.Single(session.Finish().Operations).ComponentId);
-    }
-
-    [Fact]
     public void AStartedSessionIgnoresASecondActivation()
     {
         FakeSidecarFileSystem files = new();
@@ -161,7 +147,7 @@ public sealed class NativeCaptureActivationTests
         SpecGateRuntime.RecordInputs(scope, [2, 3]);
         int before = files.Writes.Count;
 
-        session.PersistAtExit();
+        session.PersistAtExit(TextWriter.Null);
 
         Assert.Equal(before + 1, files.Writes.Count);
         Assert.Equal("incomplete_capture", FaultTypeOf(files.Last(), 0));
@@ -175,7 +161,7 @@ public sealed class NativeCaptureActivationTests
         Run("fixture.one", [2, 3], 5);
         int before = files.Writes.Count;
 
-        session.PersistAtExit();
+        session.PersistAtExit(TextWriter.Null);
 
         Assert.Equal(before, files.Writes.Count);
     }
@@ -190,7 +176,7 @@ public sealed class NativeCaptureActivationTests
         int before = files.Attempts;
         files.FailuresRemaining = int.MaxValue;
 
-        session.PersistAtExit();
+        session.PersistAtExit(TextWriter.Null);
 
         Assert.Equal(SidecarWriter.Attempts, files.Attempts - before);
     }
@@ -238,6 +224,62 @@ public sealed class NativeCaptureActivationTests
 
         Assert.Equal(CaptureRejection.PersistenceFailed, error.Rejection);
         Assert.Null(SpecGateRuntime.Current);
+    }
+
+    [Fact]
+    public void APersistenceFailureThePrecedingCodeCaughtPoisonsTheSession()
+    {
+        FakeSidecarFileSystem files = new();
+        using CaptureSession session = Started(files);
+        OperationScope first = SpecGateRuntime.EnterOperation(Boundaries.Of("Add"), "add", "fixture.one");
+        SpecGateRuntime.RecordInputs(first, [2, 3]);
+        files.FailuresRemaining = SidecarWriter.Attempts;
+        Assert.Throws<SpecGateCaptureException>(() => SpecGateRuntime.ExitOk(first, 5));
+        int writesBefore = files.Writes.Count;
+
+        // Application code swallowed the failure and carried on; the disk is healthy again.
+        SpecGateCaptureException later = Assert.Throws<SpecGateCaptureException>(
+            () => Run("fixture.one", [4, 5], 9));
+
+        Assert.Equal(CaptureRejection.PersistenceFailed, later.Rejection);
+        Assert.Contains("__SPECGATE_NATIVE_CAPTURE_PERSISTENCE_FAILURE__", later.Message, StringComparison.Ordinal);
+        Assert.Equal(writesBefore, files.Writes.Count);
+    }
+
+    [Fact]
+    public void APoisonedSessionIsReportedAtExitWithNoOperationLeftLookingSuccessful()
+    {
+        FakeSidecarFileSystem files = new();
+        using CaptureSession session = Started(files);
+        OperationScope first = SpecGateRuntime.EnterOperation(Boundaries.Of("Add"), "add", "fixture.one");
+        SpecGateRuntime.RecordInputs(first, [2, 3]);
+        files.FailuresRemaining = SidecarWriter.Attempts;
+        Assert.Throws<SpecGateCaptureException>(() => SpecGateRuntime.ExitOk(first, 5));
+        Assert.Throws<SpecGateCaptureException>(() => Run("fixture.one", [4, 5], 9));
+        using StringWriter error = new();
+
+        session.PersistAtExit(error);
+
+        Assert.Contains("__SPECGATE_NATIVE_CAPTURE_PERSISTENCE_FAILURE__", error.ToString(), StringComparison.Ordinal);
+        byte[] last = files.Last();
+        Assert.Equal(2, Operations(last).GetArrayLength());
+        Assert.Equal("incomplete_capture", FaultTypeOf(last, 0));
+        Assert.Equal("incomplete_capture", FaultTypeOf(last, 1));
+    }
+
+    [Fact]
+    public void APoisonedExitStillNeverThrowsWhenTheDiskStaysBroken()
+    {
+        FakeSidecarFileSystem files = new();
+        using CaptureSession session = Started(files);
+        OperationScope scope = SpecGateRuntime.EnterOperation(Boundaries.Of("Add"), "add", "fixture.one");
+        files.FailuresRemaining = int.MaxValue;
+        Assert.Throws<SpecGateCaptureException>(() => SpecGateRuntime.RecordInputs(scope, [2, 3]));
+        using StringWriter error = new();
+
+        session.PersistAtExit(error);
+
+        Assert.Contains("__SPECGATE_NATIVE_CAPTURE_PERSISTENCE_FAILURE__", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]

@@ -23,7 +23,7 @@
 
 use crate::capture_failure::CaptureError;
 use crate::capture_failure::FailureStage as CaptureErrorKind;
-use crate::system::{CommandEnvironment, Discovery, Execution, ProcessRequest, run_id};
+use crate::system::{CommandEnvironment, Discovery, Execution, ProcessRequest, ProcessRequestBuilder, run_id};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use specgate::__rt::{Capture, Completion, Config, ConfigDeps, EnvConfig, FAILURE_MARKER, SpanId, TraceId};
@@ -34,7 +34,7 @@ use specgate_discovery::registry::Registry;
 use specgate_discovery::runner::cargo_bin;
 use specgate_discovery::schema::normalize_registry;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 fn encode_otlp(captures: impl AsRef<[Capture]>, metadata: &ctsc_capture::Metadata) -> Result<ctsc_capture::Encoding, FailureContext> {
@@ -137,7 +137,7 @@ mod facade;
 pub(crate) use facade::{BundleRequest, capture_strict, discover};
 pub use facade::{capture, capture_with};
 mod encoding;
-use encoding::encode_bundle;
+use encoding::{NestedSchemas, encode_bundle};
 mod filter;
 use filter::validate_setups;
 mod execution;

@@ -39,7 +39,10 @@ Rust.
   with `SPECGATE_NATIVE_CAPTURE` set; a test-result log proves the filter
   selected exactly one test. The runtime-owned `[ModuleInitializer]` in
   `SpecGate.Runtime` (net8.0;net10.0) starts the session from that variable and
-  rewrites the sidecar atomically after each top-level operation. The weaver,
+  rewrites the sidecar atomically once each operation's inputs are recorded and
+  again at every operation close; a persistence failure poisons the session
+  (later writes keep failing, and a marker on stderr makes the CLI reject the
+  batch even if the test caught the exception). The weaver,
   runtime, and targets sit beside the executable, or in `SPECGATE_WEAVER_PATH`
   (the justfile sets it from `just weaver-tool`). Woven capture needs .NET 8+.
 - `specgate-ctsc` owns registry and trace encoding, digest and linkage

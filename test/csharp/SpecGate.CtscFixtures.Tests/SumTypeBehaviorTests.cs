@@ -9,16 +9,16 @@ public sealed class SumTypeBehaviorTests
     [Fact]
     public void OptionAndResultSurfacesCoverBothArms()
     {
-        Option<int> found = OptionResult.Find([4, 7, 9], 7);
+        Option<int> found = OptionResult.FindSome([4, 7, 9], 7);
         Assert.True(found.HasValue);
         Assert.Equal(1, found.Value);
-        Assert.False(OptionResult.Find([4, 7, 9], 8).HasValue);
+        Assert.False(OptionResult.FindNone([4, 7, 9], 8).HasValue);
 
-        Result<int, string> success = OptionResult.TryDivide(12, 4);
+        Result<int, string> success = OptionResult.TryDivideOk(12, 4);
         Assert.True(success.IsOk);
         Assert.Equal(3, success.OkValue);
 
-        Result<int, string> failure = OptionResult.TryDivide(12, 0);
+        Result<int, string> failure = OptionResult.TryDivideErr(12, 0);
         Assert.False(failure.IsOk);
         Assert.Equal("division by zero", failure.ErrValue);
     }

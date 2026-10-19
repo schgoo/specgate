@@ -1,12 +1,10 @@
 #![cfg_attr(all(feature = "test-util", not(test)), expect(dead_code, reason = "feature-gated fixture support"))]
 
 //! Capture workflow orchestration and publication.
-#[cfg(any(test, feature = "test-util"))]
-use super::BTreeSet;
 use super::{
-    CaptureError, CaptureErrorKind, CaptureReport, CaptureRequest, CommandEnvironment, ComponentId, Discovered, Discovery, ExecutedTests,
-    Execution, FailureContext, MANIFEST_FILE, Path, PathBuf, REGISTRY_FILE, TRACE_FILE, csharp, encode_bundle, public_error,
-    reject_failures, run_id, rust, scratch_dir, spec_operation, validate_setups, write_artifact,
+    BTreeSet, CaptureError, CaptureErrorKind, CaptureReport, CaptureRequest, CommandEnvironment, ComponentId, Discovered, Discovery,
+    ExecutedTests, Execution, FailureContext, MANIFEST_FILE, NestedSchemas, Path, PathBuf, REGISTRY_FILE, TRACE_FILE, csharp,
+    encode_bundle, public_error, reject_failures, run_id, rust, scratch_dir, spec_operation, validate_setups, write_artifact,
 };
 
 // Default capture bundles live beside the project, outside version control via `.gitignore`.
@@ -106,8 +104,8 @@ pub fn capture_with(
         excluded_operations: BTreeSet::new(),
     }];
     let executed = execute_with(&discovered, &requests, system, execution).map_err(public_error(CaptureErrorKind::Execution))?;
-    let reports =
-        write_with(&discovered, &requests, &executed, REJECT_FAILURES, system).map_err(public_error(CaptureErrorKind::Encoding))?;
+    let reports = write_with(&discovered, &requests, &executed, REJECT_FAILURES, system, discovery)
+        .map_err(public_error(CaptureErrorKind::Encoding))?;
     Ok(reports
         .into_iter()
         .next()
@@ -266,6 +264,70 @@ fn execute_with(
     }
 }
 
+/// Discover the schemas of components nested inside the captures being exported.
+///
+/// A filtered capture keeps nested calls into other annotated components, and
+/// the exported registry must declare each of them. Rust discovery reports the
+/// whole linked target in one registry, but C# discovery reports one component
+/// per document, so the nested components of a C# capture are discovered here,
+/// once for the whole batch, from the same sources.
+fn nested_schemas(
+    discovered: &Discovered,
+    requests: &[BundleRequest],
+    executed: &ExecutedTests,
+    discovery: &Discovery,
+) -> Result<NestedSchemas, FailureContext> {
+    let resolved = &discovered.implementation;
+    if resolved.language() != specgate_discovery::binding::Language::CSharp {
+        return Ok(NestedSchemas::new());
+    }
+    let mut needed = BTreeSet::new();
+    for request in requests {
+        for capture in super::filter::filter(&executed.captures, &request.component) {
+            for operation in &capture.operations {
+                if operation.component_id.as_str() != request.component.as_str() {
+                    needed.insert(operation.component_id.as_str().to_owned());
+                }
+            }
+        }
+    }
+    if needed.is_empty() {
+        return Ok(NestedSchemas::new());
+    }
+    let components = needed
+        .iter()
+        .map(|component| specgate_discovery::identity::ComponentId::from(component.as_str()))
+        .collect::<Vec<_>>();
+    let batch = discovery
+        .batch(
+            &resolved.binding_path,
+            &resolved.component,
+            Some(resolved.label.as_str()),
+            &components,
+        )
+        .map_err(|error| FailureContext::with_source(error.to_string(), error))?;
+    let mut schemas = NestedSchemas::new();
+    for component in needed {
+        let schema = match batch.schema(&component) {
+            specgate_discovery::output::SchemaLookup::Found(schema) => schema,
+            specgate_discovery::output::SchemaLookup::Invalid(error) => {
+                return Err(FailureContext::domain(format!(
+                    "metadata of nested component '{component}' is invalid: {error}"
+                )));
+            }
+            specgate_discovery::output::SchemaLookup::Missing => {
+                return Err(FailureContext::domain(format!(
+                    "nested component '{component}' was captured but discovery did not report it"
+                )));
+            }
+        };
+        let schema = serde_json::to_string(schema)
+            .map_err(|error| FailureContext::with_source(format!("failed to serialize normalized discovery schema: {error}"), error))?;
+        schemas.insert(component, schema);
+    }
+    Ok(schemas)
+}
+
 #[cfg(any(test, feature = "test-util"))]
 pub(super) fn write_bundles(
     discovered: &Discovered,
@@ -273,7 +335,14 @@ pub(super) fn write_bundles(
     executed: &ExecutedTests,
     reject_failed: bool,
 ) -> Result<Vec<CaptureReport>, FailureContext> {
-    write_with(discovered, requests, executed, reject_failed, &CommandEnvironment::real())
+    write_with(
+        discovered,
+        requests,
+        executed,
+        reject_failed,
+        &CommandEnvironment::real(),
+        &Discovery::real(),
+    )
 }
 
 fn write_with(
@@ -282,14 +351,16 @@ fn write_with(
     executed: &ExecutedTests,
     reject_failed: bool,
     system: &CommandEnvironment,
+    discovery: &Discovery,
 ) -> Result<Vec<CaptureReport>, FailureContext> {
     if reject_failed {
         reject_failures(executed)?;
     }
 
+    let nested = nested_schemas(discovered, requests, executed, discovery)?;
     let mut encoded = Vec::with_capacity(requests.len());
     for request in requests {
-        encoded.push(encode_bundle(discovered, request, executed)?);
+        encoded.push(encode_bundle(discovered, request, executed, &nested)?);
     }
 
     let mut reports = Vec::with_capacity(encoded.len());

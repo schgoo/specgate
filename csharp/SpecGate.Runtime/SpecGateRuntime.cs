@@ -81,7 +81,10 @@ public static class SpecGateRuntime
         CurrentScope.Value = null;
     }
 
-    /// <summary>Opens an operation declared for a single component. Called by woven code.</summary>
+    /// <summary>
+    /// Opens an operation. Called by woven code.
+    /// </summary>
+    /// <remarks>An operation belongs to exactly one component; the weaver rejects a method that declares several.</remarks>
     [EditorBrowsable(EditorBrowsableState.Never)]
     public static OperationScope EnterOperation(
         RuntimeMethodHandle method, string operation, string component)
@@ -93,33 +96,6 @@ public static class SpecGateRuntime
         }
 
         return Open(session, operation, component, method);
-    }
-
-    /// <summary>
-    /// Opens an operation declared for several components. Called by woven code
-    /// when a method carries more than one operation annotation.
-    /// </summary>
-    [EditorBrowsable(EditorBrowsableState.Never)]
-    public static OperationScope EnterOperation(
-        RuntimeMethodHandle method, string operation, string[] components)
-    {
-        CaptureSession? session = Volatile.Read(ref _session);
-        if (session is null)
-        {
-            return OperationScope.Disabled;
-        }
-
-        ArgumentNullException.ThrowIfNull(components);
-
-        foreach (string component in components)
-        {
-            if (session.Records(component))
-            {
-                return Open(session, operation, component, method);
-            }
-        }
-
-        return OperationScope.Disabled;
     }
 
     private static OperationScope Open(

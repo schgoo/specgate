@@ -365,7 +365,7 @@ mod cases {
         .unwrap();
         assert_eq!(
             request.to_native_value(),
-            specgate::Value::Map(std::collections::BTreeMap::from([
+            specgate::Value::Map(BTreeMap::from([
                 (
                     "binding".to_string(),
                     specgate::Value::String("bindings/reference.yaml".to_string())
@@ -376,7 +376,7 @@ mod cases {
                 ),
                 (
                     "out".to_string(),
-                    specgate::Value::Map(std::collections::BTreeMap::from([(
+                    specgate::Value::Map(BTreeMap::from([(
                         "Some".to_string(),
                         specgate::Value::String("capture/output".to_string())
                     )]))
@@ -876,6 +876,54 @@ mod cases {
     }
 
     #[test]
+    fn poisoned_sidecar_with_every_operation_incomplete_is_unfinalized() {
+        // After a persistence failure the C# runtime rewrites the sidecar with
+        // every operation closed as `incomplete_capture`; the CLI must still
+        // treat it as unfinalized and name the first operation.
+        let fault = |name: &str, order: u32| {
+            serde_json::json!({
+                "kind": "fault",
+                "order": order,
+                "time_unix_nano": 2,
+                "fault_type": "incomplete_capture",
+                "message": format!("native operation '{name}' was still outstanding when the capture ended"),
+                "observer": "target",
+            })
+        };
+        let operation = |name: &str, index: u32| {
+            serde_json::json!({
+                "order": index,
+                "span_id": format!("11111111111111{:02}", 3 + index),
+                "parent_span_id": "1111111111111102",
+                "component_id": "fixture.native",
+                "operation_name": name,
+                "start_time_unix_nano": 1,
+                "end_time_unix_nano": 2,
+                "status": "error",
+                "inputs": {},
+                "observations": [],
+                "completion": fault(name, 1),
+            })
+        };
+        let capture: Capture = serde_json::from_value(serde_json::json!({
+            "trace_id": "11111111111111111111111111111111",
+            "scenario_name": "tests::poisoned",
+            "run": {
+                "span_id": "1111111111111101", "parent_span_id": null,
+                "start_time_unix_nano": 0, "end_time_unix_nano": 4, "status": "error",
+            },
+            "scenario": {
+                "span_id": "1111111111111102", "parent_span_id": "1111111111111101",
+                "start_time_unix_nano": 1, "end_time_unix_nano": 3, "status": "error",
+            },
+            "operations": [operation("first", 0), operation("second", 1)],
+        }))
+        .expect("synthetic poisoned sidecar must decode as a capture");
+
+        assert_eq!(unfinalized_operation(&capture), Some("first"));
+    }
+
+    #[test]
     fn finalized_capture_reports_no_unfinalized_operation() {
         let capture = decoded_capture(&serde_json::json!({ "kind": "empty", "order": 1, "time_unix_nano": 2 }), "ok");
         assert_eq!(
@@ -996,7 +1044,11 @@ mod cases {
         let root = output_dir("csharp");
         let _ = std::fs::remove_dir_all(&root);
         let binding = csharp_capture_binding();
-        let components = ["fixture.cli_capture.add", "fixture.cli_capture.fetch"];
+        let components = [
+            "fixture.cli_capture.add",
+            "fixture.cli_capture.fetch",
+            "fixture.cli_capture.pipeline",
+        ];
         let requests = ["first", "second"]
             .into_iter()
             .flat_map(|run| components.map(|component| request_at(component, root.join(run).join(component))))
@@ -1051,13 +1103,15 @@ mod cases {
 
         for (run, executed) in requests.chunks(components.len()).zip(&executions) {
             assert!(executed.failures.is_empty(), "{:#?}", executed.failures);
-            // The plain test and both Theory cases are separate scenarios; the async component has one.
-            for ((request, discovered), expected) in run.iter().zip(&discovered).zip([3, 1]) {
+            // The plain test, both Theory cases and the awkwardly named case are separate scenarios;
+            // the async component has one, and the pipeline's one scenario also retains its nested
+            // call into the add component.
+            for ((request, discovered), (scenarios, operations)) in run.iter().zip(&discovered).zip([(4, 4), (1, 1), (1, 2)]) {
                 let report = write_bundles(discovered, std::slice::from_ref(request), executed, false)
                     .expect("C# capture encoding")
                     .remove(0);
-                assert_eq!(report.scenarios, expected, "{} scenarios: {report:?}", request.component);
-                assert_eq!(report.operations, expected, "{} operations: {report:?}", request.component);
+                assert_eq!(report.scenarios, scenarios, "{} scenarios: {report:?}", request.component);
+                assert_eq!(report.operations, operations, "{} operations: {report:?}", request.component);
                 let linked = validate_linked(request.out.join(TRACE_FILE), request.out.join(REGISTRY_FILE), &[]);
                 assert!(linked.valid, "{} linked validation failed: {:#?}", request.component, linked.issues);
                 let bundle = validate_bundle(&request.out);

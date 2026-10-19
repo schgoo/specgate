@@ -7,6 +7,15 @@ under `docs/decisions/`, or `docs/roadmap.md`. Generate with `just changelog`.
 
 ### Added
 
+- C# capture persistence failure is sticky, nested cross-component captures are
+  discovered and linked-validated before publishing, multi-targeting is read from
+  evaluated MSBuild properties, and `--filter` escapes `%` and `"` (#46).
+- C# capture stops the batch when a test's TRX is missing or truncated (crashed
+  host, bad filter), and parses the whole `--list-tests` output so a stray
+  warning no longer truncates it; an empty listing is an error (#46).
+- C# operations belong to exactly one component: `SpecOperationAttribute` no
+  longer allows repeated use, and the weaver and `specgate-discovery` reject a
+  method that declares several (#46).
 - `specgate capture --impl csharp` builds the binding's `tests.projects` with the
   capture weaver injected, runs each listed test in its own `dotnet test`
   process, and emits validated bundles; the weaver, net8.0 runtime, and

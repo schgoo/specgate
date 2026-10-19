@@ -2,11 +2,12 @@
 use super::facade::BundleRequest;
 use super::filter::filter;
 use super::{
-    BTreeSet, CaptureManifest, CaptureReport, ComponentId, Discovered, ExecutedTests, FORMAT_VERSION, FailureContext, Language,
-    MANIFEST_FILE, MANIFEST_FORMAT, PathBuf, REGISTRY_FILE, REGISTRY_PREFIX, REGISTRY_VERSION, Reference, RegistryDto, RegistryId,
+    BTreeMap, BTreeSet, CaptureManifest, CaptureReport, ComponentId, Discovered, ExecutedTests, FORMAT_VERSION, FailureContext, Language,
+    MANIFEST_FILE, MANIFEST_FORMAT, Path, PathBuf, REGISTRY_FILE, REGISTRY_PREFIX, REGISTRY_VERSION, Reference, RegistryDto, RegistryId,
     Scenarios, TRACE_FILE, TargetDto, Tool, Version, WireDigest, artifact_path, ctsc_capture, encode_otlp, encode_registries,
     normalize_registry, sha256_digest,
 };
+use specgate_ctsc::validation::DocumentBytes;
 
 /// Stable capture-manifest producer identity; changing it breaks consumers that identify `SpecGate` artifacts.
 const TOOL_NAME: &str = "specgate";
@@ -19,10 +20,36 @@ pub(super) struct EncodedBundle {
     pub(super) report: CaptureReport,
 }
 
+/// Normalized schemas, as serialized JSON, of the components nested inside a
+/// capture, keyed by component id.
+pub(super) type NestedSchemas = BTreeMap<String, String>;
+
+/// Refuse to publish a bundle whose trace does not link to its own registry.
+fn reject_unlinked(trace: &[u8], registry: &[u8], component: &str) -> Result<(), FailureContext> {
+    let report = specgate_ctsc::validation::bytes::validate_linked(
+        DocumentBytes::new(Path::new(TRACE_FILE.0), trace),
+        DocumentBytes::new(Path::new(REGISTRY_FILE.0), registry),
+        [],
+    );
+    if report.valid {
+        return Ok(());
+    }
+    Err(FailureContext::domain(format!(
+        "captured trace for component '{component}' does not link to its registry: {}",
+        report
+            .issues
+            .iter()
+            .map(|issue| format!("{}: {}", issue.location, issue.message))
+            .collect::<Vec<_>>()
+            .join("; ")
+    )))
+}
+
 pub(super) fn encode_bundle(
     discovered: &Discovered,
     request: &BundleRequest,
     executed: &ExecutedTests,
+    nested: &NestedSchemas,
 ) -> Result<EncodedBundle, FailureContext> {
     let resolved = &discovered.implementation;
     let language = resolved.language();
@@ -68,11 +95,17 @@ pub(super) fn encode_bundle(
     }
     let mut schemas = Vec::with_capacity(components.len());
     for component in &components {
-        let schema = normalize_registry(&discovered.registry, language, *component)?;
-        schemas
-            .push(serde_json::to_string(&schema).map_err(|error| {
-                FailureContext::with_source(format!("failed to serialize normalized discovery schema: {error}"), error)
-            })?);
+        // A language whose discovery reports one component at a time supplies the
+        // nested components' normalized schemas explicitly; otherwise the selected
+        // discovery registry describes every component.
+        let schema = if let Some(schema) = nested.get(*component).filter(|_| *component != selected) {
+            schema.clone()
+        } else {
+            let schema = normalize_registry(&discovered.registry, language, *component)?;
+            serde_json::to_string(&schema)
+                .map_err(|error| FailureContext::with_source(format!("failed to serialize normalized discovery schema: {error}"), error))?
+        };
+        schemas.push(schema);
     }
     let registry_id = format!("{REGISTRY_PREFIX}{selected}");
     let schemas = schemas.into_iter().map(specgate_ctsc::registry::Schema::new).collect::<Vec<_>>();
@@ -93,6 +126,7 @@ pub(super) fn encode_bundle(
     );
     let trace_encoding = encode_otlp(&captures, &metadata)?;
     let trace_bytes = trace_encoding.otlp_json.into_bytes();
+    reject_unlinked(&trace_bytes, &registry_bytes, selected)?;
     let trace_digest = sha256_digest(&trace_bytes);
     let scenario_count = captures.len();
     let report_scenarios = u32::try_from(scenario_count).map_err(|_error| "captured scenario count exceeds u32".to_string())?;

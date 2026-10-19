@@ -16,6 +16,20 @@ public sealed class CaptureTests
         Assert.Equal("response from a", await Remote.Fetch("a"));
     }
 
+    [Fact]
+    public void RunsThroughANestedComponent()
+    {
+        Assert.Equal(4, Pipeline.Run(3));
+    }
+
+    // The display name carries filter-reserved characters, which must still select exactly this case.
+    [Theory]
+    [InlineData("a;b&c%2C|d")]
+    public void AddsAwkwardlyNamedLengths(string label)
+    {
+        Assert.Equal(label.Length, Arithmetic.Add(label.Length, 0));
+    }
+
     [Theory]
     [InlineData(1, 2, 3)]
     [InlineData(-4, 4, 0)]

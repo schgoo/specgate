@@ -53,8 +53,16 @@ fn filters_escape_the_reserved_characters() {
     assert_eq!(exact_filter("Ns.C.M"), "DisplayName=Ns.C.M");
     assert_eq!(
         exact_filter(r#"Ns.C.M(n: 2, s: "c(d)|e&f=g!h~i\j;k")"#),
-        r#"DisplayName=Ns.C.M\(n: 2%2C s: "c\(d\)\|e\&f\=g\!h\~i\\j%3Bk"\)"#
+        r"DisplayName=Ns.C.M\(n: 2%2C s: %22c\(d\)\|e\&f\=g\!h\~i\\j%3Bk%22\)"
     );
+}
+
+#[test]
+fn a_literal_percent_escape_is_distinct_from_the_separator_it_spells() {
+    assert_eq!(exact_filter("a,b"), "DisplayName=a%2Cb");
+    assert_eq!(exact_filter("a%2Cb"), "DisplayName=a%252Cb");
+    assert_ne!(exact_filter("a%2Cb"), exact_filter("a,b"));
+    assert_eq!(exact_filter("100%"), "DisplayName=100%25");
 }
 
 #[test]
@@ -67,6 +75,26 @@ fn list_output_is_parsed_without_carriage_returns() {
     )));
     let names = list_tests(&execution, &batch(None), &project()).unwrap();
     assert_eq!(names, ["Ns.C.Plain", "Ns.C.Theory(n: 2, s: \"x\")", "Ns.C.Theory(n: 3, s: \"y\")"]);
+}
+
+#[test]
+fn a_stray_line_mid_list_does_not_truncate_the_listing() {
+    let execution = Execution::fake();
+    execution.push(Ok(output(
+        0,
+        "The following Tests are available:\n    Ns.C.First\nwarning: something noisy\n    Ns.C.Second\n\n    Ns.C.Third\n",
+        "",
+    )));
+    let names = list_tests(&execution, &batch(None), &project()).unwrap();
+    assert_eq!(names, ["Ns.C.First", "Ns.C.Second", "Ns.C.Third"]);
+}
+
+#[test]
+fn a_listing_without_tests_fails_closed() {
+    let execution = Execution::fake();
+    execution.push(Ok(output(0, "The following Tests are available:\nwarning: nothing\n", "")));
+    let empty = list_tests(&execution, &batch(None), &project()).unwrap_err();
+    assert!(empty.diagnostic().contains("listed no tests"), "{}", empty.diagnostic());
 }
 
 #[test]
@@ -96,7 +124,11 @@ fn tool_requests_pin_the_environment_and_framework() {
     assert!(plain.contains("DOTNET_CLI_UI_LANGUAGE"), "{plain}");
     assert!(plain.contains("--artifacts-path"), "{plain}");
     assert!(!plain.contains("--framework"), "{plain}");
-    assert!(!plain.contains("SPECGATE_NATIVE_CAPTURE"), "{plain}");
+    assert!(!plain.contains("SPECGATE_NATIVE_CAPTURE\", Some"), "{plain}");
+    assert!(
+        plain.contains("SPECGATE_NATIVE_CAPTURE\", None"),
+        "an inherited capture configuration must be removed from every tool request: {plain}"
+    );
 
     let framework = rendered(&tool_request("test", &batch(Some("net8.0")), &project(), [], None));
     assert!(framework.contains("--framework"), "{framework}");
@@ -114,20 +146,34 @@ fn selection_must_be_exactly_one_test() {
     let system = CommandEnvironment::fake();
     let log = Path::new("scratch/results/00000000.trx");
     system.seed_file(log, "<TestRun><UnitTestResult outcome=\"Passed\" /></TestRun>");
-    verify_selection(&system, log, "Ns.C.M", true).unwrap();
+    verify_selection(&system, log, "Ns.C.M").unwrap();
 
     system.seed_file(log, "<TestRun></TestRun>");
-    let none = verify_selection(&system, log, "Ns.C.M", true).unwrap_err();
+    let none = verify_selection(&system, log, "Ns.C.M").unwrap_err();
     assert!(none.diagnostic().contains("selected 0 tests"), "{}", none.diagnostic());
 
     system.seed_file(log, "<TestRun><UnitTestResult a=\"1\" /><UnitTestResult a=\"2\" /></TestRun>");
-    let many = verify_selection(&system, log, "Ns.C.M", true).unwrap_err();
+    let many = verify_selection(&system, log, "Ns.C.M").unwrap_err();
     assert!(many.diagnostic().contains("selected 2 tests"), "{}", many.diagnostic());
 
+    // A missing or truncated result is a batch error whether or not the process
+    // succeeded; only a result that records a failed test is an ordinary failure.
     let missing = Path::new("scratch/results/absent.trx");
-    let unmatched = verify_selection(&system, missing, "Ns.C.M", true).unwrap_err();
-    assert!(unmatched.diagnostic().contains("selected no test"), "{}", unmatched.diagnostic());
-    verify_selection(&system, missing, "Ns.C.M", false).expect("a crashed host is a failed test, not a selection error");
+    let unmatched = verify_selection(&system, missing, "Ns.C.M").unwrap_err();
+    assert!(unmatched.diagnostic().contains("'Ns.C.M'"), "{}", unmatched.diagnostic());
+    assert!(
+        unmatched.diagnostic().contains("no result was logged"),
+        "{}",
+        unmatched.diagnostic()
+    );
+
+    system.seed_file(log, "<TestRun><UnitTestResult outcome=\"Passed\" ");
+    let truncated = verify_selection(&system, log, "Ns.C.M").unwrap_err();
+    assert!(truncated.diagnostic().contains("'Ns.C.M'"), "{}", truncated.diagnostic());
+    assert!(truncated.diagnostic().contains("incomplete"), "{}", truncated.diagnostic());
+
+    system.seed_file(log, "<TestRun><UnitTestResult outcome=\"Failed\" /></TestRun>");
+    verify_selection(&system, log, "Ns.C.M").expect("a recorded failed result is an ordinary failed test");
 }
 
 #[test]
@@ -158,19 +204,63 @@ fn the_sources_project_is_the_first_project_file() {
 }
 
 #[test]
-fn multi_targeted_projects_need_a_framework() {
+fn inherited_multi_targeting_is_found_in_the_evaluated_properties() {
     let system = CommandEnvironment::fake();
-    let declared = [PathBuf::from("tests/Multi.csproj")];
-    system.seed_file(
-        &declared[0],
-        "<Project><PropertyGroup><TargetFrameworks>net8.0;net10.0</TargetFrameworks></PropertyGroup></Project>",
-    );
-    let rejected = resolve_projects(&system, &declared, None, Path::new("scratch")).unwrap_err();
+    let declared = [PathBuf::from("tests/Inherits.csproj")];
+    // The project file itself names no framework list; Directory.Build.props supplies it.
+    system.seed_file(&declared[0], "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+    let execution = Execution::fake();
+    execution.push(Ok(output(
+        0,
+        "{\n  \"Properties\": {\n    \"TargetFramework\": \"\",\n    \"TargetFrameworks\": \"net8.0;net10.0\"\n  }\n}\n",
+        "",
+    )));
+    let rejected = resolve_projects(&system, &execution, &declared, None, Path::new("scratch")).unwrap_err();
     assert!(rejected.diagnostic().contains("csharp.framework"), "{}", rejected.diagnostic());
+    let query = rendered(&execution.requests()[0]);
+    assert!(query.contains("msbuild"), "{query}");
+    assert!(query.contains("-getProperty:TargetFramework"), "{query}");
+    assert!(query.contains("-getProperty:TargetFrameworks"), "{query}");
+}
 
-    let projects = resolve_projects(&system, &declared, Some("net8.0"), Path::new("scratch")).unwrap();
-    assert_eq!(projects[0].stem, "Multi");
+#[test]
+fn a_single_evaluated_framework_is_accepted_and_a_chosen_one_needs_no_query() {
+    let system = CommandEnvironment::fake();
+    let declared = [PathBuf::from("tests/Single.csproj")];
+    system.seed_file(&declared[0], "<Project />");
+    let execution = Execution::fake();
+    execution.push(Ok(output(
+        0,
+        r#"{"Properties":{"TargetFramework":"net10.0","TargetFrameworks":""}}"#,
+        "",
+    )));
+    resolve_projects(&system, &execution, &declared, None, Path::new("scratch")).unwrap();
+    execution.push(Ok(output(
+        0,
+        r#"{"Properties":{"TargetFramework":"","TargetFrameworks":"net10.0"}}"#,
+        "",
+    )));
+    resolve_projects(&system, &execution, &declared, None, Path::new("scratch")).unwrap();
+
+    let before = execution.requests().len();
+    let projects = resolve_projects(&system, &execution, &declared, Some("net8.0"), Path::new("scratch")).unwrap();
+    assert_eq!(execution.requests().len(), before, "a chosen framework needs no property query");
+    assert_eq!(projects[0].stem, "Single");
     assert_eq!(projects[0].artifacts, Path::new("scratch").join("p0").join("artifacts"));
+}
+
+#[test]
+fn a_failed_property_query_stops_the_batch() {
+    let system = CommandEnvironment::fake();
+    let declared = [PathBuf::from("tests/Broken.csproj")];
+    system.seed_file(&declared[0], "<Project />");
+    let execution = Execution::fake();
+    execution.push(Ok(output(1, "", "error MSB1003")));
+    let failed = resolve_projects(&system, &execution, &declared, None, Path::new("scratch")).unwrap_err();
+    assert!(failed.diagnostic().contains("MSB1003"), "{}", failed.diagnostic());
+    execution.push(Ok(output(0, "not json", "")));
+    let malformed = resolve_projects(&system, &execution, &declared, None, Path::new("scratch")).unwrap_err();
+    assert!(malformed.diagnostic().contains("could not be read"), "{}", malformed.diagnostic());
 }
 
 #[test]
@@ -208,6 +298,144 @@ fn the_build_proves_that_the_weaver_ran() {
     execution.push(Ok(output(1, "error CS0001: nope\n", "")));
     let failed = build(&system, &execution, &batch(None), &project, true).unwrap_err();
     assert!(failed.diagnostic().contains("CS0001"), "{}", failed.diagnostic());
+}
+
+const LIST_BANNER: &str = "The following Tests are available:\n";
+
+/// A fake world with the sources project, the weaver, and the declared tests
+/// projects, each reporting two woven methods.
+fn world(projects: &[&str]) -> CommandEnvironment {
+    let system = CommandEnvironment::fake();
+    system.seed_file("src/Sources.csproj", "<Project />");
+    system.seed_file(Path::new("fake-bin").join(TARGETS_FILE), "<Project />");
+    for (index, project) in projects.iter().enumerate() {
+        system.seed_file(project, "<Project />");
+        system.seed_file(
+            Path::new("scratch").join(format!("p{index}")).join("weave.json"),
+            r#"{"woven_method_count":2}"#,
+        );
+    }
+    system
+}
+
+fn plan(declared: &[PathBuf]) -> Plan<'_> {
+    Plan {
+        sources: Path::new("src"),
+        declared,
+        framework: Some("net8.0"),
+        operations_discovered: true,
+    }
+}
+
+fn seed_results(system: &CommandEnvironment, count: usize) {
+    for index in 0..count {
+        system.seed_file(
+            Path::new("scratch").join("results").join(format!("{index:0INDEX_WIDTH$}.trx")),
+            "<TestRun><UnitTestResult outcome=\"Passed\" /></TestRun>",
+        );
+    }
+}
+
+fn count_requests(execution: &Execution, needle: &str) -> usize {
+    execution
+        .requests()
+        .iter()
+        .filter(|request| rendered(request).contains(needle))
+        .count()
+}
+
+#[test]
+fn each_project_is_built_and_listed_once_and_its_scenarios_carry_the_project_name() {
+    let declared = [PathBuf::from("tests/A.csproj"), PathBuf::from("tests/B.csproj")];
+    let system = world(&["tests/A.csproj", "tests/B.csproj"]);
+    seed_results(&system, 3);
+    let execution = Execution::fake();
+    for names in [["N.T1", "N.T2"].as_slice(), ["N.T1"].as_slice()] {
+        let listing: String = names.iter().map(|name| format!("    {name}\n")).collect::<Vec<_>>().concat();
+        execution.push(Ok(output(0, "", "")));
+        execution.push(Ok(output(0, &format!("{LIST_BANNER}{listing}"), "")));
+    }
+    for _ in 0..3 {
+        execution.push(Ok(output(0, "", "")));
+    }
+
+    let executed = run_batch(&system, &execution, &plan(&declared), Path::new("scratch")).unwrap();
+    assert!(executed.failures.is_empty(), "{:?}", executed.failures);
+    assert_eq!(count_requests(&execution, "\"build\""), 2, "one build per project");
+    assert_eq!(count_requests(&execution, "--list-tests"), 2, "one enumeration per project");
+    assert_eq!(count_requests(&execution, "--filter"), 3, "one process per test");
+    assert_eq!(count_requests(&execution, "tests/A.csproj"), 4, "build, list, and two tests of A");
+    for scenario in ["A::N.T1", "A::N.T2", "B::N.T1"] {
+        assert_eq!(
+            count_requests(&execution, scenario),
+            1,
+            "{scenario} is issued to exactly one test process"
+        );
+    }
+}
+
+#[test]
+fn a_single_project_keeps_the_listed_names() {
+    let declared = [PathBuf::from("tests/A.csproj")];
+    let system = world(&["tests/A.csproj"]);
+    seed_results(&system, 1);
+    let execution = Execution::fake();
+    execution.push(Ok(output(0, "", "")));
+    execution.push(Ok(output(0, &format!("{LIST_BANNER}    N.T1\n"), "")));
+    execution.push(Ok(output(0, "", "")));
+
+    run_batch(&system, &execution, &plan(&declared), Path::new("scratch")).unwrap();
+    assert_eq!(
+        count_requests(&execution, "N.T1"),
+        1,
+        "the test process gets the filter and scenario name"
+    );
+    assert_eq!(count_requests(&execution, "A::"), 0, "a lone project adds no prefix");
+}
+
+#[test]
+fn duplicate_scenario_names_stop_the_batch_before_any_test_runs() {
+    let system = world(&["tests/a/X.csproj", "tests/b/X.csproj"]);
+    // Two projects with the same stem collide even after prefixing.
+    let declared = [PathBuf::from("tests/a/X.csproj"), PathBuf::from("tests/b/X.csproj")];
+    let execution = Execution::fake();
+    for _ in 0..2 {
+        execution.push(Ok(output(0, "", "")));
+        execution.push(Ok(output(0, &format!("{LIST_BANNER}    N.T1\n"), "")));
+    }
+    let error = run_batch(&system, &execution, &plan(&declared), Path::new("scratch")).unwrap_err();
+    assert!(error.diagnostic().contains("listed more than once"), "{}", error.diagnostic());
+    assert_eq!(count_requests(&execution, "--filter"), 0, "no test may run after a naming conflict");
+
+    // A project listing the same display name twice conflicts on its own.
+    let single = [PathBuf::from("tests/a/X.csproj")];
+    execution.push(Ok(output(0, "", "")));
+    execution.push(Ok(output(0, &format!("{LIST_BANNER}    N.T1\n    N.T1\n"), "")));
+    let repeated = run_batch(&system, &execution, &plan(&single), Path::new("scratch")).unwrap_err();
+    assert!(repeated.diagnostic().contains("listed more than once"), "{}", repeated.diagnostic());
+}
+
+#[test]
+fn an_unconfigured_framework_asks_msbuild_before_building_anything() {
+    let declared = [PathBuf::from("tests/A.csproj")];
+    let system = world(&["tests/A.csproj"]);
+    let execution = Execution::fake();
+    execution.push(Ok(output(
+        0,
+        r#"{"Properties":{"TargetFramework":"","TargetFrameworks":"net8.0;net10.0"}}"#,
+        "",
+    )));
+    let unframed = Plan {
+        framework: None,
+        ..plan(&declared)
+    };
+    let error = run_batch(&system, &execution, &unframed, Path::new("scratch")).unwrap_err();
+    assert!(error.diagnostic().contains("csharp.framework"), "{}", error.diagnostic());
+    assert_eq!(
+        count_requests(&execution, "\"build\""),
+        0,
+        "nothing may be built for an ambiguous framework"
+    );
 }
 
 fn sidecar(scenario: &str, completion: &serde_json::Value, operations: bool) -> Vec<u8> {

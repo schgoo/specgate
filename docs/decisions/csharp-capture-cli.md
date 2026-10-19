@@ -124,13 +124,19 @@ A throwaway xunit.v3 project with a `[ModuleInitializer]` that logs when
   with nothing recorded must write nothing.
 - `--list-tests` prints one `    <display name>` line per test below
   `The following Tests are available:`; Theory cases appear with their data
-  (`Spike.SpikeTests.Theorized(n: 2, s: "c(d)|e&f")`).
+  (`Spike.SpikeTests.Theorized(n: 2, s: "c(d)|e&f")`). The whole output after
+  the header is scanned, so warnings or blank lines between entries are ignored
+  rather than truncating the list; a missing header or an empty list stops the
+  batch.
 - A filter of `DisplayName=<escaped display name>` selects exactly that case,
   provided `,` is written `%2C`; a raw comma is split by MSBuild property parsing
   (`MSB4177`). The TRX contains exactly one `UnitTestResult`.
 - A zero-match filter exits `0` and prints `No test matches the given testcase
   filter`; it is detected from the TRX having no result, never from the exit
-  code.
+  code. A missing or truncated TRX (crashed test host, bad filter) stops the
+  whole batch with an error naming the test, in strict and non-strict capture
+  alike; only a complete TRX recording a failed result is an ordinary failed
+  test.
 - One `dotnet test --no-build` costs about 3 s on this machine, so capturing the
   36-test fixture project costs about two minutes per run.
 
@@ -161,7 +167,43 @@ Recorded after the slices landed, where the build differed from the plan:
   `incomplete_capture` faults in each snapshot; `ProcessExit` is a final
   non-throwing flush. A persistence failure throws inside the operation
   (`CaptureRejection.PersistenceFailed`, message prefixed with the Rust failure
-  marker).
+  marker). The failure is sticky: the session is poisoned, so a test that
+  catches the exception cannot get a later write to publish the earlier
+  operation as successful. Every later write throws; at `ProcessExit` the
+  runtime prints the marker to stderr and makes a best-effort sidecar write with
+  every operation projected as `incomplete_capture`. The CLI rejects the whole
+  batch when the marker appears in a test's output, and treats such a sidecar as
+  unfinalized. Limit: if the sidecar stays unwritable and the stderr marker is
+  not forwarded by `dotnet test`, nothing further can be reported (the stderr
+  path is not yet verified live).
+- **Nested components.** C# discovery reports only the requested component, but
+  the filter keeps nested calls into other components. `capture/facade.rs`
+  discovers every retained foreign component and `encode_bundle` uses those
+  schemas (as Rust does with its whole-crate registry); the encoded trace and
+  registry are linked-validated before success for every language.
+- **Framework detection.** Multi-targeting is read from evaluated MSBuild
+  properties (`dotnet msbuild -getProperty:TargetFramework
+  -getProperty:TargetFrameworks`) through the mockable execution boundary, so
+  settings inherited from `Directory.Build.props` count. Several frameworks
+  without `csharp.framework` is an error before anything is built.
+- **Filter escaping.** `dotnet` passes `--filter` through MSBuild, which decodes
+  `%XX` and splits on `,`/`;` and rejects `"`; `exact_filter` therefore also
+  escapes `%` as `%25` (first) and `"` as `%22`. Linux behavior is unverified.
+- **Environment hygiene.** Every C# tool request removes an inherited
+  `SPECGATE_NATIVE_CAPTURE`; only the per-test request sets it.
+- **Operation↔component is 1:1 (ratified, option F).** Copilot finding 2 showed
+  that a method declaring several components could only record under the first.
+  Rather than pick an attribution rule, an operation now belongs to exactly one
+  component. `SpecOperationAttribute` no longer allows multiple use (the
+  compiler rejects repeats, CS0579), the weaver throws `WeaveException` naming
+  the method and components for an assembly that still carries several
+  (`RejectsMethodDeclaringSeveralComponents`, built with Cecil), and
+  `specgate-discovery` exits 1 with the same message
+  (`AMethodDeclaringSeveralComponentsIsRejected`). The first-declared-wins loop,
+  the `string[]` `EnterOperation` overload and their tests were deleted. The
+  fixture `StatelessAdd.Add` was split so `fixture.multi_case` has its own
+  `MultiCase.Add`; the matrix row now lists `MultiCase.cs`. Setups are
+  unchanged.
 - **I/O seam.** The C# runtime uses an interface (`ISidecarFileSystem`) with a
   fake; the Rust CLI uses the existing struct-with-inner-enum boundary.
 - **Discovery per component.** C# discovery reports only the requested

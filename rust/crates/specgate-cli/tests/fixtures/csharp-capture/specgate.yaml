@@ -7,6 +7,13 @@ components:
         sources: sources
         tests:
           projects: [tests/SpecGate.CliCaptureFixtures.Tests.csproj]
+  fixture.cli_capture.pipeline:
+    implementations:
+      csharp:
+        language: csharp
+        sources: sources
+        tests:
+          projects: [tests/SpecGate.CliCaptureFixtures.Tests.csproj]
   fixture.cli_capture.fetch:
     implementations:
       csharp:

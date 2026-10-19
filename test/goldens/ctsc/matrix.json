@@ -1069,7 +1069,7 @@
       "component": "fixture.multi_case",
       "sources": [
         "test/rust/crates/specgate-ctsc-fixtures/src/conformance/basic/multi_case.rs",
-        "test/csharp/SpecGate.CtscFixtures/Conformance/Basic/StatelessAdd.cs"
+        "test/csharp/SpecGate.CtscFixtures/Conformance/Basic/MultiCase.cs"
       ],
       "rust": {
         "binding": "rust",

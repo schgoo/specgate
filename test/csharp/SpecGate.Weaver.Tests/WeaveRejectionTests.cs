@@ -1,5 +1,8 @@
 using System;
 using System.IO;
+using System.Linq;
+using Mono.Cecil;
+using Mono.Cecil.Cil;
 using Xunit;
 
 namespace SpecGate.Weaver.Tests;
@@ -45,6 +48,68 @@ public sealed class WeaveRejectionTests
 
         Assert.Contains("Make", failure.Message, StringComparison.Ordinal);
         Assert.Contains("both a SpecGate operation and a SpecGate setup", failure.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RejectsMethodDeclaringSeveralComponents()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "specgate-weave-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            // The attribute no longer allows repetition, so the compiler cannot build
+            // this input; only a hand-built assembly can reach the weaver's own check.
+            string annotations = Path.Combine(AppContext.BaseDirectory, "SpecGate.Annotations.dll");
+            File.Copy(annotations, Path.Combine(directory, "SpecGate.Annotations.dll"));
+            string target = Path.Combine(directory, "MultiDeclared.dll");
+            WriteMultiDeclared(annotations, target);
+
+            WeaveException failure = Assert.Throws<WeaveException>(() => AssemblyWeaver.Weave(target));
+
+            Assert.Contains("Holder::Shared", failure.Message, StringComparison.Ordinal);
+            Assert.Contains("'fixture.one', 'fixture.two'", failure.Message, StringComparison.Ordinal);
+            Assert.Contains("exactly one component", failure.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    private static void WriteMultiDeclared(string annotationsPath, string targetPath)
+    {
+        using AssemblyDefinition annotations = AssemblyDefinition.ReadAssembly(annotationsPath);
+        TypeDefinition attribute = annotations.MainModule.GetType("SpecGate.Annotations.SpecOperationAttribute");
+
+        using AssemblyDefinition assembly = AssemblyDefinition.CreateAssembly(
+            new AssemblyNameDefinition("MultiDeclared", new Version(1, 0)), "MultiDeclared", ModuleKind.Dll);
+        ModuleDefinition module = assembly.MainModule;
+        MethodReference constructor = module.ImportReference(
+            attribute.Methods.Single(method => method.IsConstructor && !method.IsStatic));
+
+        TypeDefinition holder = new(
+            "Fixtures",
+            "Holder",
+            TypeAttributes.Public | TypeAttributes.Abstract | TypeAttributes.Sealed,
+            module.TypeSystem.Object);
+        module.Types.Add(holder);
+        MethodDefinition shared = new(
+            "Shared",
+            MethodAttributes.Public | MethodAttributes.Static,
+            module.TypeSystem.Void);
+        shared.Body.GetILProcessor().Emit(OpCodes.Ret);
+        holder.Methods.Add(shared);
+
+        foreach (string component in new[] { "fixture.one", "fixture.two" })
+        {
+            CustomAttribute annotation = new(constructor);
+            annotation.ConstructorArguments.Add(new CustomAttributeArgument(module.TypeSystem.String, "shared"));
+            annotation.Properties.Add(new CustomAttributeNamedArgument(
+                "Spec", new CustomAttributeArgument(module.TypeSystem.String, component)));
+            shared.CustomAttributes.Add(annotation);
+        }
+
+        assembly.Write(targetPath);
     }
 
     [Fact]
