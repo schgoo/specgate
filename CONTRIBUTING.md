@@ -107,6 +107,17 @@ builds them and exports `SPECGATE_DISCOVERY_PATH` and `SPECGATE_WEAVER_PATH`; to
 `cargo test` directly, run `just discovery-tool weaver-tool` first and export the
 two variables as the `justfile` does (`artifacts/discovery`, `artifacts/weaver`).
 
+`just rust-test` runs the product Rust workspace through Cargo with one outer
+test thread and fresh shared compilation intermediates under
+`rust/target/rust-test-<guid>/build`. This lets capture/replay tests reuse
+dependencies without overlapping rebuilds and execution of generated binaries.
+Cargo still selects the full workspace's unit, binary, integration, and doctests;
+threads explicitly created inside tests are unaffected. Wrapper regressions run
+first. Cleanup restores the caller's build-directory environment and working
+directory and removes scratch. There is no persistent test cache or CI cache
+configuration. `just test` also runs the separate `test/rust` workspace with its
+original Cargo command and parallelism.
+
 The gate covers Rust build/tests/clippy/fmt/licenses, generated crate READMEs,
 the CTSC Python corpus and linked validators, a deterministic capture-to-replay
 smoke, the CTSC golden matrix check, and the retained C# build/tests/format/
@@ -123,7 +134,7 @@ smoke cache to warm locally or restore in CI.
 Use `just --timestamp --verbose check` to identify recipe boundaries in a gate
 log; CI uses the same flags without changing the checks being run. See
 [`docs/dev-cycle-performance.md`](docs/dev-cycle-performance.md) for the
-stage breakdown, golden-regeneration measurements, and reproduction commands.
+stage breakdown, compilation-reuse measurements, and reproduction commands.
 
 Run `just package-smoke` for release changes; it packages all six retained crates,
 installs the packaged CLI, and exercises registry-dependency

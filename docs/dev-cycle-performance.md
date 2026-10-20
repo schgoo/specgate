@@ -261,6 +261,94 @@ Reproduce with `$env:RUSTUP_TOOLCHAIN = '1.96.0'` and `just ctsc-smoke` from the
 repository root. No cache cleanup is needed between samples because each run
 allocates and removes its own intermediates.
 
+## Rust workspace tests
+
+After golden regeneration and smoke were optimized, the CLI library's 98 tests
+took **346.93 s** within the Windows [#90 CI
+run](https://github.com/schgoo/specgate/actions/runs/39444560186), out of
+approximately **372 s** for the Rust-test stage. Several capture and replay
+tests repeatedly compile the same fixture packages into fresh targets.
+
+An initial serial proof ran seven real Rust capture/replay tests individually,
+first with separate intermediates and then with one fresh intermediate directory
+shared across those serial processes:
+
+| Case | Separate intermediates | Shared intermediates |
+|---|---:|---:|
+| Exit inside an open operation | 32.456 s | 31.186 s |
+| Preserve a surviving sibling | 33.764 s | 2.517 s |
+| Strictly reject an unfinalizable scenario | 32.267 s | 2.806 s |
+| Deterministic capture bundle | 33.123 s | 10.858 s |
+| Forced capture into occupied output | 32.178 s | 3.062 s |
+| Replay contract | 71.036 s | 15.820 s |
+| Candidate Cargo configuration | 339.863 s | 47.557 s |
+
+The first build still pays the compilation cost; later captures and replays
+reuse dependencies. The two C# end-to-end tests separately took **54.262 s**
+and **39.835 s**. Cargo intermediate sharing does not eliminate their
+`dotnet` work, and each captured scenario must retain its own test process.
+
+The complete unchanged CLI library test executable was then run twice to
+include the cost of giving up outer test parallelism:
+
+| Configuration | CLI library test executable |
+|---|---:|
+| Original intermediates, default test parallelism | 499.633 s |
+| Fresh shared intermediates, `--test-threads=1` | 211.341 s |
+
+Both runs passed **98 tests**, with the same one ignored golden-matrix test.
+The observed reduction is **288.292 s (57.7%)**. These are local Windows samples
+on the same shared host, not a statistical benchmark, a CI measurement, or a
+whole-gate speedup claim. The serial case totals above are not substitutes for
+this full-suite comparison.
+
+### Recipe integration
+
+`just rust-test`, included in `just test` and `just check`, applies the measured
+policy to the normal `cargo test --workspace` command in `rust`: shared
+intermediates plus `-- --test-threads=1`. Keeping Cargo in charge avoids
+reimplementing target selection or silently dropping binary, integration, or
+doctests. The other product workspace tests also run serially; this is a
+deliberate runner policy, not a change to runtime concurrency. Threads and
+concurrent operations explicitly exercised inside tests are unaffected.
+The separate `test/rust` workspace retains its original command and parallelism.
+
+The wrapper allocates a fresh GUID-named `rust/target/rust-test-*` directory for
+each invocation and sets `CARGO_BUILD_BUILD_DIR` to its `build` child. This
+includes compilation of the workspace test targets themselves, not just builds
+launched inside tests. Workspace compilation therefore starts with empty
+intermediates even if `just build` has already run; that extra cost must be
+included when timing the integrated recipe rather than assuming the library
+test executable's speedup transfers unchanged.
+
+The first integrated `just test` run passed in **298.391 s**, including tool
+builds, wrapper regressions, fresh product-workspace compilation, all selected
+product tests and doctests, and the separate fixture workspace. Product test
+compilation took approximately **66 s**; the CLI library's 98 passing tests took
+**194.04 s**. No corresponding original full-recipe measurement was taken under
+these conditions, so this is an integration measurement, not a paired
+whole-recipe speedup claim.
+
+The subsequent complete `just check` passed in **424.441 s**, including the
+unchanged smoke, golden matrix, and C# checks. Host and existing cache state
+were not reset, and no paired original full-gate run was taken; this is not
+evidence of a particular whole-gate or CI percentage reduction.
+
+Cargo runs from the product workspace so its toolchain and configuration lookup
+remain unchanged. The wrapper does not change `CARGO_TARGET_DIR`, reuse captured
+results, remove assertions, or change candidate runtime resolution. Each test
+finishes before a later test can rebuild a generated executable; existing
+capture/replay scratch and final-output isolation remain in place. Cleanup
+restores the caller's build-directory environment and working directory and
+removes the new intermediates. Interrupted scratch is never reused by a later
+invocation. There is no persistent cache or new CI cache configuration.
+
+`just rust-test-regressions` checks the exact unfiltered workspace command,
+serial execution, workspace working directory, invocation-unique build
+directories, preservation of caller target/thread settings, restoration of
+unset/empty/set build-directory values, and cleanup on success, a nonzero Cargo
+exit, or a launch error. It is a prerequisite of `just rust-test`.
+
 ## Reproduction
 
 For complete gate logs, run from the repository root:

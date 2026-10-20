@@ -26,8 +26,13 @@ build:
     cd rust && cargo build --workspace --all-targets
     cd test/rust && cargo build --workspace --all-targets
 
-test: discovery-tool weaver-tool
-    cd rust && cargo test --workspace
+rust-test-regressions:
+    pwsh -NoLogo -NoProfile -File scripts/rust-test-tests.ps1
+
+rust-test: discovery-tool weaver-tool rust-test-regressions
+    pwsh -NoLogo -NoProfile -File scripts/rust-test.ps1
+
+test: rust-test
     cd test/rust && cargo test --workspace
 
 clippy:
