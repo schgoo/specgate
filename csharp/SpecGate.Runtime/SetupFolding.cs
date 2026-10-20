@@ -188,8 +188,8 @@ internal sealed class SetupFolding
 
     /// <summary>
     /// A folding is decided by the woven method together with the component and
-    /// operation it was entered for: one method may declare the same operation
-    /// for several components, and each component folds its own setups.
+    /// operation it was entered for: the method, its single component, and the
+    /// operation name.
     /// </summary>
     private readonly struct FoldingKey : IEquatable<FoldingKey>
     {

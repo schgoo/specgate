@@ -111,6 +111,40 @@ pub struct Batch {
 }
 
 impl Batch {
+    /// Narrow the batch to the component the binding selected.
+    ///
+    /// The selected component's registry and normalized schema become a
+    /// [`Discovered`]; the sources must declare that component.
+    ///
+    /// # Errors
+    ///
+    /// Returns a binding error when the sources do not declare the selected
+    /// component, or the component's normalization failure.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the batch lacks a registry document for the selected
+    /// component, which successful discovery guarantees.
+    pub fn into_selected(mut self) -> Result<Discovered, Error> {
+        crate::discovery::require_declared(&self.implementation, &self.present_components)?;
+        let component = self.implementation.component.clone();
+        let selected = self
+            .components
+            .remove(&component)
+            .expect("successful discovery must contain the selected component");
+        let schema = selected.schema?;
+        let index = selected.registry_index;
+        let registry_json = self.registry_json.swap_remove(index);
+        let registry = self.registries.swap_remove(index);
+        Ok(Discovered {
+            implementation: self.implementation,
+            cargo_context: self.cargo_context,
+            registry_json,
+            registry,
+            schema,
+        })
+    }
+
     /// The parsed registry backing `component`.
     ///
     /// # Panics

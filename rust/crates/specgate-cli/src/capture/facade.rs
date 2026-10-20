@@ -1,12 +1,10 @@
 #![cfg_attr(all(feature = "test-util", not(test)), expect(dead_code, reason = "feature-gated fixture support"))]
 
 //! Capture workflow orchestration and publication.
-#[cfg(any(test, feature = "test-util"))]
-use super::BTreeSet;
 use super::{
     CaptureError, CaptureErrorKind, CaptureReport, CaptureRequest, CommandEnvironment, ComponentId, Discovered, Discovery, ExecutedTests,
-    Execution, FailureContext, MANIFEST_FILE, Path, PathBuf, REGISTRY_FILE, TRACE_FILE, build_binaries, encode_bundle, enumerate_tests,
-    public_error, reject_failures, run_id, run_tests, scratch_dir, spec_operation, validate_setups, write_artifact,
+    Execution, FailureContext, MANIFEST_FILE, Path, PathBuf, REGISTRY_FILE, TRACE_FILE, csharp, encode_bundle, public_error,
+    reject_failures, run_id, rust, scratch_dir, spec_operation, validate_setups, write_artifact,
 };
 
 // Default capture bundles live beside the project, outside version control via `.gitignore`.
@@ -87,12 +85,17 @@ pub fn capture_with(
 ) -> Result<CaptureReport, CaptureError> {
     let component = ComponentId::from(request.component());
     let label = Some(request.implementation()).filter(|label| !label.is_empty());
-    let discovered = discover_implementation(request.binding_str(), &component, label, system, discovery)
+    let resolved = discovery
+        .capture_resolve(
+            request.binding_str(),
+            &specgate_discovery::identity::ComponentId::from(component.as_str()),
+            label,
+        )
+        .map_err(|error| FailureContext::with_source(error.to_string(), error))
         .map_err(public_error(CaptureErrorKind::Discovery))?;
-    let out = request.out().map_or_else(
-        || default_out(&component, &discovered.implementation.label, system),
-        Path::to_path_buf,
-    );
+    let out = request
+        .out()
+        .map_or_else(|| default_out(&component, &resolved.label, system), Path::to_path_buf);
     if !request.force() && system.is_occupied(&out) {
         return Err(public_error(CaptureErrorKind::Request)(FailureContext::domain(format!(
             "capture output directory {} is not empty; pass --force to overwrite it",
@@ -103,15 +106,43 @@ pub fn capture_with(
         component,
         out,
         #[cfg(any(test, feature = "test-util"))]
-        excluded_operations: BTreeSet::new(),
+        excluded_operations: std::collections::BTreeSet::new(),
     }];
-    let executed = execute_with(&discovered, &requests, system, execution).map_err(public_error(CaptureErrorKind::Execution))?;
+    let (discovered, executed) = capture_tests(resolved, &requests, system, execution, discovery)?;
     let reports =
         write_with(&discovered, &requests, &executed, REJECT_FAILURES, system).map_err(public_error(CaptureErrorKind::Encoding))?;
     Ok(reports
         .into_iter()
         .next()
         .expect("one capture bundle request must produce one publication report"))
+}
+
+/// Discover the implementation's metadata and run its tests, once for the batch.
+///
+/// A Rust implementation is discovered first and then built and run. A C#
+/// implementation's metadata comes from the build that weaves and runs its
+/// tests, so discovery cannot precede it and the sources are never compiled a
+/// second time.
+fn capture_tests(
+    resolved: specgate_discovery::binding::ResolvedImplementation,
+    requests: &[BundleRequest],
+    system: &CommandEnvironment,
+    execution: &Execution,
+    discovery: &Discovery,
+) -> Result<(Discovered, ExecutedTests), CaptureError> {
+    match resolved.language() {
+        specgate_discovery::binding::Language::Rust => {
+            let discovered = discover_rust(resolved, system, discovery).map_err(public_error(CaptureErrorKind::Discovery))?;
+            let executed = execute_with(&discovered, requests, system, execution).map_err(public_error(CaptureErrorKind::Execution))?;
+            Ok((discovered, executed))
+        }
+        specgate_discovery::binding::Language::CSharp => {
+            let sources = resolved.implementation.sources.clone();
+            let scratch = scratch_dir(system, sources).map_err(public_error(CaptureErrorKind::Execution))?;
+            csharp::capture(system, execution, discovery, &resolved, requests, scratch.path())
+                .map_err(public_error(CaptureErrorKind::Execution))
+        }
+    }
 }
 
 /// Default bundle directory: `.specgate/captures/<component>/<implementation>/<UTC run id>`.
@@ -137,7 +168,7 @@ pub(crate) struct BundleRequest {
     /// Golden-only operation exclusions. Product capture always leaves this
     /// empty; the golden matrix validates every declared exclusion separately.
     #[cfg(any(test, feature = "test-util"))]
-    pub(crate) excluded_operations: BTreeSet<String>,
+    pub(crate) excluded_operations: std::collections::BTreeSet<String>,
 }
 
 /// Capture many components from one Rust implementation in a single pass.
@@ -173,24 +204,56 @@ pub(crate) fn capture_many(
 
 #[cfg(any(test, feature = "test-util"))]
 pub(crate) fn discover(binding: impl AsRef<Path>, component: &ComponentId, label: Option<&str>) -> Result<Discovered, FailureContext> {
-    discover_implementation(binding, component, label, &CommandEnvironment::real(), &Discovery::real())
-}
-
-fn discover_implementation(
-    binding: impl AsRef<Path>,
-    component: &ComponentId,
-    label: Option<&str>,
-    system: &CommandEnvironment,
-    discovery: &Discovery,
-) -> Result<Discovered, FailureContext> {
-    let discovered = discovery
-        .capture_discover(
+    let discovery = Discovery::real();
+    let resolved = discovery
+        .capture_resolve(
             binding.as_ref(),
             &specgate_discovery::identity::ComponentId::from(component.as_str()),
             label,
         )
         .map_err(|error| FailureContext::with_source(error.to_string(), error))?;
-    let resolved = &discovered.implementation;
+    discover_rust(resolved, &CommandEnvironment::real(), &discovery)
+}
+
+/// Capture a C# implementation through the real build, weaver, and test runner.
+///
+/// Returns the selected component's discovery result and the executed tests, ready
+/// for [`write_bundles`]. The sources are compiled once per tests project.
+#[cfg(any(test, feature = "test-util"))]
+pub(crate) fn capture_csharp_tests(
+    binding: impl AsRef<Path>,
+    component: &ComponentId,
+    label: Option<&str>,
+    requests: &[BundleRequest],
+) -> Result<(Discovered, ExecutedTests), FailureContext> {
+    let discovery = Discovery::real();
+    let resolved = discovery
+        .capture_resolve(
+            binding.as_ref(),
+            &specgate_discovery::identity::ComponentId::from(component.as_str()),
+            label,
+        )
+        .map_err(|error| FailureContext::with_source(error.to_string(), error))?;
+    let system = CommandEnvironment::real();
+    let scratch = scratch_dir(&system, &resolved.implementation.sources)?;
+    csharp::capture(&system, &Execution::real(), &discovery, &resolved, requests, scratch.path())
+}
+
+/// Discover a Rust capture implementation's metadata.
+///
+/// C# metadata is reflected from the capture build itself, so a C#
+/// implementation never reaches this function in a capture.
+fn discover_rust(
+    resolved: specgate_discovery::binding::ResolvedImplementation,
+    system: &CommandEnvironment,
+    discovery: &Discovery,
+) -> Result<Discovered, FailureContext> {
+    if resolved.language() != specgate_discovery::binding::Language::Rust {
+        return Err(FailureContext::domain(format!(
+            "implementation '{}' is not a Rust implementation; C# metadata is discovered by the capture build",
+            resolved.label
+        )));
+    }
     if !system.is_file(resolved.implementation.sources.join("Cargo.toml")) {
         return Err(FailureContext::domain(format!(
             "implementation '{}' is not a Rust package (no Cargo.toml at {})",
@@ -198,7 +261,9 @@ fn discover_implementation(
             resolved.implementation.sources.display()
         )));
     }
-    Ok(discovered)
+    discovery
+        .discover_resolved(resolved)
+        .map_err(|error| FailureContext::with_source(error.to_string(), error))
 }
 
 /// Capture many components, keeping the tests that pass.
@@ -252,10 +317,15 @@ fn execute_with(
     let resolved = &discovered.implementation;
     validate_setups(&discovered.registry, requests)?;
     let sources = &resolved.implementation.sources;
-    let scratch = scratch_dir(system, sources)?;
-    let test_binaries = build_binaries(execution, sources, scratch.path())?;
-    let tests = enumerate_tests(execution, &test_binaries)?;
-    run_tests(system, execution, &tests, scratch.path())
+    match resolved.language() {
+        specgate_discovery::binding::Language::Rust => {
+            let scratch = scratch_dir(system, sources)?;
+            rust::execute(system, execution, sources, scratch.path())
+        }
+        specgate_discovery::binding::Language::CSharp => Err(FailureContext::domain(
+            "C# tests run through the capture build, which also discovers the metadata; they cannot run from a prior discovery result",
+        )),
+    }
 }
 
 #[cfg(any(test, feature = "test-util"))]

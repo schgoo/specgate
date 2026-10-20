@@ -122,6 +122,7 @@ public sealed class OperationScope
         }
 
         Pending.RecordInputs(folded);
+        Session.Persist();
     }
 
     /// <remarks>

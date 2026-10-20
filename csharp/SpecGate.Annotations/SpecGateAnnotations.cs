@@ -2,8 +2,8 @@ using System;
 
 namespace SpecGate.Annotations;
 
-/// <summary>Marks a method as a semantic CTSC operation.</summary>
-[AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]
+/// <summary>Marks a method as a semantic CTSC operation of exactly one component.</summary>
+[AttributeUsage(AttributeTargets.Method)]
 public sealed class SpecOperationAttribute : Attribute
 {
     /// <summary>Initializes an operation annotation.</summary>

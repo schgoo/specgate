@@ -61,6 +61,12 @@ public enum CaptureRejection
     /// different construction inputs.
     /// </summary>
     SetupAmbiguity,
+
+    /// <summary>
+    /// The capture sidecar could not be replaced on disk, so the evidence the
+    /// command-line tool reads would be missing or stale.
+    /// </summary>
+    PersistenceFailed,
 }
 
 /// <summary>
@@ -97,6 +103,13 @@ public sealed class SpecGateCaptureException : Exception
     /// <param name="message">The failure description.</param>
     public SpecGateCaptureException(CaptureRejection rejection, string message)
         : base(message) => Rejection = rejection;
+
+    /// <summary>Creates a classified exception with a cause.</summary>
+    /// <param name="rejection">Why the observation was refused.</param>
+    /// <param name="message">The failure description.</param>
+    /// <param name="innerException">The underlying cause.</param>
+    public SpecGateCaptureException(CaptureRejection rejection, string message, Exception innerException)
+        : base(message, innerException) => Rejection = rejection;
 
     /// <summary>Gets the stable classification of this failure.</summary>
     public CaptureRejection Rejection { get; }

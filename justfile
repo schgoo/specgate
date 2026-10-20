@@ -9,14 +9,24 @@ _default:
 # at it.
 export SPECGATE_DISCOVERY_PATH := justfile_directory() / "artifacts" / "discovery"
 
+# C# capture runs the prebuilt weaver, the runtime it binds to, and the MSBuild
+# targets that inject them into the build. They sit in one directory, beside the
+# specgate executable when installed, otherwise here via SPECGATE_WEAVER_PATH.
+# The runtime is built for net8.0, the lowest framework a woven assembly can run on.
+export SPECGATE_WEAVER_PATH := justfile_directory() / "artifacts" / "weaver"
+
 discovery-tool:
     dotnet build csharp/SpecGate.Discovery/SpecGate.Discovery.csproj --output "{{ SPECGATE_DISCOVERY_PATH }}"
+
+weaver-tool:
+    dotnet build csharp/SpecGate.Weaver/SpecGate.Weaver.csproj --output "{{ SPECGATE_WEAVER_PATH }}"
+    dotnet build csharp/SpecGate.Runtime/SpecGate.Runtime.csproj --framework net8.0 --output "{{ SPECGATE_WEAVER_PATH }}"
 
 build:
     cd rust && cargo build --workspace --all-targets
     cd test/rust && cargo build --workspace --all-targets
 
-test: discovery-tool
+test: discovery-tool weaver-tool
     cd rust && cargo test --workspace
     cd test/rust && cargo test --workspace
 

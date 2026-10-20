@@ -4,9 +4,9 @@ using Xunit;
 namespace SpecGate.Runtime.Tests;
 
 /// <summary>
-/// A session records exactly one component. A method may declare the same
-/// operation for several components, so entry selects the declaration matching
-/// the session and ignores the rest.
+/// A session records exactly one component. Operation and component are 1:1, so
+/// entry records an operation when its component matches the session and
+/// ignores it otherwise.
 /// </summary>
 [Collection(nameof(CaptureSessionSerialization))]
 public sealed class ComponentSelectionTests
@@ -17,33 +17,6 @@ public sealed class ComponentSelectionTests
         using CaptureSession session = CaptureScenario.Begin("fixture.stateless_add");
 
         OperationScope scope = SpecGateRuntime.EnterOperation(Boundaries.Of("Add"), "add", "fixture.multi_case");
-        SpecGateRuntime.ExitOk(scope, 5);
-
-        Assert.False(scope.IsRecording);
-        Assert.Empty(session.Finish().Operations);
-    }
-
-    [Fact]
-    public void AMultiComponentOperationRecordsOnlyTheSessionComponent()
-    {
-        using CaptureSession session = CaptureScenario.Begin("fixture.multi_case");
-        string[] declared = ["fixture.stateless_add", "fixture.multi_case"];
-
-        OperationScope scope = SpecGateRuntime.EnterOperation(Boundaries.Of("Add"), "add", declared);
-        SpecGateRuntime.ExitOk(scope, 5);
-
-        OperationSpan span = Assert.Single(session.Finish().Operations);
-        Assert.Equal("fixture.multi_case", span.ComponentId);
-        Assert.Equal("add", span.OperationName);
-    }
-
-    [Fact]
-    public void AMultiComponentOperationMatchingNothingIsNotRecorded()
-    {
-        using CaptureSession session = CaptureScenario.Begin("fixture.other");
-        string[] declared = ["fixture.stateless_add", "fixture.multi_case"];
-
-        OperationScope scope = SpecGateRuntime.EnterOperation(Boundaries.Of("Add"), "add", declared);
         SpecGateRuntime.ExitOk(scope, 5);
 
         Assert.False(scope.IsRecording);

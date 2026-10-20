@@ -12,17 +12,17 @@ internal sealed class OperationDeclaration
 {
     private const string Kind = "operation";
 
-    private OperationDeclaration(string operation, string[] components, ParameterDefinition[] inputs)
+    private OperationDeclaration(string operation, string component, ParameterDefinition[] inputs)
     {
         Operation = operation;
-        Components = components;
+        Component = component;
         Inputs = inputs;
     }
 
     internal string Operation { get; }
 
-    /// <summary>Gets the components declaring this operation, in source order.</summary>
-    internal string[] Components { get; }
+    /// <summary>Gets the one component that owns this operation.</summary>
+    internal string Component { get; }
 
     /// <summary>
     /// Gets the parameters recorded as inputs, in declaration order. Their
@@ -46,33 +46,34 @@ internal sealed class OperationDeclaration
 
         AnnotatedMethod.RejectUnsupported(method, Kind);
 
-        string? operation = null;
-        List<string> components = [];
-        foreach (CustomAttribute annotation in annotations)
+        if (annotations.Count > 1)
         {
-            string name = ReadOperationName(method, annotation);
-            if (operation is null)
-            {
-                operation = name;
-            }
-            else if (!string.Equals(operation, name, StringComparison.Ordinal))
-            {
-                throw new WeaveException(
-                    $"{method.FullName} declares operations '{operation}' and '{name}'. A method may be "
-                    + "declared for several components but must use one operation name.");
-            }
-
-            components.Add(ReadComponent(method, annotation));
-        }
-
-        string[] distinct = [.. components.Distinct(StringComparer.Ordinal)];
-        if (distinct.Length != components.Count)
-        {
+            string components = string.Join(", ", annotations.Select(annotation => DescribeComponent(annotation)));
             throw new WeaveException(
-                $"{method.FullName} declares operation '{operation}' more than once for the same component.");
+                $"{method.FullName} carries {annotations.Count} SpecOperation annotations ({components}). "
+                + "An operation belongs to exactly one component, so a method may declare only one; "
+                + "split it into one method per component.");
         }
 
-        return new OperationDeclaration(operation!, distinct, AnnotatedMethod.ReadInputs(method, Kind));
+        CustomAttribute only = annotations[0];
+        return new OperationDeclaration(
+            ReadOperationName(method, only),
+            ReadComponent(method, only),
+            AnnotatedMethod.ReadInputs(method, Kind));
+    }
+
+    private static string DescribeComponent(CustomAttribute annotation)
+    {
+        foreach (CustomAttributeNamedArgument property in annotation.Properties)
+        {
+            if (string.Equals(property.Name, "Spec", StringComparison.Ordinal)
+                && property.Argument.Value is string component)
+            {
+                return $"'{component}'";
+            }
+        }
+
+        return "no component";
     }
 
     private static string ReadOperationName(MethodDefinition method, CustomAttribute annotation)

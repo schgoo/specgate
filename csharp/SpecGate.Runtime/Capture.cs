@@ -262,10 +262,7 @@ public sealed class OperationSpan
         StartTimeUnixNano = startTimeUnixNano;
         EndTimeUnixNano = endTimeUnixNano;
         Status = status;
-        if (inputs is null)
-        {
-            throw new ArgumentNullException(nameof(inputs));
-        }
+        ArgumentNullException.ThrowIfNull(inputs);
 
         // The wire form is a sorted map, so the order is fixed here rather than
         // trusting whatever order the caller's dictionary enumerates in.

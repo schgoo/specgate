@@ -50,7 +50,7 @@ pub mod runner;
 pub mod test_util;
 
 #[doc(inline)]
-pub use discovery::{discover, discover_batch, discover_many, discover_resolved};
+pub use discovery::{discover, discover_batch, discover_built, discover_many, discover_resolved};
 #[doc(inline)]
 pub use error::Error;
 

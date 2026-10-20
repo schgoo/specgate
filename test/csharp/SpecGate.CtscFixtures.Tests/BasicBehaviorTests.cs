@@ -14,6 +14,8 @@ public sealed class BasicBehaviorTests
     {
         Assert.Equal(5, StatelessAdd.Add(2, 3));
         Assert.Equal(-5, StatelessAdd.Add(-8, 3));
+        Assert.Equal(5, MultiCase.Add(2, 3));
+        Assert.Equal(-5, MultiCase.Add(-8, 3));
         Assert.Equal(5, MultiOperation.Alpha(4));
         Assert.Equal(8, MultiOperation.Beta(4));
     }

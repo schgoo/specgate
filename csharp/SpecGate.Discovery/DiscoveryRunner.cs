@@ -27,6 +27,8 @@ internal static class DiscoveryRunner
     /// <c>[0]</c> output directory, <c>[1]</c> candidate assembly path,
     /// <c>[2]</c> the candidate's build output directory holding its copy-local
     /// dependency assemblies, and <c>[3..]</c> the requested component names.
+    /// With no component names, every inventoried component is published, in
+    /// inventory order.
     /// </param>
     /// <param name="runnerSystem">Filesystem and assembly-loading adapter.</param>
     /// <returns>Zero on success.</returns>
@@ -74,6 +76,13 @@ internal static class DiscoveryRunner
 
         AnnotatedMethod[] annotatedMethods = FindAnnotatedMethods(allTypes);
 
+        string? conflict = MultiComponentConflict(annotatedMethods);
+        if (conflict is not null)
+        {
+            Console.Error.WriteLine("specgate-discovery: " + conflict);
+            return 1;
+        }
+
         runnerSystem.CreateDirectory(outputDirectory);
 
         string[] inventory =
@@ -90,6 +99,11 @@ internal static class DiscoveryRunner
             Path.Combine(outputDirectory, "components.json"),
             JsonSerializer.Serialize(inventory));
 
+        if (requestedComponents.Length == 0)
+        {
+            requestedComponents = inventory;
+        }
+
         for (int componentIndex = 0; componentIndex < requestedComponents.Length; componentIndex++)
         {
             var document = new ComponentDocument(
@@ -104,6 +118,34 @@ internal static class DiscoveryRunner
         }
 
         return 0;
+    }
+
+    /// <summary>
+    /// Describes the first method that declares an operation for more than one
+    /// component, or returns <see langword="null"/> when every operation belongs
+    /// to exactly one.
+    /// </summary>
+    /// <remarks>
+    /// An operation belongs to exactly one component. The weaver rejects the same
+    /// declaration, so discovery fails closed with the same rule instead of
+    /// publishing a registry capture could never honor.
+    /// </remarks>
+    internal static string? MultiComponentConflict(IEnumerable<AnnotatedMethod> methods)
+    {
+        foreach (AnnotatedMethod entry in methods)
+        {
+            if (entry.Operations.Length > 1)
+            {
+                string components = string.Join(
+                    ", ",
+                    entry.Operations.Select(operation => $"'{Annotations.Text(operation, "Spec")}'"));
+                return $"{entry.Method.DeclaringType?.FullName}.{entry.Method.Name} declares an operation for "
+                    + $"{entry.Operations.Length} components ({components}). An operation belongs to exactly one "
+                    + "component; split it into one method per component.";
+            }
+        }
+
+        return null;
     }
 
     /// <summary>

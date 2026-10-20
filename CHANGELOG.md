@@ -7,6 +7,34 @@ under `docs/decisions/`, or `docs/roadmap.md`. Generate with `just changelog`.
 
 ### Added
 
+- C# capture compiles the sources once per batch: reflection reads the woven
+  build's assembly and keeps every component's metadata (nested foreign ones
+  included) through publication, instead of two further builds (#46).
+- C# capture persistence failure is sticky, nested cross-component captures are
+  discovered and linked-validated before publishing, multi-targeting is read from
+  evaluated MSBuild properties, and `--filter` escapes `%` and `"` (#46).
+- C# capture stops the batch when a test's TRX is missing or truncated (crashed
+  host, bad filter), and parses the whole `--list-tests` output so a stray
+  warning no longer truncates it; an empty listing is an error (#46).
+- C# capture supports xUnit, MSTest and NUnit tests projects, detected from the
+  evaluated package references (no new binding field); an unknown or mixed
+  framework fails closed, and each framework is filtered on the property that
+  holds its listed name (`DisplayName` for xUnit, `Name` for MSTest and NUnit)
+  (#46).
+- C# capture publishes a scenario only when the test's TRX outcome is `Passed`
+  (skipped tests that completed an operation are not captured; strict capture
+  fails), and capture and discovery now select the same sources `.csproj`
+  regardless of directory listing order (#46).
+- C# operations belong to exactly one component: `SpecOperationAttribute` no
+  longer allows repeated use, and the weaver and `specgate-discovery` reject a
+  method that declares several (#46).
+- `specgate capture --impl csharp` builds the binding's `tests.projects` with the
+  capture weaver injected, runs each listed test in its own `dotnet test`
+  process, and emits validated bundles; the weaver, net8.0 runtime, and
+  `SpecGateCapture.targets` ship beside the executable (`SPECGATE_WEAVER_PATH`
+  overrides), and woven capture needs .NET 8+ (#46).
+- `SpecGate.Runtime` targets net8.0 and net10.0 and starts capture from
+  `SPECGATE_NATIVE_CAPTURE` through its own module initializer (#46).
 - A plain CLR enum maps onto a CTSC tagged union of payload-free variants in
   declaration order, in both C# capture and C# discovery.
 - Two declarations that resolve to one CTSC variant name are rejected, in C#

@@ -70,6 +70,11 @@ Run from the repository root:
 just check
 ```
 
+Rust tests that drive C# need the prebuilt discovery and weaver tools. `just test`
+builds them and exports `SPECGATE_DISCOVERY_PATH` and `SPECGATE_WEAVER_PATH`; to run
+`cargo test` directly, run `just discovery-tool weaver-tool` first and export the
+two variables as the `justfile` does (`artifacts/discovery`, `artifacts/weaver`).
+
 The gate covers Rust build/tests/clippy/fmt/licenses, generated crate READMEs,
 the CTSC Python corpus and linked validators, a deterministic capture-to-replay
 smoke, the CTSC golden matrix check, and the retained C# build/tests/format/

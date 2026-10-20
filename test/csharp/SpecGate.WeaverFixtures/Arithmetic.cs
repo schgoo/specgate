@@ -5,13 +5,11 @@ namespace SpecGate.WeaverFixtures;
 /// <summary>
 /// Fixtures whose compiled IL the weaver instruments. Each method is written so
 /// that an assertion about the recorded span is also an assertion about one
-/// weaving behaviour: multi-component declarations, void returns, exceptional
-/// exits, branching bodies, and nesting.
+/// weaving behaviour: void returns, exceptional exits, branching bodies, and nesting.
 /// </summary>
 public static class Arithmetic
 {
     [SpecOperation("add", Spec = "weaver.basic")]
-    [SpecOperation("add", Spec = "weaver.alternate")]
     public static int Add([SpecInput("a")] int a, [SpecInput("b")] int b) => a + b;
 
     [SpecOperation("describe", Spec = "weaver.basic")]

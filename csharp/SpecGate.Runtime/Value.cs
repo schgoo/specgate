@@ -119,10 +119,7 @@ public sealed class Value : IEquatable<Value>, IComparable<Value>, IComparable
     /// <exception cref="ArgumentNullException"><paramref name="value"/> is null.</exception>
     public static Value String(string value)
     {
-        if (value is null)
-        {
-            throw new ArgumentNullException(nameof(value));
-        }
+        ArgumentNullException.ThrowIfNull(value);
 
         return new Value(ValueKind.String, value, 0);
     }
@@ -167,10 +164,7 @@ public sealed class Value : IEquatable<Value>, IComparable<Value>, IComparable
     /// <exception cref="ArgumentNullException"><paramref name="entries"/>, a key, or a value is null.</exception>
     public static Value Map(IEnumerable<KeyValuePair<string, Value>> entries)
     {
-        if (entries is null)
-        {
-            throw new ArgumentNullException(nameof(entries));
-        }
+        ArgumentNullException.ThrowIfNull(entries);
 
         SortedDictionary<string, Value> sorted = new(Utf8KeyComparer.Instance);
         foreach (KeyValuePair<string, Value> entry in entries)

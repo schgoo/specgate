@@ -64,31 +64,51 @@ pub fn discover(binding_path: impl AsRef<Path>, component: &ComponentId, impleme
 /// registry invariant.
 pub fn discover_resolved(implementation: crate::binding::ResolvedImplementation) -> Result<Discovered, Error> {
     let component = implementation.component.clone();
-    let mut many = discover_many(implementation, std::slice::from_ref(&component))?;
-    require_declared(&many.implementation, &many.present_components)?;
-    let component = many.implementation.component.clone();
-    let schema = many
-        .components
-        .remove(&component)
-        .expect("successful discovery must contain every deduplicated requested component")
-        .schema?;
-    let registry_json = many
-        .registry_json
-        .into_iter()
-        .next()
-        .expect("successful single-component discovery contains a registry document");
-    let registry = many
-        .registries
-        .into_iter()
-        .next()
-        .expect("successful single-component discovery contains a parsed registry");
-    Ok(Discovered {
-        implementation: many.implementation,
-        cargo_context: many.cargo_context,
-        registry_json,
-        registry,
-        schema,
-    })
+    discover_many(implementation, std::slice::from_ref(&component))?.into_selected()
+}
+
+/// Discover every component of a C# implementation from an assembly that is
+/// already built, without building it again.
+///
+/// `artifacts` is the `--artifacts-path` of a build that included the sources
+/// project: its output is located exactly as discovery's own build locates it,
+/// and a single reflection pass reports every component the assembly declares.
+/// A capture whose tests build already compiles (and weaves) the sources uses
+/// this to learn the metadata of the bound component and of every component
+/// nested inside its captures without a second compilation.
+///
+/// # Errors
+///
+/// Returns an error for a non-C# implementation, a missing assembly, or a
+/// reflection or registry parse failure.
+pub fn discover_built(implementation: crate::binding::ResolvedImplementation, artifacts: impl AsRef<Path>) -> Result<Batch, Error> {
+    discover_built_in(implementation, artifacts.as_ref(), &crate::runner::system::System::real())
+}
+
+pub(crate) fn discover_built_in(
+    implementation: crate::binding::ResolvedImplementation,
+    artifacts: &Path,
+    system: &crate::runner::system::System,
+) -> Result<Batch, Error> {
+    if implementation.language() != crate::binding::Language::CSharp {
+        return Err(failure(
+            ErrorKind::CSharp,
+            "discovery from a prebuilt assembly is only available for C# implementations",
+        ));
+    }
+    let reflected = crate::csharp_discovery::reflect_built(&implementation.implementation, artifacts, system)?;
+    let names = reflected.present_components.clone();
+    let requested = names.iter().map(String::as_str).collect::<Vec<_>>();
+    assemble(
+        implementation,
+        &requested,
+        Assembled {
+            registry_json: reflected.documents,
+            cargo_context: None,
+            shared_document: false,
+            reported_components: Some(reflected.present_components),
+        },
+    )
 }
 
 /// Fail clearly when the selected sources do not declare the bound component.
@@ -185,10 +205,15 @@ pub(crate) fn discover_in(
     requested.sort_unstable();
     requested.dedup();
     let language = implementation.language();
-    let (registry_json, cargo_context, shared_document, reported_components) = match language {
+    let produced = match language {
         crate::binding::Language::Rust => {
             let context = crate::runner::candidate_in(&implementation.implementation.sources, system)?;
-            (vec![runner::run_in(&context, system)?], Some(context), true, None)
+            Assembled {
+                registry_json: vec![runner::run_in(&context, system)?],
+                cargo_context: Some(context),
+                shared_document: true,
+                reported_components: None,
+            }
         }
         crate::binding::Language::CSharp => {
             if requested.is_empty() {
@@ -196,9 +221,34 @@ pub(crate) fn discover_in(
             }
             let (first, rest) = requested.split_first().expect("requested components were checked as non-empty");
             let discovered = crate::csharp_discovery::run_many(&implementation.implementation, first, rest, system)?;
-            (discovered.documents, None, false, Some(discovered.present_components))
+            Assembled {
+                registry_json: discovered.documents,
+                cargo_context: None,
+                shared_document: false,
+                reported_components: Some(discovered.present_components),
+            }
         }
     };
+    assemble(implementation, &requested, produced)
+}
+
+/// What a discovery run produced, before it is parsed and normalized.
+struct Assembled {
+    registry_json: Vec<String>,
+    cargo_context: Option<crate::runner::CandidatePackage>,
+    shared_document: bool,
+    reported_components: Option<Vec<String>>,
+}
+
+/// Parse and normalize what a discovery run produced into a [`Batch`].
+fn assemble(implementation: crate::binding::ResolvedImplementation, requested: &[&str], produced: Assembled) -> Result<Batch, Error> {
+    let Assembled {
+        registry_json,
+        cargo_context,
+        shared_document,
+        reported_components,
+    } = produced;
+    let language = implementation.language();
     let registries = registry_json.iter().map(Registry::parse).collect::<Result<Vec<_>, Error>>()?;
     // A shared Rust document already describes the whole linked target; a C#
     // run reflects one document per request, so its inventory comes from the

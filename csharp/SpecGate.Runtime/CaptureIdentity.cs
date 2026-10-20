@@ -42,10 +42,7 @@ public abstract class CaptureId : IEquatable<CaptureId>
 
     private static void Validate(string value, int length, string label)
     {
-        if (value is null)
-        {
-            throw new ArgumentNullException(nameof(value));
-        }
+        ArgumentNullException.ThrowIfNull(value);
 
         if (value.Length != length || !IsLowercaseHex(value) || IsAllZero(value))
         {

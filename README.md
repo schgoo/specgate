@@ -41,7 +41,7 @@ output unless `--force`, and the output name becomes the artifact's
 `target.name`.
 
 `discover` supports Rust link-time metadata and C# compiled-assembly reflection.
-`capture` and `replay` currently support Rust. `validate` natively checks CTSC
+`capture` supports Rust and C#; `replay` currently supports Rust. `validate` natively checks CTSC
 0.3 Registry, Trace Core, Linked, and capture-bundle semantics, including JSONL
 traces and local or explicit registry imports. `compare` applies the fixed
 `ctsc.strict/0.1.0` policy and reports stable semantic mismatch paths.
@@ -66,6 +66,13 @@ every recipe that drives C# discovery points the override at that build.
 Release artifacts ship that layout: each downloadable archive holds the
 `specgate` executable and the tool's publish output beside it, so C# discovery
 needs only a .NET runtime.
+
+C# capture runs the binding's `tests.projects` through `dotnet` with the
+capture weaver injected into the build, one `dotnet test` process per listed
+test. The weaver, the net8.0 `SpecGate.Runtime`, and `SpecGateCapture.targets`
+are located beside the `specgate` executable; `SPECGATE_WEAVER_PATH` overrides
+that directory, and `just weaver-tool` builds it from a source checkout. Woven
+capture needs a .NET 8+ SDK and runtime.
 
 ## Annotation surface
 

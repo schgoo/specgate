@@ -110,10 +110,7 @@ public sealed class CaptureConfigBuilder
     /// <returns>This builder.</returns>
     public CaptureConfigBuilder OperationSpanIds(IEnumerable<SpanId> ids)
     {
-        if (ids is null)
-        {
-            throw new ArgumentNullException(nameof(ids));
-        }
+        ArgumentNullException.ThrowIfNull(ids);
 
         _operationSpanIds = [.. ids];
         return this;

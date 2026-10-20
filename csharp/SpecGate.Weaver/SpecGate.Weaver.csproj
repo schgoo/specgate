@@ -12,6 +12,10 @@
     <NoWarn>$(NoWarn);NU1701</NoWarn>
   </PropertyGroup>
   <ItemGroup>
+    <!-- Shipped beside the task assembly: SpecGateCapture.targets resolves everything from its own directory. -->
+    <None Include="SpecGateCapture.targets;SpecGateWeave.targets" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="Microsoft.Build.Framework" Version="18.9.6" PrivateAssets="all" ExcludeAssets="runtime" />
     <PackageReference Include="Microsoft.Build.Utilities.Core" Version="18.9.6" PrivateAssets="all" ExcludeAssets="runtime" />
     <PackageReference Include="Mono.Cecil" Version="0.11.6" PrivateAssets="all" />

@@ -11,7 +11,7 @@ against a Rust candidate, validates the artifacts, and compares reference and
 candidate traces with `ctsc.strict/0.1.0`.
 
 The active CLI surface is `discover`, `capture`, `replay`, `validate`, and
-`compare`. Rust and C# support discovery; capture and replay currently support
+`compare`. Rust and C# support discovery and capture; replay currently supports
 Rust.
 
 ## Ownership boundaries
@@ -31,6 +31,21 @@ Rust.
   It is located beside the `specgate` executable unless
   `SPECGATE_DISCOVERY_PATH` names its directory or assembly path, which the
   justfile sets from `just discovery-tool`.
+- C# capture (`specgate-cli`, `capture/csharp.rs`) builds each tests project once
+  with `SpecGateCapture.targets` injected through
+  `-p:CustomAfterMicrosoftCommonTargets`, so the sources project is IL-woven
+  during that build and no project file is edited. Each listed test name
+  (xUnit, MSTest or NUnit, detected from the tests project's package references)
+  is one scenario, run by an exact `--filter` in its own `dotnet test` process
+  with `SPECGATE_NATIVE_CAPTURE` set; a test-result log proves the filter
+  selected exactly one test. The runtime-owned `[ModuleInitializer]` in
+  `SpecGate.Runtime` (net8.0;net10.0) starts the session from that variable and
+  rewrites the sidecar atomically once each operation's inputs are recorded and
+  again at every operation close; a persistence failure poisons the session
+  (later writes keep failing, and a marker on stderr makes the CLI reject the
+  batch even if the test caught the exception). The weaver,
+  runtime, and targets sit beside the executable, or in `SPECGATE_WEAVER_PATH`
+  (the justfile sets it from `just weaver-tool`). Woven capture needs .NET 8+.
 - `specgate-ctsc` owns registry and trace encoding, digest and linkage
   verification, replay models, validators, and strict comparison.
 - `specgate-cli` exposes the product commands. Its Rust capture API takes an

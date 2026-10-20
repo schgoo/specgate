@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=../../../../../../binding-schema.json
+# Same component as specgate.yaml, bound to the project whose only test fails.
+components:
+  fixture.cli_capture.add:
+    implementations:
+      csharp:
+        language: csharp
+        sources: sources
+        tests:
+          projects: [tests-failing/SpecGate.CliCaptureFixtures.FailingTests.csproj]

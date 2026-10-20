@@ -62,9 +62,10 @@ components:
 - `package_root`, `targets`, `outputs`, the old `command`, the file-wide
   `language`, and `--target` are removed with no compatibility path.
 - `tests.projects` and `tests.command` are parsed and validated now. Capture
-  still builds `sources` for Rust, rejects non-Rust implementations, and
-  rejects `tests.command` as not yet supported (#46). Running C# tests is
-  out of scope (#46).
+  builds Rust `sources` and runs C# `tests.projects` through `dotnet`
+  (`docs/decisions/csharp-capture-cli.md`), and rejects `tests.command` as not
+  yet supported (#46). C# discovery and the weave target use `sources`; the
+  build, enumeration, and run use `tests.projects`.
 - `capture --out` is optional. The default is
   `./.specgate/captures/<component>/<impl>/<UTC timestamp>/` (for example
   `20261016T153100Z`), with the timestamp read through a mockable clock.

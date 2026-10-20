@@ -27,6 +27,9 @@ public sealed class CaptureSession : IDisposable
     private readonly List<PendingOperation> _operations = [];
     private readonly Dictionary<SetupKey, SortedDictionary<string, Value>> _setups = [];
     private readonly object _gate = new();
+    private readonly object _persistGate = new();
+    private readonly SidecarWriter? _sidecar;
+    private SpecGateCaptureException? _persistenceFailure;
     private readonly long _runStartNs;
     private readonly long _scenarioStartNs;
     private long _nextTimeNs;
@@ -35,17 +38,32 @@ public sealed class CaptureSession : IDisposable
     private bool _detached;
     private bool _finished;
 
-    internal CaptureSession(string component, CaptureConfig config)
+    /// <param name="component">
+    /// The only component recorded, or <see langword="null"/> to record every
+    /// component as the Rust runtime does when activated from the environment.
+    /// </param>
+    /// <param name="config">The deterministic protocol configuration.</param>
+    /// <param name="sidecar">Where to rewrite the capture after each operation, if anywhere.</param>
+    internal CaptureSession(string? component, CaptureConfig config, SidecarWriter? sidecar)
     {
-        Component = component;
+        Component = component ?? string.Empty;
+        RecordsAllComponents = component is null;
         Config = config;
+        _sidecar = sidecar;
         _runStartNs = config.StartTimeUnixNano;
         _scenarioStartNs = Add(config.StartTimeUnixNano, config.ClockStepUnixNano);
         _nextTimeNs = Add(_scenarioStartNs, config.ClockStepUnixNano);
     }
 
-    /// <summary>Gets the component this session records.</summary>
+    /// <summary>Gets the component this session records, or an empty string when it records every component.</summary>
     public string Component { get; }
+
+    /// <summary>Gets whether this session records operations of every component.</summary>
+    internal bool RecordsAllComponents { get; }
+
+    /// <summary>Gets whether operations of <paramref name="component"/> are recorded.</summary>
+    internal bool Records(string component) =>
+        RecordsAllComponents || string.Equals(Component, component, StringComparison.Ordinal);
 
     /// <summary>Gets the deterministic protocol configuration.</summary>
     public CaptureConfig Config { get; }
@@ -93,11 +111,13 @@ public sealed class CaptureSession : IDisposable
         }
     }
 
-    private Capture Build()
+    private Capture Build() =>
+        BuildCapture([.. _operations.Select(operation => operation.Build())], _nextTimeNs);
+
+    private Capture BuildCapture(OperationSpan[] operations, long scenarioEndNs)
     {
-        long scenarioEndNs = _nextTimeNs;
         long runEndNs = Add(scenarioEndNs, Config.ClockStepUnixNano);
-        bool hasError = _operations.Any(operation => operation.Status == SpanStatus.Error);
+        bool hasError = operations.Any(operation => operation.Status == SpanStatus.Error);
         SpanStatus rootStatus = hasError ? SpanStatus.Error : SpanStatus.Ok;
 
         return new Capture(
@@ -105,7 +125,176 @@ public sealed class CaptureSession : IDisposable
             Config.ScenarioName,
             new SpanBoundary(Config.RunSpanId, null, _runStartNs, runEndNs, rootStatus),
             new SpanBoundary(Config.ScenarioSpanId, Config.RunSpanId, _scenarioStartNs, scenarioEndNs, rootStatus),
-            [.. _operations.Select(operation => operation.Build())]);
+            operations);
+    }
+
+    /// <summary>
+    /// Projects the capture as it stands without ending the session. An
+    /// operation that has not reached a terminal channel — or, when
+    /// <paramref name="untrusted"/>, every operation — is shown as an
+    /// <c>incomplete_capture</c> fault, the same evidence <see cref="Finish"/>
+    /// records, so a reader can tell a finished capture from an interrupted one.
+    /// </summary>
+    /// <remarks>
+    /// The clock and order counters are copied, so projecting never shifts the
+    /// timestamps of operations that run afterwards.
+    /// </remarks>
+    private Capture Snapshot(bool untrusted)
+    {
+        lock (_gate)
+        {
+            long nextTimeNs = _nextTimeNs;
+            ulong nextOrder = _nextOrder;
+            Dictionary<PendingOperation, OperationSpan> projected = [];
+            for (int index = _operations.Count - 1; index >= 0; index--)
+            {
+                PendingOperation operation = _operations[index];
+                if (!untrusted && operation.Status is not null)
+                {
+                    continue;
+                }
+
+                ulong order = nextOrder++;
+                long faultNs = nextTimeNs;
+                nextTimeNs = Add(nextTimeNs, Config.ClockStepUnixNano);
+                long endNs = nextTimeNs;
+                nextTimeNs = Add(nextTimeNs, Config.ClockStepUnixNano);
+                projected.Add(operation, operation.BuildAs(IncompleteFault(operation, order, faultNs), endNs));
+            }
+
+            OperationSpan[] spans =
+            [
+                .. _operations.Select(operation =>
+                    projected.TryGetValue(operation, out OperationSpan? span) ? span : operation.Build()),
+            ];
+            return BuildCapture(spans, nextTimeNs);
+        }
+    }
+
+    private static FaultCompletion IncompleteFault(PendingOperation operation, ulong order, long timeNs) => new(
+        order,
+        timeNs,
+        "incomplete_capture",
+        $"native operation '{operation.OperationName}' was still outstanding when the capture ended",
+        NativeFault.TargetObserver);
+
+    /// <summary>
+    /// Rewrites the sidecar from the current state when this session has one.
+    /// </summary>
+    /// <exception cref="SpecGateCaptureException">The sidecar could not be replaced.</exception>
+    internal void Persist()
+    {
+        if (_sidecar is null)
+        {
+            return;
+        }
+
+        // Serialized so two operations finishing together cannot replace a newer
+        // snapshot with an older one.
+        lock (_persistGate)
+        {
+            // A failed write is terminal. The operation whose snapshot was lost
+            // is already complete in memory, so if application code caught the
+            // exception and a later write succeeded, the sidecar would present
+            // that operation as an ordinary success. Refusing every later write
+            // keeps the lost evidence from being papered over.
+            if (_persistenceFailure is not null)
+            {
+                throw new SpecGateCaptureException(
+                    CaptureRejection.PersistenceFailed,
+                    $"{SidecarWriter.FailureMarker} specgate: native capture persistence already failed in this "
+                    + $"process ({_persistenceFailure.Message}); the capture can no longer be trusted.",
+                    _persistenceFailure);
+            }
+
+            try
+            {
+                _sidecar.Write(CaptureJson.Serialize(Snapshot(untrusted: false)));
+            }
+            catch (SpecGateCaptureException error)
+            {
+                _persistenceFailure = error;
+                throw;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Final flush at process exit. Never throws: the process is ending and the
+    /// previous sidecar already shows every outstanding operation as incomplete.
+    /// </summary>
+    /// <remarks>
+    /// A session whose persistence failed earlier reports that here even if the
+    /// application swallowed the exception: the persistence marker goes to
+    /// <paramref name="diagnostics"/> for the command-line tool to find in the
+    /// test output, and a last best-effort write shows every operation as
+    /// <c>incomplete_capture</c>, which the tool refuses to treat as evidence.
+    /// </remarks>
+    internal void PersistAtExit(System.IO.TextWriter diagnostics)
+    {
+        ArgumentNullException.ThrowIfNull(diagnostics);
+
+        if (ReportPoisonedSession(diagnostics))
+        {
+            return;
+        }
+
+        bool outstanding;
+        lock (_gate)
+        {
+            outstanding = _operations.Any(operation => operation.Status is null);
+        }
+
+        if (!outstanding)
+        {
+            return;
+        }
+
+        try
+        {
+            Persist();
+        }
+        catch (SpecGateCaptureException)
+        {
+            // The earlier persisted snapshot stands; a failure here has nobody to report to.
+        }
+    }
+
+    private bool ReportPoisonedSession(System.IO.TextWriter diagnostics)
+    {
+        SpecGateCaptureException? failure;
+        lock (_persistGate)
+        {
+            failure = _persistenceFailure;
+        }
+
+        if (failure is null || _sidecar is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            diagnostics.WriteLine(failure.Message);
+        }
+        catch (Exception error) when (error is System.IO.IOException or ObjectDisposedException)
+        {
+            // The process is ending; the sidecar below is the remaining channel.
+        }
+
+        try
+        {
+            lock (_persistGate)
+            {
+                _sidecar.Write(CaptureJson.Serialize(Snapshot(untrusted: true)));
+            }
+        }
+        catch (SpecGateCaptureException)
+        {
+            // Nothing more can be reported; the failure message above already was.
+        }
+
+        return true;
     }
 
     private void CloseOutstanding(List<PendingOperation> outstanding)
@@ -114,13 +303,7 @@ public sealed class CaptureSession : IDisposable
         {
             PendingOperation operation = outstanding[index];
             ulong order = Order();
-            FaultCompletion fault = new(
-                order,
-                Tick(),
-                "incomplete_capture",
-                $"native operation '{operation.OperationName}' was still outstanding when the capture ended",
-                NativeFault.TargetObserver);
-            operation.Complete(fault, Tick());
+            operation.Complete(IncompleteFault(operation, order, Tick()), Tick());
         }
     }
 
@@ -181,6 +364,8 @@ public sealed class CaptureSession : IDisposable
 
             operation.Complete(built, Tick());
         }
+
+        Persist();
     }
 
     /// <remarks>
@@ -401,17 +586,26 @@ internal sealed class PendingOperation
         Status = completion?.RequiredStatus ?? SpanStatus.Ok;
     }
 
-    internal OperationSpan Build() => new(
+    internal OperationSpan Build() => BuildAs(
+        _completion,
+        _endTimeUnixNano,
+        Status ?? throw new InvalidOperationException(
+            $"specgate: operation '{OperationName}' has no terminal status."));
+
+    /// <summary>Builds the span as though it had ended with <paramref name="completion"/>, leaving this record open.</summary>
+    internal OperationSpan BuildAs(Completion completion, long endTimeUnixNano) =>
+        BuildAs(completion, endTimeUnixNano, completion.RequiredStatus);
+
+    private OperationSpan BuildAs(Completion? completion, long endTimeUnixNano, SpanStatus status) => new(
         Order,
         SpanId,
         ParentSpanId,
         ComponentId,
         OperationName,
         StartTimeUnixNano,
-        _endTimeUnixNano,
-        Status ?? throw new InvalidOperationException(
-            $"specgate: operation '{OperationName}' has no terminal status."),
+        endTimeUnixNano,
+        status,
         _inputs,
         Capture.NoObservations,
-        _completion);
+        completion);
 }

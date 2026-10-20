@@ -1,26 +1,13 @@
-//! Isolated test execution and native-capture sidecar handling.
+//! Language-neutral results of a capture execution pass.
 //!
-//! This module allocates one scratch root, builds and enumerates eligible test
-//! binaries, executes each test in a separate process, and consumes exactly one
-//! atomic runtime sidecar per passing test. Process failures and persistence
-//! markers become bounded diagnostics; missing sidecars mean the test did not
-//! exercise the selected component rather than an execution failure.
+//! This module allocates the scratch root, defines what one pass of isolated
+//! test runs produced, and renders the bounded diagnostics for process
+//! failures, persistence markers, and recordings that were never finalized. The
+//! language runners that produce those results live beside it.
 use super::{
-    BTreeSet, CAPTURE_ENV, CLOCK_STEP, Capture, CommandEnvironment, Completion, Config, ConfigDeps, Digest, EnvConfig, Execution,
-    FAILURE_MARKER, FailureContext, INDEX_WIDTH, IsolatedTest, Path, PathBuf, ProcessRequest, START_TIME, Sha256, TAIL_CHARS, TAIL_LINES,
-    TestBinary, cargo_bin, run_span, scenario_span, trace_id,
+    BTreeMap, Capture, CommandEnvironment, Completion, Digest, FAILURE_MARKER, FailureContext, Path, PathBuf, Sha256, TAIL_CHARS,
+    TAIL_LINES,
 };
-
-// Cargo's `--message-format=json` schema identifies test binaries with these
-// exact reason/profile/target-kind tokens. Changing them would silently omit
-// eligible artifacts from capture.
-const ARTIFACT_REASON: &str = "compiler-artifact";
-const TEST_PROFILE: &str = "test";
-const LIBRARY_KIND: &str = "lib";
-const FALLBACK_LABEL: &str = "test";
-// Stable libtest `--list --format terse` suffix. A different suffix would
-// prevent enumerated test cases from being isolated into capture processes.
-const CASE_SUFFIX: &str = ": test";
 
 /// Allocate the command-scoped scratch directory used by build and sidecar artifacts.
 ///
@@ -36,129 +23,20 @@ pub(super) fn scratch_dir(system: &CommandEnvironment, package_root: impl AsRef<
         .map_err(|error| FailureContext::with_source("failed to create capture scratch directory", error))
 }
 
-/// Build eligible test targets and return their executable metadata in stable order.
-///
-/// Returns a bounded compiler diagnostic when Cargo fails or emits malformed metadata.
-pub(super) fn build_binaries(
-    execution: &Execution,
-    package_root: impl AsRef<Path>,
-    scratch: impl AsRef<Path>,
-) -> Result<Vec<TestBinary>, FailureContext> {
-    let package_root = package_root.as_ref();
-    let scratch = scratch.as_ref();
-    let request = ProcessRequest::builder(cargo_bin())
-        .args(["test", "--no-run", "--quiet", "--message-format=json"])
-        .current_dir(package_root)
-        .env_remove("RUSTC_WORKSPACE_WRAPPER")
-        .env_remove("CARGO")
-        .env_remove("CARGO_MANIFEST_DIR")
-        .env("CARGO_TARGET_DIR", scratch.join("target"))
-        .build();
-    let output = execution
-        .run(&request)
-        .map_err(|error| FailureContext::with_source(format!("failed to build capture test binaries: {error}"), error))?;
-    if !output.status.success() {
-        return Err(FailureContext::domain(format!(
-            "capture test build failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        )));
-    }
-
-    let mut binaries = Vec::new();
-    let mut seen = BTreeSet::new();
-    for line in String::from_utf8_lossy(&output.stdout).lines() {
-        let Ok(message) = serde_json::from_str::<serde_json::Value>(line) else {
-            continue;
-        };
-        if message.get("reason").and_then(serde_json::Value::as_str) != Some(ARTIFACT_REASON)
-            || !message
-                .get("profile")
-                .and_then(|profile| profile.get(TEST_PROFILE))
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false)
-        {
-            continue;
-        }
-        let Some(executable) = message.get("executable").and_then(serde_json::Value::as_str) else {
-            continue;
-        };
-        let executable = PathBuf::from(executable);
-        if !seen.insert(executable.clone()) {
-            continue;
-        }
-        let target = &message["target"];
-        let label = target["name"].as_str().unwrap_or(FALLBACK_LABEL).to_string();
-        let is_library = target["kind"]
-            .as_array()
-            .is_some_and(|kinds| kinds.iter().any(|kind| kind.as_str() == Some(LIBRARY_KIND)));
-        binaries.push(TestBinary {
-            label,
-            executable,
-            is_library,
-        });
-    }
-    binaries.sort_by(|left, right| {
-        right
-            .is_library
-            .cmp(&left.is_library)
-            .then_with(|| left.label.cmp(&right.label))
-            .then_with(|| left.executable.cmp(&right.executable))
-    });
-    if binaries.is_empty() {
-        return Err(FailureContext::domain("capture test build produced no libtest binaries"));
-    }
-    binaries.shrink_to_fit();
-    Ok(binaries)
-}
-
-/// Enumerate non-ignored tests from each built binary without executing test bodies.
-///
-/// Returns a process diagnostic when a binary cannot be listed.
-pub(super) fn enumerate_tests(execution: &Execution, binaries: impl AsRef<[TestBinary]>) -> Result<Vec<IsolatedTest>, FailureContext> {
-    let binaries = binaries.as_ref();
-    let mut tests = Vec::new();
-    for binary in binaries {
-        let request = ProcessRequest::builder(&binary.executable)
-            .args(["--list", "--format", "terse"])
-            .build();
-        let output = execution.run(&request).map_err(|error| {
-            FailureContext::with_source(format!("failed to list tests in {}: {error}", binary.executable.display()), error)
-        })?;
-        if !output.status.success() {
-            return Err(FailureContext::domain(format!(
-                "capture test enumeration failed for {}: {}",
-                binary.executable.display(),
-                String::from_utf8_lossy(&output.stderr).trim()
-            )));
-        }
-        for line in String::from_utf8_lossy(&output.stdout).lines() {
-            let Some(test_name) = line.strip_suffix(CASE_SUFFIX) else {
-                continue;
-            };
-            let test_name = test_name.trim().to_string();
-            let scenario_name = if binary.is_library {
-                test_name.clone()
-            } else {
-                format!("{}::{test_name}", binary.label)
-            };
-            tests.push(IsolatedTest {
-                scenario_name,
-                test_name,
-                executable: binary.executable.clone(),
-            });
-        }
-    }
-    tests.sort_by(|left, right| left.scenario_name.cmp(&right.scenario_name));
-    tests.shrink_to_fit();
-    Ok(tests)
-}
-
 /// Outcome of one capture execution pass over every enumerated test.
 #[derive(Debug, Default)]
 pub(super) struct ExecutedTests {
     pub(super) captures: Vec<Capture>,
     pub(super) failures: Vec<FailedTest>,
+    /// Normalized schemas of every component the capture build's metadata
+    /// declared, as serialized JSON, or why one could not be normalized. Empty
+    /// for a language whose discovery registry already describes every
+    /// component.
+    pub(super) schemas: ComponentSchemas,
 }
+
+/// Normalized schemas, as serialized JSON, keyed by component id.
+pub(super) type ComponentSchemas = BTreeMap<String, Result<String, String>>;
 
 /// Why an enumerated test contributed no scenario to the batch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -169,6 +47,10 @@ pub(super) enum FailureReason {
     /// cannot be encoded. See
     /// `docs/decisions/top-level-abandonment-unsupported.md`.
     Unfinalized,
+    /// The runner finished the test without a passing result (skipped, not
+    /// executed, inconclusive, aborted), so whatever it recorded must not be
+    /// published as a scenario.
+    NotPassed,
 }
 
 /// One enumerated test that produced no usable capture.
@@ -290,108 +172,6 @@ pub(super) fn unfinalized_summary(operation: &str) -> String {
     )
 }
 
-/// Run every enumerated test once under deterministic native capture and return
-/// the sidecars that passing tests produced, in stable scenario order.
-///
-/// Tests are component-agnostic here: one execution pass serves every requested
-/// component, and scenario selection happens afterwards.
-/// Run each test in isolation and decode sidecars from successful relevant tests.
-///
-/// A passing test without a sidecar is intentionally omitted. A failing test,
-/// and a passing test whose recording was never finalized, each contribute no
-/// scenario and are recorded as failures for the caller to weigh. A malformed
-/// sidecar stops the batch with test identity in the diagnostic.
-pub(super) fn run_tests(
-    system: &CommandEnvironment,
-    execution: &Execution,
-    tests: impl AsRef<[IsolatedTest]>,
-    scratch: impl AsRef<Path>,
-) -> Result<ExecutedTests, FailureContext> {
-    let tests = tests.as_ref();
-    let sidecars = scratch.as_ref().join("sidecars");
-    system.create_dir_all(&sidecars).map_err(|error| {
-        FailureContext::with_source(
-            format!("failed to create capture sidecar directory {}: {error}", sidecars.display()),
-            error,
-        )
-    })?;
-    let mut captures = Vec::with_capacity(tests.len());
-    let mut failures = Vec::with_capacity(tests.len());
-    for (index, test) in tests.iter().enumerate() {
-        let sidecar = sidecars.join(format!("{index:0INDEX_WIDTH$}.json"));
-        let _ = system.remove_file(&sidecar);
-        let environment = EnvConfig {
-            capture: Config::builder(ConfigDeps {
-                scenario_name: test.scenario_name.clone(),
-                trace_id: trace_id(),
-                run_id: run_span(),
-                scenario_id: scenario_span(),
-            })
-            .start_time(START_TIME)
-            .clock_step(CLOCK_STEP)
-            .build()
-            .expect("hard-coded deterministic capture configuration must be valid"),
-            sidecar_path: sidecar.clone(),
-        };
-        let environment_json = serde_json::to_string(&environment)
-            .map_err(|error| FailureContext::with_source(format!("failed to serialize native capture environment: {error}"), error))?;
-        // Exact filtering isolates the scenario, and one test thread is a
-        // correctness requirement rather than only a determinism one: every
-        // capture session in this process shares one resolved scenario identity
-        // and one sidecar path, so concurrent capture threads would overwrite
-        // one another. Per-session identity is tracked by
-        // https://github.com/schgoo/specgate/issues/70.
-        let request = ProcessRequest::builder(&test.executable)
-            .arg(&test.test_name)
-            .args(["--exact", "--test-threads=1"])
-            .env(CAPTURE_ENV, environment_json)
-            .build();
-        let output = execution.run(&request).map_err(|error| {
-            FailureContext::with_source(format!("failed to run isolated test '{}': {error}", test.scenario_name), error)
-        })?;
-        reject_persistence(&test.scenario_name, output.status.code(), &output.stdout, &output.stderr)?;
-        if !output.status.success() {
-            let _ = system.remove_file(&sidecar);
-            failures.push(FailedTest {
-                scenario_name: test.scenario_name.clone(),
-                reason: FailureReason::TestFailed,
-                summary: failure_summary(output.status.code(), &output.stdout, &output.stderr),
-            });
-            continue;
-        }
-        if !system.is_file(&sidecar) {
-            continue;
-        }
-        let bytes = system.read(&sidecar).map_err(|error| {
-            FailureContext::with_source(
-                format!("failed to read native capture sidecar {}: {error}", sidecar.display()),
-                error,
-            )
-        })?;
-        let _ = system.remove_file(&sidecar);
-        let capture: Capture = serde_json::from_slice(&bytes).map_err(|error| {
-            FailureContext::with_source(
-                format!("failed to parse native capture sidecar for '{}': {error}", test.scenario_name),
-                error,
-            )
-        })?;
-        if capture.operations.is_empty() {
-            continue;
-        }
-        if let Some(operation) = unfinalized_operation(&capture) {
-            failures.push(FailedTest {
-                scenario_name: test.scenario_name.clone(),
-                reason: FailureReason::Unfinalized,
-                summary: unfinalized_summary(operation),
-            });
-            continue;
-        }
-        captures.push(capture);
-    }
-    captures.shrink_to_fit();
-    failures.shrink_to_fit();
-    Ok(ExecutedTests { captures, failures })
-}
 /// Persist one final bundle artifact through the injected command environment.
 pub(super) fn write_artifact(system: &CommandEnvironment, path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> Result<(), FailureContext> {
     let path = path.as_ref();

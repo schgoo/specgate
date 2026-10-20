@@ -153,29 +153,10 @@ internal sealed class MethodWeaver(ModuleDefinition module, RuntimeReferences ru
         [
             il.Create(OpCodes.Ldtoken, method),
             il.Create(OpCodes.Ldstr, declaration.Operation),
+            il.Create(OpCodes.Ldstr, declaration.Component),
+            il.Create(OpCodes.Call, runtime.EnterOperation),
+            il.Create(OpCodes.Stloc, scope),
         ];
-
-        if (declaration.Components.Length == 1)
-        {
-            prologue.Add(il.Create(OpCodes.Ldstr, declaration.Components[0]));
-            prologue.Add(il.Create(OpCodes.Call, runtime.EnterOperation));
-        }
-        else
-        {
-            prologue.Add(il.Create(OpCodes.Ldc_I4, declaration.Components.Length));
-            prologue.Add(il.Create(OpCodes.Newarr, module.TypeSystem.String));
-            for (int index = 0; index < declaration.Components.Length; index++)
-            {
-                prologue.Add(il.Create(OpCodes.Dup));
-                prologue.Add(il.Create(OpCodes.Ldc_I4, index));
-                prologue.Add(il.Create(OpCodes.Ldstr, declaration.Components[index]));
-                prologue.Add(il.Create(OpCodes.Stelem_Ref));
-            }
-
-            prologue.Add(il.Create(OpCodes.Call, runtime.EnterOperationMulti));
-        }
-
-        prologue.Add(il.Create(OpCodes.Stloc, scope));
 
         prologue.Add(il.Create(OpCodes.Ldloc, scope));
         AppendArgumentArray(il, prologue, declaration.Inputs);

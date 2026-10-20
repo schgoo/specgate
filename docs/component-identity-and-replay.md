@@ -152,7 +152,7 @@ Three further constraints apply independently:
 - Native capture records an async operation only while its future stays on the
   calling thread, and a remote call in Rust is almost always async and executor
   driven.
-- `specgate capture` accepts Rust implementations only; `tests.command`
+- `specgate capture` accepts Rust and C# implementations through the `tests.projects` form; `tests.command`
   implementations are rejected as not yet supported (#46).
 - Replay re-invokes an operation in process. Replaying a caller requires the
   callee either replayed in lockstep or substituted from its recorded

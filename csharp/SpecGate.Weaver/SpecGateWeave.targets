@@ -11,6 +11,6 @@
   <Target Name="SpecGateWeaveAssembly"
           AfterTargets="CopyFilesToOutputDirectory"
           Condition="'$(SpecGateWeaverTaskAssembly)' != '' and Exists('$(SpecGateWeaverTaskAssembly)') and Exists('$(TargetPath)')">
-    <SpecGateWeaverTask AssemblyPath="$(TargetPath)" />
+    <SpecGateWeaverTask AssemblyPath="$(TargetPath)" ReportPath="$(SpecGateWeaveReportPath)" />
   </Target>
 </Project>

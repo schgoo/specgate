@@ -59,7 +59,8 @@ pub(super) fn discovery_assembly(system: &System) -> Result<PathBuf, Error> {
     let candidate = directory.join(DISCOVERY_ASSEMBLY);
     if !system.filesystem.exists(&candidate) {
         return Err(failure(format!(
-            "C# discovery requires {DISCOVERY_ASSEMBLY} beside the specgate executable at {}; set {DISCOVERY_PATH_VAR} to its location",
+            "C# discovery requires {DISCOVERY_ASSEMBLY} beside the specgate executable at {}; set {DISCOVERY_PATH_VAR} to its location \
+             (from a source checkout, `just discovery-tool` builds it and `just test` sets the variable)",
             directory.display()
         )));
     }

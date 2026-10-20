@@ -260,9 +260,9 @@ That first slice landed in #44: `SpecGate.Runtime` records spans into a
 process-wide session, `SpecGate.Weaver` rewrites annotated method bodies
 during the build, and `SpecGate.Weaver.Tests` executes the woven fixtures and
 asserts on inputs, results, parentage, and terminal status. A capture session
-targets exactly one component, matching `specgate capture --component`, because
-a method may declare the same operation for several components and recording
-all of them would produce multiple spans for one call. Async capture landed
+targets exactly one component, matching `specgate capture --component`. An
+operation belongs to exactly one component: the weaver and C# discovery reject a
+method that declares several. Async capture landed
 in #71: the weaver wraps the compiler's async stub and the runtime completes
 the span when the task settles; see
 [`decisions/csharp-async-capture.md`](decisions/csharp-async-capture.md).

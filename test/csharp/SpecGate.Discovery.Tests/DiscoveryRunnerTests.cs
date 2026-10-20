@@ -80,6 +80,29 @@ public sealed class ExplodingAttribute : Attribute
 public class DiscoveryRunnerTests
 {
     [Fact]
+    public void AMethodDeclaringSeveralComponentsIsRejected()
+    {
+        MethodInfo method = typeof(Fixtures).GetMethod(nameof(Fixtures.BetaOnly))!;
+        AnnotatedMethod[] methods =
+        [
+            new(method, [new SpecOperationAttribute("beta_only") { Spec = "fixtures.beta" }], []),
+            new(
+                method,
+                [
+                    new SpecOperationAttribute("beta_only") { Spec = "fixtures.beta" },
+                    new SpecOperationAttribute("beta_only") { Spec = "fixtures.other" },
+                ],
+                []),
+        ];
+
+        string message = Assert.IsType<string>(DiscoveryRunner.MultiComponentConflict(methods));
+
+        Assert.Contains("BetaOnly", message, StringComparison.Ordinal);
+        Assert.Contains("'fixtures.beta', 'fixtures.other'", message, StringComparison.Ordinal);
+        Assert.Null(DiscoveryRunner.MultiComponentConflict(methods.Take(1)));
+    }
+
+    [Fact]
     public void TooFewArgumentsAreRejected()
     {
         RecordingSystem system = new();
@@ -99,6 +122,28 @@ public class DiscoveryRunnerTests
         Assert.Equal(["out"], system.Directories);
         string[] inventory = JsonSerializer.Deserialize<string[]>(system.Files[Path.Combine("out", "components.json")])!;
         Assert.Equal(["fixtures.alpha", "fixtures.beta", "fixtures.gamma"], inventory);
+    }
+
+    /// <summary>
+    /// Requesting no component publishes every inventoried one, in inventory
+    /// order, so a caller that cannot name them in advance reflects once.
+    /// </summary>
+    [Fact]
+    public void NoRequestedComponentPublishesEveryInventoriedComponent()
+    {
+        RecordingSystem system = new();
+
+        Assert.Equal(0, DiscoveryRunner.Run(["out", "assembly.dll", "bin"], system.Adapter));
+
+        string[] inventory = JsonSerializer.Deserialize<string[]>(system.Files[Path.Combine("out", "components.json")])!;
+        Assert.Equal(["fixtures.alpha", "fixtures.beta", "fixtures.gamma"], inventory);
+        Assert.Equal(
+            ["record_reading", "record_reading"],
+            Document(system, 0).GetProperty("operations").EnumerateArray().Select(operation => operation.GetProperty("name").GetString()));
+        Assert.Equal("beta_only", Assert.Single(Document(system, 1).GetProperty("operations").EnumerateArray()).GetProperty("name").GetString());
+        Assert.Contains(
+            Document(system, 2).GetProperty("operations").EnumerateArray(),
+            operation => operation.GetProperty("name").GetString() == "derived_read");
     }
 
     /// <summary>

@@ -20,7 +20,6 @@ internal sealed class RuntimeReferences
         TypeReference scopeType,
         TypeReference stagingType,
         MethodReference enterOperation,
-        MethodReference enterOperationMulti,
         MethodReference recordInputs,
         MethodReference exitOk,
         MethodReference exitVoid,
@@ -32,7 +31,6 @@ internal sealed class RuntimeReferences
         ScopeType = scopeType;
         StagingType = stagingType;
         EnterOperation = enterOperation;
-        EnterOperationMulti = enterOperationMulti;
         RecordInputs = recordInputs;
         ExitOk = exitOk;
         ExitVoid = exitVoid;
@@ -72,8 +70,6 @@ internal sealed class RuntimeReferences
 
     internal MethodReference EnterOperation { get; }
 
-    internal MethodReference EnterOperationMulti { get; }
-
     internal MethodReference RecordInputs { get; }
 
     internal MethodReference ExitOk { get; }
@@ -95,17 +91,10 @@ internal sealed class RuntimeReferences
         TypeDefinition scopeType = FindType(runtime, ScopeTypeName);
 
 
-        MethodDefinition[] entries =
-        [
-            .. runtimeType.Methods.Where(
-                method => string.Equals(method.Name, "EnterOperation", StringComparison.Ordinal)),
-        ];
-
         return new RuntimeReferences(
             module.ImportReference(scopeType),
             module.ImportReference(FindType(runtime, StagingTypeName)),
-            module.ImportReference(SelectEnter(entries, isMulti: false)),
-            module.ImportReference(SelectEnter(entries, isMulti: true)),
+            module.ImportReference(FindMethod(runtimeType, "EnterOperation")),
             module.ImportReference(FindMethod(runtimeType, "RecordInputs")),
             module.ImportReference(FindMethod(runtimeType, "ExitOk")),
             module.ImportReference(FindMethod(runtimeType, "ExitVoid")),
@@ -147,15 +136,6 @@ internal sealed class RuntimeReferences
         return AssemblyDefinition.ReadAssembly(
             path,
             new ReaderParameters { AssemblyResolver = module.AssemblyResolver });
-    }
-
-    private static MethodDefinition SelectEnter(MethodDefinition[] candidates, bool isMulti)
-    {
-        MethodDefinition? match = candidates.FirstOrDefault(
-            method => method.Parameters.Count == 3 && method.Parameters[2].ParameterType.IsArray == isMulti);
-        return match ?? throw new WeaveException(
-            $"{RuntimeTypeName} has no EnterOperation overload taking "
-            + (isMulti ? "a component array." : "a single component."));
     }
 
     private static TypeDefinition FindType(AssemblyDefinition assembly, string fullName)
