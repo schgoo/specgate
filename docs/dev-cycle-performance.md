@@ -124,6 +124,37 @@ Local environment: Windows 10.0.26300, Intel Xeon Platinum 8370C, 8 cores /
 16 logical processors, Cargo/Rust 1.96.0, .NET SDK 10.0.402, PowerShell 7.6.7,
 just 1.42.0. Measurements ran on a shared host; absolute times are not portable.
 
+### CI cache retention
+
+The existing `Swatinem/rust-cache` action recursively prunes workspace target
+directories before saving. Its dependency-only cleanup is not suitable for the
+golden cache's custom build layout or lease markers. CI therefore sets
+`SPECGATE_CTSC_GOLDENS_BUILD_CACHE` to
+`artifacts/ctsc-goldens-build-cache/v2`, outside those target directories, and
+uses a separate `actions/cache` entry. Local recipes retain their default path.
+The override is resolved relative to the repository root, not the caller's
+working directory; absolute paths also work.
+
+Keys include OS, architecture, the installed compiler version hash, and hashes
+of Cargo manifests, lockfiles, toolchain files, and Cargo configuration,
+excluding generated target/artifact directories. Entries are immutable: a
+successful job seeds a missing key, and
+subsequent exact hits do not upload another copy. Cargo still fingerprints
+source edits, features, and compiler options; unchanged cache keys do not
+authorize reuse of stale compiled code. No captures, replay outputs, golden
+artifacts, or validation results are stored. Failed jobs do not publish a cache,
+and the existing lease/quarantine protocol is unchanged.
+
+In [run 39419173116](https://github.com/schgoo/specgate/actions/runs/39419173116),
+before explicit retention, the golden recipe took approximately **47 s on
+Linux** and **90 s on Windows**, including harness preparation. The native
+harness took **41.57 s** and **78.92 s**, respectively. Smoke took approximately
+**125 s** and **244 s**. Retention can reduce only part of the golden stage;
+additional archive transfer and extraction must be subtracted from any saved
+compilation. Local retained-cache savings are not evidence of a net CI gain.
+Compare cold and restored-cache attempts of the same CI revision, including the
+cache restore/save steps, before attributing an improvement to retention.
+
 ## Gate stage breakdown
 
 Baseline sources: commit `352d8acdac197b5211b0a907d82e2af61d98ca00` and

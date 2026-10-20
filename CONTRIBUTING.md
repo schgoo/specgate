@@ -83,6 +83,17 @@ because children may outlive a terminated wrapper. These slots are never
 automatically recycled; reclaim them with the same safe cleanup procedure.
 The `v2` cache layout does not reuse slots from the earlier lease-only layout.
 
+CI sets `SPECGATE_CTSC_GOLDENS_BUILD_CACHE` to
+`artifacts/ctsc-goldens-build-cache/v2`, outside the workspace target directories
+pruned by `Swatinem/rust-cache`. The override accepts an absolute path or a path
+relative to the repository root; the local default is unchanged. A separate
+GitHub Actions cache retains only compilation intermediates and lease markers,
+is partitioned by OS, architecture, compiler version, and Cargo
+toolchain/dependency/configuration files, and is saved only after a successful
+job. Exact cache hits are not
+uploaded again. Normal GitHub cache branch scoping applies; no extra workflow
+permissions are granted. Golden generation and all validators still run.
+
 ## Gate
 
 Run from the repository root:
