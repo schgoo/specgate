@@ -86,7 +86,10 @@ readme-check:
 ctsc-validate:
     pwsh -NoLogo -NoProfile -File scripts/ctsc-validate.ps1
 
-ctsc-smoke:
+ctsc-smoke-regressions:
+    pwsh -NoLogo -NoProfile -File scripts/ctsc-smoke-tests.ps1
+
+ctsc-smoke: ctsc-smoke-regressions
     pwsh -NoLogo -NoProfile -File scripts/ctsc-smoke.ps1
 
 ctsc-goldens-regressions: discovery-tool

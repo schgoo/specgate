@@ -112,6 +112,14 @@ the CTSC Python corpus and linked validators, a deterministic capture-to-replay
 smoke, the CTSC golden matrix check, and the retained C# build/tests/format/
 analyzers.
 
+`just ctsc-smoke` first runs `just ctsc-smoke-regressions`, builds the CLI once,
+and shares Cargo intermediates between its capture and replay commands.
+Intermediates live only in the invocation's GUID-named
+`rust/target/ctsc-smoke-*` scratch directory; separate runs never reuse it.
+Capture/replay outputs remain separate, every original assertion still runs,
+and cleanup restores the caller's `CARGO_BUILD_BUILD_DIR`. There is no persistent
+smoke cache to warm locally or restore in CI.
+
 Use `just --timestamp --verbose check` to identify recipe boundaries in a gate
 log; CI uses the same flags without changing the checks being run. See
 [`docs/dev-cycle-performance.md`](docs/dev-cycle-performance.md) for the
