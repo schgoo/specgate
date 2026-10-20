@@ -62,6 +62,27 @@ After an intentional change, run `just ctsc-goldens-update`, review the
 artifact diff as carefully as the code diff, then confirm
 `just ctsc-goldens-check` passes.
 
+Both recipes reuse Cargo intermediate build artifacts under
+`rust/target/ctsc-goldens-build-cache`, using the pinned toolchain's
+`CARGO_BUILD_BUILD_DIR`. Each invocation exclusively leases a versioned cache
+slot until its harness exits; concurrent invocations use different slots.
+Generated runner sources, final outputs, and capture sidecars remain isolated and are
+removed with invocation scratch. No golden output or validation result is
+cached: every run executes the entire matrix. Cargo invalidates compilation
+when sources, features, or the compiler change.
+
+The intermediate cache persists like an ordinary Cargo build directory and
+can grow as sources and toolchains change. To reclaim space or measure an
+empty-cache run, remove `rust/target/ctsc-goldens-build-cache` only after all
+golden wrappers, harnesses, and their Cargo/test children have exited.
+
+A slot is marked incomplete before launching the harness and becomes reusable
+only after exactly one successful golden test is confirmed. Failed or
+interrupted runs leave the slot quarantined, even after its OS lease releases,
+because children may outlive a terminated wrapper. These slots are never
+automatically recycled; reclaim them with the same safe cleanup procedure.
+The `v2` cache layout does not reuse slots from the earlier lease-only layout.
+
 ## Gate
 
 Run from the repository root:
@@ -79,6 +100,11 @@ The gate covers Rust build/tests/clippy/fmt/licenses, generated crate READMEs,
 the CTSC Python corpus and linked validators, a deterministic capture-to-replay
 smoke, the CTSC golden matrix check, and the retained C# build/tests/format/
 analyzers.
+
+Use `just --timestamp --verbose check` to identify recipe boundaries in a gate
+log; CI uses the same flags without changing the checks being run. See
+[`docs/dev-cycle-performance.md`](docs/dev-cycle-performance.md) for the
+stage breakdown, golden-regeneration measurements, and reproduction commands.
 
 Run `just package-smoke` for release changes; it packages all six retained crates,
 installs the packaged CLI, and exercises registry-dependency

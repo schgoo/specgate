@@ -35,7 +35,7 @@ jobs:
           cargo install cargo-deny --version 0.19.0 --locked
           cargo install cargo-doc2readme --locked
       - name: Run complete gate
-        run: just check
+        run: just --timestamp --verbose check
       - name: Packaged-context smoke
         if: matrix.os == 'ubuntu-latest'
         run: just package-smoke

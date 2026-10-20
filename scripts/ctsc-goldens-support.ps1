@@ -1,5 +1,59 @@
 Set-StrictMode -Version Latest
 
+function Enter-GoldenBuildCache {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Root
+    )
+
+    for ($slot = 0; ; $slot++) {
+        $directory = Join-Path $Root "$slot"
+        New-Item -ItemType Directory -Force $directory | Out-Null
+        try {
+            $lease = [IO.File]::Open(
+                (Join-Path $directory 'lease'),
+                [IO.FileMode]::OpenOrCreate,
+                [IO.FileAccess]::ReadWrite,
+                [IO.FileShare]::None
+            )
+        }
+        catch [IO.IOException] {
+            # Only lock contention selects another slot; other I/O failures abort.
+            if (($_.Exception.HResult -band 0xffff) -notin @(11, 32)) {
+                throw
+            }
+            continue
+        }
+        try {
+            # An interrupted owner may leave live children. Never recycle its slot.
+            if ($lease.Length -ne 0) {
+                $lease.Dispose()
+                continue
+            }
+            $lease.WriteByte(1)
+            $lease.Flush()
+        }
+        catch {
+            $lease.Dispose()
+            throw
+        }
+        return [pscustomobject]@{
+            Path = Join-Path $directory 'build'
+            Lease = $lease
+        }
+    }
+}
+
+function Complete-GoldenBuildCache {
+    param(
+        [Parameter(Mandatory)]
+        [IO.FileStream]$Lease
+    )
+
+    $Lease.SetLength(0)
+    $Lease.Flush()
+}
+
 function Get-GoldenHarnessExecutable {
     param(
         [Parameter(Mandatory)]
