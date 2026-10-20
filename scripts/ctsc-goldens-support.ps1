@@ -24,11 +24,34 @@ function Enter-GoldenBuildCache {
             }
             continue
         }
+        try {
+            # An interrupted owner may leave live children. Never recycle its slot.
+            if ($lease.Length -ne 0) {
+                $lease.Dispose()
+                continue
+            }
+            $lease.WriteByte(1)
+            $lease.Flush()
+        }
+        catch {
+            $lease.Dispose()
+            throw
+        }
         return [pscustomobject]@{
             Path = Join-Path $directory 'build'
             Lease = $lease
         }
     }
+}
+
+function Complete-GoldenBuildCache {
+    param(
+        [Parameter(Mandatory)]
+        [IO.FileStream]$Lease
+    )
+
+    $Lease.SetLength(0)
+    $Lease.Flush()
 }
 
 function Get-GoldenHarnessExecutable {

@@ -18,7 +18,7 @@ work.
 
 The golden wrapper now sets Cargo 1.96's
 [`CARGO_BUILD_BUILD_DIR`](https://doc.rust-lang.org/cargo/reference/config.html#buildbuild-dir)
-to `rust/target/ctsc-goldens-build-cache/<slot>/build` **only while executing
+to `rust/target/ctsc-goldens-build-cache/v2/<slot>/build` **only while executing
 the golden harness**.
 This shares Cargo intermediate artifacts across those builds without changing
 their final target directories. Cargo still resolves the exact dependencies
@@ -29,16 +29,26 @@ captures, replay results, comparisons, or validation results. Each invocation
 holds an exclusive OS-backed file lease on its intermediate cache slot until
 the harness exits, including while its generated binaries execute. A concurrent
 invocation takes a different slot instead of racing to rebuild running binaries.
-Subsequent invocations reuse an idle slot. Generated sources, final outputs,
-and sidecars retain their existing invocation-local isolation and cleanup.
+Subsequent invocations reuse a successfully completed idle slot. Generated
+sources, final outputs, and sidecars retain their existing invocation-local
+isolation and cleanup.
 
-File handles release on normal completion, errors, or process termination;
-persistent lease files are not stale locks. Only sharing-violation/lock-busy
-errors select another slot; permission and other I/O failures abort. Slot count
-tracks peak concurrency, not invocation count. Like a regular Cargo build
-directory, each slot can grow as sources and toolchains change; there is no
-automatic eviction. Remove `rust/target/ctsc-goldens-build-cache` while no
-golden invocations are running to reclaim space or measure an empty-cache run.
+Before launching a harness, the wrapper writes and flushes an incomplete marker
+into its lease file. Only confirmation of exactly one successful golden test
+clears that marker. File handles release on errors or process termination, but
+an incomplete slot stays quarantined: surviving harness/Cargo/test children
+must never race a new invocation for those intermediates. Failed or interrupted
+slots are never automatically recycled. The `v2` layout also isolates these
+slots from the earlier lease-only implementation.
+
+Only sharing-violation/lock-busy errors or incomplete slots select another slot;
+permission and other I/O failures abort. Successful serial invocations reuse
+the same slot; concurrency and failed runs can allocate additional slots.
+Like a regular Cargo build directory, each slot can grow as sources and
+toolchains change; there is no automatic eviction. Remove
+`rust/target/ctsc-goldens-build-cache` only after all golden wrappers, harnesses,
+and their Cargo/test children have exited to reclaim space or measure an
+empty-cache run.
 
 ### Initial optimization: invocation-local sharing
 
@@ -98,9 +108,12 @@ slower than the earlier 648.849 s sample because unrelated stages varied;
 this is not evidence of an overall gate speedup. The serial regeneration
 comparisons above isolate the intended improvement.
 
-Regressions exercise two simultaneous in-process leases, contention from a
-separate PowerShell process, recovery after forcibly terminating that process,
-and propagation of non-contention I/O errors. A real Cargo fixture compiles
+Regressions exercise two simultaneous in-process leases and terminate a real
+wrapper while its native child survives and continues writing to its cache
+slot. A second invocation must not reuse that slot, even though the wrapper's
+OS lease has released. They also verify propagation of non-contention I/O
+errors, successful slot reuse, and quarantine on failed or unproven test runs.
+A real Cargo fixture compiles
 different generated runners into separate final target directories while
 sharing intermediates: the unchanged dependency must be fresh on the second
 build, an edited dependency must rebuild, and each executable must produce
@@ -215,8 +228,9 @@ including an existing `CARGO_BUILD_BUILD_DIR`.
 For the retained-cache recipe comparison, run `just ctsc-goldens-update` twice
 serially from the same worktree and toolchain, starting with the named
 intermediate cache absent. Measure each entire recipe with a stopwatch. Do not
-remove any directory while another golden invocation is using it. To reproduce
-the direct retained-cache experiment, keep `$shared = $true` and point
+remove any directory while a golden wrapper or its surviving children are
+using it. To reproduce the direct retained-cache experiment, keep
+`$shared = $true` and point
 `CARGO_BUILD_BUILD_DIR` at one dedicated directory outside `$scratch` across
 the three runs; only `$scratch` is removed between runs. Do not share that
 experimental directory with concurrent processes.
@@ -226,7 +240,7 @@ experimental directory with concurrent processes.
 | Option | Decision |
 |---|---|
 | Share final `CARGO_TARGET_DIR` across all generated runners | Not needed: sharing intermediates delivers the measured saving while retaining final-output isolation. |
-| Persist the golden build cache across invocations | Implemented after measuring the follow-up: exclusive cache slots preserve concurrency isolation and remain reusable after process termination. Disk reclamation is explicit, like a normal Cargo target directory. |
+| Persist the golden build cache across invocations | Implemented after measuring the follow-up: exclusive cache slots preserve concurrency isolation; only successful completion permits reuse, while interrupted or failed slots stay quarantined. Disk reclamation is explicit. |
 | Reuse C# assemblies or `--artifacts-path` across invocations | Deferred: C# discovery is already batched; preserve real-project/source-generator compilation and isolated outputs. |
 | Parallelize full-gate stages | Deferred: first remove redundant compilation; parallel Cargo/MSBuild processes can contend for CPU and build locks. |
 | nextest/test partitioning | Not the golden bottleneck: golden capture already executes enumerated ordinary tests through its existing isolation mechanism. Workspace test acceleration is separate work. |

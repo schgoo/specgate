@@ -57,7 +57,7 @@ try {
     Assert-SingleGoldenTestSelection -Lines $listOutput -TestName $harnessTest
 
     # Keep the lease until execution finishes, not just until Cargo stops building.
-    $buildCache = Enter-GoldenBuildCache -Root (Join-Path $root 'rust/target/ctsc-goldens-build-cache')
+    $buildCache = Enter-GoldenBuildCache -Root (Join-Path $root 'rust/target/ctsc-goldens-build-cache/v2')
     $env:CARGO_BUILD_BUILD_DIR = $buildCache.Path
     & $harness --ignored --exact --nocapture $harnessTest 2>&1 |
         Tee-Object -Variable executionOutput
@@ -69,6 +69,7 @@ try {
         throw 'CTSC golden update failed.'
     }
     Assert-SingleGoldenTestExecution -Lines @($executionOutput)
+    Complete-GoldenBuildCache -Lease $buildCache.Lease
 }
 finally {
     $env:SPECGATE_CACHE_DIR = $previousCache

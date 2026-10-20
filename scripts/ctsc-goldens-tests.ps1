@@ -68,12 +68,19 @@ Assert-Throws {
 } 'did not prove exactly one'
 
 & {
+    $wrapperRoot = Join-Path ([IO.Path]::GetTempPath()) "sg-wrapper-tests-$([guid]::NewGuid().ToString('N'))"
+    $wrapperScripts = Join-Path $wrapperRoot 'scripts'
+    New-Item -ItemType Directory -Force $wrapperScripts | Out-Null
+    foreach ($name in @('ctsc-goldens.ps1', 'ctsc-goldens-support.ps1')) {
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $wrapperScripts
+    }
+    $wrapper = Join-Path $wrapperScripts 'ctsc-goldens.ps1'
     $names = @('SPECGATE_CACHE_DIR', 'SPECGATE_CTSC_GOLDENS', 'SPECGATE_CTSC_GOLDENS_SCRATCH', 'CARGO_BUILD_BUILD_DIR')
     $previous = @{}
     foreach ($name in $names) {
         $previous[$name] = [Environment]::GetEnvironmentVariable($name)
     }
-    $state = @{ Scratch = $null; Lease = $null; Fail = $false; Builds = 0; Executions = 0 }
+    $state = @{ Scratch = $null; CachePath = $null; Lease = $null; Fail = $false; InvalidProof = $false; Builds = 0; Executions = 0 }
 
     function cargo {
         if ($env:CARGO_BUILD_BUILD_DIR -cne 'caller-CARGO_BUILD_BUILD_DIR') {
@@ -97,8 +104,9 @@ Assert-Throws {
         }
         $state.Executions++
         $state.Scratch = $env:SPECGATE_CTSC_GOLDENS_SCRATCH
+        $state.CachePath = $env:CARGO_BUILD_BUILD_DIR
         $state.Lease = $buildCache.Lease
-        $cacheRoot = Join-Path (Split-Path -Parent $PSScriptRoot) 'rust/target/ctsc-goldens-build-cache'
+        $cacheRoot = Join-Path $wrapperRoot 'rust/target/ctsc-goldens-build-cache/v2'
         if (-not $env:CARGO_BUILD_BUILD_DIR.StartsWith("$cacheRoot$([IO.Path]::DirectorySeparatorChar)", [StringComparison]::Ordinal) -or
             -not $state.Lease.CanRead -or
             $env:SPECGATE_CACHE_DIR -cne (Join-Path $state.Scratch 'cache')) {
@@ -109,11 +117,17 @@ Assert-Throws {
             $global:LASTEXITCODE = 23
             return
         }
+        if ($state.InvalidProof) {
+            Write-Output 'running 0 tests'
+            return
+        }
         Write-Output 'running 1 test'
         Write-Output 'test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s'
     }
 
     function Assert-WrapperCleanup {
+        param([bool]$Reusable = $true)
+
         foreach ($name in $names) {
             if ([Environment]::GetEnvironmentVariable($name) -cne "caller-$name") {
                 throw "The golden wrapper did not restore $name."
@@ -125,29 +139,45 @@ Assert-Throws {
         if ($state.Lease.CanRead) {
             throw 'The golden wrapper did not release its build-cache lease.'
         }
+        $leaseFile = Join-Path (Split-Path -Parent $state.CachePath) 'lease'
+        if ((([IO.File]::ReadAllBytes($leaseFile)).Length -eq 0) -ne $Reusable) {
+            throw 'The golden wrapper marked an incompletely finished cache reusable, or failed to recycle a successful cache.'
+        }
     }
 
     try {
         foreach ($name in $names) {
             [Environment]::SetEnvironmentVariable($name, "caller-$name")
         }
+        $previousPath = $null
         foreach ($mode in @('Check', 'Update')) {
-            & (Join-Path $PSScriptRoot 'ctsc-goldens.ps1') -Mode $mode | Out-Null
+            & $wrapper -Mode $mode | Out-Null
             Assert-WrapperCleanup
+            if ($null -ne $previousPath -and $state.CachePath -cne $previousPath) {
+                throw 'Successful golden invocations did not reuse their cache slot.'
+            }
+            $previousPath = $state.CachePath
         }
         $state.Fail = $true
         Assert-Throws {
-            & (Join-Path $PSScriptRoot 'ctsc-goldens.ps1') -Mode Check | Out-Null
+            & $wrapper -Mode Check | Out-Null
         } 'CTSC golden check failed'
-        Assert-WrapperCleanup
-        if ($state.Builds -ne 3 -or $state.Executions -ne 3) {
-            throw 'The wrapper regressions did not exercise all three harness invocations.'
+        Assert-WrapperCleanup -Reusable $false
+        $state.Fail = $false
+        $state.InvalidProof = $true
+        Assert-Throws {
+            & $wrapper -Mode Update | Out-Null
+        } 'did not prove exactly one'
+        Assert-WrapperCleanup -Reusable $false
+        if ($state.Builds -ne 4 -or $state.Executions -ne 4) {
+            throw 'The wrapper regressions did not exercise all four harness invocations.'
         }
     }
     finally {
         foreach ($name in $previous.Keys) {
             [Environment]::SetEnvironmentVariable($name, $previous[$name])
         }
+        Remove-Item -LiteralPath $wrapperRoot -Recurse -Force
     }
 }
 
@@ -155,7 +185,7 @@ $fixture = Join-Path ([IO.Path]::GetTempPath()) "sg-cache-tests-$([guid]::NewGui
 $first = $null
 $second = $null
 $reused = $null
-$recovered = $null
+$replacement = $null
 $previousBuildDir = $env:CARGO_BUILD_BUILD_DIR
 try {
     $cacheRoot = Join-Path $fixture 'cache'
@@ -164,38 +194,103 @@ try {
     if ($first.Path -ceq $second.Path) {
         throw 'Concurrent invocations shared mutable build intermediates.'
     }
+    Complete-GoldenBuildCache -Lease $first.Lease
     $first.Lease.Dispose()
     $reused = Enter-GoldenBuildCache -Root $cacheRoot
     if ($reused.Path -cne $first.Path) {
         throw 'A released cache slot was not reused.'
     }
 
-    $worker = Join-Path $fixture 'lease-worker.ps1'
-    [IO.File]::WriteAllText($worker, @'
-param($Helper, $Root)
+    $wrapperScripts = Join-Path $fixture 'scripts'
+    New-Item -ItemType Directory -Force $wrapperScripts | Out-Null
+    foreach ($name in @('ctsc-goldens.ps1', 'ctsc-goldens-support.ps1')) {
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $wrapperScripts
+    }
+    $cacheUser = Join-Path $fixture 'cache-user.ps1'
+    [IO.File]::WriteAllText($cacheUser, @'
 $ErrorActionPreference = 'Stop'
-. $Helper
-$cache = Enter-GoldenBuildCache -Root $Root
-[Console]::WriteLine($cache.Path)
-Start-Sleep -Seconds 60
-$cache.Lease.Dispose()
+New-Item -ItemType Directory -Force $env:CARGO_BUILD_BUILD_DIR | Out-Null
+$file = [IO.File]::Open((Join-Path $env:CARGO_BUILD_BUILD_DIR 'active-child'), 'OpenOrCreate', 'ReadWrite', 'ReadWrite')
+try {
+    [Console]::WriteLine((@{ Pid = $PID; Path = $env:CARGO_BUILD_BUILD_DIR } | ConvertTo-Json -Compress))
+    for ($iteration = 0; $iteration -lt 600; $iteration++) {
+        $file.WriteByte(1)
+        $file.Flush()
+        Start-Sleep -Milliseconds 100
+    }
+}
+finally {
+    $file.Dispose()
+}
+'@)
+    $worker = Join-Path $fixture 'wrapper-worker.ps1'
+    [IO.File]::WriteAllText($worker, @'
+param($Wrapper, $CacheUser)
+$ErrorActionPreference = 'Stop'
+function cargo {
+    $global:LASTEXITCODE = 0
+    @{
+        reason = 'compiler-artifact'
+        profile = @{ test = $true }
+        target = @{ name = 'specgate_cli'; kind = @('lib') }
+        executable = 'Invoke-ChildGoldenHarness'
+    } | ConvertTo-Json -Compress
+}
+function Invoke-ChildGoldenHarness {
+    $global:LASTEXITCODE = 0
+    if ($args -contains '--list') {
+        'goldens::tests::golden_matrix: test'
+        return
+    }
+    & (Get-Process -Id $PID).Path -NoProfile -NonInteractive -File $CacheUser
+}
+& $Wrapper -Mode Check
 '@)
     $start = [Diagnostics.ProcessStartInfo]::new((Get-Process -Id $PID).Path)
     $start.UseShellExecute = $false
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
-    foreach ($argument in @('-NoProfile', '-NonInteractive', '-File', $worker, (Join-Path $PSScriptRoot 'ctsc-goldens-support.ps1'), $cacheRoot)) {
+    foreach ($argument in @('-NoProfile', '-NonInteractive', '-File', $worker, (Join-Path $wrapperScripts 'ctsc-goldens.ps1'), $cacheUser)) {
         $start.ArgumentList.Add($argument)
     }
     $child = [Diagnostics.Process]::Start($start)
+    $cacheChild = $null
     try {
         $line = $child.StandardOutput.ReadLineAsync()
         if (-not $line.Wait(15000) -or [string]::IsNullOrEmpty($line.Result)) {
-            throw 'The cache-lease worker did not acquire a slot.'
+            throw 'The wrapper did not start its native cache-using child.'
         }
-        $childPath = $line.Result
-        if ($childPath -ceq $reused.Path -or $childPath -ceq $second.Path) {
-            throw 'Separate processes shared a leased build cache.'
+        $active = $line.Result | ConvertFrom-Json
+        $cacheChild = [Diagnostics.Process]::GetProcessById($active.Pid)
+        $wrapperCacheRoot = Join-Path $fixture 'rust/target/ctsc-goldens-build-cache/v2'
+        $replacement = Enter-GoldenBuildCache -Root $wrapperCacheRoot
+        if ($replacement.Path -ceq $active.Path) {
+            throw 'Separate processes shared a live cache slot.'
+        }
+        Complete-GoldenBuildCache -Lease $replacement.Lease
+        $replacement.Lease.Dispose()
+
+        Stop-Process -Id $child.Id -Force
+        $child.WaitForExit()
+        if ($cacheChild.HasExited) {
+            throw 'The regression did not leave a surviving native child.'
+        }
+        $marker = Join-Path $active.Path 'active-child'
+        $before = (Get-Item -LiteralPath $marker).Length
+        $wait = [Diagnostics.Stopwatch]::StartNew()
+        do {
+            Start-Sleep -Milliseconds 50
+            $after = (Get-Item -LiteralPath $marker).Length
+        } while ($after -le $before -and $wait.Elapsed.TotalSeconds -lt 5)
+        if ($after -le $before) {
+            throw 'The surviving native child did not keep writing to its cache slot.'
+        }
+        $replacement = Enter-GoldenBuildCache -Root $wrapperCacheRoot
+        if ($replacement.Path -ceq $active.Path) {
+            throw 'A terminated wrapper made its surviving child cache slot reusable.'
+        }
+        if ($cacheChild.HasExited) {
+            throw 'The native child exited before cache isolation was checked.'
         }
     }
     finally {
@@ -204,12 +299,15 @@ $cache.Lease.Dispose()
         }
         $child.WaitForExit()
         $child.Dispose()
+        if ($null -ne $cacheChild) {
+            if (-not $cacheChild.HasExited) {
+                Stop-Process -Id $cacheChild.Id -Force
+            }
+            $cacheChild.WaitForExit()
+            $cacheChild.Dispose()
+        }
     }
-    $recovered = Enter-GoldenBuildCache -Root $cacheRoot
-    if ($recovered.Path -cne $childPath) {
-        throw 'A terminated process left a stale build-cache lease.'
-    }
-    $recovered.Lease.Dispose()
+    $replacement.Lease.Dispose()
 
     $invalidRoot = Join-Path $fixture 'invalid-cache'
     New-Item -ItemType Directory -Force (Join-Path $invalidRoot '0/lease') | Out-Null
@@ -274,7 +372,7 @@ $cache.Lease.Dispose()
 }
 finally {
     $env:CARGO_BUILD_BUILD_DIR = $previousBuildDir
-    foreach ($entry in @($first, $second, $reused, $recovered)) {
+    foreach ($entry in @($first, $second, $reused, $replacement)) {
         if ($null -ne $entry) {
             $entry.Lease.Dispose()
         }
