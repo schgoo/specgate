@@ -31,6 +31,8 @@ $cache = Join-Path $scratch 'cache'
 $previousCache = $env:SPECGATE_CACHE_DIR
 $previousMode = $env:SPECGATE_CTSC_GOLDENS
 $previousScratch = $env:SPECGATE_CTSC_GOLDENS_SCRATCH
+$previousBuildDir = $env:CARGO_BUILD_BUILD_DIR
+$buildCache = $null
 
 try {
     New-Item -ItemType Directory -Force $cache | Out-Null
@@ -54,6 +56,9 @@ try {
     }
     Assert-SingleGoldenTestSelection -Lines $listOutput -TestName $harnessTest
 
+    # Keep the lease until execution finishes, not just until Cargo stops building.
+    $buildCache = Enter-GoldenBuildCache -Root (Join-Path $root 'rust/target/ctsc-goldens-build-cache')
+    $env:CARGO_BUILD_BUILD_DIR = $buildCache.Path
     & $harness --ignored --exact --nocapture $harnessTest 2>&1 |
         Tee-Object -Variable executionOutput
     $executionExitCode = $LASTEXITCODE
@@ -69,5 +74,9 @@ finally {
     $env:SPECGATE_CACHE_DIR = $previousCache
     $env:SPECGATE_CTSC_GOLDENS = $previousMode
     $env:SPECGATE_CTSC_GOLDENS_SCRATCH = $previousScratch
+    $env:CARGO_BUILD_BUILD_DIR = $previousBuildDir
+    if ($null -ne $buildCache) {
+        $buildCache.Lease.Dispose()
+    }
     Remove-Item -Recurse -Force $scratch -ErrorAction SilentlyContinue
 }

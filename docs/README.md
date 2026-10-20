@@ -10,6 +10,8 @@ This index is the starting point for humans and coding agents.
   generated artifacts, and the required gate.
 - [`../AGENTS.md`](../AGENTS.md) — agent entry point and delivery boundaries.
 - [`agentic-loop.md`](agentic-loop.md) — observe → plan → act → verify workflow.
+- [`dev-cycle-performance.md`](dev-cycle-performance.md) — gate timings and
+  golden-regeneration build-cache measurements.
 
 ## Contracts and status
 
