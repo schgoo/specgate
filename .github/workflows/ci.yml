@@ -15,9 +15,12 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
+    env:
+      SPECGATE_CTSC_GOLDENS_BUILD_CACHE: artifacts/ctsc-goldens-build-cache/v2
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
+        id: toolchain
         with:
           toolchain: "1.96.0"
           components: clippy, rustfmt
@@ -26,6 +29,11 @@ jobs:
           workspaces: |
             rust
             test/rust
+      - name: Cache golden build intermediates
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.SPECGATE_CTSC_GOLDENS_BUILD_CACHE }}
+          key: ctsc-goldens-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cachekey }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/rust-toolchain.toml', '**/.cargo/config.toml', '**/.cargo/config', '!**/target/**', '!artifacts/**') }}
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 10.0.x

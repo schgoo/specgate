@@ -27,6 +27,12 @@ $harnessTest = 'goldens::tests::golden_matrix'
 # and therefore never clobber, the same regeneration directory.
 $scratch = Join-Path $root "rust/target/ctsc-goldens-$($Mode.ToLowerInvariant())-$PID"
 $cache = Join-Path $scratch 'cache'
+$buildCacheRoot = if ([string]::IsNullOrEmpty($env:SPECGATE_CTSC_GOLDENS_BUILD_CACHE)) {
+    Join-Path $root 'rust/target/ctsc-goldens-build-cache/v2'
+}
+else {
+    [IO.Path]::GetFullPath($env:SPECGATE_CTSC_GOLDENS_BUILD_CACHE, $root)
+}
 
 $previousCache = $env:SPECGATE_CACHE_DIR
 $previousMode = $env:SPECGATE_CTSC_GOLDENS
@@ -57,7 +63,7 @@ try {
     Assert-SingleGoldenTestSelection -Lines $listOutput -TestName $harnessTest
 
     # Keep the lease until execution finishes, not just until Cargo stops building.
-    $buildCache = Enter-GoldenBuildCache -Root (Join-Path $root 'rust/target/ctsc-goldens-build-cache/v2')
+    $buildCache = Enter-GoldenBuildCache -Root $buildCacheRoot
     $env:CARGO_BUILD_BUILD_DIR = $buildCache.Path
     & $harness --ignored --exact --nocapture $harnessTest 2>&1 |
         Tee-Object -Variable executionOutput

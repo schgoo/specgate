@@ -80,7 +80,12 @@ Assert-Throws {
     foreach ($name in $names) {
         $previous[$name] = [Environment]::GetEnvironmentVariable($name)
     }
-    $state = @{ Scratch = $null; CachePath = $null; Lease = $null; Fail = $false; InvalidProof = $false; Builds = 0; Executions = 0 }
+    $previousCacheRoot = $env:SPECGATE_CTSC_GOLDENS_BUILD_CACHE
+    $state = @{
+        Scratch = $null; CachePath = $null; Lease = $null; Fail = $false; InvalidProof = $false; Builds = 0; Executions = 0
+        CacheRoot = Join-Path $wrapperRoot 'rust/target/ctsc-goldens-build-cache/v2'
+        Override = $null
+    }
 
     function cargo {
         if ($env:CARGO_BUILD_BUILD_DIR -cne 'caller-CARGO_BUILD_BUILD_DIR') {
@@ -106,7 +111,7 @@ Assert-Throws {
         $state.Scratch = $env:SPECGATE_CTSC_GOLDENS_SCRATCH
         $state.CachePath = $env:CARGO_BUILD_BUILD_DIR
         $state.Lease = $buildCache.Lease
-        $cacheRoot = Join-Path $wrapperRoot 'rust/target/ctsc-goldens-build-cache/v2'
+        $cacheRoot = $state.CacheRoot
         if (-not $env:CARGO_BUILD_BUILD_DIR.StartsWith("$cacheRoot$([IO.Path]::DirectorySeparatorChar)", [StringComparison]::Ordinal) -or
             -not $state.Lease.CanRead -or
             $env:SPECGATE_CACHE_DIR -cne (Join-Path $state.Scratch 'cache')) {
@@ -133,6 +138,9 @@ Assert-Throws {
                 throw "The golden wrapper did not restore $name."
             }
         }
+        if ($env:SPECGATE_CTSC_GOLDENS_BUILD_CACHE -cne $state.Override) {
+            throw 'The golden wrapper changed the caller build-cache root override.'
+        }
         if (Test-Path -LiteralPath $state.Scratch) {
             throw 'The golden wrapper leaked invocation scratch.'
         }
@@ -149,6 +157,7 @@ Assert-Throws {
         foreach ($name in $names) {
             [Environment]::SetEnvironmentVariable($name, "caller-$name")
         }
+        $env:SPECGATE_CTSC_GOLDENS_BUILD_CACHE = $null
         $previousPath = $null
         foreach ($mode in @('Check', 'Update')) {
             & $wrapper -Mode $mode | Out-Null
@@ -169,14 +178,28 @@ Assert-Throws {
             & $wrapper -Mode Update | Out-Null
         } 'did not prove exactly one'
         Assert-WrapperCleanup -Reusable $false
-        if ($state.Builds -ne 4 -or $state.Executions -ne 4) {
-            throw 'The wrapper regressions did not exercise all four harness invocations.'
+        $state.InvalidProof = $false
+        $state.CacheRoot = Join-Path $wrapperRoot 'artifacts/ctsc-goldens-build-cache/v2'
+        $previousPath = $null
+        foreach ($override in @($state.CacheRoot, 'artifacts/ctsc-goldens-build-cache/v2')) {
+            $state.Override = $override
+            $env:SPECGATE_CTSC_GOLDENS_BUILD_CACHE = $override
+            & $wrapper -Mode Check | Out-Null
+            Assert-WrapperCleanup
+            if ($null -ne $previousPath -and $state.CachePath -cne $previousPath) {
+                throw 'Absolute and repository-relative cache roots did not select the same reusable slot.'
+            }
+            $previousPath = $state.CachePath
+        }
+        if ($state.Builds -ne 6 -or $state.Executions -ne 6) {
+            throw 'The wrapper regressions did not exercise all six harness invocations.'
         }
     }
     finally {
         foreach ($name in $previous.Keys) {
             [Environment]::SetEnvironmentVariable($name, $previous[$name])
         }
+        $env:SPECGATE_CTSC_GOLDENS_BUILD_CACHE = $previousCacheRoot
         Remove-Item -LiteralPath $wrapperRoot -Recurse -Force
     }
 }
@@ -227,6 +250,7 @@ finally {
     [IO.File]::WriteAllText($worker, @'
 param($Wrapper, $CacheUser)
 $ErrorActionPreference = 'Stop'
+$env:SPECGATE_CTSC_GOLDENS_BUILD_CACHE = $null
 function cargo {
     $global:LASTEXITCODE = 0
     @{
