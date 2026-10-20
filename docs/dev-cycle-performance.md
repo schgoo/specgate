@@ -1,7 +1,8 @@
 # Dev-cycle performance
 
 Measurements for [#87](https://github.com/schgoo/specgate/issues/87), collected
-on 2026-10-19. The optimization targets golden regeneration, not a reduced gate.
+on 2026-10-19 and 2026-10-20. The optimizations target compilation reuse, not a
+reduced gate.
 `just check` retains its original recipes and order.
 
 ## Golden regeneration
@@ -168,6 +169,66 @@ Rust tests, end-to-end smoke, and golden regeneration dominate the baseline.
 The discovery-tool prerequisite executes once in the full gate, not once per
 dependent recipe. Packaging smoke is a separate Linux CI step, not part of
 `just check`; it is unchanged.
+
+## Capture/replay smoke
+
+The smoke wrapper previously used `cargo run` for every CLI invocation. Its
+two captures and two replays also compiled dependencies into separate target
+directories, repeating compilation even when the product workspace was warm.
+
+The wrapper now builds the CLI once and selects its executable from Cargo's
+JSON artifact messages rather than assuming a target directory or executable
+suffix. All twelve CLI invocations, including the expected failing comparison,
+use that executable. The CLI build retains the caller's compilation environment.
+During the smoke commands only, `CARGO_BUILD_BUILD_DIR` points to a shared
+`build` directory inside the invocation's scratch.
+
+Each invocation gets a fresh GUID-named directory under `rust/target`, even
+when invoked twice in the same PowerShell process. Final capture and replay
+outputs remain separate; compilation intermediates are not shared across
+invocations. Cleanup restores the caller's build-directory environment and
+removes scratch on success or failure. There is no persistent smoke cache,
+lease pool, or new CI cache configuration.
+
+All existing assertions remain: two byte-identical captures, two byte-identical
+replays, registry/trace/linked/bundle validation, a successful strict comparison,
+independent reference/candidate trace IDs, the expected result `5`, and an
+explicit semantic-mismatch path with exit `1` after changing that result to `6`.
+`just ctsc-smoke-regressions`, also a prerequisite of `just ctsc-smoke`, covers
+executable selection, a single CLI build, command ordering and validator
+coverage, distinct scratch per invocation, environment restoration, cleanup,
+build/command failures, and both negative-comparison failure modes. Its wrapper
+fixtures reuse checked-in CTSC artifacts; the real smoke still exercises the
+annotated Rust fixture through capture and replay.
+
+Two serial samples of each `just ctsc-smoke` configuration, collected before the
+full gate on the same Windows host with Rust/CTSC sources unchanged from
+`d1eca44`, gave:
+
+| Sample | Original recipe | Shared intermediates + one CLI build |
+|---|---:|---:|
+| First | 208.526 s | 60.369 s |
+| Repeated | 200.858 s | 61.474 s |
+| **Mean** | **204.692 s** | **60.922 s** |
+
+The observed mean reduction is **143.771 s (70.2%)**, approximately **3.36 times
+faster**. Both optimized samples include the new wrapper regressions and start
+with empty smoke intermediates. Tool, download, and workspace caches were not
+deleted. These are local samples on a shared host, not a statistical benchmark
+or an overall gate-speedup claim. The same invocation-local sharing applies in
+CI without retaining anything between jobs; CI savings have not been measured.
+
+Subsequent verification illustrates the timing variability: the complete
+`just check` passed in **848.303 s**, with its smoke stage taking approximately
+**209 s** at the log's one-second timestamp resolution. A standalone smoke
+immediately afterward passed in **87.625 s**. There is no paired original-recipe
+measurement for those later conditions, and the cause of the variation was not
+isolated. The 70.2% reduction describes the initial comparison, not a guarantee
+for every run or evidence of an overall gate speedup.
+
+Reproduce with `$env:RUSTUP_TOOLCHAIN = '1.96.0'` and `just ctsc-smoke` from the
+repository root. No cache cleanup is needed between samples because each run
+allocates and removes its own intermediates.
 
 ## Reproduction
 

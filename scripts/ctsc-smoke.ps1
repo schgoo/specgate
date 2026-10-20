@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$scratch = Join-Path $root "rust/target/ctsc-smoke-$PID"
+$scratch = Join-Path $root "rust/target/ctsc-smoke-$([guid]::NewGuid().ToString('N'))"
 $firstCapture = Join-Path $scratch 'a/capture'
 $secondCapture = Join-Path $scratch 'b/capture'
 # The target label is the output name, so repeated artifacts share a name and differ only by parent directory.
@@ -10,11 +10,12 @@ $secondReplay = Join-Path $scratch 'b/candidate.otlp.json'
 $changedReplay = Join-Path $scratch 'candidate-changed.otlp.json'
 $binding = Join-Path $root 'test/bindings/specgate.yaml'
 $manifest = Join-Path $root 'rust/Cargo.toml'
+$previousBuildDir = $env:CARGO_BUILD_BUILD_DIR
 
 function Invoke-SpecGate {
     param([string[]]$Arguments)
 
-    & cargo run --manifest-path $manifest -p specgate-cli --quiet -- @Arguments
+    & $cli @Arguments
     if ($LASTEXITCODE -ne 0) {
         throw "specgate failed: $($Arguments -join ' ')"
     }
@@ -22,6 +23,25 @@ function Invoke-SpecGate {
 
 try {
     New-Item -ItemType Directory -Force $scratch | Out-Null
+
+    $buildOutput = @(& cargo build --manifest-path $manifest -p specgate-cli --bin specgate --quiet --message-format=json)
+    if ($LASTEXITCODE -ne 0) {
+        $buildOutput | ForEach-Object { Write-Host $_ }
+        throw 'Failed to build the CTSC smoke CLI.'
+    }
+    $executables = @(
+        $buildOutput | ConvertFrom-Json | Where-Object {
+            $_.reason -eq 'compiler-artifact' -and
+            $_.target.name -eq 'specgate' -and
+            $_.target.kind -contains 'bin' -and
+            -not [string]::IsNullOrWhiteSpace([string]$_.executable)
+        } | Select-Object -ExpandProperty executable -Unique
+    )
+    if ($executables.Count -ne 1) {
+        throw "Expected exactly one specgate executable for the CTSC smoke, found $($executables.Count)."
+    }
+    $cli = $executables[0]
+    $env:CARGO_BUILD_BUILD_DIR = Join-Path $scratch 'build'
 
     Invoke-SpecGate @('capture', '--binding', $binding, '--component', 'fixture.stateless_add', '--impl', 'rust', '--out', $firstCapture)
     Invoke-SpecGate @('capture', '--binding', $binding, '--component', 'fixture.stateless_add', '--impl', 'rust', '--out', $secondCapture)
@@ -76,7 +96,7 @@ try {
     $value.value.intValue = '6'
     $changed | ConvertTo-Json -Depth 100 -Compress | Set-Content -NoNewline $changedReplay
 
-    $mismatch = & cargo run --manifest-path $manifest -p specgate-cli --quiet -- compare $reference $changedReplay --registry $registry
+    $mismatch = & $cli compare $reference $changedReplay --registry $registry
     if ($LASTEXITCODE -ne 1) {
         throw "Expected changed result comparison to exit 1, got $LASTEXITCODE."
     }
@@ -87,5 +107,6 @@ try {
     Write-Output 'Deterministic native capture/replay/validate/compare smoke passed.'
 }
 finally {
+    $env:CARGO_BUILD_BUILD_DIR = $previousBuildDir
     Remove-Item -Recurse -Force $scratch -ErrorAction SilentlyContinue
 }
