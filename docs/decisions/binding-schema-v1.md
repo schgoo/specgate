@@ -83,7 +83,7 @@ components:
   directories ending in the implementation label. C# goldens are unchanged;
   Rust goldens were regenerated (118 files) with `target.name` `rust` where it
   was `default`, and the digests that cover those bytes changed accordingly.
-- The golden matrix uses one shared `test/bindings/specgate.yaml`; rows name a
+- The golden matrix uses one shared `test/behavior/specgate.yaml`; rows name a
   component and an implementation label instead of a binding file.
 
 ## Deferred

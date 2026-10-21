@@ -12,19 +12,19 @@ reference stimuli + candidate metadata -> candidate replay
 ## Commands
 
 ```powershell
-specgate discover --binding test\bindings\specgate.yaml `
+specgate discover --binding test\behavior\specgate.yaml `
   --component fixture.stateless_add `
   --impl rust `
   --registry-id urn:ctsc:registry:fixture.stateless_add `
   --registry-version 0.1.0 `
   --out registry.ctsc.json
 
-specgate capture --binding test\bindings\specgate.yaml `
+specgate capture --binding test\behavior\specgate.yaml `
   --component fixture.stateless_add `
   --impl rust `
   --out capture
 
-specgate replay capture --binding test\bindings\specgate.yaml `
+specgate replay capture --binding test\behavior\specgate.yaml `
   --impl rust `
   --out candidate.otlp.json
 
@@ -92,11 +92,14 @@ renamed dependencies.
   strict comparison, and replay decoding.
 - `rust/crates/specgate-cli` — `discover`, `capture`, `replay`, `validate`, and
   `compare`.
-- `test/rust/crates/specgate-ctsc-fixtures` — focused Rust fixtures.
-- `test/rust/negative-fixtures` — fixtures discovery or the compiler must reject.
+- [`test/behavior`](test/behavior/README.md) — behavior-first cases, native tests,
+  shared expected bundles, matrix, and aggregate Rust/C# fixture projects.
+- `test/Cargo.toml` — positive Rust fixture workspace, including the separate
+  renamed-facade dependency witness.
+- `test/rejection` — isolated fixtures discovery or the compiler must reject.
+- `test/mechanics/csharp` — runtime, discovery, and weaver mechanics tests.
+- `test/support/csharp` — shared C# test support.
 - `csharp/SpecGate.Discovery` — the C# reflection tool the Rust driver invokes.
-- `test/csharp/SpecGate.CtscFixtures` — paired C# discovery and native capture fixtures.
-- `test/goldens/ctsc` — the golden matrix and its generated artifacts.
 - `docs/ctsc` — committed CTSC contracts, validator, and corpus.
 
 See the [documentation index](docs/README.md) for contracts, implementation
@@ -104,13 +107,13 @@ status, decision records, digests, and the agent delivery workflow.
 
 ## Golden matrix
 
-`test/goldens/ctsc/matrix.json` is hand-authored configuration: it accounts for
+`test/behavior/matrix.json` is hand-authored configuration: it accounts for
 every annotated fixture source, names each component's language phases,
 expected outcome, cross-language parity, reference-to-candidate replay checks,
 and limitations, and
 records where removed spec features now live.
 
-Everything else under `test/goldens/ctsc` is generated product output —
+Only declared `expected/` directories under `test/behavior/cases` and the Rust rejection project contain generated product output —
 registries, reference traces, capture manifests, and normalized discovery
 errors. **Never hand-edit a generated artifact.** Regenerate it:
 
@@ -125,7 +128,7 @@ registry, trace, linked, and bundle validators, byte-compares Rust and C#
 registries wherever the matrix claims parity, replays every component the
 matrix marks replayable, and rejects missing, stale, or undeclared goldens.
 Matrix version `0.2.0` selects one shared native golden bundle per component
-directly under `component/<id>/`, including the single canonical registry.
+directly under `cases/<id>/expected/`, including the single canonical registry.
 Successful components have no per-language golden directories. Discovery-only
 components keep that registry without behavioral files. Paired fixtures explicitly select the current
 C# endpoint; Rust-only fixtures select Rust. This is fixture configuration, not
@@ -136,8 +139,8 @@ must byte-match the checked-in canonical; every other independent producer
 registry must match that same oracle exactly or differ only by the exact known
 parity exceptions. Exceptions and unsupported replay are explicit limitations,
 not behavioral equivalence claims. The selected producer captures
-directly into the component directory (native language retained,
-`target.name` is its basename, e.g. `fixture.stateless_add`).
+directly into the case's `expected/` directory (native language retained,
+`target.name` is its basename, `expected`).
 Replay checks name the selected reference and candidate implementations, not
 language pairs, and always resolve the shared bundle. Strict
 comparison uses the reference scenario names carried through replay, not native

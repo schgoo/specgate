@@ -5,18 +5,24 @@
     <Project Path="csharp/SpecGate.Runtime/SpecGate.Runtime.csproj" />
     <Project Path="csharp/SpecGate.Weaver/SpecGate.Weaver.csproj" />
   </Folder>
-  <Folder Name="/test/csharp/">
-    <Project Path="test/csharp/SpecGate.CtscFixtures/SpecGate.CtscFixtures.csproj" />
-    <Project Path="test/csharp/SpecGate.TestSupport/SpecGate.TestSupport.csproj" />
-    <Project Path="test/csharp/SpecGate.Runtime.Tests/SpecGate.Runtime.Tests.csproj" />
-    <Project Path="test/csharp/SpecGate.CtscFixtures.Tests/SpecGate.CtscFixtures.Tests.csproj" />
-    <Project Path="test/csharp/SpecGate.Discovery.Tests/SpecGate.Discovery.Tests.csproj" />
-    <Project Path="test/csharp/SpecGate.WeaverFixtures/SpecGate.WeaverFixtures.csproj" />
-    <Project Path="test/csharp/SpecGate.WeaverNegativeFixtures/SpecGate.WeaverNegativeFixtures.csproj" />
-    <Project Path="test/csharp/SpecGate.WeaverGenericMethodFixture/SpecGate.WeaverGenericMethodFixture.csproj" />
-    <Project Path="test/csharp/SpecGate.WeaverGenericTypeFixture/SpecGate.WeaverGenericTypeFixture.csproj" />
-    <Project Path="test/csharp/SpecGate.WeaverSetupConflictFixture/SpecGate.WeaverSetupConflictFixture.csproj" />
-    <Project Path="test/csharp/SpecGate.WeaverSetupFixture/SpecGate.WeaverSetupFixture.csproj" />
-    <Project Path="test/csharp/SpecGate.Weaver.Tests/SpecGate.Weaver.Tests.csproj" />
+  <Folder Name="/test/behavior/projects/csharp/">
+    <Project Path="test/behavior/projects/csharp/SpecGate.CtscFixtures/SpecGate.CtscFixtures.csproj" />
+    <Project Path="test/behavior/projects/csharp/SpecGate.CtscFixtures.Tests/SpecGate.CtscFixtures.Tests.csproj" />
+  </Folder>
+  <Folder Name="/test/support/csharp/">
+    <Project Path="test/support/csharp/SpecGate.TestSupport/SpecGate.TestSupport.csproj" />
+  </Folder>
+  <Folder Name="/test/mechanics/csharp/">
+    <Project Path="test/mechanics/csharp/SpecGate.Runtime.Tests/SpecGate.Runtime.Tests.csproj" />
+    <Project Path="test/mechanics/csharp/SpecGate.Discovery.Tests/SpecGate.Discovery.Tests.csproj" />
+    <Project Path="test/mechanics/csharp/SpecGate.WeaverFixtures/SpecGate.WeaverFixtures.csproj" />
+    <Project Path="test/mechanics/csharp/SpecGate.WeaverSetupFixture/SpecGate.WeaverSetupFixture.csproj" />
+    <Project Path="test/mechanics/csharp/SpecGate.Weaver.Tests/SpecGate.Weaver.Tests.csproj" />
+  </Folder>
+  <Folder Name="/test/rejection/csharp/">
+    <Project Path="test/rejection/csharp/SpecGate.WeaverNegativeFixtures/SpecGate.WeaverNegativeFixtures.csproj" />
+    <Project Path="test/rejection/csharp/SpecGate.WeaverGenericMethodFixture/SpecGate.WeaverGenericMethodFixture.csproj" />
+    <Project Path="test/rejection/csharp/SpecGate.WeaverGenericTypeFixture/SpecGate.WeaverGenericTypeFixture.csproj" />
+    <Project Path="test/rejection/csharp/SpecGate.WeaverSetupConflictFixture/SpecGate.WeaverSetupConflictFixture.csproj" />
   </Folder>
 </Solution>

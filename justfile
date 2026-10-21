@@ -15,6 +15,10 @@ export SPECGATE_DISCOVERY_PATH := justfile_directory() / "artifacts" / "discover
 # The runtime is built for net8.0, the lowest framework a woven assembly can run on.
 export SPECGATE_WEAVER_PATH := justfile_directory() / "artifacts" / "weaver"
 
+# rustfmt follows #[path] modules, but not include! item fragments that retain
+# the original shared module identities. Keep those four real sources covered.
+fixture_fragments := "test/behavior/cases/comp.core/rust/component.rs test/behavior/cases/comp.app/rust/component.rs test/behavior/cases/fixture.async_smol_timer/rust/async_metadata.rs test/behavior/cases/fixture.async_tokio_timer/rust/async_metadata.rs"
+
 discovery-tool:
     dotnet build csharp/SpecGate.Discovery/SpecGate.Discovery.csproj --output "{{ SPECGATE_DISCOVERY_PATH }}"
 
@@ -24,7 +28,7 @@ weaver-tool:
 
 build:
     cd rust && cargo build --workspace --all-targets
-    cd test/rust && cargo build --workspace --all-targets
+    cd test && cargo build --workspace --all-targets
 
 rust-test-regressions:
     pwsh -NoLogo -NoProfile -File scripts/rust-test-tests.ps1
@@ -34,19 +38,21 @@ rust-test: discovery-tool weaver-tool rust-test-regressions
     pwsh -NoLogo -NoProfile -File scripts/rust-test.ps1
 
 test: rust-test
-    cd test/rust && cargo test --workspace
+    cd test && cargo test --workspace
 
 clippy:
     cd rust && cargo clippy --workspace --all-targets -- -D warnings
-    cd test/rust && cargo clippy --workspace --all-targets -- -D warnings
+    cd test && cargo clippy --workspace --all-targets -- -D warnings
 
 format-check:
     cd rust && cargo fmt -- --check
-    cd test/rust && cargo fmt -- --check
+    cd test && cargo fmt -- --check
+    rustfmt --edition 2024 --check {{fixture_fragments}}
 
 format:
     cd rust && cargo fmt
-    cd test/rust && cargo fmt
+    cd test && cargo fmt
+    rustfmt --edition 2024 {{fixture_fragments}}
 
 deny:
     cd rust && cargo deny check licenses

@@ -73,10 +73,10 @@ supported; each fails closed.
 
 ## Golden matrix
 
-`test/goldens/ctsc/matrix.json` is hand-authored configuration covering every
+`test/behavior/matrix.json` is hand-authored configuration covering every
 annotated fixture source: component rows, negative discovery/build rows, and
 replacement rows that point removed spec features at their CTSC-native tests.
-Every other file under `test/goldens/ctsc` is generated product output.
+Only declared case and rejection `expected/` directories are generated product output.
 
 - Never hand-edit a generated golden. Run `just ctsc-goldens-update` and review
   the artifact diff.

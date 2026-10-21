@@ -159,7 +159,7 @@ contains no such component, so no golden artifact changed.
 
 ## Golden matrix
 
-`test/goldens/ctsc/matrix.json` is the reviewable configuration that accounts
+`test/behavior/matrix.json` is the reviewable configuration that accounts
 for the whole fixture corpus:
 
 - **Component rows** name the component, its Rust and C# sources, the phases
@@ -193,7 +193,7 @@ for the whole fixture corpus:
   the rationale and the exact CTSC-native fixture, comparator, or validator
   tests that replaced it.
 
-Everything else under `test/goldens/ctsc` is generated product output and must
+Only declared `expected/` directories under `test/behavior/cases` and the Rust rejection project contain generated product output and must
 never be hand-edited. `just ctsc-goldens-update` rewrites it;
 `just ctsc-goldens-check` (part of `just check`) regenerates into
 repository-local scratch, validates every artifact with the native CTSC
@@ -201,7 +201,7 @@ validators, byte-compares parity registries, replays every replayable row and
 strictly compares it against its reference, and rejects missing, stale, or
 undeclared goldens.
 
-The matrix declares one shared binding, `test/bindings/specgate.yaml`
+The matrix declares one shared binding, `test/behavior/specgate.yaml`
 (shape per [the binding ADR](decisions/binding-schema-v1.md)), in place of
 the earlier per-language `bindings` map of binding files. Each language row
 names a binding implementation identity; its language is a property, not a
@@ -217,15 +217,15 @@ The internal matrix version is `0.2.0` (no compatibility reader). Every captured
 component selects exactly one successful discover+capture endpoint through
 `reference: { implementation, artifacts }`. Its inventory is exactly
 `manifest.json`, `reference.otlp.json`, and `registry.ctsc.json`, published under
-`component/<id>/` directly, with no `reference` subdirectory. There are no per-language successful-component
+`cases/<id>/expected/` directly, with no `reference` subdirectory. There are no per-language successful-component
 artifacts, including registries. A discovery-only component selects one
 successful discovery endpoint and retains only the shared registry, no
 behavioral files or checks. Negative errors are unchanged.
 
 The fixture configuration selects C# for paired captured components and Rust
 for Rust-only ones; that is not harness language policy. The selected native
-capture writes directly into the component directory, naturally encoding
-`target.name` as its basename (e.g. `fixture.stateless_add`) while retaining its
+capture writes directly into the case's `expected/` directory, naturally encoding
+`target.name` as its basename (`expected`) while retaining its
 native language and scenario names. No trace is
 copied, translated, or relabelled. Both producers keep their capture phases.
 Nonselected producers run independent strict native capture under invocation

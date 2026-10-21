@@ -158,3 +158,11 @@ retaining independent strict native capture by both producers against one
 canonical registry oracle. No per-language registry compatibility reader is
 retained. Producer registries, nonselected captures, and candidate outputs are
 transient and removed through the normal invocation-scratch lifecycle.
+# Physical layout update
+
+The approved behavior-first fixture migration supersedes only this decision's
+physical `component/<id>/` placement: bundles now live in
+`test/behavior/cases/<id>/expected/`, with layout-only matrix ownership.
+The single canonical registry, native producer trust chain, exact parity,
+directed replay semantics and all other decisions below remain unchanged.
+Native output-basename provenance is now truthfully `expected`.

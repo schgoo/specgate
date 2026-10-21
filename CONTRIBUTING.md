@@ -30,7 +30,7 @@ ratified architectural decisions under `docs/decisions/`.
 
 ## Golden matrix
 
-`test/goldens/ctsc/matrix.json` is the reviewable configuration for the whole
+`test/behavior/matrix.json` is the reviewable configuration for the whole
 fixture corpus. Edit it by hand when you add, remove, or reclassify a fixture:
 every annotated fixture source must belong to a row, every discovered component
 needs a row, and each row states its language phases, expected outcome, parity
@@ -44,10 +44,10 @@ observed difference set to equal the declared one.
 Matrix `0.2.0` has no compatibility reader. Each captured component selects
 exactly one successful discover+capture endpoint through `reference:
 { implementation, artifacts }`. Its artifacts are exactly `manifest.json`,
-`reference.otlp.json`, and `registry.ctsc.json`, directly under `component/<id>/`.
+`reference.otlp.json`, and `registry.ctsc.json`, directly under `cases/<id>/expected/`.
 There are no per-language successful-component artifacts, including registries.
 A discovery-only component selects a successful discovery endpoint and keeps
-only `component/<id>/registry.ctsc.json`. Keep both
+only `cases/<id>/expected/registry.ctsc.json`. Keep both
 native capture phases: nonselected producers capture strictly into invocation
 scratch and undergo the same native validation and exact coverage checks.
 Never copy or relabel traces or validate a producer's native bundle against
@@ -58,7 +58,7 @@ existing exact `parity.allowedDifferences`. Preserve full dependency closure and
 ordering and Rust/C# difference orientation regardless of endpoint selection.
 Fresh-producer-only comparison is insufficient: both producers could drift
 together. Exact exceptions describe known non-equivalences, not blanket passes.
-The selected producer writes directly into the component directory, with no
+The selected producer writes directly into the case's `expected/` directory, with no
 `reference` subdirectory. Native `target.name` is that directory's basename;
 its language and native scenario names remain unchanged.
 Captured rows require checks, all naming the selected reference. Discovery-only
@@ -79,7 +79,7 @@ an unrelated planner or discovery error never satisfies them. Build negatives
 reject any compiler error without primary spans exclusively in the row's
 intentional sources, even when the intended error is also present.
 
-Every other file under `test/goldens/ctsc` is generated. Do not hand-edit them.
+Only declared case and rejection `expected/` directories are generated. Do not hand-edit them.
 
 ```powershell
 just ctsc-goldens-update   # regenerate artifacts after an intended change
@@ -147,7 +147,7 @@ first, including a real Cargo fixture proving warm executable reuse and shared
 dependency compilation across isolated candidate targets. The caller's
 environment is unchanged; cleanup restores the working directory and removes
 scratch. There is no persistent test cache or CI cache configuration. `just test`
-also runs the separate `test/rust` workspace with its original Cargo command
+also runs the separate `test` workspace with its original Cargo command
 and parallelism.
 
 The runner owns the `value` and `force` entries of Cargo's

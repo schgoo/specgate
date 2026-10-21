@@ -8,7 +8,7 @@ namespace SpecGate.Weaver;
 /// </summary>
 /// <remarks>
 /// One method may carry several <c>[SpecSetup]</c> declarations — see
-/// <c>test/csharp/SpecGate.CtscFixtures/Conformance/Stateful/SharedSetup/SharedSetup.cs</c>,
+/// <c>test/behavior/cases/fixture.shared_setup/csharp/SharedSetup.cs</c>,
 /// where one producer fills both parameters of an operation — so a single
 /// invocation commits provenance for every declaration it carries. The weaver
 /// does not need the declarations themselves: capture resolves them by

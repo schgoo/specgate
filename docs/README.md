@@ -4,6 +4,9 @@ This index is the starting point for humans and coding agents.
 
 ## Product and contributor entry points
 
+- [`../test/behavior/README.md`](../test/behavior/README.md) — behavior-first
+  fixture sources, shared scenarios, aggregate projects, and generated ownership.
+
 - [`../README.md`](../README.md) — product overview, commands, repository map,
   and golden-matrix summary.
 - [`../CONTRIBUTING.md`](../CONTRIBUTING.md) — setup, CTSC-first development,
@@ -28,7 +31,7 @@ This index is the starting point for humans and coding agents.
 - [`decisions/`](decisions/) — human-ratified architectural decisions.
 - [`decisions/csharp-golden-replay-parity.md`](decisions/csharp-golden-replay-parity.md)
   — ratified single golden bundle for all languages (including canonical
-  registry, flat under `component/<id>/`), transient strict producer validation, and reference-to-candidate
+  registry, now in case `expected/` directories), transient strict producer validation, and reference-to-candidate
   implementation checks.
 - [`component-identity-and-replay.md`](component-identity-and-replay.md) —
   exploratory notes on scenario identity, the replay unit, and artifact

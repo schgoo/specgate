@@ -133,12 +133,12 @@ Rust.
 
 ## Golden matrix
 
-`test/goldens/ctsc/matrix.json` is hand-authored and accounts for every
+`test/behavior/matrix.json` is hand-authored and accounts for every
 annotated fixture source, discovered component, negative fixture, parity
 exception, replay limitation, capture exclusion, and removed-feature
 replacement.
 
-Everything else under `test/goldens/ctsc` is generated product output. Use
+Only declared `expected/` directories under `test/behavior/cases` and the Rust rejection project contain generated product output. Use
 `just ctsc-goldens-update`, review the artifact diff, then run
 `just ctsc-goldens-check`. The check is part of `just check`.
 
@@ -152,7 +152,7 @@ The matrix is exact:
   language-value set;
 - replay checks identify reference and candidate implementations, not languages;
 - matrix `0.2.0` selects exactly one golden bundle for all languages per component
-  directly in `component/<id>/`, including the single canonical registry;
+  directly in `cases/<id>/expected/`, including the single canonical registry;
   no per-language successful-component artifacts or compatibility reader;
 - discovery-only components select a successful discovery endpoint with only
   the shared registry, no behavioral files or checks;
@@ -166,7 +166,7 @@ The matrix is exact:
   fixture configuration, not harness language policy;
 - both producers still capture strictly; nonselected bundles live in invocation
   scratch and must pass native validation and exact operation/exclusion coverage;
-- the selected producer writes directly to the component directory (no
+- the selected producer writes directly to the case's `expected/` directory (no
   `reference` subdirectory), so native `target.name` is its basename, retaining
   its language and scenario names; never translate or relabel traces;
 - checks must name the selected reference, always resolve the shared bundle,

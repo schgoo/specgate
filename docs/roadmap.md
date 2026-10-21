@@ -215,7 +215,8 @@ attributes (`SpecOperation`, `SpecSetup`, `SpecInput`, `SpecEvent`,
 no recording code at all. #44 added the recording runtime and the IL weaver, and
 the first #45 slice added the semantic value model. #46 added native sidecar
 persistence and CLI bundle emission. #47 adds one shared native reference bundle
-flat under `component/<id>/` (no organizational `reference` subdirectory),
+originally flat under `component/<id>/` (now `test/behavior/cases/<id>/expected/`,
+still without an organizational `reference` subdirectory),
 per captured component and implementation-to-implementation replay checks using
 the retained corpus. Its ratified correction replaces separate Rust/C#
 behavioral goldens: paired fixtures explicitly select C# while Rust-only fixtures

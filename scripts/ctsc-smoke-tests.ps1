@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $root = Split-Path -Parent $PSScriptRoot
-$golden = Join-Path $root 'test/goldens/ctsc/component/fixture.stateless_add'
+$golden = Join-Path $root 'test/behavior/cases/fixture.stateless_add/expected'
 $fixture = Join-Path ([IO.Path]::GetTempPath()) "sg-smoke-tests-$([guid]::NewGuid().ToString('N'))"
 $scripts = Join-Path $fixture 'scripts'
 New-Item -ItemType Directory -Force $scripts | Out-Null

@@ -43,7 +43,7 @@ under `.github/skills/`.
 
 - Do not repeat an unchanged action after it fails; re-observe and revise.
 - Do not broaden product scope merely to make validation pass.
-- Do not hand-edit generated files under `test/goldens/ctsc`.
+- Do not hand-edit generated files in case and rejection `expected/` directories.
 - Do not silently finalize a decision listed in `AGENTS.md`.
 - Do not commit, push, open or merge pull requests, or otherwise mutate remote
   state without explicit authorization.
