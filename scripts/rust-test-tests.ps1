@@ -10,24 +10,31 @@ $previousBuildDir = $env:CARGO_BUILD_BUILD_DIR
 $previousTargetDir = $env:CARGO_TARGET_DIR
 $previousThreads = $env:RUST_TEST_THREADS
 $callerLocation = (Get-Location).Path
-$state = @{ Scratch = $null; Calls = 0; Failure = '' }
+$state = @{ Scratch = $null; Calls = 0; Failure = ''; CallerBuildDir = $null }
 
 function cargo {
     $state.Calls++
     $state.Scratch = $scratch
-    $expected = @('test', '--workspace', '--', '--test-threads=1')
+    $childBuildDir = ConvertTo-Json -InputObject (Join-Path $scratch 'build') -Compress
+    $expected = @(
+        'test', '--workspace',
+        '--config', "env.CARGO_BUILD_BUILD_DIR.value=$childBuildDir",
+        '--config', 'env.CARGO_BUILD_BUILD_DIR.force=true',
+        '--', '--test-threads=1'
+    )
     if ($args.Count -ne $expected.Count -or ($args -join "`n") -cne ($expected -join "`n")) {
         throw "Runner changed Cargo workspace, target, doctest, or serial execution selection: $($args -join ' | ')"
     }
     if ((Get-Location).Path -cne (Join-Path $fixture 'rust')) {
         throw 'Runner did not execute Cargo from the product workspace.'
     }
-    if ($env:CARGO_BUILD_BUILD_DIR -cne (Join-Path $scratch 'build') -or
+    if ($env:CARGO_BUILD_BUILD_DIR -cne $state.CallerBuildDir -or
         $env:CARGO_TARGET_DIR -cne 'caller-target-dir' -or $env:RUST_TEST_THREADS -cne '8') {
-        throw 'Runner did not isolate intermediates while preserving caller target/thread settings.'
+        throw 'Runner changed parent workspace compilation or caller target/thread settings.'
     }
-    New-Item -ItemType Directory -Path $env:CARGO_BUILD_BUILD_DIR | Out-Null
-    [IO.File]::WriteAllText((Join-Path $env:CARGO_BUILD_BUILD_DIR 'intermediate'), 'test')
+    $buildDir = Join-Path $scratch 'build'
+    New-Item -ItemType Directory -Path $buildDir | Out-Null
+    [IO.File]::WriteAllText((Join-Path $buildDir 'intermediate'), 'test')
     if ($state.Failure -eq 'start') { throw 'Cargo could not start.' }
     $global:LASTEXITCODE = if ($state.Failure -eq 'exit') { 23 } else { 0 }
 }
@@ -37,6 +44,7 @@ function Assert-Run {
 
     $state.Calls = 0
     $state.Failure = $Failure
+    $state.CallerBuildDir = $CallerBuildDir
     $env:CARGO_BUILD_BUILD_DIR = $CallerBuildDir
     $caught = $null
     try {
