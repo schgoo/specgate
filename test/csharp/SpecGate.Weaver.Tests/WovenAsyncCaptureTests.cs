@@ -16,6 +16,39 @@ namespace SpecGate.Weaver.Tests;
 public sealed class WovenAsyncCaptureTests
 {
     [Fact]
+    public async Task RecordsConcreteGenericSpecializations()
+    {
+        using CaptureSession session = CaptureScenario.Begin("weaver.generic");
+
+        Assert.Equal(7, await AsyncOperations.EchoAsync(7));
+        Assert.Equal("hello", await AsyncOperations.EchoAsync("hello"));
+        Assert.Single(await AsyncOperations.ItemsAsync<AsyncOperations.Item>());
+
+        OperationSpan[] spans = [.. session.Finish().Operations];
+        Assert.Equal(["echo_i32", "echo_string", "items"], Array.ConvertAll(spans, span => span.OperationName));
+        Assert.Equal(Value.Integer(7), spans[0].Result());
+        Assert.Equal(Value.String("hello"), spans[1].Result());
+        Assert.NotNull(spans[2].Result());
+    }
+
+    [Fact]
+    public async Task UnrecordedGenericSpecializationsPreserveOrdinaryExecution()
+    {
+        Assert.Equal(1.5, await AsyncOperations.EchoAsync(1.5));
+    }
+
+    [Fact]
+    public void UndeclaredGenericSpecializationIsRejectedDuringCapture()
+    {
+        using CaptureSession session = CaptureScenario.Begin("weaver.generic");
+
+        SpecGateCaptureException failure = Assert.Throws<SpecGateCaptureException>(
+            () => { _ = AsyncOperations.EchoAsync(1.5); });
+
+        Assert.Contains("declared specialization", failure.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task RecordsTheAwaitedValueOfATask()
     {
         using CaptureSession session = CaptureScenario.Begin("weaver.async");

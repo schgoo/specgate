@@ -38,6 +38,7 @@ pub(super) struct Span {
     pub(super) parent_span_id: Box<str>,
     pub(super) name: Box<str>,
     pub(super) start_time_unix_nano: Box<str>,
+    pub(super) end_time_unix_nano: Box<str>,
     #[serde(default)]
     pub(super) attributes: Box<[KeyValue]>,
     #[serde(default)]

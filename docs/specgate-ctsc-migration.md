@@ -279,10 +279,24 @@ the Rust and C# registries still differ in exactly the declared ways.
 ## Current limitations
 
 - Reference capture supports Rust libtest targets and C# native test projects.
-- Candidate replay supports synchronous public Rust free functions with
-  lossless primitive inputs.
-- Setup-backed methods, async calls, structured replay values, explicit
-  mappings, and C# replay are not implemented.
+- Candidate replay supports public Rust free functions and setup-backed
+  instance methods, including directly awaited async calls and explicit generic
+  specializations. Recorded operation and setup construction inputs must remain
+  lossless primitives.
+- Structured results and declared errors, including collections of annotated
+  records, use the existing CTSC value projection and linked validators.
+  Reachable named type declarations must match the reference; explicit
+  cross-language shape mappings and C# candidate replay are not implemented.
+- Rust setup producers must be annotated. Discovery enumerates real Cargo
+  libtest targets, including private `#[cfg(test)]` and integration-test
+  producers. Replay selects those producers through discovery's semantic
+  resolver and invokes a generated test entry point in their Cargo target;
+  ordinary candidate tests are not rerun. Construction inputs rebuild the
+  environment, rather than intercepting HTTP. Producers must be synchronous,
+  nongeneric free functions; private producers require supported primitive
+  construction inputs and an owned, downcastable output. A single replay cannot
+  combine producers from different Cargo test targets. Equal receiver producer
+  identities and construction inputs share one receiver within a scenario.
 - An async operation is captured: the macro rewrites the annotated `async fn`
   into a `fn` returning `impl Future`, which captures the caller's operation at
   construction, re-installs it around every poll, begins recording at first
@@ -336,14 +350,35 @@ the Rust and C# registries still differ in exactly the declared ways.
   intermediate behavior as nested public operations instead.
 - Components that declare an async setup are discovery-only: capture rejects
   them before it builds anything, so no reference bundle exists. The golden
-  matrix asserts this for every row it captures. An async operation no longer
-  forces discovery-only status, but its bundle cannot be replayed, because the
-  replay planner emits only synchronous candidate calls. A trace that
-  interleaves two sibling operations is additionally unreplayable, because
-  strict comparison rejects overlapping sequential children. See
+  matrix asserts this for every row it captures. Directly awaited async
+  operations replay on a current-thread executor with I/O and timers enabled.
+  A trace that interleaves sibling operations outside `conformance.parallel`
+  remains unreplayable, as does top-level abandonment. Nested abandonment is
+  observed when replay invokes its completing enclosing operation. See
   [`decisions/async-capture-context.md`](decisions/async-capture-context.md)
   for the ratified capture-context design.
 - Discovery rejects duplicate operation identity, orphan setups, method
   operations without a receiver setup, operations on private functions, and the
   dynamic runtime `Value`, because none of them can describe a well-formed CTSC
   component surface.
+
+### Explicit generic operations
+
+Each supported specialization declares its own semantic operation name and
+concrete method type arguments. Rust accepts repeatable annotations such as
+`#[spec_operation("find_items", types = "crate::Item")]`; multiple type parameters
+use a comma-separated `types` string. C# uses
+`[SpecOperation("find_items", Spec = "example.client", TypeArguments = new[] { typeof(Item) })]`.
+The annotated signatures retain their original generic constraints, including
+Rust's `'static` requirement for specialization dispatch and C# nullability
+constraints such as `where T : notnull`. Discovery publishes concrete
+signatures without inferring specializations from tests. Calling an undeclared
+specialization while recording fails explicitly. Open generic declaring types,
+generic setups, and Rust const-generic operation specializations are unsupported.
+
+The paired CLI client fixture captures a C# generic async instance method and
+replays it against a Rust method returning `Vec<Item>`. Private Rust setup
+producers in an arbitrary Cargo integration-test target construct a loopback
+HTTP server, client, and injected parameter. Repeated calls retain receiver
+state, and strict comparison checks the typed collection contents. See the
+[accepted replay decision](decisions/typed-async-client-replay.md).

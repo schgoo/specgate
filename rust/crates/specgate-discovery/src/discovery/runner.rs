@@ -110,7 +110,7 @@ pub(super) fn run_in(context: &crate::runner::CandidatePackage, system: &crate::
     if json.is_empty() {
         return Err(failure("discovery build produced no output"));
     }
-    Ok(json)
+    crate::runner::harness::augment(&context.path, &json, scratch.path(), system)
 }
 
 pub(super) fn discovery_cargo(context: &crate::runner::CandidatePackage) -> Result<crate::runner::RunnerCargo, Error> {

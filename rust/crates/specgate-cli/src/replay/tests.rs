@@ -244,6 +244,56 @@ mod cases {
     }
 
     #[test]
+    fn typed_async_setup_replay() {
+        typed_setup_replay("typed-async.yaml", "rust");
+    }
+
+    #[test]
+    fn typed_integration_setup_replay() {
+        typed_setup_replay("typed-integration.yaml", "rust");
+    }
+
+    #[test]
+    fn typed_csharp_to_rust_setup_replay() {
+        typed_setup_replay("typed-integration.yaml", "csharp");
+    }
+
+    fn typed_setup_replay(binding_name: &str, reference: &str) {
+        let cache = tempfile::tempdir().unwrap();
+        let binding = fixture_binding().with_file_name(binding_name);
+        let capture_dir = cache.path().join("capture");
+        let output = cache.path().join("candidate.otlp.json");
+        capture(
+            CaptureRequest::builder(CapturePaths { binding: binding.clone() })
+                .component(ComponentId::from("fixture.typed_async"))
+                .implementation(reference)
+                .out(&capture_dir)
+                .build()
+                .unwrap(),
+        )
+        .expect("capture a generic async instance operation with typed results");
+        let report = replay(
+            Request::builder(Paths::new(&capture_dir, &binding))
+                .out(&output)
+                .implementation("rust")
+                .build()
+                .unwrap(),
+        )
+        .expect("replay selected setups and preserve the shared receiver");
+        assert_eq!(report.operations, 3);
+        let validation = validate_linked(&output, capture_dir.join(registry_file()), &[]);
+        assert!(validation.valid, "{:#?}", validation.issues);
+        let compared = specgate_ctsc::comparison::compare_with(
+            capture_dir.join(reference_file()),
+            &output,
+            Some(capture_dir.join(registry_file())),
+            [],
+            &specgate_ctsc::comparison::SystemReader::system(),
+        );
+        assert!(compared.equivalent, "{compared:#?}");
+    }
+
+    #[test]
     fn candidate_config() {
         let (cache, binding) = configured_candidate();
         let capture_dir = cache.path().join("capture");
@@ -381,11 +431,14 @@ mod cases {
 
         let mut asynchronous = raw_operation("add");
         asynchronous.is_async = true;
-        assert_error(&candidate_metadata(asynchronous, normalized_operation("add")), "is async");
+        assert_error(
+            &candidate_metadata(asynchronous, normalized_operation("add")),
+            "async metadata disagrees",
+        );
 
         let mut method = raw_operation("add");
         method.is_method = true;
-        assert_error(&candidate_metadata(method, normalized_operation("add")), "is a method");
+        assert_error(&candidate_metadata(method, normalized_operation("add")), "receiver");
 
         let mut private = raw_operation("add");
         private.is_public = false;
@@ -395,7 +448,7 @@ mod cases {
         let mut setup_operation = raw_operation("add");
         setup_operation.is_setup = true;
         Arc::make_mut(&mut setup.inner).raw_registry.ops.push(setup_operation);
-        assert_error(&setup, "setup-backed");
+        assert_error(&setup, "ambiguously matches");
     }
 
     #[test]
@@ -417,6 +470,111 @@ mod cases {
         let reason = build_plan(&bundle, &candidate).unwrap_err();
         assert!(reason.to_string().contains("unsupported structured type"));
         assert_eq!(classify(reason.to_string()), Some(ReplayLimitation::StructuredValue));
+    }
+
+    #[test]
+    fn planner_checks_transitive_structured_outcome_declarations() {
+        let (bundle, mut candidate) = structured_metadata();
+        build_plan(&bundle, &candidate).expect("matching typed collection declarations");
+        candidate.schema.types[0].fields[0].ty = "i64".into();
+        let error = build_plan(&bundle, &candidate).unwrap_err();
+        assert!(error.to_string().contains("Child"), "{error}");
+        assert_eq!(classify(error.to_string()), Some(ReplayLimitation::StructuredValue));
+    }
+
+    #[test]
+    fn malformed_structured_candidate_never_publishes() {
+        use specgate::__rt::{self as capture, Value};
+        let (bundle, candidate) = structured_metadata();
+        let plan = build_plan(&bundle, &candidate).unwrap();
+        let config = capture::Config::builder(capture::ConfigDeps {
+            scenario_name: "add".into(),
+            trace_id: "33333333333333333333333333333333".try_into().unwrap(),
+            run_id: "3333333333333301".try_into().unwrap(),
+            scenario_id: "3333333333333302".try_into().unwrap(),
+        })
+        .build()
+        .unwrap();
+        capture::start(config).unwrap();
+        let mut operation = capture::begin_operation("fixture.stateless_add".into(), "add".into()).unwrap();
+        operation.input("a", Value::Integer(2)).unwrap();
+        operation.input("b", Value::Integer(3)).unwrap();
+        operation
+            .result(Value::List(vec![Value::Map(BTreeMap::from([(
+                "child".to_string(),
+                Value::Map(BTreeMap::from([("value".to_string(), Value::String("not an integer".to_string()))])),
+            )]))]))
+            .unwrap();
+        let captures = [capture::finish().unwrap()];
+        let system = CommandEnvironment::fake();
+        system.seed_file("existing.otlp.json", b"original");
+        for out in ["missing.otlp.json", "existing.otlp.json"] {
+            let error = write(&plan, &captures, out, &system).unwrap_err();
+            assert!(error.to_string().contains("failed linked validation"), "{error}");
+        }
+        assert!(!system.exists("missing.otlp.json"));
+        assert_eq!(system.read("existing.otlp.json").unwrap(), b"original");
+    }
+
+    #[test]
+    fn native_raw_identifiers_are_validated_and_preserved() {
+        let mut raw = raw_operation("add");
+        raw.module_path = "specgate_ctsc_fixtures::r#async".into();
+        raw.fn_name = "r#type".into();
+        let plan = build_plan(&reference_bundle(), &candidate_metadata(raw, normalized_operation("add"))).unwrap();
+        assert!(source(&plan).contains("candidate::r#async::r#type("));
+        for invalid in ["async", "r#self", "value; panic!()", "a::b", ""] {
+            assert!(link::validate_ident(invalid, "test").is_err(), "{invalid}");
+        }
+    }
+
+    fn structured_metadata() -> (ReplayBundle, Candidate) {
+        use specgate_discovery::schema::{Field, TypeDef, TypeKind};
+        let mut operation = normalized_operation("add");
+        operation.output = Some("List<Item>".into());
+        let mut raw = raw_operation("add");
+        raw.return_type = "Vec<Item>".into();
+        let mut candidate = candidate_metadata(raw, operation);
+        candidate.schema.types = vec![
+            TypeDef {
+                name: "Child".into(),
+                kind: TypeKind::Struct,
+                fields: vec![Field {
+                    name: "value".into(),
+                    ty: "i32".into(),
+                }],
+                variants: Vec::new(),
+            },
+            TypeDef {
+                name: "Item".into(),
+                kind: TypeKind::Struct,
+                fields: vec![Field {
+                    name: "child".into(),
+                    ty: "Child".into(),
+                }],
+                variants: Vec::new(),
+            },
+        ];
+        let schema = serde_json::to_string(&candidate.schema).unwrap();
+        let mut bundle = reference_bundle();
+        bundle.registry_document = specgate_ctsc::registry::encode(
+            bundle.registry.identity.id.as_str(),
+            bundle.registry.identity.version.as_str(),
+            specgate_ctsc::registry::Schema::new(&schema),
+        )
+        .unwrap()
+        .registry_json
+        .into_bytes();
+        let operation = &bundle.registry.operations[0];
+        bundle.registry.operations[0] = replay_model::RegistryOp::builder(replay_model::OpDeps {
+            component_id: operation.component_id().clone(),
+            name: operation.name().clone(),
+            inputs: operation.inputs().to_vec(),
+        })
+        .output(ReplayType::list(ReplayType::named("Item", replay_model::TypeOwner::default())))
+        .build()
+        .unwrap();
+        (bundle, candidate)
     }
 
     #[test]
@@ -502,6 +660,7 @@ mod cases {
             },
         ];
         ReplayBundle {
+            registry_document: Vec::new(),
             component_id: specgate_ctsc::replay::model::ComponentId::try_new("fixture.stateless_add").unwrap(),
             registry: replay_model::Registry {
                 identity: replay_model::RegistryIdentity {
@@ -545,6 +704,9 @@ mod cases {
             name: name.into(),
             module_path: "specgate_ctsc_fixtures::stateless".into(),
             fn_name: name.into(),
+            type_arguments: Vec::new(),
+            replay_output: None,
+            test_target: None,
             is_setup: false,
             is_async: false,
             is_method: false,
@@ -597,6 +759,7 @@ mod cases {
     fn candidate_metadata(raw: RawOperation, normalized: Operation) -> Candidate {
         Candidate {
             inner: Arc::new(CandidatesInner {
+                crate_name: "specgate_ctsc_fixtures".to_string(),
                 target_name: "rust".into(),
                 language: specgate_discovery::binding::Language::Rust,
                 package_name: "specgate-ctsc-fixtures".into(),

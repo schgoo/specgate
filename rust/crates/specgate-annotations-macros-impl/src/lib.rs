@@ -11,8 +11,10 @@
 use proc_macro_crate::{FoundCrate, crate_name};
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::quote;
-use syn::parse::{Parse, ParseStream};
+use syn::parse::{Parse, ParseStream, Parser as _};
 use syn::{Data, DeriveInput, Fields, FnArg, Ident, ItemFn, LitStr, Pat, ReturnType, Token, Type, parse_quote};
+
+pub mod harness;
 
 // `Result::Err` has one unnamed Rust error channel. The annotations contract
 // maps it to this stable CTSC declared-error name.
@@ -24,12 +26,15 @@ const ERROR_ARG: usize = 1;
 struct OperationArg {
     name: String,
     component: Option<String>,
+    types: Vec<Type>,
 }
 
 impl Parse for OperationArg {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let name = input.parse::<LitStr>()?.value();
         let mut component = None;
+        let mut types = Vec::new();
+        let mut has_types = false;
         while input.peek(Token![,]) {
             input.parse::<Token![,]>()?;
             if input.is_empty() {
@@ -39,12 +44,24 @@ impl Parse for OperationArg {
             input.parse::<Token![=]>()?;
             let value = input.parse::<LitStr>()?.value();
             if key == "spec" {
+                if component.is_some() {
+                    return Err(syn::Error::new(key.span(), "duplicate `spec` argument"));
+                }
                 component = Some(value);
+            } else if key == "types" {
+                if has_types {
+                    return Err(syn::Error::new(key.span(), "duplicate `types` argument"));
+                }
+                has_types = true;
+                types = syn::punctuated::Punctuated::<Type, Token![,]>::parse_terminated
+                    .parse_str(&value)?
+                    .into_iter()
+                    .collect();
             } else {
-                return Err(syn::Error::new(key.span(), "expected `spec`"));
+                return Err(syn::Error::new(key.span(), "expected `spec` or `types`"));
             }
         }
-        Ok(Self { name, component })
+        Ok(Self { name, component, types })
     }
 }
 

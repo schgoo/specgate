@@ -10,11 +10,25 @@
 //! Most applications import these established names from `specgate`; this
 //! implementation-facing crate exists so the facade can re-export the attributes
 //! without changing generated runtime identity.
+//!
+//! Generic operation methods declare concrete specializations explicitly with
+//! `#[spec_operation("find_items", types = "crate::Item")]`. Repeat the attribute
+//! with distinct semantic names for additional type combinations; multiple type
+//! arguments use a comma-separated string. Generic parameters keep their authored
+//! bounds and require `'static` for specialization dispatch. Setup construction
+//! inputs remain primitive; synchronous annotated test-only producers can rebuild
+//! private replay environments through generated Cargo test entry points.
 
 use proc_macro::TokenStream;
 
 fn finish(result: syn::Result<proc_macro2::TokenStream>) -> TokenStream {
     result.unwrap_or_else(syn::Error::into_compile_error).into()
+}
+
+#[doc(hidden)]
+#[proc_macro]
+pub fn __specgate_test_harness(_input: TokenStream) -> TokenStream {
+    specgate_annotations_macros_impl::harness::entry("component").into()
 }
 
 /// Mark a function or method as a native CTSC operation boundary.

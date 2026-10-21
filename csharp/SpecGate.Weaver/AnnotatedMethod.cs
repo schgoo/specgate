@@ -86,11 +86,7 @@ internal static class AnnotatedMethod
                 + "return a materialized collection instead.");
         }
 
-        // Capture resolves the method by its handle and reads what its values
-        // mean from reflection. A generic method or a generic declaring type has
-        // no single resolvable signature, and discovery cannot publish a type
-        // parameter in the registry either, so both are refused here.
-        if (method.HasGenericParameters)
+        if (method.HasGenericParameters && !string.Equals(kind, "operation", StringComparison.Ordinal))
         {
             throw new WeaveException(
                 $"{method.FullName} is a generic method. SpecGate {kind}s must have concrete "

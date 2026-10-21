@@ -275,6 +275,7 @@ fn invalid_dependencies() {
 #[test]
 fn candidate_runtime() {
     let context = crate::runner::CandidatePackage::new(crate::runner::CandidateDeps {
+        crate_name: "candidate".to_string(),
         package: "candidate".into(),
         version: "1.2.3".into(),
         path: PathBuf::from("candidate-package"),
@@ -298,6 +299,7 @@ fn runner_failures() {
 
     fn context() -> crate::runner::CandidatePackage {
         crate::runner::CandidatePackage::new(crate::runner::CandidateDeps {
+            crate_name: "candidate".to_string(),
             package: "candidate".into(),
             version: "1.0.0".into(),
             path: PathBuf::from("candidate"),
@@ -370,6 +372,7 @@ fn registry_failure() {
     use crate::runner::system::{FailureKey, FakeFs, FakeProcess, ProcessOutput};
     use std::collections::{BTreeMap, VecDeque};
     let context = crate::runner::CandidatePackage::new(crate::runner::CandidateDeps {
+        crate_name: "candidate".to_string(),
         package: "candidate".into(),
         version: "1.0.0".into(),
         path: PathBuf::from("candidate"),

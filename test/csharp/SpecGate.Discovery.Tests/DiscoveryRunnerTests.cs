@@ -80,6 +80,32 @@ public sealed class ExplodingAttribute : Attribute
 public class DiscoveryRunnerTests
 {
     [Fact]
+    public void GenericSpecializationsPublishConcreteSignatures()
+    {
+        MethodInfo method = typeof(GenericFixture).GetMethod(nameof(GenericFixture.Items))!;
+        AnnotatedMethod[] methods =
+        [
+            new(method,
+                [
+                    new SpecOperationAttribute("numbers") { Spec = "fixtures.generic", TypeArguments = [typeof(int)] },
+                    new SpecOperationAttribute("readings") { Spec = "fixtures.generic", TypeArguments = [typeof(Fixtures.Reading)] },
+                ], []),
+        ];
+        ComponentDocument document = new("fixtures.generic", [typeof(Fixtures.Reading)], methods, new NullabilityInfoContext());
+
+        JsonElement payload = JsonSerializer.SerializeToElement(document.Build());
+        JsonElement[] operations = [.. payload.GetProperty("operations").EnumerateArray()];
+        Assert.Equal(["numbers", "readings"], operations.Select(operation => operation.GetProperty("name").GetString()));
+        Assert.Equal(["List<i32>", "List<Reading>"], operations.Select(operation => operation.GetProperty("return_type").GetString()));
+        Assert.Contains(payload.GetProperty("types").EnumerateArray(), type => type.GetProperty("name").GetString() == "Reading");
+    }
+
+    private static class GenericFixture
+    {
+        public static Task<List<T>> Items<T>() where T : notnull => Task.FromResult(new List<T>());
+    }
+
+    [Fact]
     public void AMethodDeclaringSeveralComponentsIsRejected()
     {
         MethodInfo method = typeof(Fixtures).GetMethod(nameof(Fixtures.BetaOnly))!;

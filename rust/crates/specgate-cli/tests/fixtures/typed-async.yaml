@@ -1,0 +1,9 @@
+# yaml-language-server: $schema=../../../../../binding-schema.json
+components:
+  fixture.typed_async:
+    implementations:
+      rust:
+        language: rust
+        sources: typed-async
+        tests:
+          projects: [typed-async/Cargo.toml]

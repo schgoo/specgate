@@ -12,6 +12,7 @@
 //! use specgate_discovery::runner::{CandidateDeps, CandidatePackage, Dependency, PackageSource};
 //! let runtime = PackageSource::local("specgate-runtime", "0.6.0", "../runtime");
 //! let candidate = CandidatePackage::new(CandidateDeps {
+//!     crate_name: "demo".to_string(),
 //!     package: "demo".into(),
 //!     version: "1.0.0".into(),
 //!     path: PathBuf::from("demo"),
@@ -157,6 +158,8 @@ impl PackageSource {
     reason = "Cargo identity DTOs intentionally expose every exact package field"
 )]
 pub struct CandidateDeps {
+    /// Compiler-reported library crate name, including custom `[lib] name`.
+    pub crate_name: String,
     /// Candidate package name.
     pub package: PackageName,
     /// Candidate package version.
@@ -174,6 +177,8 @@ pub struct CandidateDeps {
     reason = "Cargo identity DTOs intentionally expose every exact package field"
 )]
 pub struct CandidatePackage {
+    /// Compiler-reported library crate name.
+    pub crate_name: String,
     /// Candidate package name.
     pub package: PackageName,
     /// Candidate package version.
@@ -189,6 +194,7 @@ impl CandidatePackage {
     #[must_use]
     pub fn new(deps: CandidateDeps) -> Self {
         Self {
+            crate_name: deps.crate_name,
             package: deps.package,
             version: deps.version,
             path: deps.path,

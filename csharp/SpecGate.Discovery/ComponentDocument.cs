@@ -80,6 +80,18 @@ internal sealed class ComponentDocument
 
     private object BuildOperation(MethodInfo method, object operation)
     {
+        Type[] arguments = Annotations.Types(operation, "TypeArguments");
+        if (arguments.Length != method.GetGenericArguments().Length || arguments.Any(type => type.ContainsGenericParameters))
+        {
+            throw new InvalidOperationException(
+                $"{method} requires one concrete TypeArguments entry per generic method parameter.");
+        }
+
+        if (method.IsGenericMethodDefinition)
+        {
+            method = method.MakeGenericMethod(arguments);
+        }
+
         NullabilityInfo returnInfo = nullability.Create(method.ReturnParameter);
         (bool isAsync, Type? inner, NullabilityInfo? innerInfo) = Unwrap(method.ReturnType, returnInfo);
         bool hasException = Annotations.Has(method, Annotations.Exception, inherit: true);

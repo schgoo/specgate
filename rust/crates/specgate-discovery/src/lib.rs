@@ -68,7 +68,7 @@ pub mod registry {
     //! types, or present components without depending on the wire JSON model.
     #[doc(inline)]
     pub use crate::discovery::registry::{
-        ExceptionMetadata, Field, Operation, OperationBuilder, OperationId, Registry, Type, TypeBuilder, TypeId, Variant,
+        ExceptionMetadata, Field, Operation, OperationBuilder, OperationId, Registry, TestTarget, Type, TypeBuilder, TypeId, Variant,
     };
     #[doc(inline)]
     pub use crate::discovery::registry_json;
@@ -103,5 +103,5 @@ pub mod setup {
     //! Setups are selected by exact component and operation identity; ordering
     //! and duplicate diagnostics match the main discovery workflow.
     #[doc(inline)]
-    pub use crate::discovery::setup::{MappedInput, SetupInput, build_inputs, raw_inputs};
+    pub use crate::discovery::setup::{MappedInput, SetupBinding, SetupInput, build_inputs, raw_inputs, resolve_setups};
 }

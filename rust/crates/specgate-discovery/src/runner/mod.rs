@@ -6,6 +6,7 @@
 //! composition shared by real and fake adapters.
 
 pub(crate) mod cache;
+pub mod harness;
 mod metadata;
 pub(crate) mod system;
 

@@ -32,15 +32,41 @@ fn failure(message: impl Into<String>) -> Error {
 // Inputs (setup-aware)
 // ---------------------------------------------------------------------------
 
-pub(super) struct FoldedSetup {
+pub(super) struct FoldedSetup<'a> {
     pub(super) fills: FieldName,
     pub(super) inputs: Vec<Field>,
     pub(super) output: TypeExpression,
+    producer: &'a Operation,
 }
 
-pub(super) struct FoldedOperation {
+pub(super) struct FoldedOperation<'a> {
     pub(super) inputs: Vec<Field>,
-    pub(super) setups: Vec<FoldedSetup>,
+    pub(super) setups: Vec<FoldedSetup<'a>>,
+}
+
+/// A producer selected by the same rules that fold discovery inputs.
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct SetupBinding<'a> {
+    /// Exact native declaration to invoke.
+    pub producer: &'a Operation,
+    /// Filled parameter, or an empty name for the receiver.
+    pub fills: FieldName,
+}
+
+/// Resolve setup producers without guessing from source layout.
+///
+/// # Errors
+/// Rejects the same missing, ambiguous, or colliding producers as discovery.
+pub fn resolve_setups<'a>(op: &Operation, registry: &'a Registry) -> Result<Vec<SetupBinding<'a>>, Error> {
+    Ok(fold_operation(op, registry)?
+        .setups
+        .into_iter()
+        .map(|setup| SetupBinding {
+            producer: setup.producer,
+            fills: setup.fills,
+        })
+        .collect())
 }
 
 /// One setup-folded input retaining its source type expression.
@@ -76,7 +102,7 @@ pub struct MappedInput {
 ///
 /// Rejects missing `fills` parameters, ambiguous type-based fills, multiple
 /// receiver producers, duplicate fills, and duplicate folded input names.
-pub(super) fn fold_operation(op: &Operation, registry: &Registry) -> Result<FoldedOperation, Error> {
+pub(super) fn fold_operation<'a>(op: &Operation, registry: &'a Registry) -> Result<FoldedOperation<'a>, Error> {
     let setups = registry.setups_for(&op.component, &op.name);
     let mut param_injection: BTreeMap<FieldName, Vec<Field>> = BTreeMap::new();
     let mut receiver_setup: Option<&Operation> = None;
@@ -131,6 +157,7 @@ pub(super) fn fold_operation(op: &Operation, registry: &Registry) -> Result<Fold
             fills: target.unwrap_or_default(),
             inputs: setup.params.clone(),
             output: setup.return_type.clone(),
+            producer: setup,
         });
     }
 

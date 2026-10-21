@@ -52,6 +52,19 @@ pub(super) fn write(
         ),
     );
     let encoded = encode_otlp(captures.as_ref(), &metadata)?;
+    if plan.structured_outcomes {
+        let validation = specgate_ctsc::validation::bytes::validate_linked(
+            specgate_ctsc::validation::DocumentBytes::new(out, encoded.otlp_json.as_bytes()),
+            specgate_ctsc::validation::DocumentBytes::new(Path::new("registry.ctsc.json"), &plan.registry_document),
+            [],
+        );
+        if !validation.valid {
+            return Err(Error::new_message(
+                ErrorKind::Publication,
+                format!("candidate structured outcomes failed linked validation: {:?}", validation.issues),
+            ));
+        }
+    }
     write_atomic(out, encoded.otlp_json.as_bytes(), system)?;
 
     let scenarios = u32::try_from(plan.scenarios.len()).map_err(|_error| "replayed scenario count exceeds u32".to_string())?;

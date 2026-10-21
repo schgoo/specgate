@@ -62,7 +62,10 @@ pub(crate) fn classify(reason: impl AsRef<str>) -> Option<ReplayLimitation> {
         Some(ReplayLimitation::SetupOperation)
     } else if reason.contains(METHOD_OPERATION) {
         Some(ReplayLimitation::MethodOperation)
-    } else if reason.contains(ASYNC_OPERATION) || reason.contains(NORMALIZED_ASYNC) {
+    } else if reason.contains(ASYNC_OPERATION)
+        || reason.contains(NORMALIZED_ASYNC)
+        || reason.contains("unsupported async replay scheduling:")
+    {
         Some(ReplayLimitation::AsyncOperation)
     } else if reason.starts_with(RUST_CANDIDATE) {
         Some(ReplayLimitation::UnsupportedLanguage)

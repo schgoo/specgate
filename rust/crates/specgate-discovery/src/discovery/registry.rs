@@ -6,6 +6,16 @@ use crate::error::ErrorKind;
 use crate::identity::{ComponentId, FieldName, FunctionName, KindName, ModulePath, OperationName, TypeExpression, TypeName, VariantName};
 use serde::Deserialize;
 
+/// Cargo test target containing an annotation-generated replay entry point.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct TestTarget {
+    /// Cargo's target name, not a filesystem or test-layout convention.
+    pub name: String,
+    /// Whether Cargo identified this as a library unit-test target.
+    pub library: bool,
+}
+
 // ---------------------------------------------------------------------------
 // Registry model (parsed from discovery JSON)
 // ---------------------------------------------------------------------------
@@ -62,6 +72,12 @@ pub struct Operation {
     pub module_path: ModulePath,
     /// Native function or method name.
     pub fn_name: FunctionName,
+    /// Concrete native generic type arguments, in declaration order.
+    pub type_arguments: Vec<TypeExpression>,
+    /// Compiler-qualified result type of a generated setup bridge.
+    pub replay_output: Option<String>,
+    /// Cargo test target in which this declaration was discovered.
+    pub test_target: Option<TestTarget>,
     /// Whether this declaration is a setup producer.
     pub is_setup: bool,
     /// Whether this declaration is asynchronous.
@@ -148,6 +164,9 @@ impl Operation {
                 component: required.component,
                 module_path: String::new().into(),
                 fn_name: String::new().into(),
+                type_arguments: Vec::new(),
+                replay_output: None,
+                test_target: None,
                 is_setup: false,
                 is_async: false,
                 is_method: false,
@@ -468,6 +487,12 @@ struct WireOperation {
     #[serde(default)]
     fn_name: String,
     #[serde(default)]
+    type_arguments: Vec<String>,
+    #[serde(default)]
+    replay_output: Option<String>,
+    #[serde(default)]
+    test_target: Option<TestTarget>,
+    #[serde(default)]
     is_setup: bool,
     #[serde(default)]
     is_async: bool,
@@ -507,6 +532,9 @@ impl From<WireOperation> for Operation {
             name: wire.name.into(),
             module_path: wire.module_path.into(),
             fn_name: wire.fn_name.into(),
+            type_arguments: wire.type_arguments.into_iter().map(Into::into).collect(),
+            replay_output: wire.replay_output,
+            test_target: wire.test_target,
             is_setup: wire.is_setup,
             is_async: wire.is_async,
             is_method: wire.is_method,

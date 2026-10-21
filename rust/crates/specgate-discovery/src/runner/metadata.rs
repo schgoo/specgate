@@ -116,6 +116,13 @@ fn override_context(
         None => package_source(runtime_package)?,
     };
     Ok(CandidatePackage::new(CandidateDeps {
+        crate_name: candidate
+            .targets
+            .iter()
+            .find(|target| target.kind.iter().any(|kind| kind == "lib"))
+            .ok_or_else(|| failure("candidate has no Cargo library target"))?
+            .name
+            .clone(),
         package: candidate.name.clone().into(),
         version: candidate.version.clone().into(),
         path: package_root.to_path_buf(),
@@ -264,6 +271,14 @@ struct CargoPackage {
     version: String,
     manifest_path: PathBuf,
     source: Option<String>,
+    #[serde(default)]
+    targets: Vec<CargoTarget>,
+}
+
+#[derive(Deserialize)]
+struct CargoTarget {
+    name: String,
+    kind: Vec<String>,
 }
 
 #[derive(Deserialize)]

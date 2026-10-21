@@ -1,8 +1,11 @@
 using System;
 using System.ComponentModel;
+using System.Linq;
+using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
+using SpecGate.Annotations;
 
 namespace SpecGate.Runtime;
 
@@ -93,6 +96,22 @@ public static class SpecGateRuntime
         if (session is null || !session.Records(component))
         {
             return OperationScope.Disabled;
+        }
+
+        if (MethodBase.GetMethodFromHandle(method) is MethodInfo { IsGenericMethod: true } closed)
+        {
+            Type[] arguments = closed.GetGenericArguments();
+            SpecOperationAttribute[] matches = [.. closed.GetGenericMethodDefinition()
+                .GetCustomAttributes<SpecOperationAttribute>()
+                .Where(annotation => annotation.Spec == component && annotation.TypeArguments.SequenceEqual(arguments))];
+            if (matches.Length != 1)
+            {
+                throw new SpecGateCaptureException(
+                    CaptureRejection.UnsupportedType,
+                    $"specgate: generic operation '{closed}' requires exactly one declared specialization for these type arguments.");
+            }
+
+            operation = matches[0].Name;
         }
 
         return Open(session, operation, component, method);

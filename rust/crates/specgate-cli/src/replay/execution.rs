@@ -22,6 +22,7 @@ pub(crate) struct Candidates {
 /// runtime source, preserving package identity throughout linking and execution.
 #[derive(Debug, Clone)]
 pub(crate) struct CandidatesInner {
+    pub(super) crate_name: String,
     pub(super) target_name: specgate_discovery::identity::ImplementationLabel,
     pub(super) language: specgate_discovery::binding::Language,
     pub(super) package_name: specgate_discovery::identity::PackageName,
@@ -133,6 +134,7 @@ impl Candidates {
         schemas.shrink_to_fit();
         Ok(Self {
             inner: Arc::new(CandidatesInner {
+                crate_name: cargo.crate_name,
                 target_name,
                 language,
                 package_name: cargo.package,

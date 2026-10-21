@@ -135,6 +135,22 @@ fn decode_inner(manifest_json: &[u8], registry_json: &[u8], trace_json: &[u8]) -
     }
 
     let registry = decode_registry(&registry_document, registry_digest)?;
+    if registry.operations.iter().any(|operation| {
+        operation.output().is_some_and(|value| value.primitive_name().is_none())
+            || operation
+                .errors()
+                .iter()
+                .any(|error| error.value_type.as_ref().is_some_and(|value| value.primitive_name().is_none()))
+    }) {
+        let validation = crate::validation::bytes::validate_linked(
+            crate::validation::DocumentBytes::new(std::path::Path::new("reference.otlp.json"), trace_json),
+            crate::validation::DocumentBytes::new(std::path::Path::new("registry.ctsc.json"), registry_json),
+            [],
+        );
+        if !validation.valid {
+            return Err(format!("structured replay outcomes failed linked validation: {:?}", validation.issues).into());
+        }
+    }
     if !registry
         .operations
         .iter()
@@ -153,6 +169,7 @@ fn decode_inner(manifest_json: &[u8], registry_json: &[u8], trace_json: &[u8]) -
     Ok(Bundle {
         component_id: ComponentId::try_new(manifest.component_id)?,
         registry,
+        registry_document: registry_json.to_vec(),
         scenarios,
     })
 }

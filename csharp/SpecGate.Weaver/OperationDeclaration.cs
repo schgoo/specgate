@@ -46,7 +46,7 @@ internal sealed class OperationDeclaration
 
         AnnotatedMethod.RejectUnsupported(method, Kind);
 
-        if (annotations.Count > 1)
+        if (annotations.Count > 1 && !method.HasGenericParameters)
         {
             string components = string.Join(", ", annotations.Select(annotation => DescribeComponent(annotation)));
             throw new WeaveException(
@@ -56,9 +56,37 @@ internal sealed class OperationDeclaration
         }
 
         CustomAttribute only = annotations[0];
+        string component = ReadComponent(method, only);
+        HashSet<string> names = new(StringComparer.Ordinal);
+        HashSet<string> specializations = new(StringComparer.Ordinal);
+        foreach (CustomAttribute annotation in annotations)
+        {
+            if (ReadComponent(method, annotation) != component || !names.Add(ReadOperationName(method, annotation)))
+            {
+                throw new WeaveException(
+                    $"{method.FullName} specializations require one component and distinct operation names.");
+            }
+
+            CustomAttributeArgument[] arguments = annotation.Properties
+                .Where(property => property.Name == "TypeArguments")
+                .Select(property => property.Argument.Value as CustomAttributeArgument[])
+                .FirstOrDefault() ?? [];
+            if (arguments.Length != method.GenericParameters.Count
+                || arguments.Any(argument => argument.Value is not TypeReference type || type.ContainsGenericParameter))
+            {
+                throw new WeaveException(
+                    $"{method.FullName} requires one concrete TypeArguments entry per generic method parameter.");
+            }
+
+            if (!specializations.Add(string.Join(",", arguments.Select(argument => ((TypeReference)argument.Value).FullName))))
+            {
+                throw new WeaveException($"{method.FullName} has duplicate generic specialization type arguments.");
+            }
+        }
+
         return new OperationDeclaration(
             ReadOperationName(method, only),
-            ReadComponent(method, only),
+            component,
             AnnotatedMethod.ReadInputs(method, Kind));
     }
 

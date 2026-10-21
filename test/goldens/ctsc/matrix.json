@@ -96,10 +96,10 @@
       "checks": [],
       "replacement": {
         "feature": "unsupported IL declaration rejection",
-        "rationale": "The weaver must reject async-void, generic and conflicting annotations before producing native evidence.",
+        "rationale": "The weaver rejects async-void, generic methods without concrete TypeArguments, generic declaring types, and conflicting annotations before producing native evidence.",
         "references": [
           { "path": "test/csharp/SpecGate.Weaver.Tests/WeaveRejectionTests.cs", "test": "RejectsAsyncVoidOperation" },
-          { "path": "test/csharp/SpecGate.Weaver.Tests/WeaveRejectionTests.cs", "test": "RejectsAnnotatedGenericMethod" },
+          { "path": "test/csharp/SpecGate.Weaver.Tests/WeaveRejectionTests.cs", "test": "RejectsGenericMethodWithoutConcreteSpecialization" },
           { "path": "test/csharp/SpecGate.Weaver.Tests/WeaveRejectionTests.cs", "test": "RejectsOperationOnGenericDeclaringType" },
           { "path": "test/csharp/SpecGate.Weaver.Tests/WeaveRejectionTests.cs", "test": "RejectsMethodDeclaredAsBothOperationAndSetup" },
           { "path": "test/csharp/SpecGate.Weaver.Tests/WeaveRejectionTests.cs", "test": "RejectsMethodDeclaringSeveralComponents" }
@@ -182,8 +182,7 @@
       },
       "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
-        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
-          "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it." }
+        {"reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value", "reason": "Reference and candidate structured type declarations differ; explicit semantic type mappings are not implemented."}
       ],
       "linkage": {
         "mode": "linked"
@@ -217,8 +216,7 @@
       },
       "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
-        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
-          "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it." }
+        {"reference": "csharp", "candidate": "rust", "mode": "verified"}
       ],
       "linkage": {
         "mode": "linked"
@@ -247,8 +245,7 @@
       },
       "reference": { "implementation": "rust", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
-        { "reference": "rust", "candidate": "rust", "mode": "unsupported", "expectCategory": "async-operation",
-          "reason": "The operation is async. Replay generates a synchronous candidate call, so the planner rejects an async operation even though capture now records it. The inner operation is also abandoned rather than completed, so there is no recorded outcome to replay against." }
+        {"reference": "rust", "candidate": "rust", "mode": "verified"}
       ],
       "linkage": {
         "mode": "linked"
@@ -282,8 +279,7 @@
       },
       "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
-        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "async-operation",
-          "reason": "The operation is async. Replay generates a synchronous candidate call, so the planner rejects it." }
+        {"reference": "csharp", "candidate": "rust", "mode": "verified"}
       ],
       "linkage": {
         "mode": "linked"
@@ -312,8 +308,7 @@
       },
       "reference": { "implementation": "rust", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
-        { "reference": "rust", "candidate": "rust", "mode": "unsupported", "expectCategory": "async-operation",
-          "reason": "The operation is async. Replay generates a synchronous candidate call, so the planner rejects an async operation even though capture now records it. The captured trace also carries two overlapping sibling operation spans, which strict comparison rejects outside conformance.parallel." }
+        {"reference": "rust", "candidate": "rust", "mode": "unsupported", "expectCategory": "async-operation", "reason": "Strict replay comparison does not support overlapping sibling operations outside conformance.parallel."}
       ],
       "linkage": {
         "mode": "linked"
@@ -342,8 +337,7 @@
       },
       "reference": { "implementation": "rust", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
-        { "reference": "rust", "candidate": "rust", "mode": "unsupported", "expectCategory": "async-operation",
-          "reason": "The operation is async. Replay generates a synchronous candidate call, so the planner rejects it." }
+        {"reference": "rust", "candidate": "rust", "mode": "verified"}
       ],
       "linkage": {
         "mode": "linked"
@@ -372,8 +366,7 @@
       },
       "reference": { "implementation": "rust", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
-        { "reference": "rust", "candidate": "rust", "mode": "unsupported", "expectCategory": "async-operation",
-          "reason": "The operation is async. Replay generates a synchronous candidate call, so the planner rejects it." }
+        {"reference": "rust", "candidate": "rust", "mode": "verified"}
       ],
       "linkage": {
         "mode": "linked"
@@ -402,8 +395,7 @@
       },
       "reference": { "implementation": "rust", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
-        { "reference": "rust", "candidate": "rust", "mode": "unsupported", "expectCategory": "async-operation",
-          "reason": "The operation is async. Replay generates a synchronous candidate call, so the planner rejects it." }
+        {"reference": "rust", "candidate": "rust", "mode": "verified"}
       ],
       "linkage": {
         "mode": "linked"
@@ -644,8 +636,7 @@
       },
       "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
-        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
-          "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it." }
+        {"reference": "csharp", "candidate": "rust", "mode": "link-only", "reason": "This intentional divergence witness returns different engine names. Linking is supported, but strict behavioral equivalence is not expected."}
       ],
       "linkage": {
         "mode": "linked"
@@ -726,8 +717,7 @@
       },
       "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
-        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
-          "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it." }
+        {"reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value", "reason": "Reference and candidate structured type declarations differ; explicit semantic type mappings are not implemented."}
       ],
       "linkage": {
         "mode": "linked"
@@ -819,8 +809,8 @@
       },
       "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
-        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "method-operation",
-          "reason": "The Rust candidate operation is an instance method; replay does not construct its receiver." }
+        { "reference": "csharp", "candidate": "rust", "mode": "link-only",
+          "reason": "The Rust candidate emits an undeclared count observation. Linking is supported, but the existing observation-declaration limitation prevents a valid behavioral replay." }
       ],
       "linkage": { "mode": "linked" },
       "limitations": [
@@ -1038,7 +1028,7 @@
       "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
         { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
-          "reason": "The native reference carries structured values unsupported by replay." }
+          "reason": "The native reference carries structured operation inputs unsupported by replay." }
       ],
       "linkage": {
         "mode": "linked"
@@ -1108,8 +1098,7 @@
       },
       "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
-        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "method-operation",
-          "reason": "The candidate uses instance methods; replay does not construct receivers." }
+        {"reference": "csharp", "candidate": "rust", "mode": "verified"}
       ],
       "linkage": {
         "mode": "linked"
@@ -1178,8 +1167,7 @@
       },
       "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
-        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "method-operation",
-          "reason": "The candidate uses instance methods; replay does not construct receivers." }
+        {"reference": "csharp", "candidate": "rust", "mode": "verified"}
       ],
       "linkage": {
         "mode": "linked"
@@ -1248,8 +1236,7 @@
       },
       "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
-        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "method-operation",
-          "reason": "The candidate uses instance methods; replay does not construct receivers." }
+        {"reference": "csharp", "candidate": "rust", "mode": "verified"}
       ],
       "linkage": {
         "mode": "linked"
@@ -1283,8 +1270,7 @@
       },
       "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
-        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "method-operation",
-          "reason": "The candidate uses instance methods; replay does not construct receivers." }
+        {"reference": "csharp", "candidate": "rust", "mode": "verified"}
       ],
       "linkage": {
         "mode": "linked"
@@ -1347,8 +1333,7 @@
       },
       "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
-        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
-          "reason": "The native reference carries structured values unsupported by replay." }
+        {"reference": "csharp", "candidate": "rust", "mode": "verified"}
       ],
       "linkage": {
         "mode": "linked"
@@ -1382,8 +1367,7 @@
       },
       "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
-        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
-          "reason": "The native reference carries structured values unsupported by replay." }
+        {"reference": "csharp", "candidate": "rust", "mode": "verified"}
       ],
       "linkage": {
         "mode": "linked"
@@ -1522,8 +1506,7 @@
       },
       "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
-        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
-          "reason": "The native reference carries structured values unsupported by replay." }
+        {"reference": "csharp", "candidate": "rust", "mode": "verified"}
       ],
       "linkage": {
         "mode": "linked"
@@ -1586,8 +1569,7 @@
       },
       "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
-        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "method-operation",
-          "reason": "The candidate uses instance methods; replay does not construct receivers." }
+        {"reference": "csharp", "candidate": "rust", "mode": "verified"}
       ],
       "linkage": {
         "mode": "linked"
@@ -1724,8 +1706,7 @@
       },
       "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
-        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
-          "reason": "The native reference carries structured values unsupported by replay." }
+        {"reference": "csharp", "candidate": "rust", "mode": "verified"}
       ],
       "linkage": {
         "mode": "linked"
@@ -1850,8 +1831,7 @@
       },
       "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
-        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
-          "reason": "The native reference carries structured values unsupported by replay." }
+        {"reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value", "reason": "Reference and candidate tagged-union payloads differ (named records versus tuples); explicit semantic type mappings are not implemented."}
       ],
       "linkage": {
         "mode": "linked"
@@ -1885,8 +1865,7 @@
       },
       "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
-        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "method-operation",
-          "reason": "The candidate uses instance methods; replay does not construct receivers." }
+        {"reference": "csharp", "candidate": "rust", "mode": "verified"}
       ],
       "linkage": {
         "mode": "linked"
@@ -1920,8 +1899,7 @@
       },
       "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
-        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "method-operation",
-          "reason": "The candidate uses instance methods; replay does not construct receivers." }
+        {"reference": "csharp", "candidate": "rust", "mode": "verified"}
       ],
       "linkage": {
         "mode": "linked"
@@ -1955,8 +1933,7 @@
       },
       "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
-        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "setup-backed-operation",
-          "reason": "The candidate operation requires setup injection, which replay does not construct." }
+        {"reference": "csharp", "candidate": "rust", "mode": "verified"}
       ],
       "linkage": {
         "mode": "linked"
@@ -2088,8 +2065,7 @@
       },
       "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
-        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
-          "reason": "The native reference carries structured values unsupported by replay." }
+        {"reference": "csharp", "candidate": "rust", "mode": "verified"}
       ],
       "linkage": {
         "mode": "linked"
@@ -2123,8 +2099,7 @@
       },
       "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
-        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
-          "reason": "The native reference carries structured values unsupported by replay." }
+        {"reference": "csharp", "candidate": "rust", "mode": "verified"}
       ],
       "linkage": {
         "mode": "linked"
@@ -2158,8 +2133,7 @@
       },
       "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
-        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
-          "reason": "The native reference carries structured values unsupported by replay." }
+        {"reference": "csharp", "candidate": "rust", "mode": "verified"}
       ],
       "linkage": {
         "mode": "linked"
@@ -2188,8 +2162,7 @@
       },
       "reference": { "implementation": "rust", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
-        { "reference": "rust", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
-          "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it." }
+        {"reference": "rust", "candidate": "rust", "mode": "verified"}
       ],
       "linkage": {
         "mode": "linked"
@@ -2218,8 +2191,7 @@
       },
       "reference": { "implementation": "rust", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
-        { "reference": "rust", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
-          "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it." }
+        {"reference": "rust", "candidate": "rust", "mode": "verified"}
       ],
       "linkage": {
         "mode": "linked"
@@ -2288,8 +2260,7 @@
       },
       "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
-        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "method-operation",
-          "reason": "The candidate uses instance methods; replay does not construct receivers." }
+        {"reference": "csharp", "candidate": "rust", "mode": "verified"}
       ],
       "linkage": {
         "mode": "linked"

@@ -260,6 +260,85 @@ fn rejects_digest_linkage_empty_scenario_and_structured_values() {
 }
 
 #[test]
+fn structured_outcomes_are_linked_even_with_fresh_digests() {
+    let registry = make_registry(
+        r#"{"component":"fixture.replay","operations":[
+            {"name":"items","is_async":true,"inputs":[],"output":"List<Item>"}
+        ],"types":[{"name":"Item","kind":"struct","fields":[{"name":"value","ty":"i32"}],"variants":[]}]}"#,
+    );
+    for (value, valid) in [(Value::Integer(7), true), (Value::String("not an integer".to_string()), false)] {
+        start(config("structured")).unwrap();
+        let operation = begin_operation("fixture.replay".into(), "items".into()).unwrap();
+        operation
+            .result(Value::List(vec![Value::Map(std::collections::BTreeMap::from([(
+                "value".to_string(),
+                value,
+            )]))]))
+            .unwrap();
+        let trace = reference_trace(&finish().unwrap(), &registry);
+        let manifest = make_manifest(&registry, trace.as_bytes(), &["structured"]);
+        let result = decode_replay_bundle_result(&manifest, &registry, trace.as_bytes());
+        if valid {
+            assert_eq!(result.unwrap().scenarios[0].operations.len(), 1);
+        } else {
+            let error = result.unwrap_err();
+            assert!(
+                error.to_string().contains("structured replay outcomes failed linked validation"),
+                "{error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn unsupported_async_scheduling_is_rejected_before_invocation() {
+    let registry = make_registry(
+        r#"{"component":"fixture.replay","operations":[
+            {"name":"outer","is_async":true,"inputs":[{"name":"value","ty":"i32"}],"output":"i32"},
+            {"name":"inner","is_async":true,"inputs":[{"name":"value","ty":"i32"}],"output":"i32"}
+        ],"types":[]}"#,
+    );
+    let capture = native_capture(true);
+    let trace = reference_trace(&capture, &registry);
+    let original: serde_json::Value = serde_json::from_str(&trace).unwrap();
+    for abandoned in [false, true] {
+        let mut document = original.clone();
+        let spans = document["resourceSpans"][0]["scopeSpans"][0]["spans"].as_array_mut().unwrap();
+        let outer = spans
+            .iter_mut()
+            .find(|span| {
+                span["attributes"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|attribute| attribute["key"] == "conformance.operation.name" && attribute["value"]["stringValue"] == "outer")
+            })
+            .unwrap();
+        let scenario = outer["parentSpanId"].clone();
+        let expected = if abandoned {
+            outer["events"][0]["name"] = json!("conformance.abandoned");
+            "a top-level abandoned operation"
+        } else {
+            let inner =
+                spans
+                    .iter_mut()
+                    .find(|span| {
+                        span["attributes"].as_array().unwrap().iter().any(|attribute| {
+                            attribute["key"] == "conformance.operation.name" && attribute["value"]["stringValue"] == "inner"
+                        })
+                    })
+                    .unwrap();
+            inner["parentSpanId"] = scenario;
+            "overlapping sibling operations"
+        };
+        let trace = serde_json::to_vec(&document).unwrap();
+        let manifest = make_manifest(&registry, &trace, &["scenario"]);
+        let error = decode_replay_bundle_result(&manifest, &registry, &trace).unwrap_err();
+        assert!(error.to_string().contains(expected), "{error}");
+    }
+}
+
+#[test]
 fn replay_encoder_uses_independent_deterministic_ids() {
     let registry = make_registry(
         r#"{"component":"fixture.replay","operations":[

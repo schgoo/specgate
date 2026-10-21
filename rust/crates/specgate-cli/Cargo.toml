@@ -33,6 +33,8 @@ specgate = { workspace = true }
 specgate-ctsc = { workspace = true }
 specgate-discovery = { workspace = true, features = ["serde", "raw-registry"] }
 tempfile = { workspace = true }
+syn = { workspace = true, features = ["visit-mut"] }
+quote = { workspace = true }
 
 [dev-dependencies]
 toml = { workspace = true }

@@ -115,6 +115,7 @@ fn source_mismatch() {
 #[test]
 fn lazy_override() {
     let runtime = CargoPackage {
+        targets: Vec::new(),
         id: "git+https://example.invalid/specgate#specgate-runtime@0.6.0".to_string(),
         name: "specgate-runtime".to_string(),
         version: "0.6.0".to_string(),
@@ -153,6 +154,7 @@ fn registry_source() {
         "sparse+https://registry.example.invalid/index/",
     ] {
         let package = CargoPackage {
+            targets: Vec::new(),
             id: format!("registry-package#{source}"),
             name: "specgate-runtime".to_string(),
             version: "0.6.0".to_string(),

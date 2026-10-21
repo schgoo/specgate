@@ -182,10 +182,16 @@ The detailed and authoritative list is in
 `docs/specgate-ctsc-migration.md`. Important current boundaries include:
 
 - reference capture supports Rust libtest targets and C# native test projects;
-- replay supports synchronous public Rust free functions with lossless
-  primitive inputs;
-- setup-backed methods, async calls, structured replay values, explicit
-  mappings, and C# replay are not implemented;
+- replay supports public Rust free functions and setup-backed instance methods,
+  directly awaited async calls, explicit generic specializations, and structured
+  results/errors with matching CTSC declarations;
+- Rust test-only/private setup producers are resolved semantically in actual
+  Cargo test targets; generated replay hooks run instead of ordinary tests.
+  Construction inputs remain primitive, and equal receiver producer/input
+  identities share state within a scenario;
+- async/generic setups, cross-target setup environments, overlapping sibling
+  scheduling, top-level abandonment, explicit type mappings, structured
+  construction inputs, and C# candidate replay remain unsupported;
 - `spec_trace!` observations are captured but have no registry declarations,
   so observation-emitting components cannot produce linkable bundles;
 - replay invokes top-level reference operations and validates nested operations

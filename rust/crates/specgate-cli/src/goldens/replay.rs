@@ -64,7 +64,7 @@ pub(super) fn verify_replay(
                     let candidate = scratch.join("candidates").join(format!("{group_index}-{index}.otlp.json"));
                     planned.push((plan, candidate, bundle, context));
                 }
-                // Faulting reference scenarios are intentionally never executed.
+                // Explicit link-only checks do not assert behavioral equivalence.
                 (ReplayMode::LinkOnly, Ok(_)) => {}
                 (mode @ (ReplayMode::Verified | ReplayMode::LinkOnly), Err(reason)) => {
                     problems.push(format!("{context}: matrix marks replay '{mode:?}' but linking failed: {reason}"));

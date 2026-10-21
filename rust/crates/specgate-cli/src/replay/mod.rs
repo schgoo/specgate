@@ -38,12 +38,6 @@ fn registry_file() -> &'static Path {
 fn reference_file() -> &'static Path {
     Path::new("reference.otlp.json")
 }
-const RUST_KEYWORDS: &[&str] = &[
-    "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn", "for", "if", "impl", "in", "let", "loop",
-    "match", "mod", "move", "mut", "pub", "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true", "type", "unsafe",
-    "use", "where", "while", "async", "await", "dyn",
-];
-
 mod error;
 pub use error::Error;
 use error::FailureStage as ErrorKind;

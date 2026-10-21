@@ -22,17 +22,20 @@ const METADATA_NAMESPACE: &str = "OPERATION";
 /// never-resolved future to record abandonment instead of poisoning the
 /// session. A synchronous body cannot stop part-way without unwinding, so it
 /// keeps the strict entry point.
-fn begin_fragment(rt: &TokenStream2, component: &TokenStream2, name: &str, abandonable: bool) -> TokenStream2 {
+fn begin_fragment(rt: &TokenStream2, component: &TokenStream2, name: &TokenStream2, abandonable: bool) -> TokenStream2 {
     let begin = if abandonable {
         quote!(begin_async_operation)
     } else {
         quote!(begin_operation)
     };
     quote! {
-        let mut __sg_scope = match #rt::#begin(
-            #rt::ComponentId::from(#component),
-            #rt::OperationName::from(#name),
-        ) {
+        let mut __sg_scope = match match #name {
+            ::core::option::Option::Some(name) => #rt::#begin(
+                #rt::ComponentId::from(#component),
+                #rt::OperationName::from(name),
+            ),
+            ::core::option::Option::None => #rt::reject_undeclared_specialization(),
+        } {
             ::std::result::Result::Ok(scope) => scope,
             ::std::result::Result::Err(error) => {
                 #rt::report_error(#rt::Stage::OperationBegin, &error);
@@ -108,12 +111,77 @@ fn async_completion(rt: &TokenStream2, kind: ReturnKind) -> TokenStream2 {
 /// # Ok::<(), syn::Error>(())
 /// ```
 pub fn expand_operation(attribute: TokenStream2, item: TokenStream2) -> syn::Result<TokenStream2> {
-    let OperationArg { name, component: owner } = syn::parse2(attribute)?;
+    let first: OperationArg = syn::parse2(attribute)?;
     let mut function: ItemFn = syn::parse2(item)?;
+    let mut declarations = vec![first];
+    let mut remaining_attributes = Vec::new();
+    for attribute in std::mem::take(&mut function.attrs) {
+        if attribute
+            .path()
+            .segments
+            .last()
+            .is_some_and(|segment| segment.ident == "spec_operation")
+        {
+            declarations.push(attribute.parse_args::<OperationArg>()?);
+        } else {
+            remaining_attributes.push(attribute);
+        }
+    }
+    function.attrs = remaining_attributes;
+    let owner = declarations[0].component.clone();
+    let generic_parameters = function
+        .sig
+        .generics
+        .params
+        .iter()
+        .filter_map(|parameter| match parameter {
+            syn::GenericParam::Type(parameter) => Some(Ok(parameter.ident.clone())),
+            syn::GenericParam::Lifetime(_) => None,
+            syn::GenericParam::Const(_) => Some(Err(syn::Error::new_spanned(
+                parameter,
+                "operation specializations do not support const parameters",
+            ))),
+        })
+        .collect::<syn::Result<Vec<_>>>()?;
+    let mut names = std::collections::BTreeSet::new();
+    let mut combinations = std::collections::BTreeSet::new();
+    for declaration in &declarations {
+        if declaration.component != owner || !names.insert(&declaration.name) {
+            return Err(syn::Error::new_spanned(
+                &function.sig,
+                "operation specializations require one component and distinct names",
+            ));
+        }
+        if declaration.types.len() != generic_parameters.len() {
+            return Err(syn::Error::new_spanned(
+                &function.sig,
+                "declare one concrete `types = \"...\"` argument per generic type parameter",
+            ));
+        }
+        let types = &declaration.types;
+        if !combinations.insert(quote!(#(#types),*).to_string()) {
+            return Err(syn::Error::new_spanned(&function.sig, "duplicate operation specialization types"));
+        }
+    }
     let params = parameters(&mut function);
     let body = function.block.clone();
     let rt = runtime();
     let component = component(owner.as_deref());
+    let name = if generic_parameters.is_empty() {
+        let name = &declarations[0].name;
+        quote!(::core::option::Option::Some(#name))
+    } else {
+        let cases = declarations.iter().map(|declaration| {
+            let name = &declaration.name;
+            let types = &declaration.types;
+            quote! {
+                if true #(&& ::core::any::TypeId::of::<#generic_parameters>() == ::core::any::TypeId::of::<#types>())* {
+                    ::core::option::Option::Some(#name)
+                } else
+            }
+        });
+        quote!({ #(#cases)* { ::core::option::Option::None } })
+    };
     let begin = begin_fragment(&rt, &component, &name, false);
     let begin_async = begin_fragment(&rt, &component, &name, true);
     let input_records = params
@@ -326,38 +394,98 @@ pub fn expand_operation(attribute: TokenStream2, item: TokenStream2) -> syn::Res
     *function.block = new_body;
 
     let function_name = function.sig.ident.to_string();
-    let const_name = metadata_ident(METADATA_NAMESPACE, format!("{function_name}:{name}"), function.sig.ident.span());
     let is_method = has_receiver(&function);
     let is_public = matches!(function.vis, syn::Visibility::Public(_));
-    let parameter_metadata = params.iter().map(|(_ident, ty, name)| {
-        let ty = quote!(#ty).to_string();
-        quote!(#rt::FieldMeta::new(
-            #rt::FieldName::new(#name),
-            #rt::RustType::new(#ty),
-        ))
-    });
-    let return_type = authored_return_type;
-
-    let expanded = quote! {
-        #function
-
-        #[allow(dead_code, non_upper_case_globals, reason = "generated linker metadata is referenced externally")]
-        const #const_name: () = {
-            #[#rt::_private::linkme::distributed_slice(#rt::SPECGATE_OPS)]
-            #[linkme(crate = #rt::_private::linkme)]
-            static __SPECGATE_META: #rt::OpMeta = #rt::OpMeta::const_builder(#rt::OpDeps {
-                name: #rt::OpName::new(#name),
-                module_path: #rt::ModulePath::new(::core::module_path!()),
-                fn_name: #rt::FnName::new(#function_name),
-                params: &[#(#parameter_metadata),*],
-                return_type: #rt::RustType::new(#return_type),
-                component: #rt::ComponentName::new(#component),
+    let metadata = declarations
+        .iter()
+        .map(|declaration| {
+            let name = &declaration.name;
+            let const_name = metadata_ident(METADATA_NAMESPACE, format!("{function_name}:{name}"), function.sig.ident.span());
+            let mut substitution = Substitution {
+                parameters: &generic_parameters,
+                arguments: &declaration.types,
+            };
+            let parameter_metadata = params
+                .iter()
+                .map(|(_ident, ty, name)| {
+                    let mut ty = ty.clone();
+                    syn::visit_mut::VisitMut::visit_type_mut(&mut substitution, &mut ty);
+                    let ty = quote!(#ty).to_string();
+                    quote!(#rt::FieldMeta::new(
+                        #rt::FieldName::new(#name),
+                        #rt::RustType::new(#ty),
+                    ))
+                })
+                .collect::<Vec<_>>();
+            let return_type = if authored_return_type.is_empty() {
+                String::new()
+            } else {
+                let mut output: Type = syn::parse_str(&authored_return_type)?;
+                syn::visit_mut::VisitMut::visit_type_mut(&mut substitution, &mut output);
+                quote!(#output).to_string()
+            };
+            let type_arguments = &declaration.types;
+            Ok(quote! {
+            #[allow(dead_code, non_upper_case_globals, reason = "generated linker metadata is referenced externally")]
+            const #const_name: () = {
+                #[#rt::_private::linkme::distributed_slice(#rt::SPECGATE_OPS)]
+                #[linkme(crate = #rt::_private::linkme)]
+                static __SPECGATE_META: #rt::OpMeta = #rt::OpMeta::const_builder(#rt::OpDeps {
+                    name: #rt::OpName::new(#name),
+                    module_path: #rt::ModulePath::new(::core::module_path!()),
+                    fn_name: #rt::FnName::new(#function_name),
+                    params: &[#(#parameter_metadata),*],
+                    return_type: #rt::RustType::new(#return_type),
+                    component: #rt::ComponentName::new(#component),
+                })
+                .asynchronous(#is_async)
+                .method(#is_method)
+                .public(#is_public)
+                .type_arguments(|| ::std::vec![#(::core::any::type_name::<#type_arguments>()),*])
+                .build();
+            };
             })
-            .asynchronous(#is_async)
-            .method(#is_method)
-            .public(#is_public)
-            .build();
-        };
-    };
-    Ok(expanded)
+        })
+        .collect::<syn::Result<Vec<_>>>()?;
+    Ok(quote!(#function #(#metadata)*))
+}
+
+struct Substitution<'a> {
+    parameters: &'a [syn::Ident],
+    arguments: &'a [Type],
+}
+
+impl syn::visit_mut::VisitMut for Substitution<'_> {
+    fn visit_type_mut(&mut self, i: &mut Type) {
+        if let Type::Path(path) = i
+            && path.qself.is_none()
+            && path.path.segments.len() == 1
+            && let Some(index) = self.parameters.iter().position(|parameter| path.path.is_ident(parameter))
+        {
+            *i = self.arguments[index].clone();
+            return;
+        }
+
+        syn::visit_mut::visit_type_mut(self, i);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn duplicate_specialization_options_are_rejected() {
+        for (attribute, diagnostic) in [
+            (quote::quote!("find", types = "i32", types = "String"), "duplicate `types`"),
+            (quote::quote!("find", spec = "one", spec = "two"), "duplicate `spec`"),
+        ] {
+            let error = super::expand_operation(
+                attribute,
+                quote::quote!(
+                    fn find<T: 'static>() {}
+                ),
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains(diagnostic), "{error}");
+        }
+    }
 }
