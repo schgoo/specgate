@@ -1,0 +1,282 @@
+# yaml-language-server: $schema=../../binding-schema.json
+#
+# Shared binding for the CTSC golden matrix. Every fixture component lists the
+# implementations the matrix exercises; YAML anchors share the per-project
+# implementation blocks.
+components:
+  comp.app:
+    implementations:
+      rust: &rust_fixtures
+        language: rust
+        sources: projects/rust/specgate-ctsc-fixtures
+        tests:
+          projects:
+            - projects/rust/specgate-ctsc-fixtures/Cargo.toml
+      csharp: &csharp_fixtures
+        language: csharp
+        sources: projects/csharp/SpecGate.CtscFixtures
+        tests:
+          projects:
+            - projects/csharp/SpecGate.CtscFixtures.Tests/SpecGate.CtscFixtures.Tests.csproj
+  comp.core:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.async_abandon:
+    implementations:
+      rust: *rust_fixtures
+  fixture.async_fetch:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.async_interleave:
+    implementations:
+      rust: *rust_fixtures
+  fixture.async_migration:
+    implementations:
+      rust: *rust_fixtures
+  fixture.async_smol_timer:
+    implementations:
+      rust: *rust_fixtures
+  fixture.async_tokio_timer:
+    implementations:
+      rust: *rust_fixtures
+  fixture.catch_all:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.checked_divide:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.checkpoint_inline:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.complex_inputs:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.cross_dep:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.default_input:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.divergence_witness:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.enum_event:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.extract:
+    implementations:
+      rust: *rust_fixtures
+  fixture.fallible_unit:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.faults:
+    implementations:
+      rust: *rust_fixtures
+  fixture.keyword_collision:
+    implementations:
+      rust: *rust_fixtures
+  fixture.mock_field:
+    implementations:
+      rust: *rust_fixtures
+  fixture.mock_multi_response:
+    implementations:
+      rust: *rust_fixtures
+  fixture.mock_not_found:
+    implementations:
+      rust: *rust_fixtures
+  fixture.multi_case:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.multi_field_capture:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.multi_file:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.multi_mutation:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.multi_setup:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.multi_step:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.multi_toplevel:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.named_inputs:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.nested_operations:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.nested_path:
+    implementations:
+      rust: *rust_fixtures
+  fixture.nested_structured:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.operators:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.option_none:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.option_some:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.order_pricing_translation:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.plain_enum:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.property_add:
+    implementations:
+      rust: *rust_fixtures
+  fixture.readonly_operation:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.result_err:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.result_ok:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.rich:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.scalar_operators:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.scalar_types:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.setup:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.setup_with_params:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.shared_setup:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.stateless_add:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.statemachine_counter:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.strings:
+    implementations:
+      rust: *rust_fixtures
+  fixture.structured_map:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.structured_output:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.structured_set:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.tuple_values:
+    implementations:
+      rust: *rust_fixtures
+  fixture.type_exact:
+    implementations:
+      rust: *rust_fixtures
+  fixture.unrecoverable:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.void_operation:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
+  fixture.facade_umbrella:
+    implementations:
+      rust:
+        language: rust
+        sources: projects/rust/specgate-facade-umbrella
+        tests:
+          projects:
+            - projects/rust/specgate-facade-umbrella/Cargo.toml
+  fixture.duplicate_identity:
+    implementations:
+      rust: &rust_negative
+        language: rust
+        sources: ../rejection/rust/specgate-ctsc-negative-fixtures
+        tests:
+          projects:
+            - ../rejection/rust/specgate-ctsc-negative-fixtures/Cargo.toml
+  fixture.missing_operation:
+    implementations:
+      rust: *rust_negative
+  fixture.missing_setup:
+    implementations:
+      rust: *rust_negative
+  fixture.setup_unknown_fill:
+    implementations:
+      rust: *rust_negative
+  fixture.setup_ambiguous_fill:
+    implementations:
+      rust: *rust_negative
+  fixture.setup_duplicate_fill:
+    implementations:
+      rust: *rust_negative
+  fixture.setup_extra_receiver:
+    implementations:
+      rust: *rust_negative
+  fixture.private_operation:
+    implementations:
+      rust: *rust_negative
+  fixture.value:
+    implementations:
+      rust: *rust_negative
+  fixture.unresolved_type:
+    implementations:
+      rust: *rust_negative
+  fixture.compile_error:
+    implementations:
+      rust: *rust_negative

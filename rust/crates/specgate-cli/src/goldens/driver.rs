@@ -3,29 +3,12 @@
 // Cohesive implementation group for this subsystem.
 use super::*;
 
-pub(super) fn clear_artifacts(root: impl AsRef<Path>) -> std::io::Result<()> {
-    let root = root.as_ref();
-    if !root.is_dir() {
-        return Ok(());
-    }
-    let entries = std::fs::read_dir(root)?;
-    for entry in entries {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_dir() {
-            std::fs::remove_dir_all(&path).map_err(|error| {
-                std::io::Error::new(
-                    error.kind(),
-                    format!("failed to clear generated directory '{}': {error}", path.display()),
-                )
-            })?;
-        } else if entry.file_name() != matrix_file() {
-            std::fs::remove_file(&path).map_err(|error| {
-                std::io::Error::new(
-                    error.kind(),
-                    format!("failed to clear generated file '{}': {error}", path.display()),
-                )
-            })?;
+pub(super) fn clear_artifacts(matrix: &Matrix, root: &Path) -> Result<(), GoldenError> {
+    preflight_artifacts(matrix, root, false)?;
+    for artifact in expected_artifacts(matrix) {
+        let path = root.join(artifact);
+        if path.is_file() {
+            std::fs::remove_file(&path).map_err(|error| GoldenError::wrap(format!("failed to replace {}", path.display()), error))?;
         }
     }
     Ok(())
@@ -40,13 +23,14 @@ pub(super) fn run(mode: Mode) -> Result<(), GoldenError> {
     check_replacements(&root, &matrix)?;
 
     let checked_in = repo_path(&root, &matrix.artifact_root);
+    preflight_artifacts(&matrix, &checked_in, mode == Mode::Check)?;
     let scratch = std::env::var_os("SPECGATE_CTSC_GOLDENS_SCRATCH")
         .map_or_else(|| repo_path(&root, "rust/target").join("ctsc-goldens"), PathBuf::from);
     let generated = match mode {
         Mode::Update => checked_in.clone(),
         Mode::Check => scratch.join("generated"),
     };
-    clear_artifacts(&generated).map_err(|source| GoldenError::wrap("failed to clear generated artifacts", source))?;
+    clear_artifacts(&matrix, &generated)?;
     std::fs::create_dir_all(&generated).map_err(|source| GoldenError::wrap("failed to create generated artifact directory", source))?;
 
     let rust_groups = rust_groups(&root, &matrix)?;

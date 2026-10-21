@@ -1,8 +1,0 @@
-[package]
-name = "specgate-facade-umbrella"
-version.workspace = true
-edition.workspace = true
-publish = false
-
-[dependencies]
-sg = { package = "specgate", path = "../../../../rust/crates/specgate" }

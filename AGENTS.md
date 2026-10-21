@@ -20,6 +20,11 @@ for the concise repository coding rules and
 
 ## Delivery workflow
 
+The fixture corpus starts at [`test/behavior/README.md`](test/behavior/README.md).
+Cases own real sources and shared native bundles; aggregate projects preserve
+batching and native test identities. Only declared case and rejection
+`expected/` directories are generated; never clear a mixed case or test root.
+
 Use the observe → plan → act → verify loop described in
 [`docs/agentic-loop.md`](docs/agentic-loop.md).
 

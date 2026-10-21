@@ -50,9 +50,9 @@ but uncapturable operations. Rust has no `ValueTask` equivalent.
 
 ## Validation
 
-- `test/csharp/SpecGate.Runtime.Tests/AsyncCaptureTests.cs` pins observer
+- `test/mechanics/csharp/SpecGate.Runtime.Tests/AsyncCaptureTests.cs` pins observer
   behavior, including interleaving, thread hops, cancellation, and failure.
-- `test/csharp/SpecGate.Weaver.Tests/WovenAsyncCaptureTests.cs` executes woven
+- `test/mechanics/csharp/SpecGate.Weaver.Tests/WovenAsyncCaptureTests.cs` executes woven
   async stubs for every supported shape.
 - `WeaveRejectionTests.RejectsAsyncVoidOperation` pins the fail-closed diagnostic.
 

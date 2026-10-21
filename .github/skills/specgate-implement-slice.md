@@ -13,7 +13,7 @@ Implement one approved SpecGate slice end to end.
 - Maintain exact runtime `PackageId` resolution; path and version overrides are
   assertions, not substitutions.
 - Add a matrix row for every new annotated fixture component or source.
-- Never hand-edit generated files under `test/goldens/ctsc`. Run
+- Never hand-edit generated files in case and rejection `expected/` directories. Run
   `just ctsc-goldens-update` and review the artifact diff.
 - Edit crate-level `lib.rs` documentation, then run `just readme`, rather than
   editing generated crate READMEs.

@@ -311,7 +311,7 @@ reimplementing target selection or silently dropping binary, integration, or
 doctests. The other product workspace tests also run serially; this is a
 deliberate runner policy, not a change to runtime concurrency. Threads and
 concurrent operations explicitly exercised inside tests are unaffected.
-The separate `test/rust` workspace retains its original command and parallelism.
+The separate `test` workspace retains its original command and parallelism.
 
 The wrapper allocates a fresh GUID-named `rust/target/rust-test-*` directory for
 each invocation and sets `CARGO_BUILD_BUILD_DIR` to its `build` child. This

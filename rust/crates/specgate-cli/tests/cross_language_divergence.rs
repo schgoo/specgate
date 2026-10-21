@@ -83,13 +83,13 @@ fn assert_mismatch(reference: &Value, candidate: &Value, path: &str) {
 
 fn replay(component: &str, scratch: &Path) -> (Value, Value) {
     let root = repo_root();
-    let bundle = root.join("test").join("goldens").join("ctsc").join("component").join(component);
+    let bundle = root.join("test").join("behavior").join("cases").join(component).join("expected");
     let candidate = scratch.join(format!("{component}.otlp.json"));
     let output = Command::new(env!("CARGO_BIN_EXE_specgate"))
         .arg("replay")
         .arg(&bundle)
         .arg("--binding")
-        .arg(root.join("test").join("bindings").join("specgate.yaml"))
+        .arg(root.join("test").join("behavior").join("specgate.yaml"))
         .args(["--impl", "rust", "--out"])
         .arg(&candidate)
         .output()
@@ -104,7 +104,7 @@ fn replay(component: &str, scratch: &Path) -> (Value, Value) {
     let candidate = read_json(&candidate);
     assert_eq!(
         attribute(&reference["resourceSpans"][0]["resource"], "conformance.target.name")["stringValue"],
-        component,
+        "expected",
         "native provenance follows the flat bundle directory basename"
     );
     for (trace, language) in [(&reference, "csharp"), (&candidate, "rust")] {

@@ -34,10 +34,22 @@ impl RepoPath {
             || value.starts_with('/')
             || value.ends_with('/')
             || value.contains('\\')
-            || windows_prefix
             || value
-                .split('/')
-                .any(|segment| segment.is_empty() || segment == "." || segment == "..");
+                .chars()
+                .any(|character| character.is_control() || ":<>\"|?*".contains(character))
+            || windows_prefix
+            || value.split('/').any(|segment| {
+                let stem = segment.split('.').next().unwrap_or_default().to_ascii_uppercase();
+                segment.is_empty()
+                    || segment == "."
+                    || segment == ".."
+                    || segment.ends_with(['.', ' '])
+                    || [
+                        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2",
+                        "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+                    ]
+                    .contains(&stem.as_str())
+            });
         if invalid {
             Err(PathError::new(value, std::backtrace::Backtrace::capture()))
         } else {
@@ -192,8 +204,11 @@ pub(super) struct Exclusion {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 /// One conformance fixture, negative case, or replacement row.
 pub(super) struct Row {
-    /// Stable row identifier and artifact-relative path.
+    /// Stable row identifier, independent of physical placement.
     pub(super) id: RepoPath,
+    #[serde(default)]
+    /// Layout-only generated ownership below the artifact root.
+    pub(super) artifact_directory: Option<RepoPath>,
     /// Row purpose.
     pub(super) classification: Classification,
     /// Review grouping for related fixtures.
@@ -568,7 +583,7 @@ impl Row {
 
     /// Shared behavioral bundle, regardless of the producer's language.
     pub(super) fn reference_dir(&self, root: impl AsRef<Path>) -> PathBuf {
-        root.as_ref().join(&self.id)
+        root.as_ref().join(self.artifact_directory.as_ref().expect("artifact-owning row"))
     }
 
     /// Capture directly into the shared bundle for the selected endpoint;
@@ -601,7 +616,7 @@ impl Row {
 
     /// Resolve this row's Rust artifact directory below the supplied root.
     pub(super) fn rust_dir(&self, root: impl AsRef<Path>) -> PathBuf {
-        root.as_ref().join(&self.id).join("rust")
+        self.reference_dir(root).join("rust")
     }
 
     /// Return the declared linkage mode, or not-applicable when omitted.

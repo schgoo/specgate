@@ -10,7 +10,7 @@ CTSC-native discovery, Rust and C# reference capture, Rust candidate replay, nat
 validation, and strict comparison.
 
 Rust and C# discovery produce language-neutral registries. Each captured
-component has one shared native reference bundle directly in `component/<id>/`
+component has one shared native reference bundle in `test/behavior/cases/<id>/expected/`
 (no `reference` subdirectory), explicitly selecting C# for
 paired fixtures and Rust for Rust-only fixtures. Both producers still run strict
 native capture and exact validation; producer registries and nonselected captures
@@ -53,3 +53,9 @@ slices.
   negative-fixture checks can hide product regressions.
 
 Human review remains the acceptance gate.
+# Fixture navigation
+
+See [`../../test/behavior/README.md`](../../test/behavior/README.md) for real
+case sources, aggregate projects, shared native scenarios and generated
+`expected/` ownership. Matrix row identities and conformance meaning are
+independent of this physical layout.

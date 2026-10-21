@@ -6,7 +6,7 @@
 //! value encoding — none of which a shared schema would pin down.
 //!
 //! So the agreement is written down once, as bytes, in
-//! `test/goldens/capture-sidecar/parity.json`. This test asserts Rust produces
+//! `test/mechanics/capture-sidecar/parity.json`. This test asserts Rust produces
 //! them; `CaptureJsonParityTests` in `SpecGate.Runtime.Tests` asserts C# does
 //! too. Rust is the reference: when the protocol changes, this test fails
 //! first, its panic prints the new bytes, and the file is updated from them.
@@ -17,7 +17,7 @@ use specgate_runtime::{ComponentId, OperationName};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// The checked-in bytes both producers must emit.
-const GOLDEN: &str = include_str!("../../../../test/goldens/capture-sidecar/parity.json");
+const GOLDEN: &str = include_str!("../../../../test/mechanics/capture-sidecar/parity.json");
 
 #[test]
 fn the_sidecar_document_matches_the_cross_language_golden() {
@@ -25,7 +25,7 @@ fn the_sidecar_document_matches_the_cross_language_golden() {
     assert_eq!(
         actual,
         GOLDEN.trim_end_matches('\n'),
-        "native sidecar bytes changed; update test/goldens/capture-sidecar/parity.json to:\n{actual}"
+        "native sidecar bytes changed; update test/mechanics/capture-sidecar/parity.json to:\n{actual}"
     );
 }
 
