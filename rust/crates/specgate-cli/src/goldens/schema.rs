@@ -120,14 +120,6 @@ pub(super) enum Phase {
     Build,
 }
 
-/// Expected phase outcome.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub(super) enum Expectation {
-    Success,
-    Failure,
-}
-
 /// Cross-language comparison policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -145,7 +137,6 @@ pub(super) enum ReplayMode {
     Verified,
     LinkOnly,
     Unsupported,
-    NotApplicable,
 }
 
 /// Capture-to-registry linkage policy.
@@ -221,8 +212,11 @@ pub(super) struct Row {
     pub(super) csharp: Option<LanguageRow>,
     /// Cross-language parity expectation.
     pub(super) parity: Parity,
-    /// Replay expectation.
-    pub(super) replay: Replay,
+    #[serde(default)]
+    /// Selected native producer and shared behavioral artifact inventory.
+    pub(super) reference: Option<RowReference>,
+    /// Directed reference-capture to candidate-implementation checks.
+    pub(super) checks: Vec<ReplayCheck>,
     #[serde(default)]
     /// Capture linkage expectation when a bundle exists.
     pub(super) linkage: Option<Linkage>,
@@ -237,24 +231,108 @@ pub(super) struct Row {
     pub(super) replacement: Option<Replacement>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-/// Expected phases and artifacts for one language binding.
+#[derive(Debug)]
+/// Expected phases and typed outcome for one binding.
 pub(super) struct LanguageRow {
     /// Binding key from the matrix binding map.
     pub(super) binding: String,
     /// Required pipeline phases.
     pub(super) phases: Vec<Phase>,
-    /// Expected success or failure.
-    pub(super) expect: Expectation,
-    /// Exact artifact filenames owned by this language row.
-    pub(super) artifacts: Vec<RepoPath>,
-    #[serde(default)]
-    /// Stable expected failure category.
-    pub(super) expect_category: Option<String>,
-    #[serde(default)]
+    /// Only failures own per-implementation error artifacts.
+    pub(super) outcome: LanguageOutcome,
     /// Cargo feature enabling a build-negative fixture.
     pub(super) feature: Option<String>,
+}
+
+#[derive(Debug)]
+/// Successful components own no implementation-specific golden artifacts.
+pub(super) enum LanguageOutcome {
+    Success,
+    Failure {
+        /// Exact normalized negative artifact inventory.
+        artifacts: Vec<RepoPath>,
+        /// Stable negative category.
+        category: String,
+    },
+}
+
+impl<'de> Deserialize<'de> for LanguageRow {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // This tagged wire type rejects successful endpoint artifacts. There
+        // is no compatibility reader for old per-language golden inventories.
+        #[derive(Deserialize)]
+        #[serde(tag = "expect", deny_unknown_fields, rename_all = "lowercase")]
+        enum Wire {
+            Success {
+                binding: String,
+                phases: Vec<Phase>,
+                #[serde(default)]
+                feature: Option<String>,
+            },
+            Failure {
+                binding: String,
+                phases: Vec<Phase>,
+                artifacts: Vec<RepoPath>,
+                #[serde(rename = "expectCategory")]
+                category: String,
+                #[serde(default)]
+                feature: Option<String>,
+            },
+        }
+        Ok(match Wire::deserialize(deserializer)? {
+            Wire::Success { binding, phases, feature } => Self {
+                binding,
+                phases,
+                feature,
+                outcome: LanguageOutcome::Success,
+            },
+            Wire::Failure {
+                binding,
+                phases,
+                artifacts,
+                category,
+                feature,
+            } => Self {
+                binding,
+                phases,
+                feature,
+                outcome: LanguageOutcome::Failure { artifacts, category },
+            },
+        })
+    }
+}
+
+impl LanguageRow {
+    /// Whether this endpoint is expected to succeed.
+    pub(super) fn succeeds(&self) -> bool {
+        matches!(self.outcome, LanguageOutcome::Success)
+    }
+
+    /// Negative artifact inventory; successful endpoints have no artifacts.
+    pub(super) fn error_artifacts(&self) -> &[RepoPath] {
+        match &self.outcome {
+            LanguageOutcome::Success => &[],
+            LanguageOutcome::Failure { artifacts, .. } => artifacts,
+        }
+    }
+
+    /// Exact failure category, absent for successful endpoints.
+    pub(super) fn failure_category(&self) -> Option<&str> {
+        match &self.outcome {
+            LanguageOutcome::Success => None,
+            LanguageOutcome::Failure { category, .. } => Some(category),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+/// Exactly one native registry oracle, plus behavior when the row captures.
+pub(super) struct RowReference {
+    /// Binding implementation identity, independent of its language.
+    pub(super) implementation: String,
+    /// Exact filenames published in the shared reference directory.
+    pub(super) artifacts: Vec<RepoPath>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -395,8 +473,13 @@ fn collect_at(rust: &serde_json::Value, csharp: &serde_json::Value, path: &mut S
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-/// Candidate replay expectation for one row.
-pub(super) struct Replay {
+/// One directed replay check. Endpoints are binding implementation identities,
+/// not language names; no separate checkout or version resolver is implied.
+pub(super) struct ReplayCheck {
+    /// Implementation selected by the row's shared reference declaration.
+    pub(super) reference: String,
+    /// Implementation against which the reference stimuli are replayed.
+    pub(super) candidate: String,
     /// Replay support mode.
     pub(super) mode: ReplayMode,
     #[serde(default)]
@@ -409,7 +492,7 @@ pub(super) struct Replay {
 
 /// How a captured bundle relates to its own registry.
 ///
-/// Every captured Rust bundle is `linked`: it passes native trace, Linked, and
+/// Every captured bundle is `linked`: it passes native trace, Linked, and
 /// bundle validation against the registry discovered from the same sources.
 /// `not-applicable` belongs to discovery-only rows, which own no bundle. There
 /// is no exception mode — a bundle that cannot link is a product defect.
@@ -465,14 +548,60 @@ pub(super) struct Reference {
 }
 
 impl Row {
+    /// Implementation declarations and their artifact directory keys.
+    pub(super) fn implementations(&self) -> impl Iterator<Item = (&str, &LanguageRow)> {
+        [("rust", self.rust.as_ref()), ("csharp", self.csharp.as_ref())]
+            .into_iter()
+            .filter_map(|(directory, implementation)| implementation.map(|implementation| (directory, implementation)))
+    }
+
+    /// Find an implementation by its binding identity, independently of language.
+    pub(super) fn implementation(&self, label: &str) -> Option<(&str, &LanguageRow)> {
+        self.implementations().find(|(_, implementation)| implementation.binding == label)
+    }
+
+    /// Artifact directory for a declared implementation identity.
+    pub(super) fn implementation_dir(&self, root: impl AsRef<Path>, label: &str) -> PathBuf {
+        let (directory, _) = self.implementation(label).expect("validated implementation endpoint");
+        root.as_ref().join(&self.id).join(directory)
+    }
+
+    /// Shared behavioral bundle, regardless of the producer's language.
+    pub(super) fn reference_dir(&self, root: impl AsRef<Path>) -> PathBuf {
+        root.as_ref().join(&self.id)
+    }
+
+    /// Capture directly into the shared bundle for the selected endpoint;
+    /// independent nonselected captures live only in invocation scratch.
+    pub(super) fn capture_dir(&self, root: &Path, scratch: &Path, label: &str) -> PathBuf {
+        if self.reference.as_ref().is_some_and(|reference| reference.implementation == label) {
+            self.reference_dir(root)
+        } else {
+            self.implementation_dir(scratch.join("producer-captures"), label)
+        }
+    }
+
+    /// Independent producer registry: capture's full native scope when captured,
+    /// otherwise normalized discovery output, always outside the golden tree.
+    pub(super) fn producer_registry(&self, root: &Path, scratch: &Path, label: &str) -> PathBuf {
+        let (_, implementation) = self.implementation(label).expect("validated producer");
+        if implementation.phases.contains(&Phase::Capture) {
+            self.capture_dir(root, scratch, label).join(registry_file())
+        } else {
+            self.implementation_dir(scratch.join("producer-registries"), label)
+                .join(registry_file())
+        }
+    }
+
+    /// Whether any implementation owns a native capture bundle.
+    pub(super) fn captures_any(&self) -> bool {
+        self.implementations()
+            .any(|(_, implementation)| implementation.phases.contains(&Phase::Capture))
+    }
+
     /// Resolve this row's Rust artifact directory below the supplied root.
     pub(super) fn rust_dir(&self, root: impl AsRef<Path>) -> PathBuf {
         root.as_ref().join(&self.id).join("rust")
-    }
-
-    /// Resolve this row's C# artifact directory below the supplied root.
-    pub(super) fn csharp_dir(&self, root: impl AsRef<Path>) -> PathBuf {
-        root.as_ref().join(&self.id).join("csharp")
     }
 
     /// Return the declared linkage mode, or not-applicable when omitted.

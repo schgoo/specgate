@@ -38,9 +38,19 @@ $previousCache = $env:SPECGATE_CACHE_DIR
 $previousMode = $env:SPECGATE_CTSC_GOLDENS
 $previousScratch = $env:SPECGATE_CTSC_GOLDENS_SCRATCH
 $previousBuildDir = $env:CARGO_BUILD_BUILD_DIR
+$previousDiscovery = $env:SPECGATE_DISCOVERY_PATH
+$previousWeaver = $env:SPECGATE_WEAVER_PATH
 $buildCache = $null
 
 try {
+    # `just` builds both tools. Direct wrapper callers may supply installed tools;
+    # otherwise use the same checkout layout without changing cache ownership.
+    if ([string]::IsNullOrEmpty($env:SPECGATE_DISCOVERY_PATH)) {
+        $env:SPECGATE_DISCOVERY_PATH = Join-Path $root 'artifacts/discovery'
+    }
+    if ([string]::IsNullOrEmpty($env:SPECGATE_WEAVER_PATH)) {
+        $env:SPECGATE_WEAVER_PATH = Join-Path $root 'artifacts/weaver'
+    }
     New-Item -ItemType Directory -Force $cache | Out-Null
     $env:SPECGATE_CACHE_DIR = $cache
     $env:SPECGATE_CTSC_GOLDENS = $Mode.ToLowerInvariant()
@@ -82,6 +92,8 @@ finally {
     $env:SPECGATE_CTSC_GOLDENS = $previousMode
     $env:SPECGATE_CTSC_GOLDENS_SCRATCH = $previousScratch
     $env:CARGO_BUILD_BUILD_DIR = $previousBuildDir
+    $env:SPECGATE_DISCOVERY_PATH = $previousDiscovery
+    $env:SPECGATE_WEAVER_PATH = $previousWeaver
     if ($null -ne $buildCache) {
         $buildCache.Lease.Dispose()
     }

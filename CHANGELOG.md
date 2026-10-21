@@ -7,6 +7,11 @@ under `docs/decisions/`, or `docs/roadmap.md`. Generate with `just changelog`.
 
 ### Added
 
+- One shared native golden bundle per component across all languages, including
+  one canonical registry flat under `component/<id>/` and no per-language successful-component artifacts, selecting
+  C# for paired fixtures and Rust for Rust-only fixtures, with independent strict
+  transient capture and registry validation by both producers, canonical-byte
+  anchoring, exact parity exceptions, Rust replay checks, and divergence witnesses (#47).
 - C# capture compiles the sources once per batch: reflection reads the woven
   build's assembly and keeps every component's metadata (nested foreign ones
   included) through publication, instead of two further builds (#46).
@@ -54,6 +59,8 @@ under `docs/decisions/`, or `docs/roadmap.md`. Generate with `just changelog`.
 
 ### Changed
 
+- Retired duplicate C# woven behavioral tests and unused fixtures; setup rejection
+  tests now exercise woven boundaries outside the captured native test project (#47).
 - Bindings use `components.<id>.implementations.<label>` with `language`,
   `sources`, `tests`, and a language block; the CLI takes `--binding`
   (default `./specgate.yaml`), `--component`, and `--impl`, and `replay`

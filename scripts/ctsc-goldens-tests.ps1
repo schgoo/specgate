@@ -75,14 +75,14 @@ Assert-Throws {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $wrapperScripts
     }
     $wrapper = Join-Path $wrapperScripts 'ctsc-goldens.ps1'
-    $names = @('SPECGATE_CACHE_DIR', 'SPECGATE_CTSC_GOLDENS', 'SPECGATE_CTSC_GOLDENS_SCRATCH', 'CARGO_BUILD_BUILD_DIR')
+    $names = @('SPECGATE_CACHE_DIR', 'SPECGATE_CTSC_GOLDENS', 'SPECGATE_CTSC_GOLDENS_SCRATCH', 'CARGO_BUILD_BUILD_DIR', 'SPECGATE_DISCOVERY_PATH', 'SPECGATE_WEAVER_PATH')
     $previous = @{}
     foreach ($name in $names) {
         $previous[$name] = [Environment]::GetEnvironmentVariable($name)
     }
     $previousCacheRoot = $env:SPECGATE_CTSC_GOLDENS_BUILD_CACHE
     $state = @{
-        Scratch = $null; CachePath = $null; Lease = $null; Fail = $false; InvalidProof = $false; Builds = 0; Executions = 0
+        Scratch = $null; CachePath = $null; Lease = $null; Fail = $false; InvalidProof = $false; DefaultTools = $false; Builds = 0; Executions = 0
         CacheRoot = Join-Path $wrapperRoot 'rust/target/ctsc-goldens-build-cache/v2'
         Override = $null
     }
@@ -108,6 +108,16 @@ Assert-Throws {
             return
         }
         $state.Executions++
+        foreach ($tool in @('SPECGATE_DISCOVERY_PATH', 'SPECGATE_WEAVER_PATH')) {
+            $expected = if ($state.DefaultTools) {
+                $directory = if ($tool -eq 'SPECGATE_DISCOVERY_PATH') { 'discovery' } else { 'weaver' }
+                Join-Path $wrapperRoot "artifacts/$directory"
+            }
+            else { "caller-$tool" }
+            if ([Environment]::GetEnvironmentVariable($tool) -cne $expected) {
+                throw "The golden wrapper did not select the expected $tool."
+            }
+        }
         $state.Scratch = $env:SPECGATE_CTSC_GOLDENS_SCRATCH
         $state.CachePath = $env:CARGO_BUILD_BUILD_DIR
         $state.Lease = $buildCache.Lease
@@ -167,6 +177,18 @@ Assert-Throws {
             }
             $previousPath = $state.CachePath
         }
+        $state.DefaultTools = $true
+        $env:SPECGATE_DISCOVERY_PATH = $null
+        $env:SPECGATE_WEAVER_PATH = $null
+        & $wrapper -Mode Check | Out-Null
+        foreach ($tool in @('SPECGATE_DISCOVERY_PATH', 'SPECGATE_WEAVER_PATH')) {
+            if ($null -ne [Environment]::GetEnvironmentVariable($tool)) {
+                throw "The golden wrapper leaked its default $tool."
+            }
+            [Environment]::SetEnvironmentVariable($tool, "caller-$tool")
+        }
+        Assert-WrapperCleanup
+        $state.DefaultTools = $false
         $state.Fail = $true
         Assert-Throws {
             & $wrapper -Mode Check | Out-Null
@@ -191,8 +213,8 @@ Assert-Throws {
             }
             $previousPath = $state.CachePath
         }
-        if ($state.Builds -ne 6 -or $state.Executions -ne 6) {
-            throw 'The wrapper regressions did not exercise all six harness invocations.'
+        if ($state.Builds -ne 7 -or $state.Executions -ne 7) {
+            throw 'The wrapper regressions did not exercise all seven harness invocations.'
         }
     }
     finally {

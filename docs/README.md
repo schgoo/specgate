@@ -26,6 +26,10 @@ This index is the starting point for humans and coding agents.
 - [`roadmap.md`](roadmap.md) — tiered plan to MVP, V2, and V3, and the open
   questions gating each tier.
 - [`decisions/`](decisions/) — human-ratified architectural decisions.
+- [`decisions/csharp-golden-replay-parity.md`](decisions/csharp-golden-replay-parity.md)
+  — ratified single golden bundle for all languages (including canonical
+  registry, flat under `component/<id>/`), transient strict producer validation, and reference-to-candidate
+  implementation checks.
 - [`component-identity-and-replay.md`](component-identity-and-replay.md) —
   exploratory notes on scenario identity, the replay unit, and artifact
   granularity. Not ratified.

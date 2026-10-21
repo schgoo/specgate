@@ -1,92 +1,85 @@
 #![cfg(any(test, feature = "test-util"))]
 
-// Cohesive implementation group for this subsystem.
+//! Directed implementation checks using the existing replay planner and strict comparator.
 use super::*;
 
-/// Verify every replay-enabled matrix row against its declared candidate.
-///
-/// Returns an error when candidate discovery or replay execution fails.
-///
-/// # Errors
-/// Returns a contextual golden-generation error for operational candidate failures.
+/// Verify each shared reference capture against its declared candidate.
+/// Candidate discovery and execution remain batched by source and implementation.
 pub(super) fn verify_replay(
     root: impl AsRef<Path>,
     matrix: &Matrix,
     out_root: impl AsRef<Path>,
     scratch: impl AsRef<Path>,
 ) -> Result<(), GoldenError> {
-    let root = root.as_ref();
+    let binding = repo_path(root, &matrix.binding);
     let out_root = out_root.as_ref();
     let scratch = scratch.as_ref();
-    let mut groups = rust_groups(root, matrix)?;
-    for rows in groups.values_mut() {
-        rows.retain(|row| row.captures_rust());
+    let mut groups = BTreeMap::<_, Vec<(&Row, &ReplayCheck)>>::new();
+    for row in &matrix.rows {
+        for check in &row.checks {
+            let component = row.component.as_deref().expect("validated check component");
+            let resolved = resolve_implementation(&binding, component, Some(&check.candidate))
+                .map_err(|error| GoldenError::message(format!("{}: candidate '{}' is unavailable: {error}", row.id, check.candidate)))?;
+            groups
+                .entry((resolved.implementation.sources, check.candidate.clone()))
+                .or_default()
+                .push((row, check));
+        }
     }
-    groups.retain(|_sources, rows| !rows.is_empty());
-
-    let mut problems = Vec::with_capacity(matrix.rows.len());
-    for (sources, rows) in groups {
-        let sources_group = sources.display().to_string();
-        let binding = repo_path(root, &matrix.binding);
-        let label = specgate_discovery::identity::ImplementationLabel::from(
-            rows[0]
-                .rust
-                .as_ref()
-                .unwrap_or_else(|| panic!("matrix row '{}' capturing Rust must define Rust settings", rows[0].id))
-                .binding
-                .as_str(),
-        );
-        let components = rows
+    let mut problems = Vec::new();
+    for (group_index, ((sources, label), checks)) in groups.into_iter().enumerate() {
+        let components = checks
             .iter()
-            .map(|row| {
-                specgate_discovery::identity::ComponentId::from(
-                    row.component
-                        .as_deref()
-                        .unwrap_or_else(|| panic!("matrix row '{}' capturing Rust must name a component", row.id)),
-                )
-            })
+            .map(|(row, _)| specgate_discovery::identity::ComponentId::from(row.component.as_deref().expect("validated component")))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
             .collect::<Vec<_>>();
-        let candidates = Candidates::discover(binding, Some(&label), &components)
-            .map_err(|error| GoldenError::message(format!("{sources_group}: candidate discovery failed: {error}")))?;
-
-        let mut planned = Vec::with_capacity(rows.len());
-        for row in &rows {
-            let plan = candidates.plan(row.rust_dir(out_root));
-            match (row.replay.mode, plan) {
+        let label = specgate_discovery::identity::ImplementationLabel::from(label);
+        let candidates = match Candidates::discover(&binding, Some(&label), &components) {
+            Ok(candidates) => candidates,
+            Err(error) => {
+                for (row, check) in &checks {
+                    let context = format!("{} [{} -> {}]", row.id, check.reference, check.candidate);
+                    if check.mode == ReplayMode::Unsupported {
+                        if let Some(problem) = unsupported_problem(
+                            &context,
+                            check.expect_category.as_deref().expect("validated category"),
+                            &error.to_string(),
+                        ) {
+                            problems.push(problem);
+                        }
+                    } else {
+                        problems.push(format!("{context}: candidate discovery failed: {error}"));
+                    }
+                }
+                continue;
+            }
+        };
+        let mut planned = Vec::new();
+        for (index, (row, check)) in checks.iter().enumerate() {
+            let context = format!("{} [{} -> {}]", row.id, check.reference, check.candidate);
+            let bundle = row.reference_dir(out_root);
+            match (check.mode, candidates.plan(&bundle)) {
                 (ReplayMode::Verified, Ok(plan)) => {
-                    let candidate = scratch.join("candidates").join(format!("{}.otlp.json", row.id.replace('/', "-")));
-                    planned.push((plan, candidate, *row));
+                    let candidate = scratch.join("candidates").join(format!("{group_index}-{index}.otlp.json"));
+                    planned.push((plan, candidate, bundle, context));
                 }
-                (ReplayMode::LinkOnly, Ok(_plan)) => {}
+                // Faulting reference scenarios are intentionally never executed.
+                (ReplayMode::LinkOnly, Ok(_)) => {}
                 (mode @ (ReplayMode::Verified | ReplayMode::LinkOnly), Err(reason)) => {
-                    problems.push(format!("{}: matrix marks replay '{mode:?}' but linking failed: {reason}", row.id));
+                    problems.push(format!("{context}: matrix marks replay '{mode:?}' but linking failed: {reason}"));
                 }
-                (ReplayMode::Unsupported, Ok(_plan)) => {
+                (ReplayMode::Unsupported, Ok(_)) => {
                     problems.push(format!(
-                        "{}: matrix marks replay unsupported but the candidate linked successfully; update the matrix",
-                        row.id
+                        "{context}: unsupported expectation is stale; candidate linked successfully"
                     ));
                 }
                 (ReplayMode::Unsupported, Err(reason)) => {
-                    let expected = row
-                        .replay
-                        .expect_category
-                        .as_deref()
-                        .unwrap_or_else(|| panic!("unsupported replay row '{}' must declare expectCategory", row.id));
-                    match classify(reason.to_string()) {
-                        Some(actual) if actual.code() == expected => {}
-                        Some(actual) => problems.push(format!(
-                            "{}: expected replay failure category '{expected}' but got '{}': {reason}",
-                            row.id,
-                            actual.code()
-                        )),
-                        None => problems.push(format!(
-                            "{}: replay failed for an unrelated, unclassified reason instead of '{expected}': {reason}",
-                            row.id
-                        )),
+                    let expected = check.expect_category.as_deref().expect("validated unsupported category");
+                    if let Some(problem) = unsupported_problem(&context, expected, &reason.to_string()) {
+                        problems.push(problem);
                     }
                 }
-                (mode, _) => problems.push(format!("{}: captured bundles cannot use replay mode '{mode:?}'", row.id)),
             }
         }
         if planned.is_empty() {
@@ -94,37 +87,42 @@ pub(super) fn verify_replay(
         }
         let executable = planned
             .iter()
-            .map(|(plan, candidate, _row)| (plan.clone(), candidate.clone()))
+            .map(|(plan, candidate, _, _)| (plan.clone(), candidate.clone()))
             .collect::<Vec<_>>();
         let reports = candidates
             .execute(&executable)
-            .map_err(|error| GoldenError::message(format!("{sources_group}: batched replay failed: {error}")))?;
-        assert_eq!(
-            reports.len(),
-            planned.len(),
-            "{sources_group}: replay execution must return one report per plan (reports={}, plans={})",
-            reports.len(),
-            planned.len()
-        );
-        for (_plan, candidate, row) in &planned {
-            let bundle = row.rust_dir(out_root);
+            .map_err(|error| GoldenError::message(format!("{}: batched replay failed: {error}", sources.display())))?;
+        assert_eq!(reports.len(), planned.len(), "one replay report per plan");
+        for (_, candidate, bundle, context) in &planned {
             let report = compare(bundle.join(trace_file()), candidate, Some(bundle.join(registry_file())), &[]);
             if !report.equivalent {
                 problems.push(format!(
-                    "{}: candidate replay diverged: failures={:?} mismatches={:?} errors={:?}",
-                    row.id, report.validation_failures, report.mismatches, report.errors
+                    "{context}: candidate replay diverged: failures={:?} mismatches={:?} errors={:?}",
+                    report.validation_failures, report.mismatches, report.errors
                 ));
             }
         }
     }
-    if !problems.is_empty() {
-        return Err(GoldenError::message(format!(
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(GoldenError::message(format!(
             "replay verification failed:\n  {}",
             problems.join("\n  ")
-        )));
+        )))
     }
-    Ok(())
 }
-// ---------------------------------------------------------------------------
-// Driver
-// ---------------------------------------------------------------------------
+
+/// Accept only the exact declared planner category, never an unrelated failure.
+pub(super) fn unsupported_problem(context: &str, expected: &str, reason: &str) -> Option<String> {
+    match classify(reason) {
+        Some(actual) if actual.code() == expected => None,
+        Some(actual) => Some(format!(
+            "{context}: expected replay failure category '{expected}' but got '{}': {reason}",
+            actual.code()
+        )),
+        None => Some(format!(
+            "{context}: replay failed for an unrelated, unclassified reason instead of '{expected}': {reason}"
+        )),
+    }
+}

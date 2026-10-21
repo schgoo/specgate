@@ -51,8 +51,8 @@ async C#. MVP+1 is what serves them.
 | Area | State | Evidence |
 |---|---|---|
 | Registry discovery | Rust link-time and C# compiled-assembly reflection; byte-identical for stateless, rich-type, and setup-folding fixtures | `specgate-discovery` |
-| Trace capture | Rust libtest only; synchronous calls and directly-awaited async operations | `capture.rs:189`, migration limitations |
-| C# trace capture | IL weaving instruments annotated synchronous methods, and recording produces CTSC semantic values projected at the boundary from the woven method's own reflection metadata. `[SpecSetup]` producers commit construction provenance that the operations they prepare fold into their input surface. Async operations (`Task`, `Task<T>`, `ValueTask`, `ValueTask<T>`) capture too, with cancellation recorded as abandonment. Still missing: trace serialization and a `specgate capture` path that accepts a C# binding | `csharp/SpecGate.Weaver`, `csharp/SpecGate.Runtime/ValueProjector.cs` |
+| Trace capture | Rust libtest and C# native test projects, including async operation capture | `capture/rust.rs`, `capture/csharp.rs`, migration status |
+| C# trace capture | CLI-injected weaving, native sidecars and validated bundles; one selected shared native reference per component and replay checks on Rust; both producers validated strictly | `decisions/csharp-capture-cli.md`, `decisions/csharp-golden-replay-parity.md` |
 | Async capture | A directly-awaited async operation captures: recording begins at first poll (M2 slice 1). A future resumed on another executor thread records under the operation that built it, and two instrumented operations interleaved on one thread both record correctly (M2 slice 2). An async operation dropped before it completes records `conformance.abandoned` (M2 slice 3). Still unsupported: async `#[spec_setup]`, operations first reached on a raw `std::thread::spawn`ed thread, and top-level abandonment - an abandoned async operation with no enclosing and no subsequent annotated operation, which `specgate capture` drops rather than records. Setup-input staging remains thread-affine | `annotations-macros/src/lib.rs` async arm, `PENDING_SETUP_INPUTS` |
 | Observations | Captured but never declared; a component emitting one cannot produce a linkable bundle | migration limitations |
 | Comparison | `compare <reference-trace> <candidate-trace>` exists; fixed `ctsc.strict/0.1.0`; scenarios paired by name | `comparison.rs:185-195` |
@@ -213,8 +213,18 @@ C# started as **annotations plus reflection only**: one 4 KB file of inert
 attributes (`SpecOperation`, `SpecSetup`, `SpecInput`, `SpecEvent`,
 `SpecException`) plus `Option<T>` and `Result<T,E>` for metadata discovery, with
 no recording code at all. #44 added the recording runtime and the IL weaver, and
-the first #45 slice added the semantic value model. What remains missing is
-bundle emission from a test run.
+the first #45 slice added the semantic value model. #46 added native sidecar
+persistence and CLI bundle emission. #47 adds one shared native reference bundle
+flat under `component/<id>/` (no organizational `reference` subdirectory),
+per captured component and implementation-to-implementation replay checks using
+the retained corpus. Its ratified correction replaces separate Rust/C#
+behavioral goldens: paired fixtures explicitly select C# while Rust-only fixtures
+select Rust, with language a property rather than endpoint identity. Both
+producers still capture strictly, validating nonselected bundles against their
+own transient registries. One canonical registry is stored for all languages,
+anchored to the selected native bytes in check mode; other producer registries
+must match it exactly or by precise known parity exceptions. No per-language
+successful-component artifacts remain. Unsupported replay is not equivalence.
 
 This is smaller than a rebuild, because everything around it already exists and
 is proven:
@@ -225,19 +235,20 @@ is proven:
 | Discovery to registry | Done, reflection over the built assembly |
 | Registry parity with Rust | Byte-identical on stateless, rich-type, and setup-folding fixtures, except the `fixture.enum_event` tuple-variant exception (#78) |
 | Fixtures, including async | Done |
-| Ordinary behavior tests over those fixtures | Done - eight test files |
+| Ordinary behavior tests over those fixtures | Done; reused for native golden capture |
 | Recording runtime (`SpecGate.Runtime`) | Done (#44), `AsyncLocal` logical context |
-| IL weaver (`SpecGate.Weaver`) | Done (#44), synchronous operations |
+| IL weaver (`SpecGate.Weaver`) | Done (#44), async operations added in #71 |
 | CTSC semantic values at the boundary | Done (#45 slice 1), projected from the woven method's reflection metadata |
-| CLR enum mapping | In progress (#45), plain enums only; `[Flags]` is #79 |
-| CTSC bundle emission from a test run | **Missing** (#45) |
+| CLR enum mapping | Done for plain enums; `[Flags]` is #79 |
+| CTSC bundle emission from a test run | Done (#46), golden coverage in #47 |
 
 The capture model is "capture ordinary tests at native operation boundaries."
-In C# those ordinary tests already exist and pass. The missing piece is
-precisely one thing: something that observes them while they run and emits CTSC
-spans.
+In C# those ordinary tests execute the woven annotated implementation. Their
+recordings now supply selected shared references or transient producer validation;
+duplicate interim behavioral
+assertions are retired rather than maintained as a second corpus.
 
-Scope:
+Original delivery scope:
 
 1. A C# recording runtime implementing the MVP concurrency model, with logical
    context across `Task` boundaries via `AsyncLocal`, `Activity`, or
@@ -249,8 +260,7 @@ Scope:
    Weaving is the only mechanism whose capture semantics match Rust: Roslyn
    source generators cannot rewrite an existing method body, and C# 12
    interceptors record the call site rather than the callee.
-4. Capture support for non-Rust implementations, which `capture.rs` currently
-   rejects outright.
+4. Capture support for C# implementations through the same CLI command (#46).
 
 The first slice captures one annotated C# fixture end to end. The runtime it
 builds on is async-capable from the start, because a synchronous-only stage
@@ -259,9 +269,9 @@ would be thread-affine and have to be torn out; see the same decision record.
 That first slice landed in #44: `SpecGate.Runtime` records spans into a
 process-wide session, `SpecGate.Weaver` rewrites annotated method bodies
 during the build, and `SpecGate.Weaver.Tests` executes the woven fixtures and
-asserts on inputs, results, parentage, and terminal status. A capture session
-targets exactly one component, matching `specgate capture --component`. An
-operation belongs to exactly one component: the weaver and C# discovery reject a
+asserts on distinct instrumentation mechanics. Environment capture records all
+components; `specgate capture --component` selects top-level calls and retains
+their full nested subtrees. An operation belongs to exactly one component: the weaver and C# discovery reject a
 method that declares several. Async capture landed
 in #71: the weaver wraps the compiler's async stub and the runtime completes
 the span when the task settles; see
@@ -297,9 +307,12 @@ inherits reference names. **Two independently captured bundles do not pair**
 unless their test function names coincide, which they will not across languages
 or across a rewrite.
 
-This is open question 1, and it is a hard blocker for the entire tier. CTSC
-already treats scenario matching as a policy dimension, so the extension point
-exists and is unused.
+This is open question 1 for independently captured bundles. It does not block
+#47: reference-to-candidate replay checks inherit recorded scenario names and
+compare strictly without pairing independent native test names. See
+[the golden parity decision](decisions/csharp-golden-replay-parity.md). CTSC
+already treats independent scenario matching as a policy dimension; that
+extension remains unused.
 
 ### V2.2 Comparison policy beyond fixed strict
 

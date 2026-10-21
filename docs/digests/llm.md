@@ -6,7 +6,7 @@ authoritative; update the source contract or implementation document first.
 ## Product
 
 SpecGate discovers implementation metadata as a CTSC registry, captures
-ordinary Rust tests as a reference CTSC bundle, replays the reference stimuli
+ordinary Rust or C# tests as a reference CTSC bundle, replays the reference stimuli
 against a Rust candidate, validates the artifacts, and compares reference and
 candidate traces with `ctsc.strict/0.1.0`.
 
@@ -150,6 +150,28 @@ The matrix is exact:
   operation, stable code, and reason;
 - parity differences must exactly equal the declared JSON Pointer and
   language-value set;
+- replay checks identify reference and candidate implementations, not languages;
+- matrix `0.2.0` selects exactly one golden bundle for all languages per component
+  directly in `component/<id>/`, including the single canonical registry;
+  no per-language successful-component artifacts or compatibility reader;
+- discovery-only components select a successful discovery endpoint with only
+  the shared registry, no behavioral files or checks;
+- selected full native registry bytes must match the checked-in canonical in
+  check mode, preventing simultaneous producer drift; independently generated
+  other registries match that oracle exactly or by existing exact differences,
+  preserving full dependency closure/order and Rust/C# side orientation;
+- the three parity exceptions describe known non-equivalences; neither
+  unsupported replay nor link-only checks establish behavioral equivalence;
+- paired fixtures explicitly select C#, Rust-only fixtures select Rust; this is
+  fixture configuration, not harness language policy;
+- both producers still capture strictly; nonselected bundles live in invocation
+  scratch and must pass native validation and exact operation/exclusion coverage;
+- the selected producer writes directly to the component directory (no
+  `reference` subdirectory), so native `target.name` is its basename, retaining
+  its language and scenario names; never translate or relabel traces;
+- checks must name the selected reference, always resolve the shared bundle,
+  and replay on Rust candidates where supported, without
+  matching independently captured test names;
 - unsupported replay must fail with the declared stable category;
 - build-negative compiler errors must have primary spans only in intentional
   sources.
@@ -159,7 +181,7 @@ The matrix is exact:
 The detailed and authoritative list is in
 `docs/specgate-ctsc-migration.md`. Important current boundaries include:
 
-- reference capture is limited to Rust libtest targets;
+- reference capture supports Rust libtest targets and C# native test projects;
 - replay supports synchronous public Rust free functions with lossless
   primitive inputs;
 - setup-backed methods, async calls, structured replay values, explicit

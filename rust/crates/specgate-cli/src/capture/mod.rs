@@ -134,7 +134,7 @@ mod facade;
     all(feature = "test-util", not(test)),
     expect(unused_imports, reason = "feature-gated fixture support")
 )]
-pub(crate) use facade::{BundleRequest, capture_strict, discover};
+pub(crate) use facade::{BundleRequest, capture_csharp_strict, capture_strict, discover};
 pub use facade::{capture, capture_with};
 mod encoding;
 use encoding::encode_bundle;

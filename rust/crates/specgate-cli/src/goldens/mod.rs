@@ -20,7 +20,7 @@ use specgate_discovery::runner::cargo_bin;
 use specgate_discovery::schema::normalize_registry;
 use specgate_discovery::{discover_batch, output::SchemaLookup};
 
-use crate::capture_impl::{BundleRequest, capture_strict, discover};
+use crate::capture_impl::{BundleRequest, capture_csharp_strict, capture_strict, discover};
 use crate::replay::{Candidates, classify};
 use specgate::ComponentId;
 
@@ -49,7 +49,7 @@ const REGISTRY_VERSION: &str = "0.1.0";
 // The hand-authored matrix format gates interpretation of every generated
 // artifact; changing either value requires a coordinated harness migration.
 const MATRIX_FORMAT: &str = "specgate.ctsc-golden-matrix";
-const MATRIX_VERSION: &str = "0.1.0";
+const MATRIX_VERSION: &str = "0.2.0";
 // Short strings are too collision-prone to identify a machine-specific root;
 // bare drive roots such as `C:\` are deliberately ignored by this heuristic.
 const MARKER_MIN: usize = 4;

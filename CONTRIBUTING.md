@@ -34,19 +34,47 @@ ratified architectural decisions under `docs/decisions/`.
 fixture corpus. Edit it by hand when you add, remove, or reclassify a fixture:
 every annotated fixture source must belong to a row, every discovered component
 needs a row, and each row states its language phases, expected outcome, parity
-mode, linkage mode, replay mode, and any limitation. Linkage is `linked` for
+mode, linkage mode, reference-to-candidate replay checks, and any limitation. Linkage is `linked` for
 every row that captures a bundle and `not-applicable` for discovery-only rows;
 a bundle that will not link is a defect to fix, not a row to annotate. A
 `parity` exception must also list every allowed Rust-vs-C# difference as a JSON
 Pointer plus the exact value each language emits; the harness requires the
 observed difference set to equal the declared one.
 
+Matrix `0.2.0` has no compatibility reader. Each captured component selects
+exactly one successful discover+capture endpoint through `reference:
+{ implementation, artifacts }`. Its artifacts are exactly `manifest.json`,
+`reference.otlp.json`, and `registry.ctsc.json`, directly under `component/<id>/`.
+There are no per-language successful-component artifacts, including registries.
+A discovery-only component selects a successful discovery endpoint and keeps
+only `component/<id>/registry.ctsc.json`. Keep both
+native capture phases: nonselected producers capture strictly into invocation
+scratch and undergo the same native validation and exact coverage checks.
+Never copy or relabel traces or validate a producer's native bundle against
+another endpoint's registry. In check mode, anchor the selected full native
+registry's bytes to the checked-in canonical, then compare every other
+independently generated registry to that same oracle with exact equality or the
+existing exact `parity.allowedDifferences`. Preserve full dependency closure and
+ordering and Rust/C# difference orientation regardless of endpoint selection.
+Fresh-producer-only comparison is insufficient: both producers could drift
+together. Exact exceptions describe known non-equivalences, not blanket passes.
+The selected producer writes directly into the component directory, with no
+`reference` subdirectory. Native `target.name` is that directory's basename;
+its language and native scenario names remain unchanged.
+Captured rows require checks, all naming the selected reference. Discovery-only
+components have a registry-only reference and no checks; negative and replacement
+rows have neither reference nor checks. The fixture
+configuration selects C# for paired captured rows and Rust for Rust-only rows;
+this does not impose a harness language policy.
+
 The check runs in both directions: the components each compiled target actually
 declares must be exactly the components the matrix rows name, and every
 enumerated fixture test must pass under golden capture. Every discovered
 operation must be exercised by a captured trace (nested calls count), unless
 the row's `captureExclusions` names the exact operation with a stable code and
-reason. Unsupported replay rows likewise declare the exact `expectCategory`;
+reason. Replay checks name implementation endpoints, not languages. C# native
+bundles replay on Rust candidates where supported; replay limitations never
+remove native capture coverage. Unsupported checks declare the exact `expectCategory`;
 an unrelated planner or discovery error never satisfies them. Build negatives
 reject any compiler error without primary spans exclusively in the row's
 intentional sources, even when the intended error is also present.

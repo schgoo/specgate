@@ -239,6 +239,28 @@ pub(crate) fn capture_csharp_tests(
     csharp::capture(&system, &Execution::real(), &discovery, &resolved, requests, scratch.path())
 }
 
+/// Golden-only strict C# batch. Keep executed-test internals inside capture;
+/// metadata and bundles both come from the one woven tests build.
+#[cfg(any(test, feature = "test-util"))]
+pub(crate) fn capture_csharp_strict(
+    binding: impl AsRef<Path>,
+    component: &ComponentId,
+    label: Option<&str>,
+    requests: &[BundleRequest],
+) -> Result<std::collections::BTreeMap<String, String>, FailureContext> {
+    let (discovered, executed) = capture_csharp_tests(binding, component, label, requests)?;
+    let reports = write_bundles(&discovered, requests, &executed, true)?;
+    assert_eq!(reports.len(), requests.len(), "C# capture must return one report per request");
+    executed
+        .schemas
+        .into_iter()
+        .map(|(component, schema)| {
+            let schema = schema.map_err(FailureContext::domain)?;
+            Ok((component, schema))
+        })
+        .collect()
+}
+
 /// Discover a Rust capture implementation's metadata.
 ///
 /// C# metadata is reflected from the capture build itself, so a C#

@@ -13,40 +13,15 @@ namespace SpecGate.Weaver.Tests;
 /// exception handler range or stack shape surfaces as
 /// <see cref="InvalidProgramException"/> when the method is first jitted.
 /// </summary>
-/// <remarks>
-/// The behavioral scenario tests here are interim. Once #47 generates C# trace
-/// goldens, generated artifacts byte-compared against themselves and compared to
-/// the Rust reference under <c>ctsc.strict/0.1.0</c> become the oracle, and #47
-/// deletes the scenarios they replace. Only the session-scoping and IL-mechanics
-/// tests, which no golden can express, survive that slice.
-/// </remarks>
 [Collection(WovenCaptureSerialization.Name)]
 public sealed class WovenCaptureTests
 {
-    [Fact]
-    public void RecordsInputsAndResultForSimpleOperation()
-    {
-        using CaptureSession session = CaptureScenario.Begin("weaver.basic");
-
-        int sum = Arithmetic.Add(2, 3);
-
-        Assert.Equal(5, sum);
-        OperationSpan span = Assert.Single(session.Finish().Operations);
-        Assert.Equal("weaver.basic", span.ComponentId);
-        Assert.Equal("add", span.OperationName);
-        Assert.Equal(CaptureScenario.ScenarioSpanId, span.ParentSpanId);
-        Assert.Equal(SpanStatus.Ok, span.Status);
-        Assert.Equal(["a", "b"], span.Inputs.Keys);
-        Assert.Equal([Value.Integer(2), Value.Integer(3)], span.Inputs.Values);
-        Assert.Equal(Value.Integer(5), span.Result());
-    }
-
     [Fact]
     public void RecordsNothingForUntargetedComponent()
     {
         using CaptureSession session = CaptureScenario.Begin("weaver.absent");
 
-        Arithmetic.Add(1, 1);
+        Arithmetic.Describe(1);
 
         Assert.Empty(session.Finish().Operations);
     }
@@ -64,63 +39,6 @@ public sealed class WovenCaptureTests
         OperationSpan span = Assert.Single(session.Finish().Operations);
         Assert.Equal("describe", span.OperationName);
         Assert.Equal(Value.String(expected), span.Result());
-    }
-
-    [Fact]
-    public void RecordsThrownExceptionAndRethrows()
-    {
-        using CaptureSession session = CaptureScenario.Begin("weaver.basic");
-
-        Assert.Throws<DivideByZeroException>(() => Arithmetic.Divide(1, 0));
-
-        OperationSpan span = Assert.Single(session.Finish().Operations);
-        Assert.Equal("divide", span.OperationName);
-        Assert.Equal(SpanStatus.Error, span.Status);
-        FaultCompletion fault = Assert.IsType<FaultCompletion>(span.OperationCompletion);
-        Assert.Equal("specgate.unexpected_target_fault", fault.FaultType);
-    }
-
-    [Fact]
-    public void RecordsVoidSuccessWithoutResult()
-    {
-        using CaptureSession session = CaptureScenario.Begin("weaver.basic");
-
-        Arithmetic.Guard(0);
-
-        OperationSpan span = Assert.Single(session.Finish().Operations);
-        Assert.Equal("guard", span.OperationName);
-        Assert.Equal(SpanStatus.Ok, span.Status);
-        Assert.Null(span.OperationCompletion);
-    }
-
-    [Fact]
-    public void RecordsVoidFailure()
-    {
-        using CaptureSession session = CaptureScenario.Begin("weaver.basic");
-
-        Assert.Throws<ArgumentOutOfRangeException>(() => Arithmetic.Guard(-1));
-
-        OperationSpan span = Assert.Single(session.Finish().Operations);
-        Assert.Equal(SpanStatus.Error, span.Status);
-        Assert.IsType<FaultCompletion>(span.OperationCompletion);
-    }
-
-    [Fact]
-    public void RecordsNestedOperationsWithParentage()
-    {
-        using CaptureSession session = CaptureScenario.Begin("weaver.basic");
-
-        Assert.Equal(6, Arithmetic.SumAll([1, 2, 3]));
-
-        // Operations are recorded in start order, so the caller comes first.
-        Capture capture = session.Finish();
-        OperationSpan outer = capture.Operations[0];
-        Assert.Equal("sum_all", outer.OperationName);
-        Assert.Equal(CaptureScenario.ScenarioSpanId, outer.ParentSpanId);
-
-        OperationSpan[] inner = [.. capture.Operations.Where(span => span.OperationName == "add")];
-        Assert.Equal(3, inner.Length);
-        Assert.All(inner, span => Assert.Equal(outer.SpanId, span.ParentSpanId));
     }
 
     [Theory]
@@ -166,7 +84,7 @@ public sealed class WovenCaptureTests
         CaptureSession session = CaptureScenario.Begin("weaver.basic");
         session.Dispose();
 
-        Assert.Equal(5, Arithmetic.Add(2, 3));
+        Assert.Equal("positive", Arithmetic.Describe(5));
         Assert.Empty(session.Finish().Operations);
     }
 }

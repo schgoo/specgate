@@ -13,9 +13,19 @@ pub(super) fn clear_artifacts(root: impl AsRef<Path>) -> std::io::Result<()> {
         let entry = entry?;
         let path = entry.path();
         if path.is_dir() {
-            std::fs::remove_dir_all(&path)?;
+            std::fs::remove_dir_all(&path).map_err(|error| {
+                std::io::Error::new(
+                    error.kind(),
+                    format!("failed to clear generated directory '{}': {error}", path.display()),
+                )
+            })?;
         } else if entry.file_name() != matrix_file() {
-            std::fs::remove_file(&path)?;
+            std::fs::remove_file(&path).map_err(|error| {
+                std::io::Error::new(
+                    error.kind(),
+                    format!("failed to clear generated file '{}': {error}", path.display()),
+                )
+            })?;
         }
     }
     Ok(())
@@ -41,13 +51,14 @@ pub(super) fn run(mode: Mode) -> Result<(), GoldenError> {
 
     let rust_groups = rust_groups(&root, &matrix)?;
     for rows in rust_groups.values() {
-        generate_rust(&root, &matrix, &generated, rows)?;
+        generate_rust(&root, &matrix, &generated, &scratch, rows)?;
     }
-    generate_csharp(&root, &matrix, &generated)?;
+    generate_csharp(&root, &matrix, &generated, &scratch)?;
     generate_negatives(&root, &matrix, &generated, &scratch)?;
 
     validate_artifacts(&matrix, &generated);
-    check_parity(&matrix, &generated);
+    let canonical_root = if mode == Mode::Check { &checked_in } else { &generated };
+    check_parity(&matrix, &generated, &scratch, canonical_root);
     let produced = actual_artifacts(&generated).map_err(|source| GoldenError::wrap("failed to enumerate generated artifacts", source))?;
     check_portability(&root, &generated, &produced);
 

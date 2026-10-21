@@ -79,7 +79,8 @@ capture needs a .NET 8+ SDK and runtime.
 Rust implementations use `#[spec_operation]`, `#[spec_setup]`,
 `#[derive(SpecEvent)]`, `#[spec_event]`, `spec_component!`, and `spec_trace!`.
 Operations record typed inputs and terminal behavior at real invocation
-boundaries. C# retains matching annotation metadata for registry discovery.
+boundaries. C# uses matching annotation metadata for discovery and IL weaving
+for native capture.
 Rust macros resolve the actual `specgate` dependency hygienically, including
 renamed dependencies.
 
@@ -94,7 +95,7 @@ renamed dependencies.
 - `test/rust/crates/specgate-ctsc-fixtures` — focused Rust fixtures.
 - `test/rust/negative-fixtures` — fixtures discovery or the compiler must reject.
 - `csharp/SpecGate.Discovery` — the C# reflection tool the Rust driver invokes.
-- `test/csharp/SpecGate.CtscFixtures` — annotation-only C# fixtures.
+- `test/csharp/SpecGate.CtscFixtures` — paired C# discovery and native capture fixtures.
 - `test/goldens/ctsc` — the golden matrix and its generated artifacts.
 - `docs/ctsc` — committed CTSC contracts, validator, and corpus.
 
@@ -105,7 +106,8 @@ status, decision records, digests, and the agent delivery workflow.
 
 `test/goldens/ctsc/matrix.json` is hand-authored configuration: it accounts for
 every annotated fixture source, names each component's language phases,
-expected outcome, cross-language parity, replay support, and limitations, and
+expected outcome, cross-language parity, reference-to-candidate replay checks,
+and limitations, and
 records where removed spec features now live.
 
 Everything else under `test/goldens/ctsc` is generated product output —
@@ -122,6 +124,24 @@ artifact from a fresh toolchain run, validates each one with the native CTSC
 registry, trace, linked, and bundle validators, byte-compares Rust and C#
 registries wherever the matrix claims parity, replays every component the
 matrix marks replayable, and rejects missing, stale, or undeclared goldens.
+Matrix version `0.2.0` selects one shared native golden bundle per component
+directly under `component/<id>/`, including the single canonical registry.
+Successful components have no per-language golden directories. Discovery-only
+components keep that registry without behavioral files. Paired fixtures explicitly select the current
+C# endpoint; Rust-only fixtures select Rust. This is fixture configuration, not
+a harness language policy. Both producers still run independent strict native
+capture; nonselected bundles are validated in invocation scratch, not stored or
+byte-compared as separate behavioral goldens. The selected full native registry
+must byte-match the checked-in canonical; every other independent producer
+registry must match that same oracle exactly or differ only by the exact known
+parity exceptions. Exceptions and unsupported replay are explicit limitations,
+not behavioral equivalence claims. The selected producer captures
+directly into the component directory (native language retained,
+`target.name` is its basename, e.g. `fixture.stateless_add`).
+Replay checks name the selected reference and candidate implementations, not
+language pairs, and always resolve the shared bundle. Strict
+comparison uses the reference scenario names carried through replay, not native
+test-name matching. Unsupported replay does not remove native capture coverage.
 Every captured bundle must link against its own registry; there is no linkage
 exception. A parity exception is not a licence to differ: the row lists every
 allowed difference as a JSON Pointer plus the exact value each language emits,
