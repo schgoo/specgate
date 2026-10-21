@@ -32,6 +32,7 @@ build:
 
 rust-test-regressions:
     pwsh -NoLogo -NoProfile -File scripts/rust-test-tests.ps1
+    pwsh -NoLogo -NoProfile -File scripts/rust-test-cargo-tests.ps1
 
 rust-test: discovery-tool weaver-tool rust-test-regressions
     pwsh -NoLogo -NoProfile -File scripts/rust-test.ps1

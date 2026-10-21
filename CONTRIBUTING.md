@@ -136,15 +136,24 @@ builds them and exports `SPECGATE_DISCOVERY_PATH` and `SPECGATE_WEAVER_PATH`; to
 two variables as the `justfile` does (`artifacts/discovery`, `artifacts/weaver`).
 
 `just rust-test` runs the product Rust workspace through Cargo with one outer
-test thread and fresh shared compilation intermediates under
-`rust/target/rust-test-<guid>/build`. This lets capture/replay tests reuse
-dependencies without overlapping rebuilds and execution of generated binaries.
+test thread. Workspace compilation keeps its normal build directory, reusing
+artifacts from `just build`. Cargo's child-process environment gives tests and
+doctests fresh shared intermediates under `rust/target/rust-test-<guid>/build`.
+This lets capture/replay tests reuse dependencies without overlapping rebuilds
+and execution of generated binaries.
 Cargo still selects the full workspace's unit, binary, integration, and doctests;
 threads explicitly created inside tests are unaffected. Wrapper regressions run
-first. Cleanup restores the caller's build-directory environment and working
-directory and removes scratch. There is no persistent test cache or CI cache
-configuration. `just test` also runs the separate `test` workspace with its
-original Cargo command and parallelism.
+first, including a real Cargo fixture proving warm executable reuse and shared
+dependency compilation across isolated candidate targets. The caller's
+environment is unchanged; cleanup restores the working directory and removes
+scratch. There is no persistent test cache or CI cache configuration. `just test`
+also runs the separate `test` workspace with its original Cargo command
+and parallelism.
+
+The runner owns the `value` and `force` entries of Cargo's
+`env.CARGO_BUILD_BUILD_DIR` table for its child processes. If custom Cargo
+configuration defines that entry, use table form instead of the shorthand
+string form: Cargo rejects merging a string with the runner's table entries.
 
 The gate covers Rust build/tests/clippy/fmt/licenses, generated crate READMEs,
 the CTSC Python corpus and linked validators, a deterministic capture-to-replay
