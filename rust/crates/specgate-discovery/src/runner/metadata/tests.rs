@@ -242,6 +242,9 @@ impl SparseRegistry {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let address = listener.local_addr().unwrap();
+        // Cargo caches package contents across runs, even when a listener port is recycled.
+        let prefix = format!("/{:x}/", Sha256::digest(&archive));
+        let index = format!("sparse+http://{address}{prefix}");
         let shutdown = Arc::new(AtomicBool::new(false));
         let server_shutdown = Arc::clone(&shutdown);
         let thread = std::thread::spawn(move || {
@@ -250,7 +253,7 @@ impl SparseRegistry {
                     Ok((stream, _address)) => {
                         stream.set_nonblocking(false).unwrap();
                         stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-                        serve_request(stream, address, &index_entry, &archive);
+                        serve_request(stream, address, &prefix, &index_entry, &archive);
                     }
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                         std::thread::sleep(Duration::from_millis(5));
@@ -260,7 +263,7 @@ impl SparseRegistry {
             }
         });
         Self {
-            index: format!("sparse+http://{address}/"),
+            index,
             shutdown,
             thread: Some(thread),
         }
@@ -283,6 +286,19 @@ impl Drop for SparseRegistry {
     }
 }
 
+#[test]
+fn registry_content_identity() {
+    for archive in [b"original runtime".as_slice(), b"revised runtime".as_slice()] {
+        let registry = SparseRegistry::start("{}".to_string(), archive.to_vec());
+        let prefix = format!("/{:x}/", Sha256::digest(archive));
+        assert!(
+            registry.index().ends_with(&prefix),
+            "recycled registry ports must not reuse cached packages with different contents: {}",
+            registry.index()
+        );
+    }
+}
+
 #[cfg(windows)]
 #[test]
 fn request_wait() {
@@ -293,31 +309,42 @@ fn request_wait() {
     let (stream, _) = listener.accept().unwrap();
     stream.set_nonblocking(false).unwrap();
     stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-    let server = std::thread::spawn(move || serve_request(stream, address, "{}", []));
+    let server = std::thread::spawn(move || serve_request(stream, address, "/fixture/", "{}", []));
 
     std::thread::sleep(Duration::from_millis(50));
     client
-        .write_all(b"GET /config.json HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .write_all(b"GET /fixture/config.json HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
         .unwrap();
     let mut response = String::new();
     client.read_to_string(&mut response).unwrap();
     server.join().unwrap();
 
     assert!(response.starts_with("HTTP/1.1 200 OK"));
+    assert!(response.ends_with(&format!(r#"{{"dl":"http://{address}/fixture/api/v1/crates"}}"#)));
 }
 
-fn serve_request(mut stream: impl Read + Write, address: SocketAddr, index_entry: impl AsRef<str>, archive: impl AsRef<[u8]>) {
+fn serve_request(
+    mut stream: impl Read + Write,
+    address: SocketAddr,
+    prefix: &str,
+    index_entry: impl AsRef<str>,
+    archive: impl AsRef<[u8]>,
+) {
     let index_entry = index_entry.as_ref();
     let archive = archive.as_ref();
     let mut request = [0_u8; 8192];
     let length = stream.read(&mut request).unwrap();
     let request = String::from_utf8_lossy(&request[..length]);
-    let path = request.lines().next().and_then(|line| line.split_whitespace().nth(1)).unwrap_or("");
-    let config = format!(r#"{{"dl":"http://{address}/api/v1/crates"}}"#);
+    let path = request
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|path| path.strip_prefix(prefix));
+    let config = format!(r#"{{"dl":"http://{address}{prefix}api/v1/crates"}}"#);
     let (status, content_type, body) = match path {
-        "/config.json" => ("200 OK", "application/json", config.as_bytes()),
-        "/sp/ec/specgate-runtime" => ("200 OK", "text/plain", index_entry.as_bytes()),
-        path if path == format!("/api/v1/crates/specgate-runtime/{RUNTIME_VERSION}/download") => {
+        Some("config.json") => ("200 OK", "application/json", config.as_bytes()),
+        Some("sp/ec/specgate-runtime") => ("200 OK", "text/plain", index_entry.as_bytes()),
+        Some(path) if path == format!("api/v1/crates/specgate-runtime/{RUNTIME_VERSION}/download") => {
             ("200 OK", "application/octet-stream", archive)
         }
         _ => ("404 Not Found", "text/plain", &[] as &[u8]),
