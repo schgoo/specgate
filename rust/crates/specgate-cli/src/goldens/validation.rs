@@ -50,7 +50,10 @@ fn reject_inventory_link(path: &Path, metadata: &std::fs::Metadata) -> std::io::
 }
 
 pub(super) fn actual_artifacts(root: impl AsRef<Path>) -> std::io::Result<BTreeSet<RepoPath>> {
-    let root = root.as_ref();
+    // Unix follows a link named with a trailing separator; inspect "linked",
+    // not "linked/".
+    let root = root.as_ref().components().collect::<PathBuf>();
+    let root = root.as_path();
     let mut found = BTreeSet::new();
     // Check parents first: even a missing root can be reached through a linked
     // ancestor. Do not canonicalize away the link before inspecting it.
