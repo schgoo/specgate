@@ -313,13 +313,12 @@ deliberate runner policy, not a change to runtime concurrency. Threads and
 concurrent operations explicitly exercised inside tests are unaffected.
 The separate `test/rust` workspace retains its original command and parallelism.
 
-The wrapper allocates a fresh GUID-named `rust/target/rust-test-*` directory for
-each invocation and sets `CARGO_BUILD_BUILD_DIR` to its `build` child. This
-includes compilation of the workspace test targets themselves, not just builds
-launched inside tests. Workspace compilation therefore starts with empty
-intermediates even if `just build` has already run; that extra cost must be
-included when timing the integrated recipe rather than assuming the library
-test executable's speedup transfers unchanged.
+The initial implementation in #91 allocated a fresh GUID-named
+`rust/target/rust-test-*` directory for each invocation and set
+`CARGO_BUILD_BUILD_DIR` to its `build` child. This included compilation of the
+workspace test targets themselves, not just builds launched inside tests.
+Workspace compilation therefore started with empty intermediates even if
+`just build` had already run; the following measurements include that cost.
 
 The first integrated `just test` run passed in **298.391 s**, including tool
 builds, wrapper regressions, fresh product-workspace compilation, all selected
@@ -334,20 +333,82 @@ unchanged smoke, golden matrix, and C# checks. Host and existing cache state
 were not reset, and no paired original full-gate run was taken; this is not
 evidence of a particular whole-gate or CI percentage reduction.
 
+### Reusing workspace compilation
+
+The post-merge [#91 main run](https://github.com/schgoo/specgate/actions/runs/39464486084)
+still spent **38.95 s** on Linux and **54.47 s** on Windows compiling product
+workspace tests into fresh intermediates, after the ordinary workspace build
+had already completed.
+
+The [#92 Windows PR run](https://github.com/schgoo/specgate/actions/runs/39596839855)
+spent about **81 s** on the same duplicate compilation. Its additional native
+C# golden captures and cross-language replay coverage remain unchanged by this
+optimization.
+
+The current wrapper scopes the private build directory to Cargo's child-process
+environment instead of changing PowerShell's `CARGO_BUILD_BUILD_DIR`. It passes
+two Cargo configuration overrides: `env.CARGO_BUILD_BUILD_DIR.value` is the
+JSON-quoted absolute scratch path (also a valid TOML string), and
+`env.CARGO_BUILD_BUILD_DIR.force` is `true`. Cargo applies its `[env]` table to
+children, not to the selection of its own build directory. The workspace test
+command therefore reuses the normal workspace cache, including a caller's
+existing build-directory override, while tests, doctests, and their nested
+Cargo commands inherit invocation-private intermediates.
+
+Before #92, a local Windows comparison ran the unchanged `just build test`
+recipe first, then the scoped child-environment version, with the same Rust
+sources:
+
+| Configuration | Complete `just build test` | Product test compilation | CLI library execution |
+|---|---:|---:|---:|
+| Private directory also used for workspace compilation | 245.165 s | 49.85 s | 150.81 s |
+| Private directory only inherited by children | 191.247 s | 2.08 s | 146.83 s |
+
+Both runs passed the same 98 CLI library tests with one ignored golden-matrix
+test, plus the other selected workspace tests and doctests. The optimized
+measurement includes the new real-Cargo regressions. The observed complete
+recipe reduction is **53.918 s (22.0%)**; workspace compilation alone fell by
+**47.77 s**, while CLI execution also varied by **3.98 s**. This is one ordered
+pair on a shared host without resetting existing caches, not a statistical
+benchmark or a claim that all timing differences are caused by compilation
+reuse. CI savings for this follow-up have not been measured.
+
+A subsequent complete root `just check`, also before #92, passed in
+**437.557 s**, including the native regressions, unchanged smoke and golden
+matrix, and C# checks. This separate gate run is not a paired whole-gate
+performance comparison.
+
+After rebasing onto merged #92, the complete root gate passed in **618.290 s**.
+Product workspace test compilation took **12.33 s**, and all 111 active CLI
+library tests and the new cross-language divergence integration test passed.
+The full native C#/Rust golden capture and replay checks remained enabled.
+This run includes #92's additional work, so its total is not directly comparable
+with the pre-#92 gate timing above; CI savings remain unmeasured.
+
 Cargo runs from the product workspace so its toolchain and configuration lookup
 remain unchanged. The wrapper does not change `CARGO_TARGET_DIR`, reuse captured
 results, remove assertions, or change candidate runtime resolution. Each test
 finishes before a later test can rebuild a generated executable; existing
-capture/replay scratch and final-output isolation remain in place. Cleanup
-restores the caller's build-directory environment and working directory and
-removes the new intermediates. Interrupted scratch is never reused by a later
-invocation. There is no persistent cache or new CI cache configuration.
+capture/replay scratch and final-output isolation remain in place. The caller's
+environment is never changed; cleanup restores the working directory and removes
+the new intermediates. Interrupted scratch is never reused by a later invocation.
+There is no persistent cache or new CI cache configuration.
 
 `just rust-test-regressions` checks the exact unfiltered workspace command,
 serial execution, workspace working directory, invocation-unique build
-directories, preservation of caller target/thread settings, restoration of
-unset/empty/set build-directory values, and cleanup on success, a nonzero Cargo
-exit, or a launch error. It is a prerequisite of `just rust-test`.
+directories, preservation of caller target/thread settings and unset/empty/set
+build-directory values, and cleanup on success, a nonzero Cargo exit, or a launch
+error. A real Cargo fixture also proves that the warmed workspace executable is
+used without rebuilding; unit tests and doctests inherit the same private
+directory; and two candidate-rooted builds keep separate final targets while
+compiling a common dependency only once. It exercises both default and explicit
+caller build directories, paths containing spaces, and candidate Cargo
+configuration. These regressions are prerequisites of `just rust-test`.
+
+If user Cargo configuration already defines `env.CARGO_BUILD_BUILD_DIR`, it
+must use table form. Cargo reports a merge error for a shorthand string entry
+when the wrapper supplies its `value` and `force` fields; no fallback silently
+disables isolation.
 
 ## Reproduction
 
