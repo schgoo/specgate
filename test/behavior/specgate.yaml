@@ -201,6 +201,10 @@ components:
     implementations:
       rust: *rust_fixtures
       csharp: *csharp_fixtures
+  fixture.unsigned:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
   fixture.statemachine_counter:
     implementations:
       rust: *rust_fixtures

@@ -337,7 +337,7 @@ pub trait ToNativeValue {
     fn to_native_value(&self) -> Value;
 }
 
-macro_rules! native_signed {
+macro_rules! native_integer {
     ($($ty:ty),* $(,)?) => {
         $(
             impl ToNativeValue for $ty {
@@ -361,8 +361,8 @@ macro_rules! native_unsigned {
     };
 }
 
-native_signed!(i8, i16, i32);
-native_unsigned!(u8, u16, u32, u64);
+native_integer!(i8, i16, i32, u32);
+native_unsigned!(u8, u16, u64);
 
 impl ToNativeValue for i64 {
     fn to_native_value(&self) -> Value {

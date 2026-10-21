@@ -57,6 +57,44 @@ public sealed class ValueProjectionTests
     }
 
     [Fact]
+    public void UnsignedScalarsPreserveTheirFullRangeInInputsAndResults()
+    {
+        foreach (uint value in new uint[] { 0, int.MaxValue, 2_147_483_648, uint.MaxValue })
+        {
+            OperationSpan span = Capture(nameof(Declarations.Unsigned32), [value], value);
+            Assert.Equal(Value.Integer(value), Assert.Single(span.Inputs).Value);
+            Assert.Equal(Value.Integer(value), span.Result());
+        }
+
+        foreach (ulong value in new ulong[] { 0, long.MaxValue, 9_223_372_036_854_775_808, ulong.MaxValue })
+        {
+            OperationSpan span = Capture(nameof(Declarations.Unsigned64), [value], value);
+            Assert.Equal(Value.Unsigned(value), Assert.Single(span.Inputs).Value);
+            Assert.Equal(Value.Unsigned(value), span.Result());
+        }
+    }
+
+    [Fact]
+    public void NestedUnsignedValuesKeepTheirDeclaredProjection()
+    {
+        OperationSpan span = Capture(
+            nameof(Declarations.NestedUnsigned),
+            [uint.MaxValue, new List<ulong?> { ulong.MaxValue, null }]);
+
+        Assert.Equal(Value.Tagged("Some", Value.Integer(uint.MaxValue)), Named(span, "count"));
+        Assert.Equal(
+            Value.List(
+            [
+                Value.Tagged("Some", Value.Unsigned(ulong.MaxValue)),
+                Value.Tagged("None", Value.Unit),
+            ]),
+            Named(span, "totals"));
+        Assert.Equal(
+            Value.Tagged("None", Value.Unit),
+            Named(Capture(nameof(Declarations.NestedUnsigned), [null, new List<ulong?>()]), "count"));
+    }
+
+    [Fact]
     public void AVoidOperationRecordsNoResult()
     {
         OperationSpan span = Capture(nameof(Declarations.Scalars), [true, (sbyte)0, (short)0, 0, 0L, 0f, 0d, ""]);
@@ -173,6 +211,8 @@ public sealed class ValueProjectionTests
     public void AnErasedValueProjectsFromItsRuntimeType()
     {
         Assert.Equal(Value.Integer(5), Single(nameof(Declarations.Erased), [5]));
+        Assert.Equal(Value.Integer(uint.MaxValue), Single(nameof(Declarations.Erased), [uint.MaxValue]));
+        Assert.Equal(Value.Unsigned(ulong.MaxValue), Single(nameof(Declarations.Erased), [ulong.MaxValue]));
         Assert.Equal(Value.String("text"), Single(nameof(Declarations.Erased), ["text"]));
         Assert.Equal(
             Value.Tagged("Circle", Map(("radius", Value.Float(1.0)))),
@@ -430,6 +470,12 @@ public sealed class ValueProjectionTests
         }
 
         internal static int Total(List<int> numbers) => numbers.Sum();
+
+        internal static uint Unsigned32(uint value) => value;
+
+        internal static ulong Unsigned64(ulong value) => value;
+
+        internal static void NestedUnsigned(uint? count, List<ulong?> totals) => _ = (count, totals);
 
         internal static void Optionals(
             int? count,

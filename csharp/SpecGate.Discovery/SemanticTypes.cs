@@ -73,6 +73,8 @@ internal sealed class SemanticTypes
         if (type == typeof(object)) return "value";
         if (type == typeof(int)) return "i32";
         if (type == typeof(long)) return "i64";
+        if (type == typeof(uint)) return "u32";
+        if (type == typeof(ulong)) return "u64";
         if (type == typeof(short)) return "i16";
         if (type == typeof(sbyte)) return "i8";
         if (type == typeof(double)) return "f64";

@@ -17,18 +17,42 @@ CTSC primitives are `unit`, `string`, `bool`, `i32`, `i64`, `u32`, `u64`,
 | `bool` | `bool` | `bool` |
 | `i32` | `i32` | `int` |
 | `i64` | `i64` | `long` |
-| `u32` | `u32` | not yet supported (`uint`) |
-| `u64` | `u64` | not yet supported (`ulong`) |
+| `u32` | `u32` | `uint` (`System.UInt32`) |
+| `u64` | `u64` | `ulong` (`System.UInt64`) |
 | `f32` | `f32` | `float` |
 | `f64` | `f64` | `double` |
-
-CTSC defines `u32` and `u64`, but the C# type mapping does not handle `uint`
-or `ulong` yet; capture rejects them as unsupported types. A C# component
-cannot currently expose an unsigned CTSC boundary.
 
 Other native numeric types (Rust `i8`, `u8`, `i16`, `u16`, `i128`, `u128`,
 `isize`, `usize`, `char`; C# `short`, `sbyte`, `byte`, `ushort`, and others)
 are not CTSC primitives. Use one of the widths above at the annotated boundary.
+
+### Unsigned integers
+
+Discovery and capture use the declared boundary type, including types nested in
+collections, optionals, and annotated members. The normative wire
+representations are defined in [CTSC Trace](../ctsc/trace.md).
+
+| Rust | C# | CTSC registry type | OTLP value |
+|---|---|---|---|
+| `u32` | `uint` (`System.UInt32`) | `u32` | `intValue`, from 0 through 4,294,967,295 |
+| `u64` | `ulong` (`System.UInt64`) | `u64` | `stringValue`, canonical decimal from `"0"` through `"18446744073709551615"` |
+
+The native runtime projects `u32`/`uint` as an integer and `u64`/`ulong` as an
+unsigned value. The latter is encoded as decimal text even when it fits in a
+signed integer; values above `long.MaxValue` are preserved without narrowing.
+Decimal text has no sign, separators, whitespace, or leading zeroes except `"0"`.
+
+These mappings apply to operation inputs and results and recurse through
+supported value shapes. C# nullable unsigned integers use the same optional
+projection as other nullable values: nested values carry `Some` or `None`, while
+an outer nullable return selects the result or empty outcome. A C# `object`
+holding a boxed `uint` or `ulong` uses the corresponding native value family.
+
+The [`fixture.unsigned`](../../test/behavior/cases/fixture.unsigned/) case captures
+zero, signed maxima, the first values above those maxima, and unsigned maxima
+through ordinary annotated operations in both languages. Its golden matrix row
+requires identical registries, linked native bundles, and successful replay of
+the C# reference on Rust.
 
 ## Composite types
 
