@@ -260,8 +260,8 @@ mod cases {
 
     #[test]
     fn private_lexical_setup_replay() {
-        let bundle = setup_replay("private-replay.yaml", "rust", "fixture.private_replay", 10, 4);
-        assert_eq!(bundle.observed_operations.len(), 11);
+        let bundle = setup_replay("private-replay.yaml", "rust", "fixture.private_replay", 12, 4);
+        assert_eq!(bundle.observed_operations.len(), 13);
         assert!(
             bundle
                 .observed_operations
@@ -275,6 +275,16 @@ mod cases {
                 .flat_map(|scenario| &scenario.operations)
                 .any(|operation| operation.operation_name == "inner")
         );
+    }
+
+    #[test]
+    fn test_only_operation_replay() {
+        setup_replay("private-replay.yaml", "rust", "fixture.test_only", 1, 1);
+    }
+
+    #[test]
+    fn integration_local_operation_replay() {
+        setup_replay("typed-integration.yaml", "rust", "fixture.integration_local", 1, 1);
     }
 
     fn typed_setup_replay(binding_name: &str, reference: &str) {
@@ -483,6 +493,19 @@ mod cases {
     }
 
     #[test]
+    fn planner_selects_target_for_plain_test_operation() {
+        let mut raw = raw_operation("add");
+        let target: specgate_discovery::registry::TestTarget = serde_json::from_value(serde_json::json!({
+            "name": "custom_library",
+            "library": true,
+        }))
+        .unwrap();
+        raw.test_target = Some(target.clone());
+        let plan = build_plan(&reference_bundle(), &candidate_metadata(raw, normalized_operation("add"))).unwrap();
+        assert_eq!(plan.test_target, Some(target));
+    }
+
+    #[test]
     fn planner_limits() {
         let mut bundle = reference_bundle();
         let operation = &bundle.registry.operations[0];
@@ -594,6 +617,31 @@ mod cases {
         for invalid in ["async", "r#self", "value; panic!()", "a::b", ""] {
             assert!(link::validate_ident(invalid, "test").is_err(), "{invalid}");
         }
+    }
+
+    #[test]
+    fn module_paths_accept_only_library_or_reported_test_roots() {
+        let mut raw = raw_operation("add");
+        raw.test_target = Some(
+            serde_json::from_value(serde_json::json!({
+                "name": "environment-contract",
+                "library": false,
+            }))
+            .unwrap(),
+        );
+        assert_eq!(link::module_path(&raw, "specgate_ctsc_fixtures").unwrap(), ["stateless"]);
+        raw.module_path = "environment_contract::local".into();
+        assert_eq!(link::module_path(&raw, "specgate_ctsc_fixtures").unwrap(), ["local"]);
+        raw.module_path = "unrelated::local".into();
+        assert!(
+            link::module_path(&raw, "specgate_ctsc_fixtures")
+                .unwrap_err()
+                .to_string()
+                .contains("does not begin with crate")
+        );
+        raw.test_target = None;
+        raw.module_path = "environment_contract::local".into();
+        link::module_path(&raw, "specgate_ctsc_fixtures").unwrap_err();
     }
 
     fn structured_metadata() -> (ReplayBundle, Candidate) {

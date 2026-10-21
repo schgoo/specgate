@@ -12,3 +12,10 @@ components:
         sources: typed-integration
         tests:
           projects: [typed-integration/Cargo.toml]
+  fixture.integration_local:
+    implementations:
+      rust:
+        language: rust
+        sources: typed-integration
+        tests:
+          projects: [typed-integration/Cargo.toml]

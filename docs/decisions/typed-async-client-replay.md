@@ -38,11 +38,14 @@ The owner additionally approved discovering and replaying inside actual Cargo
 test targets. Private unit-test and integration-test producers remain in their
 original lexical scopes. Generated, type-erased constructor and invocation
 bridges expose only the selected annotated calls to a reserved libtest entry
-point. Receiver downcasts stay in the producer's scope; free-function generic
-arguments stay in the operation's scope, preserving authored public re-exports
+point. Receiver producers delegate to operation-local associated bridges, keeping
+receiver downcasts and method specialization arguments in the operation's scope.
+Free-function generic arguments also stay in the operation's scope, preserving authored public re-exports
 rather than treating compiler `type_name` output as accessible source paths.
 Cargo metadata and compiler artifacts identify targets and executables,
-including custom library names and arbitrary integration-test source paths.
+including explicit library crate types, custom library names, and arbitrary
+integration-test source paths. Test-local operations retain their compiler-reported
+crate root and target even without setup or generic arguments.
 No conventional `tests/` layout or test body is used as a selector.
 
 Discovery builds the test targets, enumerates only the generated metadata

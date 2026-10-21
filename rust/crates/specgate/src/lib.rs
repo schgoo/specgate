@@ -85,5 +85,7 @@ pub mod __rt {
         TYPES as SPECGATE_TYPES, TypeDeps, TypeKind, TypeMeta, TypeName, VariantMeta, VariantName, discovery,
     };
     pub use specgate_runtime::value::Value;
-    pub use specgate_runtime::{ComponentId, ImplementationLabel, OperationName, SpecEvent, ToNativeValue, emit_event, emit_lazy};
+    pub use specgate_runtime::{
+        CaptureError, ComponentId, ImplementationLabel, OperationName, SpecEvent, ToNativeValue, emit_event, emit_lazy,
+    };
 }

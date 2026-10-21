@@ -34,6 +34,16 @@ fn manifest_escaping() {
 }
 
 #[test]
+fn explicit_library_kinds() {
+    for kind in ["lib", "rlib", "dylib", "cdylib", "staticlib"] {
+        assert!(library_kind(kind), "{kind}");
+    }
+    for kind in ["bin", "test", "bench", "example", "custom-build"] {
+        assert!(!library_kind(kind), "{kind}");
+    }
+}
+
+#[test]
 fn candidate_root() {
     let cache = InvocationCache::create(CacheScope::new("tests"), CacheLabel::new("metadata-source")).unwrap();
     let runtime = cache.path().join("runtime");

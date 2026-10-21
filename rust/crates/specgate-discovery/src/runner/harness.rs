@@ -92,7 +92,7 @@ fn build_in(
             .to_string();
         let library = target["kind"]
             .as_array()
-            .is_some_and(|kinds| kinds.iter().any(|kind| kind == "lib"));
+            .is_some_and(|kinds| kinds.iter().filter_map(Value::as_str).any(super::metadata::library_kind));
         let request = ProcessRequest::builder(executable)
             .arg("--list")
             .arg("--format")

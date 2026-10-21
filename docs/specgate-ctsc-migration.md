@@ -301,7 +301,10 @@ the Rust and C# registries still differ in exactly the declared ways.
   Scenario scopes release receivers and setup guards before the next scenario.
   Concrete downcasts and invocations stay in lexical bridges, so private setup
   outputs and public re-export specialization paths need not be accessible
-  from every generated test hook.
+  from every generated test hook. Method specialization paths resolve in the
+  operation's module, not the receiver producer's module. Plain test-only
+  operations also select their recorded Cargo target; integration-local module
+  paths are validated against that target's compiler-reported crate root.
 - An async operation is captured: the macro rewrites the annotated `async fn`
   into a `fn` returning `impl Future`, which captures the caller's operation at
   construction, re-installs it around every poll, begins recording at first

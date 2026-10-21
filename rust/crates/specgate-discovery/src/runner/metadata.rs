@@ -50,6 +50,10 @@ const PACKAGE_EDITION: &str = "2024";
 // Cargo metadata format 1 is the stable shape deserialized below.
 const METADATA_VERSION: &str = "1";
 
+pub(super) fn library_kind(kind: &str) -> bool {
+    matches!(kind, "lib" | "rlib" | "dylib" | "cdylib" | "staticlib")
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum RuntimeOverride {
     Path { package_id: String },
@@ -119,7 +123,7 @@ fn override_context(
         crate_name: candidate
             .targets
             .iter()
-            .find(|target| target.kind.iter().any(|kind| kind == "lib"))
+            .find(|target| target.kind.iter().any(|kind| library_kind(kind)))
             .ok_or_else(|| failure("candidate has no Cargo library target"))?
             .name
             .clone(),

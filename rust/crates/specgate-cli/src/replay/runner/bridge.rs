@@ -1,6 +1,6 @@
 //! Invocation code expanded only in its operation or receiver producer's scope.
 
-use super::{HarnessPaths, Link, Plan, model, qualify_type};
+use super::{Link, Plan, model};
 
 pub(super) fn source(plan: &Plan) -> String {
     let mut arms = Vec::new();
@@ -8,18 +8,24 @@ pub(super) fn source(plan: &Plan) -> String {
     for link in &plan.links {
         let component = link.component_id.as_str();
         let operation = link.operation_name.as_str();
-        let body = invocation(plan, link);
+        let body = invocation(link);
         let components = [quote::quote!(#component), quote::quote!(crate::__SPECGATE_COMPONENT)];
         if link.is_method {
             let setup = link.setups.iter().find(|setup| setup.fills.is_empty()).expect("validated receiver");
             let function = &setup.fn_name;
             let fills = &setup.declared_fills;
+            let bridge = quote::format_ident!("__SPECGATE_replay_{}", link.fn_name.trim_start_matches("r#"));
             for component in components {
                 arms.push(quote::quote! {
                     (#package, setup, #component, #operation, #function, #fills, $output:ty) => {
                         Some::<__specgate::harness::Invocation>(|receiver, inputs, setups| {
+                            <$output>::#bridge(#operation, receiver, inputs, setups)
+                        })
+                    };
+                    (#package, method, #component, #operation, $function:ident, [$($types:ty),*]) => {
+                        Some::<__specgate::harness::Invocation>(|receiver, inputs, setups| {
                             Box::pin(async move {
-                                let receiver = receiver.downcast_mut::<$output>()
+                                let receiver = receiver.downcast_mut::<Self>()
                                     .ok_or_else(|| __specgate::harness::error("selected setup returned a different receiver type"))?;
                                 #body
                             })
@@ -49,7 +55,7 @@ pub(super) fn source(plan: &Plan) -> String {
     .to_string()
 }
 
-fn invocation(plan: &Plan, link: &Link) -> impl quote::ToTokens {
+fn invocation(link: &Link) -> impl quote::ToTokens {
     let mut bindings = Vec::new();
     let mut arguments = Vec::new();
     for (position, parameter) in link.parameters.iter().enumerate() {
@@ -86,27 +92,10 @@ fn invocation(plan: &Plan, link: &Link) -> impl quote::ToTokens {
         }
     }
     let call = if link.is_method {
-        let function: syn::Ident = syn::parse_str(&link.fn_name).expect("validated method name");
-        let arguments = link
-            .type_arguments
-            .iter()
-            .map(|argument| {
-                let mut ty: syn::Type = syn::parse_str(argument).expect("validated specialization");
-                qualify_type(&mut ty, &plan.target.crate_name);
-                let target = plan.test_target.as_ref().expect("harness target");
-                let root: syn::Path = if target.library {
-                    syn::parse_quote!(crate)
-                } else {
-                    syn::parse_str(&plan.target.crate_name).expect("validated library crate")
-                };
-                syn::visit_mut::VisitMut::visit_type_mut(&mut HarnessPaths { root }, &mut ty);
-                ty
-            })
-            .collect::<Vec<_>>();
-        if arguments.is_empty() {
-            quote::quote!(receiver.#function)
+        if link.type_arguments.is_empty() {
+            quote::quote!(receiver.$function)
         } else {
-            quote::quote!(receiver.#function::<#(#arguments),*>)
+            quote::quote!(receiver.$function::<$($types),*>)
         }
     } else if link.type_arguments.is_empty() {
         quote::quote!($function)

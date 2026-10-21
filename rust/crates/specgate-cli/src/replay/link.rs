@@ -102,10 +102,7 @@ pub(super) fn build_plan(bundle: &ReplayBundle, candidate: &Candidate) -> Result
         test_target = Some(target.clone());
     }
     if test_target.is_none() {
-        for link in links
-            .iter()
-            .filter(|link| !link.setups.is_empty() || !link.type_arguments.is_empty())
-        {
+        for link in &links {
             if let Some(target) = candidate
                 .metadata()
                 .raw_registry
@@ -270,11 +267,7 @@ pub(super) fn link_operation(reference: &specgate_ctsc::replay::model::RegistryO
         }
         validate_ident(&producer.fn_name, "candidate setup function name")?;
         setups.push(super::model::Setup {
-            module_path: if producer.test_target.is_some() {
-                producer.module_path.as_str().split("::").skip(1).map(str::to_string).collect()
-            } else {
-                module_path(producer, &candidate.metadata().crate_name)?
-            },
+            module_path: module_path(producer, &candidate.metadata().crate_name)?,
             fn_name: producer.fn_name.to_string(),
             fills: selection.fills.to_string(),
             declared_fills: producer.fills.to_string(),
@@ -634,8 +627,15 @@ pub(super) fn check_rust(semantic_type: &ReplayType, rust_type: impl AsRef<str>,
 }
 
 pub(super) fn module_path(raw: &RawOperation, package_name: impl AsRef<str>) -> Result<Vec<String>, Error> {
-    let crate_ident = package_name.as_ref().replace('-', "_");
     let mut segments = raw.module_path.split("::").collect::<Vec<_>>();
+    let library_root = package_name.as_ref().replace('-', "_");
+    let crate_ident = raw
+        .test_target
+        .as_ref()
+        .filter(|target| !target.library)
+        .map(|target| target.name.replace('-', "_"))
+        .filter(|root| segments.first().copied() == Some(root.as_str()))
+        .unwrap_or(library_root);
     if segments.first().copied() != Some(crate_ident.as_str()) {
         return failure(format!(
             "candidate operation '{}::{}' raw module path '{}' does not begin with crate '{}'",

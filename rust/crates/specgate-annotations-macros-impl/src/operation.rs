@@ -410,6 +410,48 @@ pub fn expand_operation(attribute: TokenStream2, item: TokenStream2) -> syn::Res
     let function_name = function.sig.ident.to_string();
     let is_method = has_receiver(&function);
     let is_public = matches!(function.vis, syn::Visibility::Public(_));
+    let method_bridge = if is_method && std::env::var_os("SPECGATE_TEST_DISPATCH").is_some() {
+        let package = std::env::var("CARGO_PKG_NAME").map_err(|error| syn::Error::new_spanned(&function.sig, error))?;
+        let function_ident = &function.sig.ident;
+        let bridge = quote::format_ident!("__SPECGATE_replay_{}", function_name.trim_start_matches("r#"));
+        let visibility = &function.vis;
+        let selections = declarations.iter().map(|declaration| {
+            let name = &declaration.name;
+            let types = &declaration.types;
+            quote! {
+                #name => {
+                    macro_rules! __specgate_selected {
+                        () => { __specgate_dispatch!(#package, method, #component, #name, #function_ident, [#(#types),*]) };
+                    }
+                    include!(env!("SPECGATE_TEST_DISPATCH"))
+                }
+            }
+        });
+        quote! {
+            #[doc(hidden)]
+            #[allow(dead_code, non_snake_case, reason = "generated operation-local replay bridge")]
+            #visibility fn #bridge<'__specgate>(
+                operation: &str,
+                receiver: &'__specgate mut dyn ::std::any::Any,
+                inputs: ::std::vec::Vec<#rt::Value>,
+                setups: ::std::vec::Vec<::std::boxed::Box<dyn ::std::any::Any>>,
+            ) -> ::std::pin::Pin<::std::boxed::Box<dyn ::core::future::Future<Output = ::core::result::Result<(), #rt::CaptureError>> + '__specgate>> {
+                use #rt as __specgate;
+                let invocation = match operation {
+                    #(#selections,)*
+                    _ => None::<__specgate::harness::Invocation>,
+                };
+                match invocation {
+                    Some(invoke) => invoke(receiver, inputs, setups),
+                    None => ::std::boxed::Box::pin(async {
+                        Err(__specgate::harness::error("method has no selected lexical operation bridge"))
+                    }),
+                }
+            }
+        }
+    } else {
+        TokenStream2::new()
+    };
     let metadata = declarations
         .iter()
         .map(|declaration| {
@@ -478,7 +520,7 @@ pub fn expand_operation(attribute: TokenStream2, item: TokenStream2) -> syn::Res
             })
         })
         .collect::<syn::Result<Vec<_>>>()?;
-    Ok(quote!(#function #(#metadata)*))
+    Ok(quote!(#function #method_bridge #(#metadata)*))
 }
 
 struct Substitution<'a> {
