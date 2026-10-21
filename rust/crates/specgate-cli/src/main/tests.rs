@@ -234,3 +234,45 @@ fn optional_outputs() {
     assert_eq!(parse_capture(args(["--component", "fixture.add"])).unwrap().out, None);
     assert_eq!(parse_replay(args(["capture"])).unwrap().out, None);
 }
+
+const USAGE_START: &str = "<!-- specgate-usage:start -->";
+const USAGE_END: &str = "<!-- specgate-usage:end -->";
+
+/// Returns the fenced text between the usage markers of a Markdown document.
+fn documented_usage(markdown: &str) -> Option<String> {
+    let markdown = markdown.replace("\r\n", "\n");
+    let (_, rest) = markdown.split_once(USAGE_START)?;
+    let (block, _) = rest.split_once(USAGE_END)?;
+    let block = block.trim().strip_prefix("```text\n")?.strip_suffix("```")?;
+    Some(block.trim_end_matches('\n').to_owned())
+}
+
+#[test]
+fn usage_matches_cli_reference() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../docs/reference/cli.md");
+    let markdown = std::fs::read_to_string(&path).unwrap();
+    let documented = documented_usage(&markdown).expect("docs/reference/cli.md must fence the usage text between specgate-usage markers");
+    assert_eq!(
+        documented, USAGE,
+        "docs/reference/cli.md usage block differs from `specgate --help`; copy the usage text into the marked block"
+    );
+}
+
+#[test]
+fn usage_snapshot_rejects_drift() {
+    let good = format!("intro\n{USAGE_START}\n```text\n{USAGE}\n```\n{USAGE_END}\n");
+    assert_eq!(documented_usage(&good).as_deref(), Some(USAGE));
+    assert_eq!(documented_usage(&good.replace('\n', "\r\n")).as_deref(), Some(USAGE));
+
+    let drifted = good.replace("validate bundle <capture-dir>", "validate bundle <dir>");
+    assert_ne!(documented_usage(&drifted).as_deref(), Some(USAGE));
+    assert_eq!(documented_usage("no markers"), None);
+    assert_eq!(documented_usage(&format!("{USAGE_START}\n{USAGE}\n{USAGE_END}")), None);
+}
+
+#[test]
+fn usage_is_printed_unchanged() {
+    let mut stderr = Vec::new();
+    assert_eq!(run(["--help"], &mut Vec::new(), &mut stderr), ExitCode::SUCCESS);
+    assert_eq!(String::from_utf8(stderr).unwrap(), format!("{USAGE}\n"));
+}

@@ -26,15 +26,20 @@ Candidate replay remains Rust-only.
 
 ## Current delivery boundary
 
-The repository has no separate active roadmap. Work should start from the
-current human directive, the CTSC contracts, and
-`docs/specgate-ctsc-migration.md`, then be divided into reviewable vertical
-slices.
+Planned work is tracked in
+[`docs/contributor/roadmap.md`](../contributor/roadmap.md). Work starts from the
+current human directive, the CTSC contracts, [`docs/status.md`](../status.md),
+and [`docs/reference/limitations.md`](../reference/limitations.md), then is
+divided into reviewable vertical slices.
 
 ## Major limitations
 
-- Capture supports Rust libtest targets and C# native test projects. Async
-  operation capture is supported; async setups are not instrumented.
+- Capture supports Rust libtest targets and C# native test projects
+  (xUnit, MSTest, NUnit). Async operation capture is supported in both: Rust
+  `async fn`, and C# `Task`, `Task<T>`, `ValueTask`, and `ValueTask<T>`. A
+  future dropped while pending, or a cancelled C# task, is recorded as
+  abandoned; top-level abandonment drops the scenario. Async setups are
+  rejected.
 - Replay supports synchronous public Rust free functions with primitive
   lossless inputs.
 - Setup-backed methods, structured replay values, explicit mappings, async
@@ -52,10 +57,11 @@ slices.
 - The golden matrix is a trust anchor. Weakening coverage, parity, linkage, or
   negative-fixture checks can hide product regressions.
 
-Human review remains the acceptance gate.
-# Fixture navigation
+## Fixture navigation
 
 See [`../../test/behavior/README.md`](../../test/behavior/README.md) for real
 case sources, aggregate projects, shared native scenarios and generated
 `expected/` ownership. Matrix row identities and conformance meaning are
 independent of this physical layout.
+
+Human review remains the acceptance gate.

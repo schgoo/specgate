@@ -1,7 +1,7 @@
 //! Command-line interface for `SpecGate`'s CTSC-native workflow.
 //!
 //! ```text
-//! specgate discover --component <id> [--binding <specgate.yaml>] [--impl <label>] --registry-id <id> --registry-version <version> --out <registry.ctsc.json>
+//! specgate discover --component <id> [--binding <specgate.yaml>] [--impl <label>] --registry-id <id> --registry-version <version> -o|--out <registry.ctsc.json>
 //! specgate capture --component <id> [--binding <specgate.yaml>] [--impl <label>] [--out <dir>] [--force]
 //! specgate replay <capture-dir> [--binding <specgate.yaml>] [--impl <label>] [--out <candidate.otlp.json>] [--force]
 //! specgate validate registry <registry.json> [--import <registry.json>]...
@@ -12,7 +12,7 @@
 //! ```
 //!
 //! `discover` exports a deterministic CTSC registry from Rust link-time or C#
-//! compiled-assembly metadata. `capture` runs ordinary Rust tests in isolation
+//! compiled-assembly metadata. `capture` runs ordinary Rust or C# tests in isolation
 //! and records the selected component's top-level operation subtrees from
 //! passing native scenarios, keeping nested calls into other annotated
 //! components verbatim. `replay` verifies a capture bundle,
@@ -23,6 +23,10 @@
 //! reads `.spec.yaml` or invokes Python. The library capture entry point accepts
 //! one owned [`CaptureRequest`], constructed with a validated builder, and
 //! returns `Result<CaptureReport, CaptureError>`.
+//!
+//! The [CLI reference](https://github.com/schgoo/specgate/blob/main/docs/reference/cli.md)
+//! holds the exact usage text, exit codes, and output lines; its usage block is
+//! tested against the binary.
 //!
 //! Without `--out`, `capture` writes to
 //! `./.specgate/captures/<component>/<impl>/<UTC run id>/` (for example

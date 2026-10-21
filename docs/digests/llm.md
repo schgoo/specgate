@@ -14,6 +14,12 @@ The active CLI surface is `discover`, `capture`, `replay`, `validate`, and
 `compare`. Rust and C# support discovery and capture; replay currently supports
 Rust.
 
+To use SpecGate on a codebase, follow `docs/guides/README.md` (agent quick
+path) and the facts in `docs/reference/` (`cli.md`, `binding.md`,
+`value-mapping.md`, `bundle.md`, `limitations.md`). CLI stdout lines are not
+yet a stable contract; exit codes are 0 success, 1 failure or negative
+verdict, 2 usage error.
+
 ## Ownership boundaries
 
 - `specgate-runtime` owns native capture, semantic values, and link-time
@@ -86,7 +92,8 @@ Rust.
   setup-filled parameters are omitted.
 - Structured native values implement `ToNativeValue`, normally through
   `#[derive(SpecEvent)]`.
-- C# annotations are metadata only. Preserve raw declaring type, method,
+- C# attributes are metadata only; capture weaves its own build of the
+  sources project. Preserve raw declaring type, method,
   signature, visibility, static/async/setup state, and exception metadata.
 - Generated Rust runners resolve the candidate's exact `specgate-runtime`
   package through candidate-rooted `cargo metadata`. Runtime path and version
@@ -117,6 +124,11 @@ Rust.
   (golden generation) still fails the whole batch. The supported form of
   abandonment is nesting
   (`decisions/top-level-abandonment-unsupported.md`).
+- C# async operations returning `Task`, `Task<T>`, `ValueTask`, or
+  `ValueTask<T>` are woven and captured; cancellation is recorded as
+  `conformance.abandoned`. Async setups, `async void`, `async` methods returning
+  other awaitables, and async iterators are rejected by the weaver
+  (`decisions/csharp-async-capture.md`).
 - Environment-driven capture atomically persists the cumulative provisional
   scenario after declared inputs and after every operation close. Outstanding
   operations are projected as target-observed `incomplete_capture` faults from
@@ -178,8 +190,8 @@ The matrix is exact:
 
 ## Current limitations
 
-The detailed and authoritative list is in
-`docs/specgate-ctsc-migration.md`. Important current boundaries include:
+The detailed list is the single table in `docs/reference/limitations.md`;
+architecture and status are in `docs/status.md`. Important current boundaries include:
 
 - reference capture supports Rust libtest targets and C# native test projects;
 - replay supports synchronous public Rust free functions with lossless

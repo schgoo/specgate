@@ -1,7 +1,7 @@
 # Changelog
 
 Entries are one line per change. Rationale lives in the commit body, an ADR
-under `docs/decisions/`, or `docs/roadmap.md`. Generate with `just changelog`.
+under `docs/decisions/`, or `docs/contributor/roadmap.md`. Generate with `just changelog`.
 
 ## [Unreleased]
 
@@ -105,6 +105,19 @@ under `docs/decisions/`, or `docs/roadmap.md`. Generate with `just changelog`.
   verification stack.
 - Rust and C# fixtures are reduced to stateless, rich-type, and setup-discovery
   coverage.
+- Fixtures live under `test/behavior`, `test/mechanics`, `test/rejection`, and
+  `test/support` (workspace `test/Cargo.toml`); shared golden bundles are now at
+  `test/behavior/cases/<id>/expected/` (#94).
+
+### Documentation
+
+- Task guides in `docs/guides/` and reference pages in `docs/reference/` (CLI,
+  binding, value mapping, bundle, limitations); `docs/status.md` and
+  `docs/reference/limitations.md` replace `docs/specgate-ctsc-migration.md`,
+  `docs/README.md` absorbs `docs/references.md`, and contributor-only documents
+  move to `docs/contributor/`.
+- `just docs-check` keeps the CLI usage block, relative links, binding
+  examples, and quoted capture diagnostics in sync with the code.
 
 ### Testing
 

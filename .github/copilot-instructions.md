@@ -4,8 +4,9 @@
 
 Read `AGENTS.md`, `docs/README.md`, `docs/digests/llm.md`, and the relevant CTSC
 contract before planning or changing behavior. Use the observe → plan → act →
-verify workflow in `docs/agentic-loop.md`. Do not silently resolve a
-human-owned decision listed in `AGENTS.md`.
+verify workflow in `docs/contributor/agentic-loop.md`. Do not silently resolve a
+human-owned decision listed in `AGENTS.md`. To use SpecGate on a codebase
+rather than change it, follow `docs/guides/README.md`.
 
 ## Gate
 
@@ -39,15 +40,10 @@ ordinary tests. Do not add a separate behavioral assertion format or flat trace
 compatibility path.
 
 `binding-schema.json` is the CTSC target-binding format. Paths are relative to
-the binding file. The active CLI surface is:
-
-```text
-specgate discover <binding> ...
-specgate capture <binding> ...
-specgate replay <capture> <candidate-binding> ...
-specgate validate <registry|trace|linked|bundle> ...
-specgate compare <reference-trace> <candidate-trace> ...
-```
+the binding file. The active commands are `discover`, `capture`, `replay`,
+`validate`, and `compare`; the exact usage text, defaults, exit codes, and
+output lines are in `docs/reference/cli.md` (a test keeps its usage block in
+sync with the binary).
 
 ## Architecture
 
@@ -60,16 +56,18 @@ specgate compare <reference-trace> <candidate-trace> ...
    semantic normalization/setup folding.
 4. `specgate-ctsc` owns registry/trace encoding, bundle digest/link
    verification, replay models, and validators.
-5. `specgate-cli` exposes discovery, Rust reference capture, and Rust candidate
-   replay.
+5. `specgate-cli` exposes discovery, Rust and C# reference capture, Rust
+   candidate replay, validation, and comparison.
 
-A directly-awaited async operation captures natively; recording begins at the
-future's first poll, never at construction, so the instrumented signature stays
-unchanged and registry parity with C# holds. Async `#[spec_setup]` is still
-uninstrumented and rejected, because setup-input staging is thread-affine. A
-future that migrates between executor threads, is abandoned before completing,
-or is polled concurrently with another instrumented operation is not yet
-supported; each fails closed.
+Async operations capture natively in Rust (`async fn`) and C# (`Task`,
+`Task<T>`, `ValueTask`, `ValueTask<T>`). Rust recording begins at the
+future's first poll, so the instrumented signature stays unchanged. A future
+created inside a recording operation keeps its parent across executor threads;
+a future dropped while pending, or a cancelled C# task, is recorded as
+`conformance.abandoned`. Async setups are rejected, top-level abandonment
+drops the scenario, and an operation first reached on a raw
+`std::thread::spawn` thread is not covered. See `docs/guides/async-capture.md`
+and `docs/decisions/async-capture-context.md`.
 
 ## Golden matrix
 
@@ -114,7 +112,8 @@ Only declared case and rejection `expected/` directories are generated product o
 - Every captured bundle must pass trace, linked, and bundle validation.
 - Structured values implement `ToNativeValue`, normally via
   `#[derive(SpecEvent)]`.
-- C# annotations are metadata only; preserve raw declaring type, method,
+- C# attributes are metadata; `specgate capture` injects `SpecGate.Weaver`
+  into its own build of the sources project. Preserve raw declaring type, method,
   signature, static/public/async/setup, and exception information.
 - Observation declarations and comparison profiles are not implemented; do not
   claim otherwise.
