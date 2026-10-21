@@ -9,14 +9,23 @@ contributor rules.
 1. [`docs/README.md`](docs/README.md) — documentation map and precedence.
 2. [`docs/digests/llm.md`](docs/digests/llm.md) — operational facts,
    invariants, limitations, and decision boundaries.
-3. [`docs/specgate-ctsc-migration.md`](docs/specgate-ctsc-migration.md) —
-   current implementation status and product limitations.
+3. [`docs/status.md`](docs/status.md) and
+   [`docs/reference/limitations.md`](docs/reference/limitations.md) — current
+   implementation status and product limitations.
 4. The relevant contract under [`docs/ctsc/`](docs/ctsc/) and the source and
    tests for the area being changed.
 
 Also follow [`.github/copilot-instructions.md`](.github/copilot-instructions.md)
 for the concise repository coding rules and
 [`CONTRIBUTING.md`](CONTRIBUTING.md) for the contributor gate.
+
+## Using SpecGate
+
+To instrument, capture, replay, validate, or compare with SpecGate (rather than
+change it), follow the task guides in [`docs/guides/`](docs/guides/README.md),
+starting with the
+[agent quick path](docs/guides/README.md#agent-quick-path). CLI, binding, and
+bundle facts are in [`docs/reference/`](docs/README.md#reference).
 
 ## Delivery workflow
 
@@ -26,7 +35,7 @@ batching and native test identities. Only declared case and rejection
 `expected/` directories are generated; never clear a mixed case or test root.
 
 Use the observe → plan → act → verify loop described in
-[`docs/agentic-loop.md`](docs/agentic-loop.md).
+[`docs/contributor/agentic-loop.md`](docs/contributor/agentic-loop.md).
 
 - Plan one bounded vertical slice with explicit file and responsibility
   boundaries.

@@ -18,6 +18,8 @@ running validation.
    - generated artifacts came from `just ctsc-goldens-update` and their diff is
      intentional;
    - crate README changes originate from crate-level docs;
+   - user-visible behavior changes are reflected in `docs/guides/` and
+     `docs/reference/`;
    - no human-owned decision was silently finalized.
 3. Run focused validation and the complete gate:
 

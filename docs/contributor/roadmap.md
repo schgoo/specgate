@@ -5,7 +5,7 @@
 >
 > **Date:** 2026-09-28
 >
-> **Related:** [`specgate-ctsc-migration.md`](specgate-ctsc-migration.md) for
+> **Related:** [`../reference/limitations.md`](../reference/limitations.md) for
 > current limitations, [`component-identity-and-replay.md`](component-identity-and-replay.md)
 > for the open model questions that gate several items below.
 
@@ -35,7 +35,7 @@ instrumentation can then implement rather than redesign.
 Parallel test execution is not on that list. The CLI harness already runs one
 process per test (`capture.rs:683`, `--test-threads=1`), so per-test isolation
 exists at process granularity, and thread affinity is not what constrains it.
-See [`decisions/async-capture-context.md`](decisions/async-capture-context.md).
+See [`decisions/async-capture-context.md`](../decisions/async-capture-context.md).
 
 Building synchronous C# capture first would mean building on thread-affine
 assumptions that every documented consumer violates, and reworking it when
@@ -85,7 +85,7 @@ Relates to issue #2, whose problem statement is correct but whose proposed
 solution predates CTSC span parentage.
 
 The capture-context design is ratified in
-[`decisions/async-capture-context.md`](decisions/async-capture-context.md),
+[`decisions/async-capture-context.md`](../decisions/async-capture-context.md),
 which also covers M2.
 
 ### M2. Rust async context propagation
@@ -108,7 +108,7 @@ not affect the registry: the macro authors `return_type`, `invocation`,
 rewrite, so byte-identical parity with the C# twin is preserved.
 
 Slice 3 landed abandonment as a terminal state
-([`abandonment-terminal-state`](decisions/abandonment-terminal-state.md)): an
+([`abandonment-terminal-state`](../decisions/abandonment-terminal-state.md)): an
 async operation dropped before it reaches an outcome records
 `conformance.abandoned` with `UNSET` status, which is neither a fault nor a
 completion and does not propagate to its caller. That holds for an abandonment
@@ -117,7 +117,7 @@ abandonment, with no enclosing and no subsequent annotated operation, leaves a
 recording that was never finalized; `specgate capture` drops that scenario
 rather than emitting a trace that reports an error for a scenario whose test
 passed, and reports it as a failed test so sibling components still bundle
-([`top-level-abandonment-unsupported`](decisions/top-level-abandonment-unsupported.md)).
+([`top-level-abandonment-unsupported`](../decisions/top-level-abandonment-unsupported.md)).
 Two follow-ups remain from that
 slice: abandonment is never exercised under a concurrent unwind or a
 multi-threaded drop (#65), and no test pins the macro's sync/async arm selection
@@ -171,7 +171,7 @@ Format-level decisions, not just runtime work:
 - unique span identity per retry or repeated identical invocation;
 - explicit parallel regions;
 - cancellation representation — settled and implemented by
-  [`abandonment-terminal-state`](decisions/abandonment-terminal-state.md);
+  [`abandonment-terminal-state`](../decisions/abandonment-terminal-state.md);
 - known-started but unfinished operations;
 - exactly one completion or fault treatment per span.
 
@@ -257,7 +257,7 @@ Original delivery scope:
 2. A test-run collector that emits a validated CTSC bundle.
 3. Instrumentation at annotated boundaries by IL weaving of the real built
    assembly, ratified in
-   [`decisions/csharp-capture-instrumentation.md`](decisions/csharp-capture-instrumentation.md).
+   [`decisions/csharp-capture-instrumentation.md`](../decisions/csharp-capture-instrumentation.md).
    Weaving is the only mechanism whose capture semantics match Rust: Roslyn
    source generators cannot rewrite an existing method body, and C# 12
    interceptors record the call site rather than the callee.
@@ -276,7 +276,7 @@ their full nested subtrees. An operation belongs to exactly one component: the w
 method that declares several. Async capture landed
 in #71: the weaver wraps the compiler's async stub and the runtime completes
 the span when the task settles; see
-[`decisions/csharp-async-capture.md`](decisions/csharp-async-capture.md).
+[`decisions/csharp-async-capture.md`](../decisions/csharp-async-capture.md).
 
 The first #45 slice replaced that runtime's raw `object?` buffer with the CTSC
 value model. The weaver hands the runtime each operation's
@@ -311,7 +311,7 @@ or across a rewrite.
 This is open question 1 for independently captured bundles. It does not block
 #47: reference-to-candidate replay checks inherit recorded scenario names and
 compare strictly without pairing independent native test names. See
-[the golden parity decision](decisions/csharp-golden-replay-parity.md). CTSC
+[the golden parity decision](../decisions/csharp-golden-replay-parity.md). CTSC
 already treats independent scenario matching as a policy dimension; that
 extension remains unused.
 

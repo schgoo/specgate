@@ -98,6 +98,17 @@ readme-check:
 ctsc-validate:
     pwsh -NoLogo -NoProfile -File scripts/ctsc-validate.ps1
 
+# Keep public docs in sync with the code: relative links and anchors, quoted
+# capture diagnostics, the CLI usage block in docs/reference/cli.md, and
+# binding examples against binding-schema.json and the binding loader.
+docs-check:
+    pwsh -NoLogo -NoProfile -File scripts/docs-links-tests.ps1
+    pwsh -NoLogo -NoProfile -File scripts/docs-links.ps1
+    pwsh -NoLogo -NoProfile -File scripts/docs-diagnostics-tests.ps1
+    pwsh -NoLogo -NoProfile -File scripts/docs-diagnostics.ps1
+    cd rust && cargo test -p specgate-cli --bin specgate usage
+    cd rust && cargo test -p specgate-discovery --test binding_examples
+
 ctsc-smoke-regressions:
     pwsh -NoLogo -NoProfile -File scripts/ctsc-smoke-tests.ps1
 
@@ -131,4 +142,4 @@ format-cs:
 format-check-cs:
     dotnet format SpecGate.slnx --verify-no-changes
 
-check: build test clippy format-check deny readme-check ctsc-validate ctsc-smoke ctsc-goldens-check dotnet-build dotnet-test format-check-cs
+check: build test clippy format-check deny readme-check docs-check ctsc-validate ctsc-smoke ctsc-goldens-check dotnet-build dotnet-test format-check-cs

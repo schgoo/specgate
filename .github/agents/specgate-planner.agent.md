@@ -14,7 +14,7 @@ user-invocable: false
 Follow `.github/skills/specgate-plan-slice.md`. Remain read-only.
 
 Read the user directive, `AGENTS.md`, `docs/digests/llm.md`, the relevant CTSC
-contract, migration status, and affected source and tests. Return a task packet
+contract, current status (`docs/status.md`), and affected source and tests. Return a task packet
 that an implementer can execute without re-deriving scope:
 
 - observable outcome;

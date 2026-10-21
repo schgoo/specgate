@@ -9,6 +9,9 @@
 
 - [README](README.md) — overview and quick start
 - [CTSC documentation](docs/ctsc/README.md) — artifact contracts and validator
-- [Migration status](docs/specgate-ctsc-migration.md) — retained capabilities and limitations
+- [Guides](docs/guides/README.md) — install, instrument, capture, replay, compare
+- [Troubleshooting capture](docs/guides/troubleshoot-capture.md) — common diagnostics and fixes
+- [Limitations](docs/reference/limitations.md) — unsupported shapes and tracking issues
+- [Status](docs/status.md) — current architecture and capabilities
 - [CHANGELOG](CHANGELOG.md) — release history
 - [CONTRIBUTING](CONTRIBUTING.md) — development guide

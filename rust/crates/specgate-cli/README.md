@@ -8,7 +8,7 @@
 Command-line interface for `SpecGate`’s CTSC-native workflow.
 
 ```text
-specgate discover --component <id> [--binding <specgate.yaml>] [--impl <label>] --registry-id <id> --registry-version <version> --out <registry.ctsc.json>
+specgate discover --component <id> [--binding <specgate.yaml>] [--impl <label>] --registry-id <id> --registry-version <version> -o|--out <registry.ctsc.json>
 specgate capture --component <id> [--binding <specgate.yaml>] [--impl <label>] [--out <dir>] [--force]
 specgate replay <capture-dir> [--binding <specgate.yaml>] [--impl <label>] [--out <candidate.otlp.json>] [--force]
 specgate validate registry <registry.json> [--import <registry.json>]...
@@ -19,7 +19,7 @@ specgate compare <reference-trace> <candidate-trace> [--registry <root-registry>
 ```
 
 `discover` exports a deterministic CTSC registry from Rust link-time or C#
-compiled-assembly metadata. `capture` runs ordinary Rust tests in isolation
+compiled-assembly metadata. `capture` runs ordinary Rust or C# tests in isolation
 and records the selected component’s top-level operation subtrees from
 passing native scenarios, keeping nested calls into other annotated
 components verbatim. `replay` verifies a capture bundle,
@@ -30,6 +30,10 @@ CTSC 0.3 Registry, Trace Core, Linked, and capture-bundle validation.
 reads `.spec.yaml` or invokes Python. The library capture entry point accepts
 one owned [`CaptureRequest`][__link0], constructed with a validated builder, and
 returns `Result<CaptureReport, CaptureError>`.
+
+The [CLI reference][__link1]
+holds the exact usage text, exit codes, and output lines; its usage block is
+tested against the binary.
 
 Without `--out`, `capture` writes to
 `./.specgate/captures/<component>/<impl>/<UTC run id>/` (for example
@@ -60,5 +64,6 @@ println!("registry: {}", report.registry_path.display());
 
 Part of the [SpecGate](https://github.com/schgoo/specgate) project.
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQbJSusbBjLO7EbSlASCvKRTqwbmd2gsLYkxMobU3WiDiuhvKthYvRhcoQbadv_WbJH6wAbWrt7wwM1Ghkbnl6JzGuix-8bHTOfv-MDfuVhZIGDbHNwZWNnYXRlLWNsaWUwLjYuMGxzcGVjZ2F0ZV9jbGk
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQbJSusbBjLO7EbSlASCvKRTqwbmd2gsLYkxMobU3WiDiuhvKthYvRhcoQbmcDD44vczCQbj2gPsMcXSuIbE7b_AVKIiggbfKMWcXwOhUthZIGDbHNwZWNnYXRlLWNsaWUwLjYuMGxzcGVjZ2F0ZV9jbGk
  [__link0]: https://docs.rs/specgate-cli/0.6.0/specgate_cli/?search=CaptureRequest
+ [__link1]: https://github.com/schgoo/specgate/blob/main/docs/reference/cli.md
