@@ -101,6 +101,26 @@ pub(super) fn build_plan(bundle: &ReplayBundle, candidate: &Candidate) -> Result
         }
         test_target = Some(target.clone());
     }
+    if test_target.is_none() {
+        for link in links
+            .iter()
+            .filter(|link| !link.setups.is_empty() || !link.type_arguments.is_empty())
+        {
+            if let Some(target) = candidate
+                .metadata()
+                .raw_registry
+                .ops
+                .iter()
+                .find(|raw| raw.component == link.component_id && raw.name == link.operation_name && !raw.is_setup)
+                .and_then(|raw| raw.test_target.as_ref())
+            {
+                if test_target.as_ref().is_some_and(|prior| prior != target) {
+                    return failure("selected operations belong to different Cargo test targets");
+                }
+                test_target = Some(target.clone());
+            }
+        }
+    }
     let plan = Plan {
         test_target,
         component_id: bundle.component_id.clone().as_str().into(),
@@ -257,6 +277,7 @@ pub(super) fn link_operation(reference: &specgate_ctsc::replay::model::RegistryO
             },
             fn_name: producer.fn_name.to_string(),
             fills: selection.fills.to_string(),
+            declared_fills: producer.fills.to_string(),
             native_module: producer.module_path.to_string(),
             replay_output: producer.replay_output.clone(),
             test_target: producer.test_target.clone(),
@@ -277,13 +298,12 @@ pub(super) fn link_operation(reference: &specgate_ctsc::replay::model::RegistryO
         .iter()
         .map(|parameter| {
             if let Some(index) = setups.iter().position(|setup| setup.fills == parameter.name.as_str()) {
-                let native = parameter.ty.as_str().trim();
-                let borrow = if native.starts_with("& mut ") || native.starts_with("&mut ") {
-                    "&mut "
-                } else if native.starts_with('&') {
-                    "&"
-                } else {
-                    ""
+                let native = syn::parse_str::<syn::Type>(parameter.ty.as_str())
+                    .map_err(|error| Error::from(format!("invalid candidate parameter type '{}': {error}", parameter.ty)))?;
+                let borrow = match native {
+                    syn::Type::Reference(reference) if reference.mutability.is_some() => "&mut ",
+                    syn::Type::Reference(_) => "&",
+                    _ => "",
                 };
                 Ok(super::model::Parameter::Setup {
                     index,
@@ -439,7 +459,11 @@ fn validate_structured_types(bundle: &ReplayBundle, candidate: &Candidate, links
     for operation in &bundle.registry.operations {
         if links.iter().any(|link| {
             link.component_id.as_str() == operation.component_id().as_str() && link.operation_name.as_str() == operation.name().as_str()
-        }) {
+        }) || bundle
+            .observed_operations
+            .iter()
+            .any(|observed| &observed.component_id == operation.component_id() && &observed.operation_name == operation.name())
+        {
             for ty in operation
                 .output()
                 .into_iter()

@@ -162,6 +162,20 @@ pub fn expand_operation(attribute: TokenStream2, item: TokenStream2) -> syn::Res
         if !combinations.insert(quote!(#(#types),*).to_string()) {
             return Err(syn::Error::new_spanned(&function.sig, "duplicate operation specialization types"));
         }
+        let mut output = function.sig.output.clone();
+        syn::visit_mut::VisitMut::visit_return_type_mut(
+            &mut Substitution {
+                parameters: &generic_parameters,
+                arguments: &declaration.types,
+            },
+            &mut output,
+        );
+        if return_kind(&output) != return_kind(&function.sig.output) {
+            return Err(syn::Error::new_spanned(
+                output,
+                "operation specialization changes the return outcome shape; declare a concrete return signature",
+            ));
+        }
     }
     let params = parameters(&mut function);
     let body = function.block.clone();
@@ -425,6 +439,22 @@ pub fn expand_operation(attribute: TokenStream2, item: TokenStream2) -> syn::Res
                 quote!(#output).to_string()
             };
             let type_arguments = &declaration.types;
+            let function_ident = &function.sig.ident;
+            let replay = if !is_method && std::env::var_os("SPECGATE_TEST_DISPATCH").is_some() {
+                let package = std::env::var("CARGO_PKG_NAME").map_err(|error| syn::Error::new_spanned(&function.sig, error))?;
+                quote! {
+                    .replay_operation({
+                        use #rt as __specgate;
+                        macro_rules! __specgate_selected {
+                            () => { __specgate_dispatch!(#package, operation, #component, #name, #function_ident, [#(#type_arguments),*]) };
+                        }
+                        include!(env!("SPECGATE_TEST_DISPATCH"))
+                    })
+                }
+            } else {
+                TokenStream2::new()
+            };
+            let type_names = type_arguments.iter().map(|ty| quote!(#ty).to_string()).collect::<Vec<_>>();
             Ok(quote! {
             #[allow(dead_code, non_upper_case_globals, reason = "generated linker metadata is referenced externally")]
             const #const_name: () = {
@@ -441,7 +471,8 @@ pub fn expand_operation(attribute: TokenStream2, item: TokenStream2) -> syn::Res
                 .asynchronous(#is_async)
                 .method(#is_method)
                 .public(#is_public)
-                .type_arguments(|| ::std::vec![#(::core::any::type_name::<#type_arguments>()),*])
+                .type_arguments(|| ::std::vec![#(#type_names),*])
+                #replay
                 .build();
             };
             })
@@ -472,6 +503,45 @@ impl syn::visit_mut::VisitMut for Substitution<'_> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn specializations_cannot_change_completion_channels() {
+        for function in [
+            quote::quote!(
+                fn make<T: 'static>() -> Option<T> {
+                    None
+                }
+            ),
+            quote::quote!(
+                async fn make<T: 'static>() -> Option<T> {
+                    None
+                }
+            ),
+            quote::quote!(
+                fn make<T: 'static>() -> Result<T, String> {
+                    panic!()
+                }
+            ),
+            quote::quote!(
+                fn make<T: 'static>() -> T {
+                    panic!()
+                }
+            ),
+        ] {
+            let error = super::expand_operation(quote::quote!("make", types = "()"), function).unwrap_err();
+            assert!(error.to_string().contains("return outcome shape"), "{error}");
+        }
+        let error = super::expand_operation(
+            quote::quote!("make", types = "Result<i32, String>"),
+            quote::quote!(
+                fn make<T: 'static>() -> T {
+                    panic!()
+                }
+            ),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("return outcome shape"), "{error}");
+    }
+
     #[test]
     fn duplicate_specialization_options_are_rejected() {
         for (attribute, diagnostic) in [

@@ -41,6 +41,7 @@ pub struct OpMeta {
     pub(crate) component: &'static str,
     type_arguments: Option<fn() -> Vec<&'static str>>,
     pub(crate) replay_setup: Option<harness::Setup>,
+    pub(crate) replay_operation: Option<harness::Invocation>,
 }
 
 /// One named field with its (stringified) Rust type. Used for both operation
@@ -259,12 +260,20 @@ impl OpMeta {
                 component: deps.component.0,
                 type_arguments: None,
                 replay_setup: None,
+                replay_operation: None,
             },
         }
     }
 }
 
 impl OpBuilder {
+    /// Attach an invocation generated in the operation's lexical scope.
+    #[must_use]
+    pub const fn replay_operation(mut self, invoke: Option<harness::Invocation>) -> Self {
+        self.meta.replay_operation = invoke;
+        self
+    }
+
     /// Attach a generated test-local setup constructor.
     #[must_use]
     pub const fn replay_setup(mut self, setup: harness::Setup) -> Self {

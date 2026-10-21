@@ -102,7 +102,21 @@ public class DiscoveryRunnerTests
 
     private static class GenericFixture
     {
+        [SpecOperation("numbers", Spec = "fixtures.generic", TypeArguments = new[] { typeof(int) })]
+        [SpecOperation("readings", Spec = "fixtures.generic", TypeArguments = new[] { typeof(Fixtures.Reading) })]
         public static Task<List<T>> Items<T>() where T : notnull => Task.FromResult(new List<T>());
+    }
+
+    [Fact]
+    public void GenericSpecializationsPassTheDiscoveryEntryPoint()
+    {
+        RecordingSystem system = new();
+
+        Assert.Equal(0, DiscoveryRunner.Run(["out", "assembly.dll", "bin", "fixtures.generic"], system.Adapter));
+
+        JsonElement[] operations = [.. Document(system, 0).GetProperty("operations").EnumerateArray()];
+        Assert.Equal(["numbers", "readings"], operations.Select(operation => operation.GetProperty("name").GetString()));
+        Assert.Equal(["List<i32>", "List<Reading>"], operations.Select(operation => operation.GetProperty("return_type").GetString()));
     }
 
     [Fact]
@@ -147,7 +161,7 @@ public class DiscoveryRunnerTests
 
         Assert.Equal(["out"], system.Directories);
         string[] inventory = JsonSerializer.Deserialize<string[]>(system.Files[Path.Combine("out", "components.json")])!;
-        Assert.Equal(["fixtures.alpha", "fixtures.beta", "fixtures.gamma"], inventory);
+        Assert.Equal(["fixtures.alpha", "fixtures.beta", "fixtures.gamma", "fixtures.generic"], inventory);
     }
 
     /// <summary>
@@ -162,7 +176,7 @@ public class DiscoveryRunnerTests
         Assert.Equal(0, DiscoveryRunner.Run(["out", "assembly.dll", "bin"], system.Adapter));
 
         string[] inventory = JsonSerializer.Deserialize<string[]>(system.Files[Path.Combine("out", "components.json")])!;
-        Assert.Equal(["fixtures.alpha", "fixtures.beta", "fixtures.gamma"], inventory);
+        Assert.Equal(["fixtures.alpha", "fixtures.beta", "fixtures.gamma", "fixtures.generic"], inventory);
         Assert.Equal(
             ["record_reading", "record_reading"],
             Document(system, 0).GetProperty("operations").EnumerateArray().Select(operation => operation.GetProperty("name").GetString()));

@@ -652,6 +652,8 @@ pub struct Bundle {
     pub registry: Registry,
     /// Exact verified registry bytes, retained for candidate linked validation.
     pub registry_document: Vec<u8>,
+    /// Observed operations, including nested operations that must not be invoked separately.
+    pub observed_operations: Vec<Operation>,
     /// Ordered replay scenarios.
     pub scenarios: Vec<Scenario>,
 }

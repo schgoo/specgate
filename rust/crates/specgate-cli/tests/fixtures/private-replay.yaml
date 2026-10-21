@@ -1,0 +1,8 @@
+components:
+  fixture.private_replay:
+    implementations:
+      rust:
+        language: rust
+        sources: private-replay
+        tests:
+          projects: [private-replay/Cargo.toml]

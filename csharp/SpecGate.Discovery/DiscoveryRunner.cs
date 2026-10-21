@@ -134,7 +134,9 @@ internal static class DiscoveryRunner
     {
         foreach (AnnotatedMethod entry in methods)
         {
-            if (entry.Operations.Length > 1)
+            if (entry.Operations.Length > 1
+                && (!entry.Method.IsGenericMethodDefinition
+                    || entry.Operations.Select(operation => Annotations.Text(operation, "Spec")).Distinct(StringComparer.Ordinal).Count() > 1))
             {
                 string components = string.Join(
                     ", ",

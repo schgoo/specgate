@@ -24,11 +24,12 @@ struct ScenarioRef<'a> {
     position: usize,
 }
 
-pub(super) fn decode_scenarios(
-    document: &Document,
-    manifest: &ValidatedManifest,
-    registry: &Registry,
-) -> Result<Vec<Scenario>, error::Error> {
+pub(super) struct Decoded {
+    pub scenarios: Vec<Scenario>,
+    pub observed_operations: Vec<Operation>,
+}
+
+pub(super) fn decode_scenarios(document: &Document, manifest: &ValidatedManifest, registry: &Registry) -> Result<Decoded, error::Error> {
     if document.resource_spans.len() != 1 {
         return Err(format!(
             "reference OTLP must contain exactly one resourceSpans entry, found {}",
@@ -227,7 +228,10 @@ pub(super) fn decode_scenarios(
             operations,
         });
     }
-    Ok(scenarios)
+    Ok(Decoded {
+        scenarios,
+        observed_operations: decoded_operations.into_values().collect(),
+    })
 }
 
 fn decode_operation(span: &Span, registry: &Registry) -> Result<Operation, error::Error> {

@@ -10,6 +10,7 @@ use super::{TokenStream2, metadata_ident, quote, runtime};
 pub fn entry(identity: &str) -> TokenStream2 {
     let dependency = quote!(
         const _: ::core::option::Option<&str> = ::core::option_env!("SPECGATE_TEST_ENTRY");
+        const _: ::core::option::Option<&str> = ::core::option_env!("SPECGATE_TEST_DISPATCH");
     );
     if std::env::var_os("SPECGATE_TEST_ENTRY").is_none() {
         return dependency;

@@ -258,20 +258,49 @@ mod cases {
         typed_setup_replay("typed-integration.yaml", "csharp");
     }
 
+    #[test]
+    fn private_lexical_setup_replay() {
+        let bundle = setup_replay("private-replay.yaml", "rust", "fixture.private_replay", 10, 4);
+        assert_eq!(bundle.observed_operations.len(), 11);
+        assert!(
+            bundle
+                .observed_operations
+                .iter()
+                .any(|operation| operation.operation_name == "inner")
+        );
+        assert!(
+            !bundle
+                .scenarios
+                .iter()
+                .flat_map(|scenario| &scenario.operations)
+                .any(|operation| operation.operation_name == "inner")
+        );
+    }
+
     fn typed_setup_replay(binding_name: &str, reference: &str) {
+        setup_replay(binding_name, reference, "fixture.typed_async", 3, 1);
+    }
+
+    fn setup_replay(binding_name: &str, reference: &str, component: &str, operations: u32, scenarios: u32) -> ReplayBundle {
         let cache = tempfile::tempdir().unwrap();
         let binding = fixture_binding().with_file_name(binding_name);
         let capture_dir = cache.path().join("capture");
         let output = cache.path().join("candidate.otlp.json");
         capture(
             CaptureRequest::builder(CapturePaths { binding: binding.clone() })
-                .component(ComponentId::from("fixture.typed_async"))
+                .component(ComponentId::from(component))
                 .implementation(reference)
                 .out(&capture_dir)
                 .build()
                 .unwrap(),
         )
         .expect("capture a generic async instance operation with typed results");
+        let bundle = specgate_ctsc::replay::decode(
+            std::fs::read(capture_dir.join(manifest_file())).unwrap(),
+            std::fs::read(capture_dir.join(registry_file())).unwrap(),
+            std::fs::read(capture_dir.join(reference_file())).unwrap(),
+        )
+        .unwrap();
         let report = replay(
             Request::builder(Paths::new(&capture_dir, &binding))
                 .out(&output)
@@ -280,7 +309,8 @@ mod cases {
                 .unwrap(),
         )
         .expect("replay selected setups and preserve the shared receiver");
-        assert_eq!(report.operations, 3);
+        assert_eq!(report.operations, operations);
+        assert_eq!(report.scenarios, scenarios);
         let validation = validate_linked(&output, capture_dir.join(registry_file()), &[]);
         assert!(validation.valid, "{:#?}", validation.issues);
         let compared = specgate_ctsc::comparison::compare_with(
@@ -291,6 +321,7 @@ mod cases {
             &specgate_ctsc::comparison::SystemReader::system(),
         );
         assert!(compared.equivalent, "{compared:#?}");
+        bundle
     }
 
     #[test]
@@ -483,6 +514,43 @@ mod cases {
     }
 
     #[test]
+    fn planner_checks_nested_outcomes_without_scheduling_them() {
+        let (mut bundle, mut candidate) = structured_metadata();
+        let typed = &bundle.registry.operations[0];
+        let nested = replay_model::RegistryOp::builder(replay_model::OpDeps {
+            component_id: typed.component_id().clone(),
+            name: replay_model::OperationName::try_new("inner").unwrap(),
+            inputs: typed.inputs().to_vec(),
+        })
+        .output(typed.output().unwrap().clone())
+        .build()
+        .unwrap();
+        bundle.registry.operations = vec![reference_bundle().registry.operations.remove(0), nested];
+        let mut observed = bundle.scenarios[0].operations[0].clone();
+        observed.operation_name = replay_model::OperationName::try_new("inner").unwrap();
+        bundle.observed_operations.push(observed);
+        let mut inner = candidate.schema.operations[0].clone();
+        inner.name = "inner".into();
+        candidate.schema.operations[0].output = Some("i32".into());
+        candidate.schema.operations.push(inner);
+        let schema = serde_json::to_string(&candidate.schema).unwrap();
+        bundle.registry_document = specgate_ctsc::registry::encode(
+            bundle.registry.identity.id.as_str(),
+            bundle.registry.identity.version.as_str(),
+            specgate_ctsc::registry::Schema::new(&schema),
+        )
+        .unwrap()
+        .registry_json
+        .into_bytes();
+        let plan = build_plan(&bundle, &candidate).unwrap();
+        assert_eq!(plan.links.len(), 1);
+        assert_eq!(plan.links[0].operation_name.as_str(), "add");
+        candidate.schema.types[0].fields[0].ty = "i64".into();
+        let error = build_plan(&bundle, &candidate).unwrap_err();
+        assert!(error.to_string().contains("Child"), "{error}");
+    }
+
+    #[test]
     fn malformed_structured_candidate_never_publishes() {
         use specgate::__rt::{self as capture, Value};
         let (bundle, candidate) = structured_metadata();
@@ -661,6 +729,7 @@ mod cases {
         ];
         ReplayBundle {
             registry_document: Vec::new(),
+            observed_operations: Vec::new(),
             component_id: specgate_ctsc::replay::model::ComponentId::try_new("fixture.stateless_add").unwrap(),
             registry: replay_model::Registry {
                 identity: replay_model::RegistryIdentity {

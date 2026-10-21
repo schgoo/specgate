@@ -182,7 +182,7 @@ fn collect_parameters(function: &mut ItemFn, strip: bool) -> Vec<(Ident, Type, S
     result
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum ReturnKind {
     Unit,
     Option,

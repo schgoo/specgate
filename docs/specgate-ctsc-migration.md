@@ -285,7 +285,8 @@ the Rust and C# registries still differ in exactly the declared ways.
   lossless primitives.
 - Structured results and declared errors, including collections of annotated
   records, use the existing CTSC value projection and linked validators.
-  Reachable named type declarations must match the reference; explicit
+  Reachable named type declarations, including nested observed outcomes, must
+  match the reference; explicit
   cross-language shape mappings and C# candidate replay are not implemented.
 - Rust setup producers must be annotated. Discovery enumerates real Cargo
   libtest targets, including private `#[cfg(test)]` and integration-test
@@ -297,6 +298,10 @@ the Rust and C# registries still differ in exactly the declared ways.
   construction inputs and an owned, downcastable output. A single replay cannot
   combine producers from different Cargo test targets. Equal receiver producer
   identities and construction inputs share one receiver within a scenario.
+  Scenario scopes release receivers and setup guards before the next scenario.
+  Concrete downcasts and invocations stay in lexical bridges, so private setup
+  outputs and public re-export specialization paths need not be accessible
+  from every generated test hook.
 - An async operation is captured: the macro rewrites the annotated `async fn`
   into a `fn` returning `impl Future`, which captures the caller's operation at
   construction, re-installs it around every poll, begins recording at first
@@ -375,6 +380,10 @@ constraints such as `where T : notnull`. Discovery publishes concrete
 signatures without inferring specializations from tests. Calling an undeclared
 specialization while recording fails explicitly. Open generic declaring types,
 generic setups, and Rust const-generic operation specializations are unsupported.
+Rust substitutions that change the authored signature's syntactic completion
+channels are rejected, including `Option<T>` specialized to `Option<()>` and
+`T` specialized to `Result<i32, String>`; use a concrete return signature.
+The check does not resolve aliases or associated-type projections.
 
 The paired CLI client fixture captures a C# generic async instance method and
 replays it against a Rust method returning `Vec<Item>`. Private Rust setup

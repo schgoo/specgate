@@ -25,17 +25,28 @@ fn failure(message: impl Into<String>) -> Error {
 ///
 /// # Errors
 /// Reports Cargo, metadata, and libtest enumeration failures.
-pub fn build(package: &Path, entry: &Path, scratch: &Path, target: Option<&TestTarget>) -> Result<Vec<Binary>, Error> {
-    build_in(package, entry, scratch, target, &System::real())
+pub fn build(package: &Path, entry: &Path, dispatch: &Path, scratch: &Path, target: Option<&TestTarget>) -> Result<Vec<Binary>, Error> {
+    build_in(package, entry, Some(dispatch), scratch, target, &System::real())
 }
 
-fn build_in(package: &Path, entry: &Path, scratch: &Path, target: Option<&TestTarget>, system: &System) -> Result<Vec<Binary>, Error> {
+fn build_in(
+    package: &Path,
+    entry: &Path,
+    dispatch: Option<&Path>,
+    scratch: &Path,
+    target: Option<&TestTarget>,
+    system: &System,
+) -> Result<Vec<Binary>, Error> {
     entry.to_str().ok_or_else(|| failure("test-harness entry path is not Unicode"))?;
     let request = ProcessRequest::builder(super::cargo_with(system)).arg("test");
     let request = match target {
         Some(target) if target.library => request.arg("--lib"),
         Some(target) => request.arg("--test").arg(&target.name),
         None => request.arg("--tests"),
+    };
+    let request = match dispatch {
+        Some(dispatch) => request.env("SPECGATE_TEST_DISPATCH", dispatch),
+        None => request.env_remove("SPECGATE_TEST_DISPATCH"),
     };
     let request = request
         .arg("--no-run")
@@ -120,7 +131,7 @@ fn build_in(package: &Path, entry: &Path, scratch: &Path, target: Option<&TestTa
 pub(crate) fn augment(package: &Path, original: &str, scratch: &Path, system: &System) -> Result<String, Error> {
     let entry = scratch.join("test-entry.rs");
     system.filesystem.write(&entry, b"{ let path = std::env::var_os(\"SPECGATE_TEST_METADATA\").expect(\"missing metadata output\"); std::fs::write(path, __specgate::discovery().to_string()).expect(\"failed to write test-target metadata\"); }")?;
-    let binaries = build_in(package, &entry, &scratch.join("tests"), None, system)?;
+    let binaries = build_in(package, &entry, None, &scratch.join("tests"), None, system)?;
     let mut document: Value = serde_json::from_str(original).map_err(|error| failure(format!("invalid production registry: {error}")))?;
     for (index, binary) in binaries.iter().enumerate() {
         let metadata = scratch.join(format!("test-metadata-{index}.json"));
@@ -155,6 +166,9 @@ pub(crate) fn augment(package: &Path, original: &str, scratch: &Path, system: &S
                         .all(|field| prior[*field] == value[*field])
                 });
                 if let Some(prior) = existing {
+                    if prior["is_setup"] == false && prior.get("test_target").is_none() {
+                        prior["test_target"] = serde_json::to_value(&binary.target).map_err(|error| failure(error.to_string()))?;
+                    }
                     if let Some(output) = value.get("replay_output") {
                         prior["replay_output"] = output.clone();
                         if prior["is_setup"] == true && prior["is_public"] == false && prior.get("test_target").is_none() {

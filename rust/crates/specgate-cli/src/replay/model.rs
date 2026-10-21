@@ -183,6 +183,7 @@ pub(crate) struct Setup {
     pub(crate) module_path: Vec<String>,
     pub(crate) fn_name: String,
     pub(crate) fills: String,
+    pub(crate) declared_fills: String,
     pub(crate) inputs: Vec<usize>,
     pub(crate) native_module: String,
     pub(crate) replay_output: Option<String>,

@@ -164,13 +164,14 @@ fn decode_inner(manifest_json: &[u8], registry_json: &[u8], trace_json: &[u8]) -
     }
 
     let document: OtlpDoc = serde_json::from_slice(trace_json).map_err(|error| Error::json("malformed reference OTLP JSON", error))?;
-    let scenarios = decode_scenarios(&document, &manifest, &registry)?;
+    let decoded = decode_scenarios(&document, &manifest, &registry)?;
 
     Ok(Bundle {
         component_id: ComponentId::try_new(manifest.component_id)?,
         registry,
         registry_document: registry_json.to_vec(),
-        scenarios,
+        scenarios: decoded.scenarios,
+        observed_operations: decoded.observed_operations,
     })
 }
 

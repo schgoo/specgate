@@ -2,22 +2,39 @@
 
 use crate::{CaptureError, CaptureErrorKind, capture::Capture, registry, value::Value};
 use std::any::Any;
+use std::pin::Pin;
 
 /// Type-erased synchronous constructor with explicit input failures.
 pub type Constructor = fn(Vec<Value>) -> Result<Box<dyn Any>, CaptureError>;
+
+/// Lexically typed invocation whose future may borrow its erased receiver.
+pub type Invocation =
+    for<'a> fn(&'a mut dyn Any, Vec<Value>, Vec<Box<dyn Any>>) -> Pin<Box<dyn Future<Output = Result<(), CaptureError>> + 'a>>;
 
 /// Erased setup constructor, emitted in the producer's own lexical scope.
 #[derive(Debug, Clone, Copy)]
 pub struct Setup {
     invoke: Constructor,
     output: fn() -> &'static str,
+    dispatch: Option<Invocation>,
 }
 
 impl Setup {
     /// Construct a generated setup bridge.
     #[must_use]
     pub const fn new(invoke: Constructor, output: fn() -> &'static str) -> Self {
-        Self { invoke, output }
+        Self {
+            invoke,
+            output,
+            dispatch: None,
+        }
+    }
+
+    /// Attach invocation code generated in the constructor's lexical scope.
+    #[must_use]
+    pub const fn dispatch(mut self, dispatch: Option<Invocation>) -> Self {
+        self.dispatch = dispatch;
+        self
     }
 
     pub(crate) fn output(self) -> &'static str {
@@ -43,6 +60,11 @@ pub fn setup(
     fills: &str,
     inputs: Vec<Value>,
 ) -> Result<Box<dyn Any>, CaptureError> {
+    let bridge = setup_bridge(component, operation, module, function, fills)?;
+    (bridge.invoke)(inputs)
+}
+
+fn setup_bridge(component: &str, operation: &str, module: &str, function: &str, fills: &str) -> Result<Setup, CaptureError> {
     let matches = registry::OPERATIONS
         .iter()
         .filter(|entry| {
@@ -67,10 +89,49 @@ pub fn setup(
             )));
         }
     };
-    let bridge = entry
+    entry
         .replay_setup
-        .ok_or_else(|| error(format!("setup '{module}::{function}' has no supported replay bridge")))?;
-    (bridge.invoke)(inputs)
+        .ok_or_else(|| error(format!("setup '{module}::{function}' has no supported replay bridge")))
+}
+
+/// Select a setup-local invocation without exposing its concrete receiver type.
+///
+/// # Errors
+/// Rejects missing or ambiguous setup declarations and missing invocation bridges.
+pub fn setup_invocation(component: &str, operation: &str, module: &str, function: &str, fills: &str) -> Result<Invocation, CaptureError> {
+    setup_bridge(component, operation, module, function, fills)?
+        .dispatch
+        .ok_or_else(|| error(format!("setup '{module}::{function}' has no selected operation bridge")))
+}
+
+/// Select an operation-local invocation, preserving private specialization paths.
+///
+/// # Errors
+/// Rejects missing, ambiguous, or unsupported operation declarations.
+pub fn operation_invocation(component: &str, operation: &str) -> Result<Invocation, CaptureError> {
+    let mut matches = registry::OPERATIONS
+        .iter()
+        .filter(|entry| !entry.is_setup && entry.component == component && entry.name == operation);
+    let entry = matches
+        .next()
+        .ok_or_else(|| error(format!("test target does not contain operation '{component}::{operation}'")))?;
+    if matches.next().is_some() {
+        return Err(error(format!("test target duplicates operation '{component}::{operation}'")));
+    }
+    entry
+        .replay_operation
+        .ok_or_else(|| error(format!("operation '{component}::{operation}' has no selected lexical bridge")))
+}
+
+/// Recover an injected value using the type inferred by its lexical invocation.
+///
+/// # Errors
+/// Rejects a constructor result that does not match the selected native parameter.
+pub fn take<T: Any>(value: Box<dyn Any>) -> Result<T, CaptureError> {
+    value
+        .downcast::<T>()
+        .map(|value| *value)
+        .map_err(|_value| error("selected setup returned a different native parameter type"))
 }
 
 /// Primitive construction-input conversion used by generated setup bridges.

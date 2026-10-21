@@ -6,6 +6,8 @@
 //! boundaries; malformed plans are programming-invariant failures.
 use super::*;
 
+mod bridge;
+
 // Generated source uses serde_json 1.x APIs only; retaining the major range
 // lets Cargo select compatible fixes without changing the runner contract.
 const SERDE_VERSION: &str = "1";
@@ -152,7 +154,7 @@ pub(super) fn source(plan: &Plan) -> String {
 }
 
 fn source_in(plan: &Plan, harness: bool) -> String {
-    let asynchronous = plan.links.iter().any(|link| link.is_async);
+    let asynchronous = harness || plan.links.iter().any(|link| link.is_async);
     let mut source = if harness {
         String::from("{\nfn run(sidecar: &std::path::Path) -> Result<(), String> {\n")
     } else {
@@ -173,6 +175,7 @@ fn source_in(plan: &Plan, harness: bool) -> String {
     // scenario therefore starts at one, which feeds every deterministic trace
     // and span identifier below.
     for (scenario_position, scenario) in plan.scenarios.iter().enumerate() {
+        source.push_str("    {\n");
         let identity = u64::try_from(scenario_position)
             .expect("validated replay scenario position must fit u64")
             .checked_add(FIRST_IDENTITY)
@@ -251,22 +254,15 @@ fn source_in(plan: &Plan, harness: bool) -> String {
                     .collect::<Vec<_>>()
                     .join(", ");
                 if harness {
-                    let native_output = setup
-                        .replay_output
-                        .as_ref()
-                        .expect("test-harness setup must have a generated bridge");
-                    let mut native_output: syn::Type = syn::parse_str(native_output).expect("compiler-qualified setup output type");
-                    qualify_type(&mut native_output, &plan.target.crate_name);
-                    let native_output = quote::quote!(#native_output).to_string();
                     let values = setup
                         .inputs
                         .iter()
                         .map(|index| format!("__specgate::ToNativeValue::to_native_value(&({}))", rendered_inputs[*index]))
                         .collect::<Vec<_>>()
                         .join(", ");
-                    writeln!(source, "    let mut {local} = *__specgate::harness::setup({}, {}, {}, {}, {}, vec![{values}]).map_err(|error| error.to_string())?.downcast::<{native_output}>().map_err(|_| \"selected setup returned a different native type\".to_string())?;",
+                    writeln!(source, "    let mut {local} = __specgate::harness::setup({}, {}, {}, {}, {}, vec![{values}]).map_err(|error| error.to_string())?;",
                         string_literal(link.component_id.as_str()), string_literal(link.operation_name.as_str()),
-                        string_literal(&setup.native_module), string_literal(&setup.fn_name), string_literal(&setup.fills),
+                        string_literal(&setup.native_module), string_literal(&setup.fn_name), string_literal(&setup.declared_fills),
                     ).expect("writing to a String cannot fail");
                 } else {
                     let path = invocation_path(&setup.module_path, &setup.fn_name);
@@ -276,6 +272,52 @@ fn source_in(plan: &Plan, harness: bool) -> String {
                     receivers.push((setup.clone(), values, local.clone()));
                 }
                 setup_locals.push(local);
+            }
+            if harness {
+                let inputs = rendered_inputs
+                    .iter()
+                    .map(|value| format!("__specgate::ToNativeValue::to_native_value(&({value}))"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let injected = link
+                    .parameters
+                    .iter()
+                    .filter_map(|parameter| match parameter {
+                        model::Parameter::Setup { index, .. } => Some(setup_locals[*index].as_str()),
+                        model::Parameter::Input(_) => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let (dispatch, receiver) = if link.is_method {
+                    let index = link
+                        .setups
+                        .iter()
+                        .position(|setup| setup.fills.is_empty())
+                        .expect("validated receiver");
+                    let setup = &link.setups[index];
+                    (
+                        format!(
+                            "__specgate::harness::setup_invocation({}, {}, {}, {}, {})",
+                            string_literal(link.component_id.as_str()),
+                            string_literal(link.operation_name.as_str()),
+                            string_literal(&setup.native_module),
+                            string_literal(&setup.fn_name),
+                            string_literal(&setup.declared_fills)
+                        ),
+                        format!("&mut *{}", setup_locals[index]),
+                    )
+                } else {
+                    (
+                        format!(
+                            "__specgate::harness::operation_invocation({}, {})",
+                            string_literal(link.component_id.as_str()),
+                            string_literal(link.operation_name.as_str())
+                        ),
+                        "&mut ()".to_string(),
+                    )
+                };
+                writeln!(source, "    {dispatch}.map_err(|error| error.to_string())?({receiver}, vec![{inputs}], vec![{injected}]).await.map_err(|error| error.to_string())?;").expect("writing source");
+                continue;
             }
             let arguments = link
                 .parameters
@@ -313,6 +355,7 @@ fn source_in(plan: &Plan, harness: bool) -> String {
             writeln!(source, "    let _ = {path}({arguments}){await_suffix};").expect("writing to a String cannot fail");
         }
         source.push_str("    captures.push(specgate_runtime::capture::finish().map_err(|error| error.to_string())?);\n");
+        source.push_str("    }\n");
     }
     if harness {
         source.push_str("    __specgate::harness::publish(sidecar, &captures).map_err(|error| error.to_string())?;\n    Ok(())\n");
@@ -372,8 +415,13 @@ fn execute_harness(plan: &Plan, scratch: &Path, execution: &Execution, system: &
     system
         .write(&entry, source_in(plan, true))
         .map_err(|error| format!("failed to write test replay entry: {error}"))?;
-    let binaries = specgate_discovery::runner::harness::build(&plan.target.package_root, &entry, scratch, plan.test_target.as_ref())
-        .map_err(|error| Error::wrap(ErrorKind::Linking, "failed to build candidate test replay", error))?;
+    let dispatch = scratch.join("test-dispatch.rs");
+    system
+        .write(&dispatch, bridge::source(plan))
+        .map_err(|error| format!("failed to write lexical replay dispatch: {error}"))?;
+    let binaries =
+        specgate_discovery::runner::harness::build(&plan.target.package_root, &entry, &dispatch, scratch, plan.test_target.as_ref())
+            .map_err(|error| Error::wrap(ErrorKind::Linking, "failed to build candidate test replay", error))?;
     let target = plan.test_target.as_ref().expect("test replay requires a selected target");
     let binary = binaries
         .iter()

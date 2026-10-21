@@ -108,6 +108,21 @@ pub fn expand_setup(attribute: TokenStream2, item: TokenStream2) -> syn::Result<
             ReturnType::Default => quote!(()),
             ReturnType::Type(_, ty) => quote!(#ty),
         };
+        let dispatch = if std::env::var_os("SPECGATE_TEST_DISPATCH").is_some() {
+            let declared_fills = fills.as_deref().unwrap_or_default();
+            let package = std::env::var("CARGO_PKG_NAME").map_err(|error| syn::Error::new_spanned(&function.sig, error))?;
+            quote! {
+                .dispatch({
+                    use #rt as __specgate;
+                    macro_rules! __specgate_selected {
+                        () => { __specgate_dispatch!(#package, setup, #component, #operation, #function_name, #declared_fills, #output) };
+                    }
+                    include!(env!("SPECGATE_TEST_DISPATCH"))
+                })
+            }
+        } else {
+            TokenStream2::new()
+        };
         quote! {
             .replay_setup(#rt::harness::Setup::new(
                 |values| {
@@ -119,7 +134,7 @@ pub fn expand_setup(attribute: TokenStream2, item: TokenStream2) -> syn::Result<
                     ::core::result::Result::Ok(::std::boxed::Box::new(#function_ident(#(#arguments),*)))
                 },
                 || ::core::any::type_name::<#output>(),
-            ))
+            ) #dispatch)
         }
     } else {
         TokenStream2::new()

@@ -36,8 +36,11 @@ setup producers, and structured results.
 
 The owner additionally approved discovering and replaying inside actual Cargo
 test targets. Private unit-test and integration-test producers remain in their
-original lexical scopes. Generated, type-erased constructor bridges expose
-only the selected annotated setup invocation to a reserved libtest entry point.
+original lexical scopes. Generated, type-erased constructor and invocation
+bridges expose only the selected annotated calls to a reserved libtest entry
+point. Receiver downcasts stay in the producer's scope; free-function generic
+arguments stay in the operation's scope, preserving authored public re-exports
+rather than treating compiler `type_name` output as accessible source paths.
 Cargo metadata and compiler artifacts identify targets and executables,
 including custom library names and arbitrary integration-test source paths.
 No conventional `tests/` layout or test body is used as a selector.
@@ -45,19 +48,29 @@ No conventional `tests/` layout or test body is used as a selector.
 Discovery builds the test targets, enumerates only the generated metadata
 hooks, and merges test-only declarations into the normal semantic registry.
 Replay compiles the selected target and runs only its generated replay hook.
-An environment dependency emitted with `option_env!("SPECGATE_TEST_ENTRY")`
-invalidates Cargo artifacts when the generated entry changes, without
-overriding candidate compiler flags or Cargo configuration.
+Environment dependencies emitted for `SPECGATE_TEST_ENTRY` and
+`SPECGATE_TEST_DISPATCH` invalidate Cargo artifacts when the generated entry or
+lexical dispatch changes, without overriding candidate compiler flags or Cargo
+configuration. Each scenario owns a separate scope so its receiver and setup
+guards are dropped before the next scenario starts.
 
 Structured outcomes retain the exact reference registry bytes for linked
 validation before decoding and before publishing candidate output. Reachable
-named declarations must match; known tuple-versus-record or ownership
+named declarations, including those reached only through observed nested calls,
+must match; known tuple-versus-record or ownership
 differences require explicit mappings, which remain unsupported. Validation
 failure never replaces an existing output.
 
 Missing or ambiguous producers and undeclared generic specializations must fail
 explicitly. An annotation does not make arbitrary unannotated test environment
 reproducible. Setup code must construct everything the replayed operation needs.
+
+Rust specializations must preserve the authored return signature's syntactic
+completion shape. Substitutions that change unit, optional-empty, or
+success/error channels are rejected before instrumentation; for example,
+`Option<T>` with `T = ()`, or `T` with `T = Result<i32, String>`. Such operations
+must declare a concrete return signature. This check does not resolve aliases
+or associated-type projections.
 
 ## Validation
 
