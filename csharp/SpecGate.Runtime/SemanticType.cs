@@ -15,6 +15,8 @@ internal enum SemanticKind
     I16,
     I32,
     I64,
+    U32,
+    U64,
     F32,
     F64,
     String,
@@ -153,6 +155,16 @@ internal sealed class SemanticType : IEquatable<SemanticType>
         if (type == typeof(long))
         {
             return Scalar(SemanticKind.I64);
+        }
+
+        if (type == typeof(uint))
+        {
+            return Scalar(SemanticKind.U32);
+        }
+
+        if (type == typeof(ulong))
+        {
+            return Scalar(SemanticKind.U64);
         }
 
         if (type == typeof(float))

@@ -5,6 +5,9 @@ specgate::spec_component!("fixture.ctsc");
 #[path = "../../../../cases/fixture.stateless_add/rust/stateless_add.rs"]
 pub mod stateless;
 
+#[path = "../../../../cases/fixture.unsigned/rust/unsigned.rs"]
+pub mod unsigned;
+
 #[path = "../../../../cases/fixture.rich/rust/rich.rs"]
 pub mod rich;
 

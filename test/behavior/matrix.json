@@ -2050,6 +2050,38 @@
       "limitations": []
     },
     {
+      "id": "component/fixture.unsigned",
+      "artifactDirectory": "behavior/cases/fixture.unsigned/expected",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/basic",
+      "component": "fixture.unsigned",
+      "sources": [
+        "test/behavior/cases/fixture.unsigned/rust/unsigned.rs",
+        "test/behavior/cases/fixture.unsigned/csharp/BoundaryEchoes.cs"
+      ],
+      "rust": {
+        "binding": "rust",
+        "phases": ["discover", "capture"],
+        "expect": "success"
+      },
+      "csharp": {
+        "binding": "csharp",
+        "phases": ["discover", "capture"],
+        "expect": "success"
+      },
+      "parity": {
+        "mode": "byte-identical"
+      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "verified" }
+      ],
+      "linkage": {
+        "mode": "linked"
+      },
+      "limitations": []
+    },
+    {
       "id": "component/fixture.statemachine_counter",
       "artifactDirectory": "behavior/cases/fixture.statemachine_counter/expected",
       "classification": "implementation-component",

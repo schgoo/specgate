@@ -39,6 +39,8 @@ This index is the starting point for humans and coding agents.
 
 ## Digests and references
 
+- [`reference/value-mapping.md`](reference/value-mapping.md) — native unsigned
+  integer type and value projection across Rust and C#.
 - [`digests/llm.md`](digests/llm.md) — dense operational summary for agents.
 - [`digests/human.md`](digests/human.md) — concise status, risks, and ownership
   boundaries.
