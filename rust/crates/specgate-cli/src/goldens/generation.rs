@@ -16,8 +16,12 @@ pub(super) fn registry_id(component: impl AsRef<str>) -> String {
 
 /// Encode a normalized schema as deterministic compact CTSC registry bytes.
 pub(super) fn registry_bytes(schema: &specgate_discovery::schema::Schema, component: impl AsRef<str>) -> Result<Vec<u8>, GoldenError> {
-    let component = component.as_ref();
     let schema_json = serde_json::to_string(schema).map_err(|error| GoldenError::wrap("failed to serialize discovery schema", error))?;
+    registry_json_bytes(schema_json, component.as_ref())
+}
+
+/// Encode the serialized normalized metadata retained by native capture.
+fn registry_json_bytes(schema_json: String, component: &str) -> Result<Vec<u8>, GoldenError> {
     let encoded = encode_registry(
         registry_id(component),
         REGISTRY_VERSION.to_string(),
@@ -54,7 +58,13 @@ pub(super) fn rust_groups(root: impl AsRef<Path>, matrix: &Matrix) -> Result<BTr
 }
 
 /// Generate and validate Rust artifacts for one group of rows sharing a sources directory.
-pub(super) fn generate_rust(root: impl AsRef<Path>, matrix: &Matrix, out_root: impl AsRef<Path>, rows: &[&Row]) -> Result<(), GoldenError> {
+pub(super) fn generate_rust(
+    root: impl AsRef<Path>,
+    matrix: &Matrix,
+    out_root: impl AsRef<Path>,
+    scratch: &Path,
+    rows: &[&Row],
+) -> Result<(), GoldenError> {
     let root = root.as_ref();
     let out_root = out_root.as_ref();
     let Some(first) = rows.first() else {
@@ -110,7 +120,7 @@ pub(super) fn generate_rust(root: impl AsRef<Path>, matrix: &Matrix, out_root: i
         let schema = normalize_registry(&discovered.registry, discovered.implementation.language(), component.as_str())
             .map_err(|error| GoldenError::message(format!("{component}: discovery-only normalization failed: {error}")))?;
         let bytes = registry_bytes(&schema, component)?;
-        write_bytes(row.rust_dir(out_root).join(registry_file()), &bytes)?;
+        publish_discovery_registry(row, &row.rust.as_ref().expect("Rust row").binding, out_root, scratch, &bytes)?;
     }
 
     let requests = rows
@@ -122,7 +132,7 @@ pub(super) fn generate_rust(root: impl AsRef<Path>, matrix: &Matrix, out_root: i
                     .clone()
                     .expect("implementation-component matrix row must declare a component identity"),
             ),
-            out: row.rust_dir(out_root),
+            out: row.capture_dir(out_root, scratch, &row.rust.as_ref().expect("Rust row").binding),
             excluded_operations: row.capture_exclusions.iter().map(|exclusion| exclusion.operation.clone()).collect(),
         })
         .collect::<Vec<_>>();
@@ -136,7 +146,10 @@ pub(super) fn generate_rust(root: impl AsRef<Path>, matrix: &Matrix, out_root: i
         requests.len(),
         "{implementation_label}: capture must return exactly one report per request"
     );
-    assert_coverage(implementation_label, &discovered.registry, rows, out_root)?;
+    assert_coverage(implementation_label, &discovered.registry, rows, out_root, scratch)?;
+    for row in rows.iter().filter(|row| row.captures_rust()) {
+        validate_producer_capture(row, implementation_label, out_root, scratch)?;
+    }
     Ok(())
 }
 
@@ -171,11 +184,15 @@ pub(super) fn assert_coverage(
     registry: &Registry,
     rows: &[&Row],
     out_root: impl AsRef<Path>,
+    scratch: &Path,
 ) -> Result<(), GoldenError> {
     let implementation_label = implementation_label.as_ref();
     let out_root = out_root.as_ref();
     let mut problems = Vec::with_capacity(rows.len().saturating_mul(PROBLEM_CAP));
-    for row in rows.iter().filter(|row| row.captures_rust()) {
+    for row in rows.iter().filter(|row| {
+        row.implementation(implementation_label)
+            .is_some_and(|(_, implementation)| implementation.phases.contains(&Phase::Capture))
+    }) {
         let component = row
             .component
             .as_deref()
@@ -186,16 +203,7 @@ pub(super) fn assert_coverage(
             .filter(|operation| !operation.is_setup && operation.component == component)
             .map(|operation| OperationIdentity::new(&operation.component, operation.name.to_string()))
             .collect::<BTreeSet<_>>();
-        let trace = std::fs::File::open(row.rust_dir(out_root).join(trace_file()))
-            .map_err(|error| GoldenError::wrap(format!("{}: failed to open captured trace", row.id), error))?;
-        let captured = captured_ops(trace)
-            .map_err(|error| GoldenError::message(format!("{}: failed to inspect captured operation coverage: {error}", row.id)))?;
-        let excluded = row
-            .capture_exclusions
-            .iter()
-            .map(|exclusion| OperationIdentity::new(component, exclusion.operation.clone()))
-            .collect::<BTreeSet<_>>();
-        problems.extend(coverage_problems(row.id.as_str(), &discovered, &captured, &excluded));
+        problems.extend(row_coverage(implementation_label, row, &discovered, out_root, scratch)?);
     }
     if problems.is_empty() {
         Ok(())
@@ -205,6 +213,50 @@ pub(super) fn assert_coverage(
             problems.join("\n  ")
         )))
     }
+}
+
+/// Shared exact coverage check for raw Rust and normalized C# discovery.
+pub(super) fn row_coverage(
+    label: &str,
+    row: &Row,
+    discovered: &BTreeSet<OperationIdentity>,
+    out_root: &Path,
+    scratch: &Path,
+) -> Result<Vec<String>, GoldenError> {
+    let trace = std::fs::File::open(row.capture_dir(out_root, scratch, label).join(trace_file()))
+        .map_err(|error| GoldenError::wrap(format!("{} [{label}]: failed to open captured trace", row.id), error))?;
+    let captured = captured_ops(trace)?;
+    let component = row.component.as_deref().expect("component row");
+    let excluded = row
+        .capture_exclusions
+        .iter()
+        .map(|exclusion| OperationIdentity::new(component, exclusion.operation.clone()))
+        .collect();
+    Ok(coverage_problems(format!("{} [{label}]", row.id), discovered, &captured, &excluded))
+}
+
+/// Validate every native producer against its own full bundle registry.
+pub(super) fn validate_producer_capture(row: &Row, label: &str, out_root: &Path, scratch: &Path) -> Result<(), GoldenError> {
+    let capture = row.capture_dir(out_root, scratch, label);
+    let problems = capture_problems(&capture);
+    if !problems.is_empty() {
+        return Err(GoldenError::message(format!(
+            "{} [{label}]: native producer validation failed:\n  {}",
+            row.id,
+            problems.join("\n  ")
+        )));
+    }
+    Ok(())
+}
+
+/// Keep independent discovery metadata transient; only the selected endpoint
+/// also publishes the single canonical registry for a discovery-only component.
+pub(super) fn publish_discovery_registry(row: &Row, label: &str, out_root: &Path, scratch: &Path, bytes: &[u8]) -> Result<(), GoldenError> {
+    write_bytes(row.producer_registry(out_root, scratch, label), bytes)?;
+    if row.reference.as_ref().is_some_and(|reference| reference.implementation == label) {
+        write_bytes(row.reference_dir(out_root).join(registry_file()), bytes)?;
+    }
+    Ok(())
 }
 
 /// Parse a trace stream and return its unique operation identities.
@@ -331,7 +383,12 @@ pub(super) fn assert_sync(implementation_label: impl AsRef<str>, registry: &Regi
 }
 
 /// Generate and validate C# artifacts for every matrix binding.
-pub(super) fn generate_csharp(root: impl AsRef<Path>, matrix: &Matrix, out_root: impl AsRef<Path>) -> Result<(), GoldenError> {
+pub(super) fn generate_csharp(
+    root: impl AsRef<Path>,
+    matrix: &Matrix,
+    out_root: impl AsRef<Path>,
+    scratch: &Path,
+) -> Result<(), GoldenError> {
     let root = root.as_ref();
     let out_root = out_root.as_ref();
     let rows = matrix
@@ -366,36 +423,103 @@ pub(super) fn generate_csharp(root: impl AsRef<Path>, matrix: &Matrix, out_root:
                 .expect("implementation-component matrix row must declare a component identity")
         })
         .collect::<Vec<_>>();
-    let component_ids = components
+    let requests = rows
         .iter()
-        .copied()
-        .map(specgate_discovery::identity::ComponentId::from)
+        .filter(|row| {
+            row.csharp
+                .as_ref()
+                .is_some_and(|implementation| implementation.phases.contains(&Phase::Capture))
+        })
+        .map(|row| BundleRequest {
+            component: ComponentId::from(row.component.clone().expect("component row")),
+            out: row.capture_dir(out_root, scratch, &implementation_label),
+            excluded_operations: row.capture_exclusions.iter().map(|exclusion| exclusion.operation.clone()).collect(),
+        })
         .collect::<Vec<_>>();
-
-    let anchor = component_ids
-        .first()
-        .expect("non-empty C# matrix rows must yield at least one component");
-    let discovered = discover_batch(binding, anchor, Some(&implementation_label), &component_ids)
-        .map_err(|error| GoldenError::message(format!("{implementation_label}: batched C# discovery failed: {error}")))?;
+    let anchor = ComponentId::from(components[0]);
+    if requests.is_empty() {
+        // Discovery-only bindings may use tests.command and must not pay for
+        // weaving or strict native test enumeration. Mixed batches still take
+        // the capture path below, retaining its same-woven-assembly metadata.
+        let selected = components
+            .iter()
+            .copied()
+            .map(specgate_discovery::identity::ComponentId::from)
+            .collect::<Vec<_>>();
+        let discovered = discover_batch(&binding, &selected[0], Some(&implementation_label), &selected)
+            .map_err(|error| GoldenError::wrap(format!("{implementation_label}: batched discovery failed"), error))?;
+        if let Some(diagnostic) = inventory_mismatch(
+            &implementation_label,
+            &components.iter().map(|component| (*component).to_string()).collect(),
+            &discovered.present_components,
+        ) {
+            return Err(GoldenError::message(diagnostic));
+        }
+        for row in &rows {
+            let component = row.component.as_deref().expect("component row");
+            let schema = match discovered.schema(component) {
+                SchemaLookup::Found(schema) => schema,
+                SchemaLookup::Invalid(error) => {
+                    return Err(GoldenError::message(format!(
+                        "{component}: discovery-only normalization failed: {error}"
+                    )));
+                }
+                SchemaLookup::Missing => {
+                    return Err(GoldenError::message(format!("{component}: missing discovery-only metadata")));
+                }
+            };
+            let bytes = registry_bytes(schema, component)?;
+            publish_discovery_registry(row, &implementation_label, out_root, scratch, &bytes)?;
+        }
+        return Ok(());
+    }
+    let schemas = capture_csharp_strict(binding, &anchor, Some(&implementation_label), &requests).map_err(|error| {
+        GoldenError::message(format!(
+            "{implementation_label}: batched native capture failed: {}",
+            error.diagnostic()
+        ))
+    })?;
     if let Some(diagnostic) = inventory_mismatch(
         &implementation_label,
         &components.iter().map(|component| (*component).to_string()).collect(),
-        &discovered.present_components,
+        &schemas.keys().collect::<Vec<_>>(),
     ) {
         return Err(GoldenError::message(diagnostic));
     }
+    let mut problems = Vec::new();
     for row in &rows {
         let component = row
             .component
             .as_deref()
             .expect("implementation-component matrix row must declare a component identity");
-        let schema = match discovered.schema(component) {
-            SchemaLookup::Found(schema) => schema,
-            SchemaLookup::Invalid(error) => return Err(GoldenError::message(format!("{component}: C# normalization failed: {error}"))),
-            SchemaLookup::Missing => return Err(GoldenError::message(format!("{component}: C# discovery returned no metadata"))),
-        };
-        let bytes = registry_bytes(schema, component)?;
-        write_bytes(row.csharp_dir(out_root).join(registry_file()), &bytes)?;
+        let schema = schemas.get(component).expect("exact built metadata inventory");
+        if row.csharp.as_ref().expect("C# row").phases.contains(&Phase::Capture) {
+            let metadata: serde_json::Value =
+                serde_json::from_str(schema).map_err(|error| GoldenError::wrap(format!("{component}: invalid capture metadata"), error))?;
+            let operations = metadata["operations"]
+                .as_array()
+                .ok_or_else(|| GoldenError::message(format!("{component}: metadata has no operations")))?;
+            let discovered = operations
+                .iter()
+                .map(|operation| {
+                    operation["name"]
+                        .as_str()
+                        .map(|name| OperationIdentity::new(component, name))
+                        .ok_or_else(|| GoldenError::message(format!("{component}: metadata operation has no name")))
+                })
+                .collect::<Result<_, _>>()?;
+            problems.extend(row_coverage(&implementation_label, row, &discovered, out_root, scratch)?);
+            validate_producer_capture(row, &implementation_label, out_root, scratch)?;
+        } else {
+            let bytes = registry_json_bytes(schema.clone(), component)?;
+            publish_discovery_registry(row, &implementation_label, out_root, scratch, &bytes)?;
+        }
+    }
+    if !problems.is_empty() {
+        return Err(GoldenError::message(format!(
+            "C# golden capture operation coverage failed:\n  {}",
+            problems.join("\n  ")
+        )));
     }
     Ok(())
 }

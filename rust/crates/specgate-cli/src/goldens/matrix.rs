@@ -71,12 +71,7 @@ pub(super) fn check_shape(matrix: &Matrix) {
             row.id
         );
         assert!(!row.source_group.is_empty(), "row '{}' must declare a source group", row.id);
-        assert_eq!(
-            row.captures_rust(),
-            row.replay.mode != ReplayMode::NotApplicable,
-            "row '{}' must declare a replay mode exactly when it captures a Rust bundle",
-            row.id
-        );
+        check_checks(row);
         if row.parity.mode != ParityMode::ByteIdentical {
             assert!(
                 row.parity.reason.as_ref().is_some_and(|reason| !reason.is_empty()),
@@ -120,56 +115,22 @@ pub(super) fn check_shape(matrix: &Matrix) {
                 row.parity.mode
             );
         }
-        if row.replay.mode != ReplayMode::Verified {
-            assert!(
-                row.replay.reason.as_ref().is_some_and(|reason| !reason.is_empty()),
-                "row '{}' replay mode '{:?}' requires an explicit reason",
-                row.id,
-                row.replay.mode
-            );
-        }
-        if row.replay.mode == ReplayMode::Unsupported {
-            let category = row
-                .replay
-                .expect_category
-                .as_deref()
-                .unwrap_or_else(|| panic!("row '{}' marks replay unsupported and must declare expectCategory", row.id));
-            assert!(
-                REPLAY_FAILURES.contains(&category),
-                "row '{}' declares unknown replay failure category '{category}'",
-                row.id
-            );
-        } else {
-            assert!(
-                row.replay.expect_category.is_none(),
-                "row '{}' declares replay expectCategory but its mode is '{:?}'",
-                row.id,
-                row.replay.mode
-            );
-        }
         assert_eq!(
-            row.captures_rust(),
+            row.captures_any(),
             row.linkage_mode() == LinkageMode::Linked,
-            "row '{}' must declare linkage 'linked' exactly when it captures a Rust bundle",
+            "row '{}' must declare linkage 'linked' exactly when it captures a bundle",
             row.id
         );
         for (language_name, language) in [("rust", row.rust.as_ref()), ("csharp", row.csharp.as_ref())]
             .into_iter()
             .filter_map(|(name, language)| language.map(|language| (name, language)))
         {
-            assert_eq!(
-                language.binding, language_name,
-                "row '{}' must select the '{language_name}' implementation label in its {language_name} block",
+            assert!(
+                !language.binding.is_empty(),
+                "row '{}' has an empty {language_name} implementation",
                 row.id
             );
             assert!(!language.phases.is_empty(), "row '{}' must declare at least one phase", row.id);
-            if language.expect == Expectation::Failure {
-                assert!(
-                    language.expect_category.is_some(),
-                    "row '{}' expects failure and must declare expectCategory",
-                    row.id
-                );
-            }
         }
         match row.classification {
             Classification::ImplementationComponent => {
@@ -186,36 +147,17 @@ pub(super) fn check_shape(matrix: &Matrix) {
                     format!("component/{component}"),
                     "component row id must be 'component/<component>'"
                 );
-                let rust = row
-                    .rust
-                    .as_ref()
-                    .unwrap_or_else(|| panic!("component row '{}' must declare Rust coverage", row.id));
-                assert!(!row.sources.is_empty(), "component row '{}' must list its sources", row.id);
-                let rust_artifacts = if row.captures_rust() {
-                    vec![
-                        RepoPath::from_path(manifest_file()).expect("manifest artifact name must be portable"),
-                        RepoPath::from_path(trace_file()).expect("trace artifact name must be portable"),
-                        RepoPath::from_path(registry_file()).expect("registry artifact name must be portable"),
-                    ]
-                } else {
-                    vec![RepoPath::from_path(registry_file()).expect("registry artifact name must be portable")]
-                };
-                assert_eq!(
-                    rust.artifacts, rust_artifacts,
-                    "component row '{}' declares the wrong Rust artifact set",
+                assert!(
+                    row.implementations().next().is_some(),
+                    "component row '{}' needs implementation coverage",
                     row.id
                 );
-                if let Some(csharp) = row.csharp.as_ref() {
-                    assert_eq!(
-                        csharp.artifacts,
-                        vec![RepoPath::from_path(registry_file()).expect("registry artifact name must be portable")],
-                        "C# coverage is registry-only; row '{}' declares more",
-                        row.id
-                    );
-                    assert_eq!(
-                        csharp.phases,
-                        vec![Phase::Discover],
-                        "C# coverage is discovery-only; row '{}' declares more",
+                assert!(!row.sources.is_empty(), "component row '{}' must list its sources", row.id);
+                for (name, implementation) in row.implementations() {
+                    assert!(implementation.succeeds(), "component row '{}' must succeed", row.id);
+                    assert!(
+                        implementation.phases.contains(&Phase::Discover),
+                        "component row '{}' must discover {name}",
                         row.id
                     );
                 }
@@ -227,14 +169,9 @@ pub(super) fn check_shape(matrix: &Matrix) {
                     .rust
                     .as_ref()
                     .unwrap_or_else(|| panic!("negative row '{}' needs Rust coverage", row.id));
+                assert!(!language.succeeds(), "negative row '{}' must expect failure", row.id);
                 assert_eq!(
-                    language.expect,
-                    Expectation::Failure,
-                    "negative row '{}' must expect failure",
-                    row.id
-                );
-                assert_eq!(
-                    language.artifacts,
+                    language.error_artifacts(),
                     vec![RepoPath::from_path(error_file()).expect("error artifact name must be portable")],
                     "negative row '{}' must produce exactly {}",
                     row.id,
@@ -277,7 +214,7 @@ pub(super) fn check_shape(matrix: &Matrix) {
             );
         }
         assert!(
-            row.capture_exclusions.is_empty() || row.classification == Classification::ImplementationComponent && row.captures_rust(),
+            row.capture_exclusions.is_empty() || row.classification == Classification::ImplementationComponent && row.captures_any(),
             "row '{}' may declare captureExclusions only for a captured component",
             row.id
         );
@@ -294,6 +231,120 @@ pub(super) fn check_shape(matrix: &Matrix) {
                 row.id,
                 exclusion.operation
             );
+        }
+    }
+}
+
+/// Validate one selected native reference and its directed checks before builds.
+fn check_checks(row: &Row) {
+    let mut implementations = BTreeSet::new();
+    for (_, implementation) in row.implementations() {
+        assert!(
+            implementations.insert(&implementation.binding),
+            "row '{}' has duplicate implementation endpoints",
+            row.id
+        );
+    }
+    if let Some(reference) = &row.reference {
+        assert_eq!(
+            row.classification,
+            Classification::ImplementationComponent,
+            "row '{}': only component rows may select a reference",
+            row.id
+        );
+        let (_, implementation) = row.implementation(&reference.implementation).unwrap_or_else(|| {
+            panic!(
+                "row '{}' has unknown selected reference implementation '{}'",
+                row.id, reference.implementation
+            )
+        });
+        assert!(
+            implementation.succeeds() && implementation.phases.contains(&Phase::Discover),
+            "row '{}' selected reference '{}' has no successful discovery",
+            row.id,
+            reference.implementation
+        );
+        let artifacts = if row.captures_any() {
+            assert!(
+                implementation.phases.contains(&Phase::Capture),
+                "row '{}' selected reference '{}' has no successful capture",
+                row.id,
+                reference.implementation
+            );
+            assert!(!row.checks.is_empty(), "row '{}' is missing checks for selected reference", row.id);
+            vec![manifest_file(), trace_file(), registry_file()]
+        } else {
+            assert!(row.checks.is_empty(), "row '{}' discovery-only component owns no checks", row.id);
+            vec![registry_file()]
+        };
+        assert_eq!(
+            reference.artifacts,
+            artifacts
+                .into_iter()
+                .map(|file| RepoPath::from_path(file).expect("portable artifact"))
+                .collect::<Vec<_>>(),
+            "row '{}' declares the wrong reference artifact set",
+            row.id
+        );
+    } else {
+        assert_ne!(
+            row.classification,
+            Classification::ImplementationComponent,
+            "row '{}' must select a reference",
+            row.id
+        );
+        assert!(row.checks.is_empty(), "row '{}' has checks without a selected reference", row.id);
+    }
+    let mut endpoints = BTreeSet::new();
+    for check in &row.checks {
+        assert!(
+            endpoints.insert((&check.reference, &check.candidate)),
+            "row '{}' has duplicate check endpoints",
+            row.id
+        );
+        let (_, reference) = row
+            .implementation(&check.reference)
+            .unwrap_or_else(|| panic!("row '{}' has unknown reference implementation '{}'", row.id, check.reference));
+        assert!(
+            reference.succeeds() && reference.phases.contains(&Phase::Capture),
+            "row '{}' reference '{}' has no successful capture",
+            row.id,
+            check.reference
+        );
+        assert_eq!(
+            check.reference,
+            row.reference.as_ref().expect("checks require a selected reference").implementation,
+            "row '{}' check reference does not equal selected reference",
+            row.id
+        );
+        let (_, candidate) = row
+            .implementation(&check.candidate)
+            .unwrap_or_else(|| panic!("row '{}' has unknown candidate implementation '{}'", row.id, check.candidate));
+        assert!(
+            candidate.succeeds() && candidate.phases.contains(&Phase::Discover),
+            "row '{}' candidate '{}' is unavailable",
+            row.id,
+            check.candidate
+        );
+        if check.mode != ReplayMode::Verified {
+            assert!(
+                check.reason.as_ref().is_some_and(|reason| !reason.is_empty()),
+                "row '{}' non-verified check requires an explicit reason",
+                row.id
+            );
+        }
+        if check.mode == ReplayMode::Unsupported {
+            let category = check
+                .expect_category
+                .as_deref()
+                .unwrap_or_else(|| panic!("row '{}' unsupported check must declare expectCategory", row.id));
+            assert!(
+                REPLAY_FAILURES.contains(&category),
+                "row '{}' declares unknown replay failure category '{category}'",
+                row.id
+            );
+        } else {
+            assert!(check.expect_category.is_none(), "row '{}' has stale replay expectCategory", row.id);
         }
     }
 }

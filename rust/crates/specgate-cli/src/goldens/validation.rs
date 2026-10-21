@@ -6,9 +6,14 @@ use super::*;
 pub(super) fn expected_artifacts(matrix: &Matrix) -> BTreeSet<RepoPath> {
     let mut expected = BTreeSet::new();
     for row in &matrix.rows {
+        if let Some(reference) = &row.reference {
+            for artifact in &reference.artifacts {
+                expected.insert(RepoPath::try_from(format!("{}/{artifact}", row.id)).expect("portable reference artifact"));
+            }
+        }
         for (language, name) in [(row.rust.as_ref(), "rust"), (row.csharp.as_ref(), "csharp")] {
             let Some(language) = language else { continue };
-            for artifact in &language.artifacts {
+            for artifact in language.error_artifacts() {
                 expected
                     .insert(RepoPath::try_from(format!("{}/{name}/{artifact}", row.id)).expect("matrix artifact path must be portable"));
             }
@@ -46,21 +51,33 @@ pub(super) fn validate_artifacts(matrix: &Matrix, out_root: impl AsRef<Path>) {
     let out_root = out_root.as_ref();
     let mut problems = Vec::new();
     for row in &matrix.rows {
+        if row.captures_any() {
+            problems.extend(
+                capture_problems(&row.reference_dir(out_root))
+                    .into_iter()
+                    .map(|problem| format!("{}/reference: {problem}", row.id)),
+            );
+        } else if row.reference.is_some() {
+            let report = validate_registry(row.reference_dir(out_root).join(registry_file()), &[]);
+            if !report.valid {
+                problems.push(format!("{}/reference: registry validation failed: {:?}", row.id, report.issues));
+            }
+        }
         for (language, name) in [(row.rust.as_ref(), "rust"), (row.csharp.as_ref(), "csharp")] {
             let Some(language) = language else { continue };
             let directory = out_root.join(&row.id).join(name);
-            for artifact in &language.artifacts {
+            for artifact in language.error_artifacts() {
                 let path = directory.join(artifact);
                 if !path.is_file() {
                     problems.push(format!("{}/{name}: {artifact} was not generated", row.id));
                 }
             }
-            if language.expect == Expectation::Failure {
+            if !language.succeeds() {
                 let path = directory.join(error_file());
                 if path.is_file() {
                     let document: serde_json::Value = serde_json::from_slice(&read_bytes(&path)).expect("generated error document");
                     let category = document["category"].as_str().unwrap_or_default();
-                    let expected = language.expect_category.as_deref().unwrap_or_default();
+                    let expected = language.failure_category().unwrap_or_default();
                     if category != expected {
                         problems.push(format!(
                             "{}/{name}: expected category '{expected}' but produced '{category}'",
@@ -69,44 +86,6 @@ pub(super) fn validate_artifacts(matrix: &Matrix, out_root: impl AsRef<Path>) {
                     }
                     if document["outcome"].as_str() != Some("failure") {
                         problems.push(format!("{}/{name}: normalized error is not a failure", row.id));
-                    }
-                }
-                continue;
-            }
-            if language
-                .artifacts
-                .iter()
-                .any(|artifact| <RepoPath as AsRef<Path>>::as_ref(artifact) == registry_file())
-            {
-                let registry = directory.join(registry_file());
-                let report = validate_registry(&registry, &[]);
-                if !report.valid {
-                    problems.push(format!("{}/{name}: registry validation failed: {:?}", row.id, report.issues));
-                }
-                if language
-                    .artifacts
-                    .iter()
-                    .any(|artifact| <RepoPath as AsRef<Path>>::as_ref(artifact) == trace_file())
-                {
-                    let trace = directory.join(trace_file());
-                    let trace_report = validate_trace(&trace);
-                    if !trace_report.valid {
-                        problems.push(format!("{}/{name}: trace validation failed: {:?}", row.id, trace_report.issues));
-                    }
-                    if row.linkage_mode() != LinkageMode::Linked {
-                        problems.push(format!(
-                            "{}/{name}: captured bundles must declare linkage 'linked', found '{:?}'",
-                            row.id,
-                            row.linkage_mode()
-                        ));
-                    }
-                    let linked = validate_linked(&trace, &registry, &[]);
-                    if !linked.valid {
-                        problems.push(format!("{}/{name}: linked validation failed: {:?}", row.id, linked.issues));
-                    }
-                    let bundle = validate_bundle(&directory);
-                    if !bundle.valid {
-                        problems.push(format!("{}/{name}: bundle validation failed: {:?}", row.id, bundle.issues));
                     }
                 }
             }
@@ -119,63 +98,115 @@ pub(super) fn validate_artifacts(matrix: &Matrix, out_root: impl AsRef<Path>) {
     );
 }
 
-pub(super) fn check_parity(matrix: &Matrix, out_root: impl AsRef<Path>) {
-    let out_root = out_root.as_ref();
+/// The same native validation for selected and transient producer bundles.
+pub(super) fn capture_problems(directory: &Path) -> Vec<String> {
+    let registry = directory.join(registry_file());
+    let trace = directory.join(trace_file());
+    let mut problems = Vec::new();
+    for (kind, report) in [
+        ("registry", validate_registry(&registry, &[])),
+        ("trace", validate_trace(&trace)),
+        ("linked", validate_linked(&trace, &registry, &[])),
+        ("bundle", validate_bundle(directory)),
+    ] {
+        if !report.valid {
+            problems.push(format!("{kind} validation failed: {:?}", report.issues));
+        }
+    }
+    problems
+}
+
+/// Anchor the selected full native registry to the checked-in canonical bytes
+/// before comparing independent producers to that same oracle. In update mode
+/// `canonical_root` is the newly generated shared tree.
+pub(super) fn check_parity(matrix: &Matrix, out_root: &Path, scratch: &Path, canonical_root: &Path) {
     let mut problems = Vec::new();
     for row in matrix
         .rows
         .iter()
         .filter(|row| row.classification == Classification::ImplementationComponent)
     {
-        let rust = row.rust_dir(out_root).join(registry_file());
-        let csharp = row.csharp_dir(out_root).join(registry_file());
-        match row.parity.mode {
-            ParityMode::ByteIdentical => {
-                if !csharp.is_file() {
-                    problems.push(format!("{}: parity requires a C# registry", row.id));
-                    continue;
-                }
-                if read_bytes(&rust) != read_bytes(&csharp) {
-                    problems.push(format!("{}: Rust and C# registries are not byte-identical", row.id));
-                }
+        let reference = row.reference.as_ref().expect("component registry oracle");
+        let canonical = read_bytes(row.reference_dir(canonical_root).join(registry_file()));
+        for (directory, implementation) in row.implementations() {
+            let path = row.producer_registry(out_root, scratch, &implementation.binding);
+            let report = validate_registry(&path, &[]);
+            if !report.valid {
+                problems.push(format!(
+                    "{} [{directory}]: producer registry validation failed: {:?}",
+                    row.id, report.issues
+                ));
             }
-            ParityMode::Exception => {
-                if !csharp.is_file() {
-                    problems.push(format!("{}: a parity exception requires a C# registry", row.id));
-                    continue;
-                }
-                let rust_document: serde_json::Value = serde_json::from_slice(&read_bytes(&rust)).expect("generated Rust registry is JSON");
-                let csharp_document: serde_json::Value =
-                    serde_json::from_slice(&read_bytes(&csharp)).expect("generated C# registry is JSON");
-                let observed = semantic_differences(&rust_document, &csharp_document);
-                if observed.is_empty() {
-                    problems.push(format!(
-                        "{}: parity exception is stale — Rust and C# registries now match; remove the exception",
-                        row.id
-                    ));
-                    continue;
-                }
-                let observed_set = observed.iter().map(ParityDifference::render).collect::<BTreeSet<_>>();
-                let declared_set = row
-                    .parity
-                    .allowed_differences
-                    .iter()
-                    .map(ParityDifference::render)
-                    .collect::<BTreeSet<_>>();
-                for undeclared in observed_set.difference(&declared_set) {
-                    problems.push(format!("{}: undeclared cross-language difference {undeclared}", row.id));
-                }
-                for stale in declared_set.difference(&observed_set) {
-                    problems.push(format!("{}: declared cross-language difference no longer occurs {stale}", row.id));
-                }
-            }
-            ParityMode::RustOnly if row.csharp.is_some() || csharp.exists() => {
-                problems.push(format!("{}: declared Rust-only but a C# artifact exists", row.id));
-            }
-            _ => {}
+            let producer = read_bytes(path);
+            problems.extend(registry_parity_problems(row, &implementation.binding, &producer, &canonical));
+        }
+        if matches!(row.parity.mode, ParityMode::ByteIdentical | ParityMode::Exception) && (row.rust.is_none() || row.csharp.is_none()) {
+            problems.push(format!("{}: registry parity requires both producers", row.id));
+        }
+        if row.parity.mode == ParityMode::RustOnly
+            && (row.csharp.is_some() || reference.implementation != row.rust.as_ref().expect("Rust-only endpoint").binding)
+        {
+            problems.push(format!("{}: declared Rust-only but selects or declares another producer", row.id));
         }
     }
     assert!(problems.is_empty(), "cross-language parity failed:\n  {}", problems.join("\n  "));
+}
+
+/// Reuse the exact semantic parity model, retaining language-side orientation
+/// independently of endpoint identity or canonical producer selection.
+pub(super) fn registry_parity_problems(row: &Row, label: &str, producer: &[u8], canonical: &[u8]) -> Vec<String> {
+    let reference = row.reference.as_ref().expect("component registry oracle");
+    if label == reference.implementation {
+        return if producer == canonical {
+            Vec::new()
+        } else {
+            vec![format!(
+                "{} [{label}]: selected native registry differs from canonical golden",
+                row.id
+            )]
+        };
+    }
+    if row.parity.mode != ParityMode::Exception {
+        return if producer == canonical {
+            Vec::new()
+        } else {
+            vec![format!(
+                "{} [{label}]: producer registry is not byte-identical to canonical golden",
+                row.id
+            )]
+        };
+    }
+    let (directory, _) = row.implementation(label).expect("declared producer");
+    let (rust, csharp) = if directory == "rust" {
+        (producer, canonical)
+    } else {
+        (canonical, producer)
+    };
+    let rust = serde_json::from_slice(rust).expect("native Rust registry JSON");
+    let csharp = serde_json::from_slice(csharp).expect("native C# registry JSON");
+    let observed = semantic_differences(&rust, &csharp);
+    if observed.is_empty() {
+        return vec![format!(
+            "{}: parity exception is stale — registries now match; remove the exception",
+            row.id
+        )];
+    }
+    let observed = observed.iter().map(ParityDifference::render).collect::<BTreeSet<_>>();
+    let declared = row
+        .parity
+        .allowed_differences
+        .iter()
+        .map(ParityDifference::render)
+        .collect::<BTreeSet<_>>();
+    observed
+        .difference(&declared)
+        .map(|difference| format!("{}: undeclared cross-language difference {difference}", row.id))
+        .chain(
+            declared
+                .difference(&observed)
+                .map(|difference| format!("{}: declared cross-language difference no longer occurs {difference}", row.id)),
+        )
+        .collect()
 }
 
 /// Reject any generated artifact that embeds a machine-specific location.

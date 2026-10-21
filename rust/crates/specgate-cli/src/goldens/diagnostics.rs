@@ -337,7 +337,7 @@ fn generate_with(
         let intentional = intentional_sources(row)?;
         let rejection = compile_errors(String::from_utf8_lossy(&output.stdout), &intentional)
             .map_err(|source| GoldenError::wrap(format!("{}: compiler diagnostic attribution failed", row.id), source))?;
-        let category = language.expect_category.as_deref().unwrap_or(ErrorCategory::Compile.as_str());
+        let category = language.failure_category().unwrap_or(ErrorCategory::Compile.as_str());
         if category != ErrorCategory::Compile.as_str() {
             return Err(GoldenError::message(format!(
                 "{}: build-negative expectCategory must be '{}', found '{category}'",

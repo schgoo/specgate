@@ -286,7 +286,9 @@ mod cases {
         );
         assert!(!unused.out.exists());
 
-        let strict = request_at("fixture.cli.replay", root.join("strict"));
+        // A nonselected golden producer uses this same strict native path:
+        // a sibling's passing capture cannot hide any enumerated failed test.
+        let strict = request_at("fixture.cli.replay", root.join("producer-captures").join("nonreference"));
         let strict_error = write_bundles(&discovered, std::slice::from_ref(&strict), &executed, true)
             .expect_err("strict capture must reject the focused failing scenario");
         assert!(strict_error.diagnostic().starts_with("1 fixture test(s) produced no capture"));

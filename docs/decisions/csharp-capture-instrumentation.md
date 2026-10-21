@@ -62,12 +62,15 @@ implementation choice. This record closes it.
    operation scopes live in a separate runtime package, so discovery keeps
    reflecting over attributes that carry no behavior.
 
-4. **C# golden-matrix rows may declare trace artifacts and the capture phase.**
-   `goldens/matrix.rs` currently asserts C# coverage is registry-only and
-   discovery-only, failing any row that declares more. That assertion is relaxed
-   to permit captured C# artifacts. It is a guardrail, so relaxing it must not
-   leave a row free to over-claim: a row declaring a C# trace must produce and
-   byte-match one, exactly as Rust rows do.
+4. **C# golden-matrix rows may declare the capture phase.**
+   #47 replaces the earlier registry-only/discovery-only restriction with exact
+   native C# capture inventory and validation. Its ratified correction selects
+   one golden bundle for all languages per component, including one canonical
+   registry and no per-language successful artifacts. Both producers capture
+   strictly; nonselected bundles validate against their own transient registries.
+   All producer registries compare to the selected canonical with exact parity.
+   Behavioral comparison uses reference-to-candidate implementation checks; see
+   [the golden parity decision](csharp-golden-replay-parity.md).
 
 5. **Issue #43 is not a prerequisite.** Exact seam selection is language-neutral
    operation-level filtering, and `specgate capture --component` already selects

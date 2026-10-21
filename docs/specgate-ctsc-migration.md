@@ -165,7 +165,8 @@ for the whole fixture corpus:
 - **Component rows** name the component, its Rust and C# sources, the phases
   each language runs (`discover`, `capture`), the expected outcome, the
   cross-language parity mode, the bundle linkage mode (`linked` for every
-  captured bundle, `not-applicable` for discovery-only rows), the replay mode,
+  captured bundle, `not-applicable` for discovery-only rows), reference-to-candidate
+  replay checks,
   and any limitation that keeps a row from full coverage.
 - **Negative rows** name the fixture that discovery or the compiler must
   reject, and the stable failure category its normalized `error.json` must
@@ -177,7 +178,8 @@ for the whole fixture corpus:
   nested calls. A row may exclude only an exact operation through
   `captureExclusions`, with a stable code and reason; unknown or stale
   exclusions fail.
-- **Replay limitations** use `replay.expectCategory`. An `unsupported` row
+- **Replay limitations** attach an exact `expectCategory` to each reference-to-candidate
+  check. An `unsupported` check
   passes only for that exact stable planner limitation, never for an unrelated
   bundle, discovery, linkage, or runner failure.
 - **Parity exceptions** enumerate, in `parity.allowedDifferences`, every
@@ -202,15 +204,50 @@ undeclared goldens.
 The matrix declares one shared binding, `test/bindings/specgate.yaml`
 (shape per [the binding ADR](decisions/binding-schema-v1.md)), in place of
 the earlier per-language `bindings` map of binding files. Each language row
-names its implementation label, which must equal the row's language, and the
-component is the row's component. The harness resolves rows through the
-binding and groups them by implementation `sources`, so rows that share
-sources still share one discovery and capture batch. Every other matrix
-invariant (parity `allowedDifferences`, replayable and unsupported rows,
-`captureExclusions`, negative rows) is unchanged. The label now appears in
-the capture manifest `target.name` and the `conformance.target.name` trace
-attribute only through the output directory name: that name is the artifact
-label, and the harness uses fixed output directories ending in the label.
+names a binding implementation identity; its language is a property, not a
+constraint on that label. The component is the row's component. The harness
+resolves rows through the binding and groups them by implementation `sources`,
+so rows that share sources still share one discovery and capture batch.
+`checks` lists directed reference/candidate implementation labels with their
+replay policies. Parity `allowedDifferences`, exact unsupported categories,
+`captureExclusions`, and negative-row guarantees are preserved. The capture
+manifest `target.name` and `conformance.target.name` trace attribute come from
+the output directory name, not directly from the implementation identity.
+The internal matrix version is `0.2.0` (no compatibility reader). Every captured
+component selects exactly one successful discover+capture endpoint through
+`reference: { implementation, artifacts }`. Its inventory is exactly
+`manifest.json`, `reference.otlp.json`, and `registry.ctsc.json`, published under
+`component/<id>/` directly, with no `reference` subdirectory. There are no per-language successful-component
+artifacts, including registries. A discovery-only component selects one
+successful discovery endpoint and retains only the shared registry, no
+behavioral files or checks. Negative errors are unchanged.
+
+The fixture configuration selects C# for paired captured components and Rust
+for Rust-only ones; that is not harness language policy. The selected native
+capture writes directly into the component directory, naturally encoding
+`target.name` as its basename (e.g. `fixture.stateless_add`) while retaining its
+native language and scenario names. No trace is
+copied, translated, or relabelled. Both producers keep their capture phases.
+Nonselected producers run independent strict native capture under invocation
+scratch (`producer-captures/<row>/<implementation-directory>`), with the same
+registry, Trace Core, Linked, bundle-digest, and exact operation/exclusion
+validation. Their behavioral bundles are not separately byte-checked or stored.
+Every producer's full native registry is obtained independently in scratch,
+preserving dependency closure and ordering. Never substitute the canonical for a
+producer's own bundle linkage validation. In check mode, the selected native
+registry must byte-match the single checked-in canonical registry; compare every
+other producer to that same anchored oracle, not just to fresh producer output.
+Byte-identical rows require exact bytes. Exception rows require exactly the
+existing `parity.allowedDifferences`, with Rust/C# sides preserved regardless of
+which endpoint was selected. The three exception rows describe precise known
+non-equivalences, not blanket equivalence passes.
+
+Captured rows require checks whose `reference` equals the selected endpoint;
+each check resolves the shared reference directory. Nonselected producers need
+no replay check of their own. Discovery-only components have a registry-only
+reference and no checks; negative and replacement rows have no reference or
+checks. Candidate traces also remain in scratch. Unsupported and link-only checks
+do not establish behavioral equivalence.
 `capture --out` is optional (default
 `.specgate/captures/<component>/<impl>/<UTC run id>/`) and capture and replay
 refuse existing output unless `--force`.
@@ -224,10 +261,16 @@ fixture test that fails fails the whole batch, even when a sibling test already
 covers the same component. (`specgate capture` itself is unchanged and still
 captures the tests that pass.)
 
-Every captured Rust bundle must validate natively as a trace, link against the
-registry discovered from the same sources, and pass bundle validation. There is
+Every captured Rust or C# bundle must validate natively as a trace, link against
+its own discovered registry, and pass bundle validation. C# reflection reads the
+same woven assembly that its ordinary tests execute, not a separate build. There is
 no linkage exception: a bundle that cannot link is a product defect, not a row
-annotation.
+annotation. C# traces and manifests come from the retained C# native tests,
+whether selected for storage or validated only transiently. Replay checks identify reference and candidate implementation
+versions through binding labels, not language pairs. Supported C# recordings
+replay on Rust candidates and compare strictly while preserving reference
+scenario names; unsupported replay does not suppress native capture. See
+[the golden parity decision](decisions/csharp-golden-replay-parity.md).
 
 One kind of exception is pinned rather than skipped, so closing the product gap
 fails the gate until the matrix is updated: a `parity` exception asserts that
@@ -235,7 +278,7 @@ the Rust and C# registries still differ in exactly the declared ways.
 
 ## Current limitations
 
-- Reference capture supports Rust libtest targets only.
+- Reference capture supports Rust libtest targets and C# native test projects.
 - Candidate replay supports synchronous public Rust free functions with
   lossless primitive inputs.
 - Setup-backed methods, async calls, structured replay values, explicit

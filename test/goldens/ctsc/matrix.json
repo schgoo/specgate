@@ -1,11 +1,17 @@
 {
   "format": "specgate.ctsc-golden-matrix",
-  "formatVersion": "0.1.0",
+  "formatVersion": "0.2.0",
   "artifactRoot": "test/goldens/ctsc",
   "binding": "test/bindings/specgate.yaml",
   "sources": {
     "roots": [
       "test/csharp/SpecGate.CtscFixtures",
+      "test/csharp/SpecGate.WeaverFixtures",
+      "test/csharp/SpecGate.WeaverSetupFixture",
+      "test/csharp/SpecGate.WeaverNegativeFixtures",
+      "test/csharp/SpecGate.WeaverGenericMethodFixture",
+      "test/csharp/SpecGate.WeaverGenericTypeFixture",
+      "test/csharp/SpecGate.WeaverSetupConflictFixture",
       "test/rust/crates/specgate-ctsc-fixtures/src",
       "test/rust/crates/specgate-facade-umbrella/src",
       "test/rust/negative-fixtures/specgate-ctsc-negative-fixtures/src"
@@ -27,6 +33,80 @@
   },
   "rows": [
     {
+      "id": "replacement/woven-capture-mechanics",
+      "classification": "replacement",
+      "sourceGroup": "producer/il",
+      "sources": [
+        "test/csharp/SpecGate.WeaverFixtures/Arithmetic.cs",
+        "test/csharp/SpecGate.WeaverFixtures/AsyncOperations.cs"
+      ],
+      "parity": { "mode": "not-applicable", "reason": "Producer/IL mechanics use isolated woven fixtures, not cross-implementation behavioral components." },
+      "checks": [],
+      "replacement": {
+        "feature": "woven capture producer mechanics",
+        "rationale": "Ordinary CTSC fixtures own behavioral goldens. These sources retain return-epilogue, existing-handler, receiver-offset, session-scoping and async producer mechanics through native capture tests.",
+        "references": [
+          { "path": "test/csharp/SpecGate.Weaver.Tests/WovenCaptureTests.cs", "test": "RoutesEveryReturnThroughOneEpilogue" },
+          { "path": "test/csharp/SpecGate.Weaver.Tests/WovenCaptureTests.cs", "test": "LeavesAnExistingTryCatchIntact" },
+          { "path": "test/csharp/SpecGate.Weaver.Tests/WovenCaptureTests.cs", "test": "SkipsTheImplicitInstanceArgument" },
+          { "path": "test/csharp/SpecGate.Weaver.Tests/WovenCaptureTests.cs", "test": "RecordsNothingForUntargetedComponent" },
+          { "path": "test/csharp/SpecGate.Weaver.Tests/WovenCaptureTests.cs", "test": "RecordsNothingAfterTheSessionEnds" },
+          { "path": "test/csharp/SpecGate.Weaver.Tests/WovenAsyncCaptureTests.cs", "test": "RecordsTheAwaitedValueOfATask" },
+          { "path": "test/csharp/SpecGate.Weaver.Tests/WovenAsyncCaptureTests.cs", "test": "RecordsNoResultForANonGenericTask" },
+          { "path": "test/csharp/SpecGate.Weaver.Tests/WovenAsyncCaptureTests.cs", "test": "RecordsTheAwaitedValueOfAValueTask" },
+          { "path": "test/csharp/SpecGate.Weaver.Tests/WovenAsyncCaptureTests.cs", "test": "RecordsANonGenericValueTask" },
+          { "path": "test/csharp/SpecGate.Weaver.Tests/WovenAsyncCaptureTests.cs", "test": "RecordsAnAsyncFailureAndRethrowsIt" },
+          { "path": "test/csharp/SpecGate.Weaver.Tests/WovenAsyncCaptureTests.cs", "test": "RecordsCancellationAsAbandonedWithoutFailingTheCaller" },
+          { "path": "test/csharp/SpecGate.Weaver.Tests/WovenAsyncCaptureTests.cs", "test": "ForwardingTaskStaysOpenUntilItSettlesAndRecordsItsValue" },
+          { "path": "test/csharp/SpecGate.Weaver.Tests/WovenAsyncCaptureTests.cs", "test": "ForwardingTaskRecordsAFault" },
+          { "path": "test/csharp/SpecGate.Weaver.Tests/WovenAsyncCaptureTests.cs", "test": "NestsAnAwaitedOperationUnderItsCaller" }
+        ]
+      }
+    },
+    {
+      "id": "replacement/woven-setup-mechanics",
+      "classification": "replacement",
+      "sourceGroup": "producer/il",
+      "sources": ["test/csharp/SpecGate.WeaverSetupFixture/Counter.cs"],
+      "parity": { "mode": "not-applicable", "reason": "Setup producer epilogues and rejection mechanics are not behavioral parity fixtures." },
+      "checks": [],
+      "replacement": {
+        "feature": "woven setup producer mechanics",
+        "rationale": "Stateful CTSC fixtures own folded behavior. This woven fixture proves setup commit, missing/repeated-input rejection, and idempotent weaving without a second behavioral oracle.",
+        "references": [
+          { "path": "test/csharp/SpecGate.Weaver.Tests/WovenSetupTests.cs", "test": "ASetupThatThrowsCommitsNothing" },
+          { "path": "test/csharp/SpecGate.Weaver.Tests/WovenSetupTests.cs", "test": "AnOperationWhoseSetupNeverRanIsRejected" },
+          { "path": "test/csharp/SpecGate.Weaver.Tests/WovenSetupTests.cs", "test": "ASetupMayRunTwiceWithIdenticalInputs" },
+          { "path": "test/csharp/SpecGate.Weaver.Tests/WovenSetupTests.cs", "test": "ASetupThatRunsTwiceWithDifferentInputsIsRejected" },
+          { "path": "test/csharp/SpecGate.Weaver.Tests/WovenSetupTests.cs", "test": "AnAlreadyWovenAssemblyIsNotWovenAgain" }
+        ]
+      }
+    },
+    {
+      "id": "replacement/weave-rejections",
+      "classification": "replacement",
+      "sourceGroup": "producer/il",
+      "sources": [
+        "test/csharp/SpecGate.WeaverNegativeFixtures/Unsupported.cs",
+        "test/csharp/SpecGate.WeaverGenericMethodFixture/GenericMethod.cs",
+        "test/csharp/SpecGate.WeaverGenericTypeFixture/GenericHolder.cs",
+        "test/csharp/SpecGate.WeaverSetupConflictFixture/ConflictingDeclaration.cs"
+      ],
+      "parity": { "mode": "not-applicable", "reason": "Invalid producer declarations are tested through exact weave rejection, not discoverable component parity." },
+      "checks": [],
+      "replacement": {
+        "feature": "unsupported IL declaration rejection",
+        "rationale": "The weaver must reject async-void, generic and conflicting annotations before producing native evidence.",
+        "references": [
+          { "path": "test/csharp/SpecGate.Weaver.Tests/WeaveRejectionTests.cs", "test": "RejectsAsyncVoidOperation" },
+          { "path": "test/csharp/SpecGate.Weaver.Tests/WeaveRejectionTests.cs", "test": "RejectsAnnotatedGenericMethod" },
+          { "path": "test/csharp/SpecGate.Weaver.Tests/WeaveRejectionTests.cs", "test": "RejectsOperationOnGenericDeclaringType" },
+          { "path": "test/csharp/SpecGate.Weaver.Tests/WeaveRejectionTests.cs", "test": "RejectsMethodDeclaredAsBothOperationAndSetup" },
+          { "path": "test/csharp/SpecGate.Weaver.Tests/WeaveRejectionTests.cs", "test": "RejectsMethodDeclaringSeveralComponents" }
+        ]
+      }
+    },
+    {
       "id": "component/comp.app",
       "classification": "implementation-component",
       "sourceGroup": "registry",
@@ -41,22 +121,12 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "exception",
@@ -110,11 +180,11 @@
           }
         ]
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "structured-value",
-        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
+          "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -135,31 +205,21 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "structured-value",
-        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
+          "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -179,22 +239,17 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "parity": {
         "mode": "rust-only",
         "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "async-operation",
-        "reason": "The operation is async. Replay generates a synchronous candidate call, so the planner rejects an async operation even though capture now records it. The inner operation is also abandoned rather than completed, so there is no recorded outcome to replay against."
-      },
+      "reference": { "implementation": "rust", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "rust", "candidate": "rust", "mode": "unsupported", "expectCategory": "async-operation",
+          "reason": "The operation is async. Replay generates a synchronous candidate call, so the planner rejects an async operation even though capture now records it. The inner operation is also abandoned rather than completed, so there is no recorded outcome to replay against." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -215,31 +270,21 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "async-operation",
-        "reason": "The operation is async. Replay generates a synchronous candidate call, so the planner rejects an async operation even though capture now records it."
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "async-operation",
+          "reason": "The operation is async. Replay generates a synchronous candidate call, so the planner rejects it." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -259,22 +304,17 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "parity": {
         "mode": "rust-only",
         "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "async-operation",
-        "reason": "The operation is async. Replay generates a synchronous candidate call, so the planner rejects an async operation even though capture now records it. The captured trace also carries two overlapping sibling operation spans, which strict comparison rejects outside conformance.parallel."
-      },
+      "reference": { "implementation": "rust", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "rust", "candidate": "rust", "mode": "unsupported", "expectCategory": "async-operation",
+          "reason": "The operation is async. Replay generates a synchronous candidate call, so the planner rejects an async operation even though capture now records it. The captured trace also carries two overlapping sibling operation spans, which strict comparison rejects outside conformance.parallel." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -294,22 +334,17 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "parity": {
         "mode": "rust-only",
         "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "async-operation",
-        "reason": "The operation is async. Replay generates a synchronous candidate call, so the planner rejects an async operation even though capture now records it."
-      },
+      "reference": { "implementation": "rust", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "rust", "candidate": "rust", "mode": "unsupported", "expectCategory": "async-operation",
+          "reason": "The operation is async. Replay generates a synchronous candidate call, so the planner rejects it." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -329,22 +364,17 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "parity": {
         "mode": "rust-only",
         "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "async-operation",
-        "reason": "The operation is async. Replay generates a synchronous candidate call, so the planner rejects an async operation even though capture now records it."
-      },
+      "reference": { "implementation": "rust", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "rust", "candidate": "rust", "mode": "unsupported", "expectCategory": "async-operation",
+          "reason": "The operation is async. Replay generates a synchronous candidate call, so the planner rejects it." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -364,22 +394,17 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "parity": {
         "mode": "rust-only",
         "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "async-operation",
-        "reason": "The operation is async. Replay generates a synchronous candidate call, so the planner rejects an async operation even though capture now records it."
-      },
+      "reference": { "implementation": "rust", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "rust", "candidate": "rust", "mode": "unsupported", "expectCategory": "async-operation",
+          "reason": "The operation is async. Replay generates a synchronous candidate call, so the planner rejects it." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -400,29 +425,20 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "verified"
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "verified" }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -443,30 +459,21 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "link-only",
-        "reason": "The candidate links, but the reference scenario ends in an unwinding fault. The generated replay runner has no fault boundary, so linkage is verified and execution is not attempted."
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "link-only",
+          "reason": "The candidate links, but the reference scenario ends in an unwinding fault. The generated replay runner has no fault boundary, so linkage is verified and execution is not attempted." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -487,29 +494,20 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "verified"
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "verified" }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -530,31 +528,21 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "structured-value",
-        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
+          "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -575,29 +563,20 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "verified"
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "verified" }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -618,31 +597,21 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "structured-value",
-        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
+          "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -663,31 +632,21 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "structured-value",
-        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
+          "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -708,22 +667,12 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "exception",
@@ -775,11 +724,11 @@
           }
         ]
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "structured-value",
-        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
+          "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -799,22 +748,17 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "parity": {
         "mode": "rust-only",
         "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "structured-value",
-        "reason": "Replay planning is all-or-nothing per row, and the planner rejects this component before it reaches the async `fetch` operation: `find` takes a `Vec<i32>`, and replay supports only lossless primitive inputs, so the list input is an unsupported structured replay type."
-      },
+      "reference": { "implementation": "rust", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "rust", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
+          "reason": "Replay planning is all-or-nothing per row, and the planner rejects this component before it reaches the async `fetch` operation: `find` takes a `Vec<i32>`, and replay supports only lossless primitive inputs, so the list input is an unsupported structured replay type." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -834,20 +778,16 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "parity": {
         "mode": "rust-only",
         "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
       },
-      "replay": {
-        "mode": "verified"
-      },
+      "reference": { "implementation": "rust", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "rust", "candidate": "rust", "mode": "verified" }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -867,32 +807,26 @@
         "phases": [
           "discover"
         ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "not-applicable",
-        "reason": "Discovery-only components produce no capture bundle, so there is nothing to replay."
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "method-operation",
+          "reason": "The Rust candidate operation is an instance method; replay does not construct its receiver." }
+      ],
+      "linkage": { "mode": "linked" },
       "limitations": [
         {
           "code": "observation-not-declared",
-          "detail": "A fixture test now awaits the async `fallible_task` operation, so async is no longer what holds this row back. `UnitCounter::advance` emits a `spec_trace!(\"count\", ...)` observation, and discovery has no link-time observation metadata, so a capture bundle fails bundle and linked validation with `observation 'count' is not declared`. This row stays discovery-only until M5 declares observations."
+          "detail": "A fixture test now awaits the async `fallible_task` operation, so async is no longer what holds this Rust endpoint back. `UnitCounter::advance` emits a `spec_trace!(\"count\", ...)` observation, and discovery has no link-time observation metadata, so a Rust capture bundle fails bundle and linked validation with `observation 'count' is not declared`. This Rust endpoint stays discovery-only until M5 declares observations."
         }
       ]
     },
@@ -910,21 +844,17 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "parity": {
         "mode": "rust-only",
         "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
       },
-      "replay": {
-        "mode": "link-only",
-        "reason": "The candidate links, but the reference scenario ends in an unwinding fault. The generated replay runner has no fault boundary, so linkage is verified and execution is not attempted."
-      },
+      "reference": { "implementation": "rust", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "rust", "candidate": "rust", "mode": "link-only",
+          "reason": "The candidate links, but the reference scenario ends in an unwinding fault. The generated replay runner has no fault boundary, so linkage is verified and execution is not attempted." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -944,20 +874,16 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "parity": {
         "mode": "rust-only",
         "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
       },
-      "replay": {
-        "mode": "verified"
-      },
+      "reference": { "implementation": "rust", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "rust", "candidate": "rust", "mode": "verified" }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -977,20 +903,16 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "parity": {
         "mode": "rust-only",
         "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
       },
-      "replay": {
-        "mode": "verified"
-      },
+      "reference": { "implementation": "rust", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "rust", "candidate": "rust", "mode": "verified" }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -1010,20 +932,16 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "parity": {
         "mode": "rust-only",
         "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
       },
-      "replay": {
-        "mode": "verified"
-      },
+      "reference": { "implementation": "rust", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "rust", "candidate": "rust", "mode": "verified" }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -1043,20 +961,16 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "parity": {
         "mode": "rust-only",
         "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
       },
-      "replay": {
-        "mode": "verified"
-      },
+      "reference": { "implementation": "rust", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "rust", "candidate": "rust", "mode": "verified" }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -1077,29 +991,20 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "verified"
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "verified" }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -1120,31 +1025,21 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "structured-value",
-        "reason": "Replay supports only lossless primitive and unit values. This component's captured observation operation carries a structured account value, so replay decoding rejects it."
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
+          "reason": "The native reference carries structured values unsupported by replay." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -1167,29 +1062,20 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "verified"
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "verified" }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -1210,31 +1096,21 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "method-operation",
-        "reason": "Replay links only public synchronous free functions. This component's operations are setup-backed receivers, and replay does not construct setups."
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "method-operation",
+          "reason": "The candidate uses instance methods; replay does not construct receivers." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -1255,31 +1131,21 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "structured-value",
-        "reason": "Replay supports only lossless primitive and unit values. This component's captured observation operation carries a structured account value, so replay decoding rejects it."
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
+          "reason": "The native reference carries structured values unsupported by replay." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -1300,31 +1166,21 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "method-operation",
-        "reason": "Replay links only public synchronous free functions. This component's operations are setup-backed receivers, and replay does not construct setups."
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "method-operation",
+          "reason": "The candidate uses instance methods; replay does not construct receivers." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -1346,29 +1202,20 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "verified"
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "verified" }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -1389,31 +1236,21 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "method-operation",
-        "reason": "Replay links only public synchronous free functions. This component's operations are setup-backed receivers, and replay does not construct setups."
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "method-operation",
+          "reason": "The candidate uses instance methods; replay does not construct receivers." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -1434,31 +1271,21 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "method-operation",
-        "reason": "Replay links only public synchronous free functions. This component's operations are setup-backed receivers, and replay does not construct setups."
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "method-operation",
+          "reason": "The candidate uses instance methods; replay does not construct receivers." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -1478,20 +1305,16 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "parity": {
         "mode": "rust-only",
         "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
       },
-      "replay": {
-        "mode": "verified"
-      },
+      "reference": { "implementation": "rust", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "rust", "candidate": "rust", "mode": "verified" }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -1512,31 +1335,21 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "structured-value",
-        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
+          "reason": "The native reference carries structured values unsupported by replay." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -1557,31 +1370,21 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "structured-value",
-        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
+          "reason": "The native reference carries structured values unsupported by replay." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -1602,31 +1405,21 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "structured-value",
-        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
+          "reason": "The native reference carries structured values unsupported by replay." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -1647,31 +1440,21 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "structured-value",
-        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
+          "reason": "The native reference carries structured values unsupported by replay." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -1692,31 +1475,21 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "structured-value",
-        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
+          "reason": "The native reference carries structured values unsupported by replay." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -1737,31 +1510,21 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "structured-value",
-        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
+          "reason": "The native reference carries structured values unsupported by replay." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -1781,20 +1544,16 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "parity": {
         "mode": "rust-only",
         "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
       },
-      "replay": {
-        "mode": "verified"
-      },
+      "reference": { "implementation": "rust", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "rust", "candidate": "rust", "mode": "verified" }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -1815,31 +1574,21 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "method-operation",
-        "reason": "Replay links only public synchronous free functions. This component's operations are setup-backed receivers, and replay does not construct setups."
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "method-operation",
+          "reason": "The candidate uses instance methods; replay does not construct receivers." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -1860,29 +1609,20 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "verified"
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "verified" }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -1903,29 +1643,20 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "verified"
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "verified" }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -1946,31 +1677,21 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "structured-value",
-        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
+          "reason": "The native reference carries structured values unsupported by replay." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -1991,31 +1712,21 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "structured-value",
-        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
+          "reason": "The native reference carries structured values unsupported by replay." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -2036,22 +1747,12 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "exception",
@@ -2147,11 +1848,11 @@
           }
         ]
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "structured-value",
-        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
+          "reason": "The native reference carries structured values unsupported by replay." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -2172,31 +1873,21 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "method-operation",
-        "reason": "Replay links only public synchronous free functions. This component's operations are setup-backed receivers, and replay does not construct setups."
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "method-operation",
+          "reason": "The candidate uses instance methods; replay does not construct receivers." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -2217,31 +1908,21 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "method-operation",
-        "reason": "Replay links only public synchronous free functions. This component's operations are setup-backed receivers, and replay does not construct setups."
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "method-operation",
+          "reason": "The candidate uses instance methods; replay does not construct receivers." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -2262,31 +1943,21 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "setup-backed-operation",
-        "reason": "Replay links only public synchronous free functions. This component's operations are setup-backed receivers, and replay does not construct setups."
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "setup-backed-operation",
+          "reason": "The candidate operation requires setup injection, which replay does not construct." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -2307,29 +1978,20 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "verified"
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "verified" }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -2350,31 +2012,21 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "structured-value",
-        "reason": "Replay supports only lossless primitive and unit values. This component's captured observation operation carries a structured counter value, so replay decoding rejects it."
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
+          "reason": "The native reference carries structured values unsupported by replay." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -2394,20 +2046,16 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "parity": {
         "mode": "rust-only",
         "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
       },
-      "replay": {
-        "mode": "verified"
-      },
+      "reference": { "implementation": "rust", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "rust", "candidate": "rust", "mode": "verified" }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -2428,31 +2076,21 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "structured-value",
-        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
+          "reason": "The native reference carries structured values unsupported by replay." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -2473,31 +2111,21 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "structured-value",
-        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
+          "reason": "The native reference carries structured values unsupported by replay." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -2518,31 +2146,21 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "structured-value",
-        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
+          "reason": "The native reference carries structured values unsupported by replay." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -2562,22 +2180,17 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "parity": {
         "mode": "rust-only",
         "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "structured-value",
-        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
-      },
+      "reference": { "implementation": "rust", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "rust", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
+          "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -2597,22 +2210,17 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "parity": {
         "mode": "rust-only",
         "reason": "No annotated C# fixture declares this component, so there is no second language surface to compare."
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "structured-value",
-        "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it."
-      },
+      "reference": { "implementation": "rust", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "rust", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
+          "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -2633,30 +2241,21 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "link-only",
-        "reason": "The candidate links, but the reference scenario ends in an unwinding fault. The generated replay runner has no fault boundary, so linkage is verified and execution is not attempted."
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "link-only",
+          "reason": "The candidate links, but the reference scenario ends in an unwinding fault. The generated replay runner has no fault boundary, so linkage is verified and execution is not attempted." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -2677,31 +2276,21 @@
           "discover",
           "capture"
         ],
-        "expect": "success",
-        "artifacts": [
-          "manifest.json",
-          "reference.otlp.json",
-          "registry.ctsc.json"
-        ]
+        "expect": "success"
       },
       "csharp": {
         "binding": "csharp",
-        "phases": [
-          "discover"
-        ],
-        "expect": "success",
-        "artifacts": [
-          "registry.ctsc.json"
-        ]
+        "phases": ["discover", "capture"],
+        "expect": "success"
       },
       "parity": {
         "mode": "byte-identical"
       },
-      "replay": {
-        "mode": "unsupported",
-        "expectCategory": "method-operation",
-        "reason": "Replay links only public synchronous free functions. This component's operations are setup-backed receivers, and replay does not construct setups."
-      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "method-operation",
+          "reason": "The candidate uses instance methods; replay does not construct receivers." }
+      ],
       "linkage": {
         "mode": "linked"
       },
@@ -2730,10 +2319,7 @@
         "mode": "not-applicable",
         "reason": "Negative cases assert that one language's discovery rejects the fixture; there is no second surface to compare."
       },
-      "replay": {
-        "mode": "not-applicable",
-        "reason": "Rejected components never produce a capture bundle to replay."
-      },
+      "checks": [],
       "limitations": [
         {
           "code": "normalized-error-only",
@@ -2764,10 +2350,7 @@
         "mode": "not-applicable",
         "reason": "Negative cases assert that one language's discovery rejects the fixture; there is no second surface to compare."
       },
-      "replay": {
-        "mode": "not-applicable",
-        "reason": "Rejected components never produce a capture bundle to replay."
-      },
+      "checks": [],
       "limitations": [
         {
           "code": "normalized-error-only",
@@ -2798,10 +2381,7 @@
         "mode": "not-applicable",
         "reason": "Negative cases assert that one language's discovery rejects the fixture; there is no second surface to compare."
       },
-      "replay": {
-        "mode": "not-applicable",
-        "reason": "Rejected components never produce a capture bundle to replay."
-      },
+      "checks": [],
       "limitations": [
         {
           "code": "normalized-error-only",
@@ -2832,10 +2412,7 @@
         "mode": "not-applicable",
         "reason": "Negative cases assert that one language's discovery rejects the fixture; there is no second surface to compare."
       },
-      "replay": {
-        "mode": "not-applicable",
-        "reason": "Rejected components never produce a capture bundle to replay."
-      },
+      "checks": [],
       "limitations": [
         {
           "code": "normalized-error-only",
@@ -2866,10 +2443,7 @@
         "mode": "not-applicable",
         "reason": "Negative cases assert that one language's discovery rejects the fixture; there is no second surface to compare."
       },
-      "replay": {
-        "mode": "not-applicable",
-        "reason": "Rejected components never produce a capture bundle to replay."
-      },
+      "checks": [],
       "limitations": [
         {
           "code": "normalized-error-only",
@@ -2900,10 +2474,7 @@
         "mode": "not-applicable",
         "reason": "Negative cases assert that one language's discovery rejects the fixture; there is no second surface to compare."
       },
-      "replay": {
-        "mode": "not-applicable",
-        "reason": "Rejected components never produce a capture bundle to replay."
-      },
+      "checks": [],
       "limitations": [
         {
           "code": "normalized-error-only",
@@ -2934,10 +2505,7 @@
         "mode": "not-applicable",
         "reason": "Negative cases assert that one language's discovery rejects the fixture; there is no second surface to compare."
       },
-      "replay": {
-        "mode": "not-applicable",
-        "reason": "Rejected components never produce a capture bundle to replay."
-      },
+      "checks": [],
       "limitations": [
         {
           "code": "normalized-error-only",
@@ -2968,10 +2536,7 @@
         "mode": "not-applicable",
         "reason": "Negative cases assert that one language's discovery rejects the fixture; there is no second surface to compare."
       },
-      "replay": {
-        "mode": "not-applicable",
-        "reason": "Rejected components never produce a capture bundle to replay."
-      },
+      "checks": [],
       "limitations": [
         {
           "code": "normalized-error-only",
@@ -3002,10 +2567,7 @@
         "mode": "not-applicable",
         "reason": "Negative cases assert that one language's discovery rejects the fixture; there is no second surface to compare."
       },
-      "replay": {
-        "mode": "not-applicable",
-        "reason": "Rejected components never produce a capture bundle to replay."
-      },
+      "checks": [],
       "limitations": [
         {
           "code": "normalized-error-only",
@@ -3036,10 +2598,7 @@
         "mode": "not-applicable",
         "reason": "Negative cases assert that one language's discovery rejects the fixture; there is no second surface to compare."
       },
-      "replay": {
-        "mode": "not-applicable",
-        "reason": "Rejected components never produce a capture bundle to replay."
-      },
+      "checks": [],
       "limitations": [
         {
           "code": "normalized-error-only",
@@ -3071,10 +2630,7 @@
         "mode": "not-applicable",
         "reason": "A deliberate Rust syntax error has no cross-language analogue."
       },
-      "replay": {
-        "mode": "not-applicable",
-        "reason": "A fixture that does not compile never produces a capture bundle."
-      },
+      "checks": [],
       "limitations": [
         {
           "code": "compiler-diagnostics-omitted",
@@ -3091,10 +2647,7 @@
         "mode": "not-applicable",
         "reason": "Replacement rows record where a removed spec feature now lives; they own no generated artifact."
       },
-      "replay": {
-        "mode": "not-applicable",
-        "reason": "Replacement rows own no capture bundle."
-      },
+      "checks": [],
       "limitations": [],
       "replacement": {
         "feature": "spec mock runtime (mock fields, multiple responses, and not-found responses)",
@@ -3128,10 +2681,7 @@
         "mode": "not-applicable",
         "reason": "Replacement rows record where a removed spec feature now lives; they own no generated artifact."
       },
-      "replay": {
-        "mode": "not-applicable",
-        "reason": "Replacement rows own no capture bundle."
-      },
+      "checks": [],
       "limitations": [],
       "replacement": {
         "feature": "spec property cases and generated inputs",
@@ -3157,10 +2707,7 @@
         "mode": "not-applicable",
         "reason": "Replacement rows record where a removed spec feature now lives; they own no generated artifact."
       },
-      "replay": {
-        "mode": "not-applicable",
-        "reason": "Replacement rows own no capture bundle."
-      },
+      "checks": [],
       "limitations": [],
       "replacement": {
         "feature": "spec matcher operators (contains, approximately, set and map matchers)",
@@ -3198,10 +2745,7 @@
         "mode": "not-applicable",
         "reason": "Replacement rows record where a removed spec feature now lives; they own no generated artifact."
       },
-      "replay": {
-        "mode": "not-applicable",
-        "reason": "Replacement rows own no capture bundle."
-      },
+      "checks": [],
       "limitations": [],
       "replacement": {
         "feature": "spec-declared target routing and per-case target selection",
@@ -3235,10 +2779,7 @@
         "mode": "not-applicable",
         "reason": "Replacement rows record where a removed spec feature now lives; they own no generated artifact."
       },
-      "replay": {
-        "mode": "not-applicable",
-        "reason": "Replacement rows own no capture bundle."
-      },
+      "checks": [],
       "limitations": [],
       "replacement": {
         "feature": "spec coverage reports",
@@ -3264,10 +2805,7 @@
         "mode": "not-applicable",
         "reason": "Replacement rows record where a removed spec feature now lives; they own no generated artifact."
       },
-      "replay": {
-        "mode": "not-applicable",
-        "reason": "Replacement rows own no capture bundle."
-      },
+      "checks": [],
       "limitations": [],
       "replacement": {
         "feature": "spec run provenance and report metadata",

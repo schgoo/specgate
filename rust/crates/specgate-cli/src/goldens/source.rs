@@ -200,7 +200,9 @@ pub(super) fn check_replacements(root: impl AsRef<Path>, matrix: &Matrix) -> Res
             }
             let text = std::fs::read_to_string(&path)
                 .map_err(|error| GoldenError::message(format!("failed to read {}: {error}", path.display())))?;
-            let declared = text.contains(&format!("fn {}(", reference.test)) || text.contains(&format!("void {}(", reference.test));
+            let declared = ["fn", "void", "Task", "ValueTask"]
+                .iter()
+                .any(|return_type| text.contains(&format!("{return_type} {}(", reference.test)));
             if !declared {
                 problems.push(format!("{}: {} does not declare test '{}'", row.id, reference.path, reference.test));
             }

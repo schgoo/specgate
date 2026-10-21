@@ -97,7 +97,10 @@ ctsc-smoke-regressions:
 ctsc-smoke: ctsc-smoke-regressions
     pwsh -NoLogo -NoProfile -File scripts/ctsc-smoke.ps1
 
-ctsc-goldens-regressions: discovery-tool
+ctsc-goldens-harness-tests:
+    cd rust && cargo test -p specgate-cli --lib goldens::tests::cases
+
+ctsc-goldens-regressions: discovery-tool weaver-tool ctsc-goldens-harness-tests
     pwsh -NoLogo -NoProfile -File scripts/ctsc-goldens-tests.ps1
 
 ctsc-goldens-update: ctsc-goldens-regressions

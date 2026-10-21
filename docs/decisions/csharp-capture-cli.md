@@ -125,9 +125,14 @@ non-Rust implementation in `require_capturable`.
 
 ### Non-goals
 
-C# rows in the golden matrix and Rust-versus-C# strict comparison belong to
-[#47](https://github.com/schgoo/specgate/issues/47). No matrix, golden, CLI flag,
-CTSC document shape or manifest field changes here.
+C# capture phases in the golden matrix and replay-based cross-implementation
+strict comparison were delivered separately in
+[#47](https://github.com/schgoo/specgate/issues/47); see
+[the golden parity decision](csharp-golden-replay-parity.md), whose ratified
+correction stores one selected native reference bundle per component, not
+separate Rust/C# behavioral goldens. Both producers remain strictly captured
+and validated, with nonselected bundles only in invocation scratch. This CLI slice
+introduced no matrix, golden, CLI flag, CTSC shape, or manifest field changes.
 
 ## Spike findings (this machine: Windows, SDK 10.0.402, xunit.v3 3.2.2, VSTest)
 
@@ -282,15 +287,11 @@ Recorded after the slices landed, where the build differed from the plan:
   fixture concurrently. It finishes in about 40 s, down from about 235 s. The
   packaged-install smoke and the release workflow capture the same passing
   fixture, so they need no failure tolerance.
-- **Fixture conflict (tracked in #47).** `SetupFoldingTests.*` (8 tests in
-  `CtscFixtures.Tests`) call `CaptureScenario.Begin`, which starts a runtime
-  session. Under CLI capture the environment session is already active, so they
-  fail with "a capture session is already active". Non-strict capture tolerates
-  the failures; strict capture and the golden harness would not. The binding at
-  `test/bindings/specgate.yaml` stays pointed at that project for
-  [#47](https://github.com/schgoo/specgate/issues/47), which owns the decision
-  (retire the in-process `Begin` for native capture, or make it join the
-  environment session). Nothing in #46 exercises it.
+- **Fixture conflict resolved in #47.** The captured `CtscFixtures.Tests`
+  project no longer starts manual sessions. Its ordinary stateful tests supply
+  woven setup-folding goldens; permanent rejection cases execute existing woven
+  fixtures in `SpecGate.Weaver.Tests`, with duplicate throwing-setup coverage
+  removed. No manual session joins the environment session.
 - **Unverified.** `;` as `%3B` in filters, fully-qualified-name filtering, and the
   textual multi-TFM check, which misses values set only in props files.
   **Linux is untested:** every run and measurement above was on Windows. Path
