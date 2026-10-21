@@ -8,7 +8,7 @@
 
 Environment-driven capture writes its sidecar incrementally and has no
 end-of-test signal, as described in "Provisional capture sidecars" in
-[`../specgate-ctsc-migration.md`](../specgate-ctsc-migration.md). Every
+[`../status.md`](../status.md). Every
 snapshot closes still-outstanding operations with an `incomplete_capture`
 target fault at `Status::Error` so the file is always well formed.
 

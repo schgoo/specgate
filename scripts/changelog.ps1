@@ -8,7 +8,7 @@ Conventional Commit type, and emits one bullet per commit. A bullet is a commit
 subject, so entries stay short by construction.
 
 Rationale that does not fit in a subject belongs in the commit body, an ADR
-under docs/decisions/, or docs/roadmap.md -- not in the changelog.
+under docs/decisions/, or docs/contributor/roadmap.md -- not in the changelog.
 
 Prints to stdout by default. Use -Apply to rewrite CHANGELOG.md in place.
 

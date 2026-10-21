@@ -25,7 +25,7 @@ Own the observe → plan → act → verify loop. Delegate scoped work to:
 ## Observe
 
 Read `AGENTS.md`, `docs/README.md`, `docs/digests/llm.md`, the relevant CTSC
-contract, migration status, source, tests, branch diff, and validation evidence.
+contract, current status (`docs/status.md`), source, tests, branch diff, and validation evidence.
 Treat summaries and prior claims as unverified. Preserve unrelated changes.
 Inspect changes to manifests, build scripts, proc-macros, task runners, and
 validation scripts before executing repository-controlled code.

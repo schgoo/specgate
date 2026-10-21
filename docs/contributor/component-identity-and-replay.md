@@ -6,6 +6,13 @@
 > **Date:** 2026-09-25
 >
 > **Related:** capture profiles (#43), stable operation identity (#10)
+>
+> **Historical anchors:** file and line references below (for example
+> `replay.rs:440` and `specgate-runtime/src/lib.rs:857`) point at the code as
+> it was when this note was written. `replay.rs` has since been split into
+> `rust/crates/specgate-cli/src/replay/`, and native capture state moved from a
+> thread-local stack to a per-run `Send` collector. Claims superseded since
+> then are marked inline.
 
 ## Why this note exists
 
@@ -131,9 +138,12 @@ should report its resolved set as a first-class outcome.
 
 ## Open question 5 - process boundaries
 
-SpecGate records operation parentage from a thread-local stack: `parent_span_id`
-is the innermost active operation
-(`rust/crates/specgate-runtime/src/lib.rs:857`). There is no span context
+*Superseded:* when this note was written, SpecGate recorded operation parentage
+from a thread-local stack (`rust/crates/specgate-runtime/src/lib.rs:857`).
+Recording now uses a per-run `Send` collector, and an async operation carries
+its construction parent across polls
+([`async-capture-context`](../decisions/async-capture-context.md)). Parentage is
+still in-process only: there is no span context
 propagation anywhere in the workspace, and CTSC already states the consequence:
 different target executions do not exchange span context
 (`docs/ctsc/trace.md`, section 5).
@@ -149,9 +159,11 @@ missing pieces are transport and aggregation, not shape.
 
 Three further constraints apply independently:
 
-- Native capture records an async operation only while its future stays on the
-  calling thread, and a remote call in Rust is almost always async and executor
-  driven.
+- *Superseded:* native capture originally recorded an async operation only
+  while its future stayed on the calling thread. A directly awaited
+  `#[spec_operation] async fn` is now captured across executor migration; see
+  [`../reference/limitations.md`](../reference/limitations.md) for the
+  remaining async limits.
 - `specgate capture` accepts Rust and C# implementations through the `tests.projects` form; `tests.command`
   implementations are rejected as not yet supported (#46).
 - Replay re-invokes an operation in process. Replaying a caller requires the

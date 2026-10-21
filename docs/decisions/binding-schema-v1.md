@@ -94,4 +94,4 @@ components:
 - The command form needs scenario boundaries inside one process; today one
   process is one test.
 - Whether one registry document per component should replace multi-component
-  documents (`docs/component-identity-and-replay.md`, question 3).
+  documents (`docs/contributor/component-identity-and-replay.md`, question 3).

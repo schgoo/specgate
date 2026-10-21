@@ -18,7 +18,7 @@ a C# registry, and `fixture.async_fetch` is byte-identical with Rust, so C#
 behavior tests that pass today. The missing piece is something that observes
 those tests while they run and emits CTSC spans.
 
-[`../roadmap.md`](../roadmap.md) lists the instrumentation mechanism as an open
+[`../contributor/roadmap.md`](../contributor/roadmap.md) lists the instrumentation mechanism as an open
 implementation choice. This record closes it.
 
 ## Decision
@@ -49,7 +49,7 @@ implementation choice. This record closes it.
 2. **The C# recording runtime is async-capable from its first commit.** Logical
    context flows across `Task` boundaries through `AsyncLocal` or an equivalent,
    even while the first instrumented fixture is synchronous. This follows
-   [`../roadmap.md`](../roadmap.md), which already rejects a synchronous-only
+   [`../contributor/roadmap.md`](../contributor/roadmap.md), which already rejects a synchronous-only
    stage: every documented consumer is async C#, and a thread-affine capture
    state would have to be torn out again. The Rust milestone ordering makes the
    same argument — moving thread-affine state must precede enabling async, never

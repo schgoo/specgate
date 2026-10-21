@@ -144,7 +144,9 @@ subsequent exact hits do not upload another copy. Cargo still fingerprints
 source edits, features, and compiler options; unchanged cache keys do not
 authorize reuse of stale compiled code. No captures, replay outputs, golden
 artifacts, or validation results are stored. Failed jobs do not publish a cache,
-and the existing lease/quarantine protocol is unchanged.
+and the existing lease/quarantine protocol is unchanged. Normal GitHub cache
+branch scoping applies; no extra workflow permissions are granted. Golden
+generation and all validators still run.
 
 In [run 39419173116](https://github.com/schgoo/specgate/actions/runs/39419173116),
 before explicit retention, the golden recipe took approximately **47 s on
