@@ -57,6 +57,12 @@ See [guides](docs/guides/README.md#agent-quick-path), [contracts](docs/ctsc/),
     Assert-Broken 'a missing reference target' "[ref]: ../nowhere.md`n" "'../nowhere.md' -> missing nowhere.md"
     Assert-Broken 'a missing directory' "[x](../docs/nothing/)`n" "-> missing docs/nothing"
 
+    Write-Doc 'docs/single.md' "# Project`n"
+    Write-Doc 'docs/empty.md' "No headings.`n"
+    Assert-Broken 'a prefix of a singleton anchor' "[x](single.md#proj)`n" "no heading or anchor '#proj'"
+    Assert-Broken 'an anchor in a file without headings' "[x](empty.md#any)`n" "no heading or anchor '#any'"
+    Remove-Item -LiteralPath (Join-Path $fixture 'docs/single.md'), (Join-Path $fixture 'docs/empty.md')
+
     Write-Doc 'docs/case.md' "# Case`n"
     Write-Doc '.github/skills/bad.md' "[x](../../docs/gone.md)`n"
     $result = Invoke-Check

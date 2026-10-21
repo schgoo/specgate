@@ -61,7 +61,7 @@ value as its result.
 | Recorded result | The output value | The awaited value; `Task` and `ValueTask` record none |
 | Thread migration | A future built inside a recording operation keeps its parent when polled on another thread | Supported |
 | Failure | `Err` / panic as for sync code | A faulted task is recorded like a throw and rethrown |
-| Abandonment | Dropped while pending: `conformance.abandoned`, status `UNSET`, not propagated to the parent | Cancellation (`IsCanceled`, or `OperationCanceledException` from a `ValueTask`): same marker and status |
+| Abandonment | Dropped while pending: `conformance.abandoned`, status `UNSET`, not propagated to the parent | Cancellation (`IsCanceled`, or `OperationCanceledException` from a `ValueTask`): same marker and status; persisted immediately, so top-level cancellation keeps the scenario |
 | Never finished | Top-level abandonment, or work still open at test end: the scenario is dropped with a diagnostic | An unawaited task still outstanding when the test's session finishes: the open span is recorded as a fault and `InvalidOperationException` is thrown, so that test contributes no scenario |
 | Rejected | Async setups | Async setups, `async void`, async iterators, `async` methods returning other awaitables |
 | Replay | Not supported | Not supported (no C# replay) |

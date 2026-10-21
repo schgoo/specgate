@@ -64,8 +64,9 @@ Async operations capture natively in Rust (`async fn`) and C# (`Task`,
 future's first poll, so the instrumented signature stays unchanged. A future
 created inside a recording operation keeps its parent across executor threads;
 a future dropped while pending, or a cancelled C# task, is recorded as
-`conformance.abandoned`. Async setups are rejected, top-level abandonment
-drops the scenario, and an operation first reached on a raw
+`conformance.abandoned`. Async setups are rejected, Rust top-level abandonment
+drops the scenario (C# cancellation keeps it), and an operation first reached
+on a raw
 `std::thread::spawn` thread is not covered. See `docs/guides/async-capture.md`
 and `docs/decisions/async-capture-context.md`.
 

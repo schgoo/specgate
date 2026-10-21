@@ -41,7 +41,7 @@ the component's registry plus a reference trace of what the tests did.
 | Build tests | `cargo test --no-run` in `sources` ([#96](https://github.com/schgoo/specgate/issues/96)). | `dotnet build` of each `tests.projects` entry with the weaver injected. |
 | List tests | Each libtest binary's test list. | `dotnet test --list-tests`. |
 | Run tests | One process per test, `--exact --test-threads=1`. | One `dotnet test` per test, filtered to that test. |
-| Assemble | Every passing test that called an operation of the component becomes a scenario. | Same. |
+| Assemble | Every passing test with a top-level operation of the selected component becomes a scenario. Those top-level subtrees are kept, including nested calls to other components; a call reached only beneath another component's operation produces no scenario. | Same. |
 
 - A failing test is skipped, not fatal. Capture fails only when no passing test
   produced a scenario for the component.

@@ -9,8 +9,12 @@ you instrument.
 
 - Rust targets: a Rust toolchain with `cargo`, version 1.93 or later (the
   workspace `rust-version` in `rust/Cargo.toml`).
-- C# targets: the .NET 8 or later SDK. Capture builds and runs your tests with
-  `dotnet`.
+- C# targets:
+  - The .NET 10 runtime, to run the C# discovery tool (`SpecGate.Discovery`
+    targets `net10.0` and ships framework-dependent). Building it from source
+    needs the .NET 10 SDK.
+  - An SDK that can build and test your projects, which must target .NET 8 or
+    later. Capture builds and runs your tests with `dotnet`.
 
 ## Steps
 

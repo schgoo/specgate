@@ -8,8 +8,10 @@ capture its tests as reference behavior.
 ## Prerequisites
 
 - The CLI with its C# tools beside it ([`install.md`](install.md)).
-- The .NET 8 or later SDK. The project that holds your operations must target
-  .NET 8 or later for capture (`SpecGate.Runtime` targets `net8.0` and
+- The .NET 10 runtime for the C# discovery tool (`SpecGate.Discovery` targets
+  `net10.0`; building it from source needs the .NET 10 SDK).
+- An SDK that builds your projects. The project that holds your operations must
+  target .NET 8 or later for capture (`SpecGate.Runtime` targets `net8.0` and
   `net10.0`).
 - A sources project that references the `SpecGate.Annotations` package.
 - A separate tests project that references the sources project and uses exactly

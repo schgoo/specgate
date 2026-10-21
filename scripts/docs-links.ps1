@@ -165,7 +165,7 @@ foreach ($file in Get-Files) {
             }
             if ($fragment -and $target.EndsWith('.md') -and (Test-Path -LiteralPath $target -PathType Leaf)) {
                 $anchor = [Uri]::UnescapeDataString($fragment)
-                if (-not (Get-Anchors $target).Contains($anchor)) {
+                if ($anchor -cnotin @(Get-Anchors $target)) {
                     $problems.Add("${relative}:$($line.Number): '$link' -> no heading or anchor '#$anchor'")
                 }
             }

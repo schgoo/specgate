@@ -38,8 +38,8 @@ divided into reviewable vertical slices.
   (xUnit, MSTest, NUnit). Async operation capture is supported in both: Rust
   `async fn`, and C# `Task`, `Task<T>`, `ValueTask`, and `ValueTask<T>`. A
   future dropped while pending, or a cancelled C# task, is recorded as
-  abandoned; top-level abandonment drops the scenario. Async setups are
-  rejected.
+  abandoned. In Rust, top-level abandonment drops the scenario; a C#
+  cancellation keeps it. Async setups are rejected.
 - Replay supports synchronous public Rust free functions with primitive
   lossless inputs.
 - Setup-backed methods, structured replay values, explicit mappings, async

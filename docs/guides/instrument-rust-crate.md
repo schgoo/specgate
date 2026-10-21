@@ -34,8 +34,8 @@ fn adds_two_numbers() {
 
 [doctest] (the `specgate` crate doc test compiles the same pattern)
 
-- `spec_component!("…")` sets the default component for the module's
-  annotations. Override it per item with `spec = "…"`, for example
+- Declare `spec_component!("…")` once at the crate root; it sets the crate-wide
+  default component. Override it per item with `spec = "…"`, for example
   `#[spec_operation("add", spec = "example.math")]`.
 - The operation name is the first argument. Operations must be public; discovery
   rejects annotated private functions.
