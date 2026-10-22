@@ -19,8 +19,9 @@ are `discover`, `capture`, `replay`, `validate`, and `compare`.
 ## Planning and agent workflow
 
 Start with `AGENTS.md` and `docs/README.md`. Use the observe → plan → act →
-verify loop in `docs/agentic-loop.md`: define one bounded vertical slice with
-explicit responsibility boundaries, implement it through the existing CTSC
+verify loop in
+[`docs/contributor/agentic-loop.md`](docs/contributor/agentic-loop.md): define
+one bounded vertical slice with explicit responsibility boundaries, implement it through the existing CTSC
 mechanisms, then independently inspect the diff and validation evidence.
 
 Normative CTSC shapes and validation, public CLI shape, capture/replay identity
@@ -30,7 +31,7 @@ ratified architectural decisions under `docs/decisions/`.
 
 ## Golden matrix
 
-`test/goldens/ctsc/matrix.json` is the reviewable configuration for the whole
+`test/behavior/matrix.json` is the reviewable configuration for the whole
 fixture corpus. Edit it by hand when you add, remove, or reclassify a fixture:
 every annotated fixture source must belong to a row, every discovered component
 needs a row, and each row states its language phases, expected outcome, parity
@@ -44,10 +45,10 @@ observed difference set to equal the declared one.
 Matrix `0.2.0` has no compatibility reader. Each captured component selects
 exactly one successful discover+capture endpoint through `reference:
 { implementation, artifacts }`. Its artifacts are exactly `manifest.json`,
-`reference.otlp.json`, and `registry.ctsc.json`, directly under `component/<id>/`.
+`reference.otlp.json`, and `registry.ctsc.json`, directly under `cases/<id>/expected/`.
 There are no per-language successful-component artifacts, including registries.
 A discovery-only component selects a successful discovery endpoint and keeps
-only `component/<id>/registry.ctsc.json`. Keep both
+only `cases/<id>/expected/registry.ctsc.json`. Keep both
 native capture phases: nonselected producers capture strictly into invocation
 scratch and undergo the same native validation and exact coverage checks.
 Never copy or relabel traces or validate a producer's native bundle against
@@ -58,7 +59,7 @@ existing exact `parity.allowedDifferences`. Preserve full dependency closure and
 ordering and Rust/C# difference orientation regardless of endpoint selection.
 Fresh-producer-only comparison is insufficient: both producers could drift
 together. Exact exceptions describe known non-equivalences, not blanket passes.
-The selected producer writes directly into the component directory, with no
+The selected producer writes directly into the case's `expected/` directory, with no
 `reference` subdirectory. Native `target.name` is that directory's basename;
 its language and native scenario names remain unchanged.
 Captured rows require checks, all naming the selected reference. Discovery-only
@@ -79,7 +80,7 @@ an unrelated planner or discovery error never satisfies them. Build negatives
 reject any compiler error without primary spans exclusively in the row's
 intentional sources, even when the intended error is also present.
 
-Every other file under `test/goldens/ctsc` is generated. Do not hand-edit them.
+Only declared case and rejection `expected/` directories are generated. Do not hand-edit them.
 
 ```powershell
 just ctsc-goldens-update   # regenerate artifacts after an intended change
@@ -91,36 +92,12 @@ artifact diff as carefully as the code diff, then confirm
 `just ctsc-goldens-check` passes.
 
 Both recipes reuse Cargo intermediate build artifacts under
-`rust/target/ctsc-goldens-build-cache`, using the pinned toolchain's
-`CARGO_BUILD_BUILD_DIR`. Each invocation exclusively leases a versioned cache
-slot until its harness exits; concurrent invocations use different slots.
-Generated runner sources, final outputs, and capture sidecars remain isolated and are
-removed with invocation scratch. No golden output or validation result is
-cached: every run executes the entire matrix. Cargo invalidates compilation
-when sources, features, or the compiler change.
-
-The intermediate cache persists like an ordinary Cargo build directory and
-can grow as sources and toolchains change. To reclaim space or measure an
-empty-cache run, remove `rust/target/ctsc-goldens-build-cache` only after all
-golden wrappers, harnesses, and their Cargo/test children have exited.
-
-A slot is marked incomplete before launching the harness and becomes reusable
-only after exactly one successful golden test is confirmed. Failed or
-interrupted runs leave the slot quarantined, even after its OS lease releases,
-because children may outlive a terminated wrapper. These slots are never
-automatically recycled; reclaim them with the same safe cleanup procedure.
-The `v2` cache layout does not reuse slots from the earlier lease-only layout.
-
-CI sets `SPECGATE_CTSC_GOLDENS_BUILD_CACHE` to
-`artifacts/ctsc-goldens-build-cache/v2`, outside the workspace target directories
-pruned by `Swatinem/rust-cache`. The override accepts an absolute path or a path
-relative to the repository root; the local default is unchanged. A separate
-GitHub Actions cache retains only compilation intermediates and lease markers,
-is partitioned by OS, architecture, compiler version, and Cargo
-toolchain/dependency/configuration files, and is saved only after a successful
-job. Exact cache hits are not
-uploaded again. Normal GitHub cache branch scoping applies; no extra workflow
-permissions are granted. Golden generation and all validators still run.
+`rust/target/ctsc-goldens-build-cache` (CI: `SPECGATE_CTSC_GOLDENS_BUILD_CACHE`).
+No golden output or validation result is cached; every run executes the entire
+matrix. Remove that directory only after every golden wrapper, harness, and
+child process has exited. Slot leasing, quarantine, and CI retention are
+described in
+[`docs/contributor/dev-cycle-performance.md`](docs/contributor/dev-cycle-performance.md#golden-regeneration).
 
 ## Gate
 
@@ -147,7 +124,7 @@ first, including a real Cargo fixture proving warm executable reuse and shared
 dependency compilation across isolated candidate targets. The caller's
 environment is unchanged; cleanup restores the working directory and removes
 scratch. There is no persistent test cache or CI cache configuration. `just test`
-also runs the separate `test/rust` workspace with its original Cargo command
+also runs the separate `test` workspace with its original Cargo command
 and parallelism.
 
 The runner owns the `value` and `force` entries of Cargo's
@@ -156,9 +133,25 @@ configuration defines that entry, use table form instead of the shorthand
 string form: Cargo rejects merging a string with the runner's table entries.
 
 The gate covers Rust build/tests/clippy/fmt/licenses, generated crate READMEs,
-the CTSC Python corpus and linked validators, a deterministic capture-to-replay
-smoke, the CTSC golden matrix check, and the retained C# build/tests/format/
-analyzers.
+the public docs (`just docs-check`), the CTSC Python corpus and linked
+validators, a deterministic capture-to-replay smoke, the CTSC golden matrix
+check, and the retained C# build/tests/format/analyzers.
+
+`just docs-check` fails when the docs drift from the code. It checks:
+
+- the CLI usage block in [`docs/reference/cli.md`](docs/reference/cli.md)
+  against the program's usage text;
+- relative links and heading anchors in repository Markdown
+  (`scripts/docs-links.ps1`);
+- the diagnostic fragments quoted in
+  [`docs/guides/troubleshoot-capture.md`](docs/guides/troubleshoot-capture.md)
+  against non-test sources (`scripts/docs-diagnostics.ps1`);
+- every `specgate.yaml` in the repository, and every documentation YAML block
+  whose first line is `# yaml-language-server: $schema=<relative path>/binding-schema.json`,
+  against `binding-schema.json` and the binding loader
+  (`rust/crates/specgate-discovery/tests/binding_examples.rs`).
+
+Each check runs its own regression tests, which prove it fails on bad input.
 
 `just ctsc-smoke` first runs `just ctsc-smoke-regressions`, builds the CLI once,
 and shares Cargo intermediates between its capture and replay commands.
@@ -170,10 +163,10 @@ smoke cache to warm locally or restore in CI.
 
 Use `just --timestamp --verbose check` to identify recipe boundaries in a gate
 log; CI uses the same flags without changing the checks being run. See
-[`docs/dev-cycle-performance.md`](docs/dev-cycle-performance.md) for the
+[`docs/contributor/dev-cycle-performance.md`](docs/contributor/dev-cycle-performance.md) for the
 stage breakdown, compilation-reuse measurements, and reproduction commands.
 
-Run `just package-smoke` for release changes; it packages all six retained crates,
+Run `just package-smoke` for release changes; it packages all seven workspace crates,
 installs the packaged CLI, and exercises registry-dependency
 discover/capture/replay.
 
@@ -198,4 +191,4 @@ and folds any hand-curated `## [Unreleased]` body in above the generated
 bullets.
 
 Rationale does not belong in the changelog. Put it in the commit body, an ADR
-under `docs/decisions/`, or `docs/roadmap.md`.
+under `docs/decisions/`, or `docs/contributor/roadmap.md`.

@@ -166,7 +166,7 @@ input!(String, String, Ok::<_, std::convert::Infallible>);
 input!(bool, Bool, Ok::<_, std::convert::Infallible>);
 input!(i32, Integer, i32::try_from);
 input!(i64, Integer, Ok::<_, std::convert::Infallible>);
-input!(u32, Unsigned, u32::try_from);
+input!(u32, Integer, u32::try_from);
 input!(u64, Unsigned, Ok::<_, std::convert::Infallible>);
 input!(f64, Float, Ok::<_, std::convert::Infallible>);
 
@@ -200,16 +200,16 @@ pub fn argument<T: Input>(values: &mut impl Iterator<Item = Value>, name: &str) 
     T::decode(values.next().ok_or_else(|| error(format!("missing setup input '{name}'")))?)
 }
 
-/// Run a directly awaited replay on a timer- and I/O-capable executor.
+/// Complete the immediately ready bridges of a synchronous replay plan.
 ///
 /// # Errors
-/// Reports executor construction failures.
-pub fn run<F: Future>(future: F) -> Result<F::Output, CaptureError> {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|source| CaptureError::caused(CaptureErrorKind::Configuration, "failed to start replay executor", source))?;
-    Ok(runtime.block_on(future))
+/// Rejects a pending future; asynchronous plans must use the candidate's executor.
+pub fn run_sync<F: Future>(future: F) -> Result<F::Output, CaptureError> {
+    let mut future = std::pin::pin!(future);
+    match future.as_mut().poll(&mut std::task::Context::from_waker(std::task::Waker::noop())) {
+        std::task::Poll::Ready(output) => Ok(output),
+        std::task::Poll::Pending => Err(error("synchronous replay unexpectedly suspended; configure a replay executor")),
+    }
 }
 
 /// Serialize completed captures for the CLI's existing publication pipeline.
@@ -230,6 +230,7 @@ mod tests {
     #[test]
     fn construction_inputs_are_lossless_and_fail_explicitly() {
         assert_eq!(i32::decode(Value::Integer(7)).unwrap(), 7);
+        assert_eq!(u32::decode(Value::Integer(i64::from(u32::MAX))).unwrap(), u32::MAX);
         i32::decode(Value::Integer(i64::MAX)).unwrap_err();
         u32::decode(Value::Unsigned(u64::MAX)).unwrap_err();
         u32::decode(Value::Integer(-1)).unwrap_err();
@@ -239,5 +240,12 @@ mod tests {
         <()>::decode(Value::List(vec![Value::Integer(1)])).unwrap_err();
         let error = argument::<i32>(&mut std::iter::empty(), "initial").unwrap_err();
         assert!(error.to_string().contains("missing setup input 'initial'"), "{error}");
+    }
+
+    #[test]
+    fn synchronous_replay_does_not_supply_an_async_executor() {
+        assert_eq!(super::run_sync(async { 7 }).unwrap(), 7);
+        let error = super::run_sync(std::future::pending::<()>()).unwrap_err();
+        assert!(error.to_string().contains("unexpectedly suspended"), "{error}");
     }
 }

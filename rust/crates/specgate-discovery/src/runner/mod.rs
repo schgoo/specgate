@@ -12,6 +12,7 @@ pub(crate) mod system;
 
 pub use crate::discovery::runner::{cargo_bin, run_discovery};
 pub use metadata::{
-    CandidateDeps, CandidatePackage, Dependency, DependencyBuilder, PackageSource, RunnerCargo, candidate_package, runner_cargo,
+    CandidateDeps, CandidatePackage, Dependency, DependencyBuilder, ExecutorDependency, PackageSource, RunnerCargo, candidate_package,
+    runner_cargo,
 };
 pub(crate) use metadata::{candidate_in, cargo_with};

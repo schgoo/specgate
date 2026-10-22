@@ -1,0 +1,11 @@
+[workspace]
+members = [
+    "behavior/projects/rust/specgate-ctsc-fixtures",
+    "behavior/projects/rust/specgate-facade-umbrella",
+]
+exclude = ["rejection/rust/specgate-ctsc-negative-fixtures"]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"

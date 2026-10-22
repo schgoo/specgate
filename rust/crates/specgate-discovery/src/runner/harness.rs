@@ -57,6 +57,8 @@ fn build_in(
         .env_remove("CARGO")
         .env_remove("CARGO_MANIFEST_DIR")
         .env("SPECGATE_TEST_ENTRY", entry)
+        // Environment-dependent macro expansion must not reuse incremental state.
+        .env("CARGO_INCREMENTAL", "0")
         .env("CARGO_TARGET_DIR", scratch.join("target"))
         .build();
     let output = system.process.output(&request)?;
@@ -196,4 +198,47 @@ pub(crate) fn augment(package: &Path, original: &str, scratch: &Path, system: &S
         }
     }
     serde_json::to_string(&document).map_err(|error| failure(format!("failed to encode combined test-target registry: {error}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runner::system::{FakeFs, FakeProcess, ProcessOutput};
+    use std::ffi::OsStr;
+
+    #[test]
+    fn generated_builds_disable_incremental_without_replacing_shared_dependencies_or_flags() {
+        let system = System::builder((
+            FakeFs::default(),
+            FakeProcess::queued((0..2).map(|_| {
+                Ok(ProcessOutput {
+                    success: true,
+                    stdout: Vec::new(),
+                    stderr: Vec::new(),
+                })
+            })),
+        ))
+        .build();
+        for dispatch in [None, Some(Path::new("dispatch.rs"))] {
+            build_in(
+                Path::new("candidate"),
+                Path::new("entry.rs"),
+                dispatch,
+                Path::new("scratch"),
+                None,
+                &system,
+            )
+            .unwrap();
+        }
+        let state = system.process.fake_state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.requests.len(), 2);
+        for request in &state.requests {
+            assert!(request.env.iter().any(|(key, value)| key == "CARGO_INCREMENTAL" && value == "0"));
+            for preserved in ["CARGO_BUILD_BUILD_DIR", "RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS"] {
+                assert!(!request.env.iter().any(|(key, _)| key == preserved));
+                assert!(!request.env_remove.contains(&OsStr::new(preserved).to_os_string()));
+            }
+        }
+    }
 }

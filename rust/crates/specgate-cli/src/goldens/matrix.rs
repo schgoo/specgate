@@ -43,16 +43,12 @@ pub(super) fn parse_matrix(reader: impl std::io::Read) -> Result<Matrix, serde_j
 
 /// Load the checked-in matrix rooted at the supplied repository.
 pub(super) fn load_matrix(root: impl AsRef<Path>) -> Matrix {
-    let path = repo_path(root, "test/goldens/ctsc").join(matrix_file());
+    let path = repo_path(root, "test/behavior").join(matrix_file());
     let file = std::fs::File::open(&path).unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
     let matrix = parse_matrix(file).unwrap_or_else(|error| panic!("{} is not a valid golden matrix: {error}", path.display()));
     assert_eq!(matrix.format, MATRIX_FORMAT, "unexpected matrix format");
     assert_eq!(matrix.format_version, MATRIX_VERSION, "unexpected matrix format version");
-    assert_eq!(
-        matrix.artifact_root.as_str(),
-        "test/goldens/ctsc",
-        "unexpected matrix artifact root"
-    );
+    assert_eq!(matrix.artifact_root.as_str(), "test", "unexpected matrix artifact root");
     matrix
 }
 // ---------------------------------------------------------------------------
@@ -233,6 +229,59 @@ pub(super) fn check_shape(matrix: &Matrix) {
             );
         }
     }
+    check_ownership(matrix).expect("invalid generated output ownership");
+}
+
+/// Ownership cannot escape the reserved generated namespace or collide with
+/// handwritten sources. Row identities never determine producer scratch paths.
+pub(super) fn check_ownership(matrix: &Matrix) -> Result<(), GoldenError> {
+    let mut directories = BTreeSet::new();
+    for row in &matrix.rows {
+        let directory = match (&row.artifact_directory, row.classification) {
+            (None, Classification::Replacement) => continue,
+            (Some(directory), Classification::ImplementationComponent | Classification::NegativeFixture) => directory,
+            _ => return Err(GoldenError::message(format!("{}: invalid artifact directory ownership", row.id))),
+        };
+        let required = match row.classification {
+            Classification::ImplementationComponent => {
+                format!("behavior/cases/{}/expected", row.component.as_deref().expect("component identity"))
+            }
+            Classification::NegativeFixture => format!(
+                "rejection/rust/specgate-ctsc-negative-fixtures/expected/{}",
+                row.id.strip_prefix("negative/").expect("negative identity")
+            ),
+            Classification::Replacement => unreachable!(),
+        };
+        if directory.as_str() != required {
+            return Err(GoldenError::message(format!("{}: output ownership must be '{required}'", row.id)));
+        }
+        let key = directory.to_ascii_lowercase();
+        if directories
+            .iter()
+            .any(|owned: &String| key == *owned || key.starts_with(&format!("{owned}/")) || owned.starts_with(&format!("{key}/")))
+        {
+            return Err(GoldenError::message(format!(
+                "duplicate or overlapping output ownership: {directory}"
+            )));
+        }
+        directories.insert(key);
+        let owned = format!("{}/{directory}", matrix.artifact_root).to_ascii_lowercase();
+        let collides = |source: &RepoPath| {
+            let source = source.to_ascii_lowercase();
+            source == owned || source.starts_with(&format!("{owned}/"))
+        };
+        if matrix.rows.iter().flat_map(|row| &row.sources).any(collides)
+            || matrix
+                .sources
+                .exclusions
+                .iter()
+                .flat_map(|exclusion| &exclusion.paths)
+                .any(collides)
+        {
+            return Err(GoldenError::message(format!("output/source collision: {directory}")));
+        }
+    }
+    Ok(())
 }
 
 /// Validate one selected native reference and its directed checks before builds.

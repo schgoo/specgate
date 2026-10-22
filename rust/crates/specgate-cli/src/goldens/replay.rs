@@ -3,8 +3,38 @@
 //! Directed implementation checks using the existing replay planner and strict comparator.
 use super::*;
 
+struct ReplayGroup<'a> {
+    implementation: specgate_discovery::binding::Implementation,
+    label: String,
+    checks: Vec<(&'a Row, &'a ReplayCheck)>,
+}
+
+fn replay_groups<'a>(binding: &Path, matrix: &'a Matrix) -> Result<Vec<ReplayGroup<'a>>, GoldenError> {
+    let mut groups = Vec::<ReplayGroup<'a>>::new();
+    for row in &matrix.rows {
+        for check in &row.checks {
+            let component = row.component.as_deref().expect("validated check component");
+            let resolved = resolve_implementation(binding, component, Some(&check.candidate))
+                .map_err(|error| GoldenError::message(format!("{}: candidate '{}' is unavailable: {error}", row.id, check.candidate)))?;
+            if let Some(group) = groups
+                .iter_mut()
+                .find(|group| group.implementation == resolved.implementation && group.label == check.candidate)
+            {
+                group.checks.push((row, check));
+            } else {
+                groups.push(ReplayGroup {
+                    implementation: resolved.implementation,
+                    label: check.candidate.clone(),
+                    checks: vec![(row, check)],
+                });
+            }
+        }
+    }
+    Ok(groups)
+}
+
 /// Verify each shared reference capture against its declared candidate.
-/// Candidate discovery and execution remain batched by source and implementation.
+/// Batch only implementations with identical source, test, and execution settings.
 pub(super) fn verify_replay(
     root: impl AsRef<Path>,
     matrix: &Matrix,
@@ -14,20 +44,13 @@ pub(super) fn verify_replay(
     let binding = repo_path(root, &matrix.binding);
     let out_root = out_root.as_ref();
     let scratch = scratch.as_ref();
-    let mut groups = BTreeMap::<_, Vec<(&Row, &ReplayCheck)>>::new();
-    for row in &matrix.rows {
-        for check in &row.checks {
-            let component = row.component.as_deref().expect("validated check component");
-            let resolved = resolve_implementation(&binding, component, Some(&check.candidate))
-                .map_err(|error| GoldenError::message(format!("{}: candidate '{}' is unavailable: {error}", row.id, check.candidate)))?;
-            groups
-                .entry((resolved.implementation.sources, check.candidate.clone()))
-                .or_default()
-                .push((row, check));
-        }
-    }
     let mut problems = Vec::new();
-    for (group_index, ((sources, label), checks)) in groups.into_iter().enumerate() {
+    for (group_index, group) in replay_groups(&binding, matrix)?.into_iter().enumerate() {
+        let ReplayGroup {
+            implementation,
+            label,
+            checks,
+        } = group;
         let components = checks
             .iter()
             .map(|(row, _)| specgate_discovery::identity::ComponentId::from(row.component.as_deref().expect("validated component")))
@@ -91,7 +114,7 @@ pub(super) fn verify_replay(
             .collect::<Vec<_>>();
         let reports = candidates
             .execute(&executable)
-            .map_err(|error| GoldenError::message(format!("{}: batched replay failed: {error}", sources.display())))?;
+            .map_err(|error| GoldenError::message(format!("{}: batched replay failed: {error}", implementation.sources.display())))?;
         assert_eq!(reports.len(), planned.len(), "one replay report per plan");
         for (_, candidate, bundle, context) in &planned {
             let report = compare(bundle.join(trace_file()), candidate, Some(bundle.join(registry_file())), &[]);
@@ -124,5 +147,43 @@ pub(super) fn unsupported_problem(context: &str, expected: &str, reason: &str) -
         None => Some(format!(
             "{context}: replay failed for an unrelated, unclassified reason instead of '{expected}': {reason}"
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn replay_groups_preserve_component_executor_selection() {
+        use specgate_discovery::binding::{LanguageOptions, Runtime};
+
+        let root = repo_root(std::env::current_dir().unwrap());
+        let matrix = load_matrix(&root);
+        let binding = repo_path(&root, &matrix.binding);
+        let groups = replay_groups(&binding, &matrix).unwrap();
+        let group_index = |component: &str| {
+            groups
+                .iter()
+                .position(|group| group.checks.iter().any(|(row, _)| row.component.as_deref() == Some(component)))
+                .expect("fixture has a replay check")
+        };
+        let smol = group_index("fixture.async_smol_timer");
+        let tokio = group_index("fixture.async_tokio_timer");
+        assert_ne!(smol, tokio);
+        assert_eq!(group_index("fixture.async_fetch"), smol);
+        assert_eq!(group_index("fixture.fallible_unit"), smol);
+        for (index, runtime) in [(smol, Runtime::Smol), (tokio, Runtime::Tokio)] {
+            assert_eq!(
+                groups[index].implementation.options,
+                LanguageOptions::Rust { runtime, executor: None }
+            );
+        }
+        for group in groups {
+            for (row, check) in group.checks {
+                let resolved = resolve_implementation(&binding, row.component.as_deref().unwrap(), Some(&check.candidate)).unwrap();
+                assert_eq!(group.implementation, resolved.implementation);
+            }
+        }
     }
 }

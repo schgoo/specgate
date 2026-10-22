@@ -87,7 +87,7 @@ jobs:
       - name: Run C# discovery from the install layout
         shell: pwsh
         run: |
-          ./dist/specgate${{ matrix.exe }} discover --binding test/bindings/specgate.yaml `
+          ./dist/specgate${{ matrix.exe }} discover --binding test/behavior/specgate.yaml `
             --component fixture.stateless_add `
             --impl csharp `
             --registry-id urn:ctsc:registry:fixture.stateless_add `

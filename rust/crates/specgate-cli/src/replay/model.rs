@@ -137,6 +137,23 @@ pub(crate) struct Target {
     pub(crate) package_root: PathBuf,
     /// Exact resolved runtime package source.
     pub(crate) runtime: specgate_discovery::runner::PackageSource,
+    /// Candidate-owned execution context; never a capture-runtime dependency.
+    #[serde(default)]
+    pub(crate) executor: Executor,
+}
+
+/// How generated replay enters the candidate's async execution context.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum Executor {
+    #[default]
+    Synchronous,
+    Builtin {
+        alias: String,
+        source: specgate_discovery::runner::PackageSource,
+    },
+    Custom {
+        path: String,
+    },
 }
 
 /// One ordered candidate parameter in a statically linked invocation.
@@ -259,7 +276,7 @@ impl Candidate {
 
 #[cfg(test)]
 mod tests {
-    use super::{Language, Plan, RegistryDigest, RegistryId, RegistryVersion, SHA256_WIDTH, Target};
+    use super::{Executor, Language, Plan, RegistryDigest, RegistryId, RegistryVersion, SHA256_WIDTH, Target};
     use specgate_discovery::identity::{ComponentId, PackageName, PackageVersion};
     use specgate_discovery::runner::PackageSource;
     use std::path::PathBuf;
@@ -313,6 +330,7 @@ mod tests {
                 package_version: PackageVersion::from("1.0.0"),
                 package_root: PathBuf::from("fixture"),
                 runtime: PackageSource::local("specgate-runtime", "0.6.0", "../runtime"),
+                executor: Executor::Synchronous,
             },
             links: Vec::new(),
             scenarios: Vec::new(),

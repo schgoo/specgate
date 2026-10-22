@@ -21,7 +21,6 @@ linkme = { workspace = true }
 tempfile = { workspace = true }
 ohno = { workspace = true }
 tracing = { workspace = true }
-tokio = { version = "1", features = ["rt", "net", "time"] }
 
 [lints]
 workspace = true

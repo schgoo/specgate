@@ -29,6 +29,8 @@ pub(crate) struct CandidatesInner {
     pub(super) package_version: specgate_discovery::identity::PackageVersion,
     pub(super) package_root: PathBuf,
     pub(super) runtime: specgate_discovery::runner::PackageSource,
+    pub(super) executor_options: specgate_discovery::binding::LanguageOptions,
+    pub(super) executors: std::collections::BTreeMap<String, specgate_discovery::runner::ExecutorDependency>,
     pub(super) raw_registry: Registry,
     pub(super) schemas: HashMap<specgate_discovery::identity::ComponentId, Schema>,
 }
@@ -141,6 +143,8 @@ impl Candidates {
                 package_version: cargo.version,
                 package_root,
                 runtime: cargo.runtime,
+                executor_options: discovered.implementation.implementation.options,
+                executors: cargo.executors,
                 raw_registry,
                 schemas,
             }),

@@ -3,12 +3,12 @@
     Regenerate or verify the CTSC golden matrix artifacts.
 
 .DESCRIPTION
-    `Update` rewrites every generated artifact under test/goldens/ctsc.
+    `Update` rewrites declared artifacts in case and rejection expected/ directories.
     `Check` regenerates into repository-local scratch, validates the fresh
     output with the native CTSC validators, replays the components the matrix
     marks replayable, and byte-compares everything against the checked-in
     goldens. The matrix itself is hand-authored configuration; nothing else
-    under test/goldens/ctsc may be edited by hand.
+    in case and rejection expected/ directories may be edited by hand.
 #>
 [CmdletBinding()]
 param(

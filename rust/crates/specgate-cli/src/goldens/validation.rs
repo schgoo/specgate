@@ -8,45 +8,177 @@ pub(super) fn expected_artifacts(matrix: &Matrix) -> BTreeSet<RepoPath> {
     for row in &matrix.rows {
         if let Some(reference) = &row.reference {
             for artifact in &reference.artifacts {
-                expected.insert(RepoPath::try_from(format!("{}/{artifact}", row.id)).expect("portable reference artifact"));
+                expected.insert(
+                    RepoPath::try_from(format!(
+                        "{}/{artifact}",
+                        row.artifact_directory.as_ref().expect("reference ownership")
+                    ))
+                    .expect("portable reference artifact"),
+                );
             }
         }
         for (language, name) in [(row.rust.as_ref(), "rust"), (row.csharp.as_ref(), "csharp")] {
             let Some(language) = language else { continue };
             for artifact in language.error_artifacts() {
-                expected
-                    .insert(RepoPath::try_from(format!("{}/{name}/{artifact}", row.id)).expect("matrix artifact path must be portable"));
+                expected.insert(
+                    RepoPath::try_from(format!(
+                        "{}/{name}/{artifact}",
+                        row.artifact_directory.as_ref().expect("negative ownership")
+                    ))
+                    .expect("matrix artifact path must be portable"),
+                );
             }
         }
     }
     expected
 }
 
-pub(super) fn actual_artifacts(root: impl AsRef<Path>) -> std::io::Result<BTreeSet<RepoPath>> {
-    let root = root.as_ref();
-    let mut found = BTreeSet::new();
-    if !root.is_dir() {
-        return Ok(found);
+fn reject_inventory_link(path: &Path, metadata: &std::fs::Metadata) -> std::io::Result<()> {
+    let linked = metadata.file_type().is_symlink();
+    #[cfg(windows)]
+    let linked = {
+        use std::os::windows::fs::MetadataExt;
+        linked || metadata.file_attributes() & 0x400 != 0 // FILE_ATTRIBUTE_REPARSE_POINT, including junctions.
+    };
+    if linked {
+        return Err(std::io::Error::other(format!(
+            "generated inventory cannot follow symlink: {}",
+            path.display()
+        )));
     }
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(directory) = stack.pop() {
+    Ok(())
+}
+
+pub(super) fn actual_artifacts(root: impl AsRef<Path>) -> std::io::Result<BTreeSet<RepoPath>> {
+    // Unix follows a link named with a trailing separator; inspect "linked",
+    // not "linked/".
+    let root = root.as_ref().components().collect::<PathBuf>();
+    let root = root.as_path();
+    let mut found = BTreeSet::new();
+    // Check parents first: even a missing root can be reached through a linked
+    // ancestor. Do not canonicalize away the link before inspecting it.
+    for directory in root.ancestors().collect::<Vec<_>>().into_iter().rev() {
+        if directory.as_os_str().is_empty() {
+            continue;
+        }
+        let metadata = match std::fs::symlink_metadata(directory) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        reject_inventory_link(directory, &metadata)?;
+        if !metadata.is_dir() {
+            return Err(std::io::Error::other(format!(
+                "generated inventory requires a directory: {}",
+                directory.display()
+            )));
+        }
+    }
+    // Only these mixed trees reserve expected/ for generated output. The case
+    // root itself is handwritten; never treat it as a generated directory.
+    let mut stack = vec![
+        (root.join("behavior"), false),
+        (root.join("rejection"), false),
+        // Recognized goldens left at the previous layout are stale, not a
+        // second oracle. Handwritten files there are still never deleted.
+        (root.join("goldens"), false),
+        (root.join("component"), false),
+        (root.join("negative"), false),
+    ];
+    for file in [
+        manifest_file(),
+        trace_file(),
+        registry_file(),
+        error_file(),
+        Path::new("candidate.otlp.json"),
+    ] {
+        if root.join(file).exists() {
+            found.insert(RepoPath::from_path(file).expect("portable misplaced artifact"));
+        }
+    }
+    while let Some((directory, generated)) = stack.pop() {
+        let metadata = match std::fs::symlink_metadata(&directory) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        reject_inventory_link(&directory, &metadata)?;
         let entries = std::fs::read_dir(&directory)?;
+        let mut empty = true;
         for entry in entries {
             let entry = entry?;
+            empty = false;
             let path = entry.path();
-            if path.is_dir() {
-                stack.push(path);
+            let kind = entry.file_type()?;
+            reject_inventory_link(&path, &std::fs::symlink_metadata(&path)?)?;
+            if kind.is_dir() {
+                let name = entry.file_name();
+                let build_output = !generated
+                    && ["bin", "obj", "target"].iter().any(|ignored| name == std::ffi::OsStr::new(ignored))
+                    && (directory.join("Cargo.toml").is_file()
+                        || std::fs::read_dir(&directory)?
+                            .filter_map(Result::ok)
+                            .any(|entry| entry.path().extension().is_some_and(|ext| ext == "csproj")));
+                if !build_output {
+                    stack.push((path, generated || name.to_string_lossy().eq_ignore_ascii_case("expected")));
+                }
             } else {
                 let relative = RepoPath::try_from(relative_display(root, &path)).expect("generated artifact path must be portable");
-                if <RepoPath as AsRef<Path>>::as_ref(&relative) != matrix_file() {
+                if generated
+                    || entry.file_name().to_string_lossy().eq_ignore_ascii_case("expected")
+                    || [
+                        manifest_file(),
+                        trace_file(),
+                        registry_file(),
+                        error_file(),
+                        Path::new("candidate.otlp.json"),
+                    ]
+                    .iter()
+                    .any(|name| name.to_string_lossy().eq_ignore_ascii_case(&entry.file_name().to_string_lossy()))
+                {
                     found.insert(relative);
                 }
             }
+        }
+        if generated && empty {
+            found.insert(RepoPath::from_path(directory.strip_prefix(root).expect("inventory root")).expect("portable empty directory"));
         }
     }
     Ok(found)
 }
 
+/// Validate the entire reserved namespace before any deletion, directory
+/// creation or producer write. Missing files are allowed only during update.
+pub(super) fn preflight_artifacts(matrix: &Matrix, root: &Path, complete: bool) -> Result<(), GoldenError> {
+    check_ownership(matrix)?;
+    let expected = expected_artifacts(matrix);
+    let actual = actual_artifacts(root).map_err(|error| GoldenError::wrap("failed to inspect generated ownership", error))?;
+    for path in actual.intersection(&expected) {
+        if !root.join(path).is_file() {
+            return Err(GoldenError::message(format!("generated artifact must be a regular file: {path}")));
+        }
+    }
+    let extra = actual
+        .difference(&expected)
+        .filter(|path| {
+            // Empty directories on declared output paths are safe for update,
+            // including the negative errors' rust/ leaf after an interrupted
+            // run. Unknown nested directories and files are never cleaned up.
+            complete || !root.join(path).is_dir() || !expected.iter().any(|artifact| artifact.starts_with(&format!("{path}/")))
+        })
+        .collect::<Vec<_>>();
+    let missing = if complete {
+        expected.difference(&actual).collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    if !extra.is_empty() || !missing.is_empty() {
+        return Err(GoldenError::message(format!(
+            "unsafe generated namespace: unexpected {extra:?}; missing {missing:?}"
+        )));
+    }
+    Ok(())
+}
 pub(super) fn validate_artifacts(matrix: &Matrix, out_root: impl AsRef<Path>) {
     let out_root = out_root.as_ref();
     let mut problems = Vec::new();
@@ -65,7 +197,10 @@ pub(super) fn validate_artifacts(matrix: &Matrix, out_root: impl AsRef<Path>) {
         }
         for (language, name) in [(row.rust.as_ref(), "rust"), (row.csharp.as_ref(), "csharp")] {
             let Some(language) = language else { continue };
-            let directory = out_root.join(&row.id).join(name);
+            if language.succeeds() {
+                continue;
+            }
+            let directory = row.reference_dir(out_root).join(name);
             for artifact in language.error_artifacts() {
                 let path = directory.join(artifact);
                 if !path.is_file() {

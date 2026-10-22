@@ -249,6 +249,16 @@ mod cases {
     }
 
     #[test]
+    fn arty_runtime_replay() {
+        setup_replay("arty-replay.yaml", "configured", "fixture.arty_replay", 1, 1);
+    }
+
+    #[test]
+    fn arty_custom_executor_replay() {
+        setup_replay_to("arty-replay.yaml", "configured", "configured", "fixture.arty_replay", 1, 1);
+    }
+
+    #[test]
     fn typed_integration_setup_replay() {
         typed_setup_replay("typed-integration.yaml", "rust");
     }
@@ -292,6 +302,17 @@ mod cases {
     }
 
     fn setup_replay(binding_name: &str, reference: &str, component: &str, operations: u32, scenarios: u32) -> ReplayBundle {
+        setup_replay_to(binding_name, reference, "rust", component, operations, scenarios)
+    }
+
+    fn setup_replay_to(
+        binding_name: &str,
+        reference: &str,
+        candidate: &str,
+        component: &str,
+        operations: u32,
+        scenarios: u32,
+    ) -> ReplayBundle {
         let cache = tempfile::tempdir().unwrap();
         let binding = fixture_binding().with_file_name(binding_name);
         let capture_dir = cache.path().join("capture");
@@ -314,7 +335,7 @@ mod cases {
         let report = replay(
             Request::builder(Paths::new(&capture_dir, &binding))
                 .out(&output)
-                .implementation("rust")
+                .implementation(candidate)
                 .build()
                 .unwrap(),
         )
@@ -332,6 +353,61 @@ mod cases {
         );
         assert!(compared.equivalent, "{compared:#?}");
         bundle
+    }
+
+    #[test]
+    fn replay_selects_candidate_executor_identity_and_rejects_ambiguity() {
+        use specgate_discovery::{
+            binding::{LanguageOptions, Runtime},
+            runner::PackageSource,
+        };
+        let mut raw = raw_operation("add");
+        raw.is_async = true;
+        let mut normalized = normalized_operation("add");
+        normalized.is_async = true;
+        let mut candidate = candidate_metadata(raw, normalized);
+        assert_error(&candidate, "no matching replay executor");
+        for (name, version) in [("arty", "0.5.0"), ("smol", "2.0.2"), ("tokio", "1.48.0")] {
+            Arc::make_mut(&mut candidate.inner).executors = BTreeMap::from([(
+                "engine".to_string(),
+                PackageSource::registry(name, version, "registry+https://github.com/rust-lang/crates.io-index").into(),
+            )]);
+            let plan = build_plan(&reference_bundle(), &candidate).unwrap();
+            let manifest = cargo_manifest(&plan).unwrap().manifest;
+            assert!(manifest.contains(&format!("={version}")), "{manifest}");
+            assert!(manifest.contains("engine"), "{manifest}");
+            let code = source(&plan);
+            assert!(
+                code.contains(if name == "arty" {
+                    "engine::runtime::Runtime::new"
+                } else if name == "smol" {
+                    "engine::block_on"
+                } else {
+                    "engine::runtime::Builder"
+                }),
+                "{code}"
+            );
+        }
+        Arc::make_mut(&mut candidate.inner)
+            .executors
+            .insert("arty".to_string(), PackageSource::local("arty", "0.5.0", "arty").into());
+        assert_error(&candidate, "multiple matching replay executors");
+        Arc::make_mut(&mut candidate.inner).executor_options = LanguageOptions::Rust {
+            runtime: Runtime::Arty,
+            executor: None,
+        };
+        let plan = build_plan(&reference_bundle(), &candidate).unwrap();
+        assert!(matches!(plan.target.executor, model::Executor::Builtin { ref alias, .. } if alias == "arty"));
+        Arc::make_mut(&mut candidate.inner).executors.get_mut("arty").unwrap().source =
+            Err("unsupported arty Cargo source 'git+https://example.test/arty'".to_string());
+        assert_error(&candidate, "configure rust.executor");
+        Arc::make_mut(&mut candidate.inner).executor_options = LanguageOptions::Rust {
+            runtime: Runtime::Auto,
+            executor: Some("crate::run_replay".to_string()),
+        };
+        let plan = build_plan(&reference_bundle(), &candidate).unwrap();
+        assert!(source(&plan).contains("candidate::run_replay(move || async move"));
+        assert!(!cargo_manifest(&plan).unwrap().manifest.contains("[dependencies.engine]"));
     }
 
     #[test]
@@ -883,6 +959,11 @@ mod cases {
                 package_version: "0.1.0".into(),
                 package_root: PathBuf::from("candidate"),
                 runtime: specgate_discovery::runner::PackageSource::local("specgate-runtime", "0.6.0", "resolved-runtime"),
+                executor_options: specgate_discovery::binding::LanguageOptions::Rust {
+                    runtime: specgate_discovery::binding::Runtime::Auto,
+                    executor: None,
+                },
+                executors: BTreeMap::new(),
                 raw_registry: Registry {
                     ops: vec![raw],
                     types: Vec::new(),

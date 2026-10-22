@@ -4,9 +4,18 @@
 //! operations/setups/types, and exercise behavior through ordinary tests.
 //! `specgate capture` records those real invocations as deterministic CTSC
 //! reference traces; `specgate replay` invokes a candidate from the captured
-//! semantic inputs. Async operations open at first poll and preserve their construction parent across executor-thread migration and same-thread interleaving. Async setups remain unsupported. `ComponentId`,
-//! `OperationName`, and `ImplementationLabel` distinguish semantic identities while
-//! retaining transparent CTSC string projection and unrestricted string input.
+//! semantic inputs.
+//!
+//! Async operations open at first poll and keep their construction parent
+//! across executor-thread migration and same-thread interleaving. A future
+//! dropped while pending is recorded as abandoned. Async setups are
+//! unsupported. `ComponentId`, `OperationName`, and `ImplementationLabel`
+//! distinguish semantic identities while retaining transparent CTSC string
+//! projection and unrestricted string input.
+//!
+//! Task guides, including
+//! [instrumenting a Rust crate](https://github.com/schgoo/specgate/blob/main/docs/guides/instrument-rust-crate.md),
+//! are in the [SpecGate repository](https://github.com/schgoo/specgate/tree/main/docs/guides).
 //!
 //! ```rust
 //! use specgate::{spec_component, spec_operation};

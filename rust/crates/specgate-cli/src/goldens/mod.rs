@@ -1,8 +1,8 @@
 #![cfg(any(test, feature = "test-util"))]
 //! CTSC golden matrix harness.
 //!
-//! The checked-in matrix at `test/goldens/ctsc/matrix.json` is the reviewable
-//! configuration; every artifact beside it is regenerated product output. The
+//! The checked-in matrix at `test/behavior/matrix.json` is the reviewable
+//! configuration; only declared expected/ directories contain generated output. The
 //! harness discovers, captures, and validates the whole fixture corpus in one
 //! pass, then either rewrites the goldens (`update`) or byte-compares fresh
 //! output against them (`check`).

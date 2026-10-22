@@ -187,6 +187,30 @@ pub struct CandidatePackage {
     pub path: PathBuf,
     /// Exact runtime source resolved in the candidate graph.
     pub runtime: PackageSource,
+    /// Supported direct executor dependencies, keyed by their Rust crate alias.
+    pub executors: std::collections::BTreeMap<String, ExecutorDependency>,
+}
+
+/// A direct executor dependency with source validation deferred until replay.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "Cargo executor metadata exposes its resolved package and source"
+)]
+pub struct ExecutorDependency {
+    /// Cargo package name, independent of whether a runner can preserve its source.
+    pub package: PackageName,
+    /// Exact package source or the diagnostic preventing generated dependency use.
+    pub source: Result<PackageSource, String>,
+}
+
+impl From<PackageSource> for ExecutorDependency {
+    fn from(source: PackageSource) -> Self {
+        Self {
+            package: source.package.clone(),
+            source: Ok(source),
+        }
+    }
 }
 
 impl CandidatePackage {
@@ -199,6 +223,7 @@ impl CandidatePackage {
             version: deps.version,
             path: deps.path,
             runtime: deps.runtime,
+            executors: std::collections::BTreeMap::new(),
         }
     }
 }

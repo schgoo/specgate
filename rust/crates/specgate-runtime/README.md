@@ -10,13 +10,17 @@
 Provides native structured operation capture, semantic value projection,
 and the link-time operation/type registry used by CTSC discovery.
 Isolated test processes can activate native capture through
-`SPECGATE_NATIVE_CAPTURE`; the first operation starts the session lazily and
-each completed top-level operation atomically refreshes a stable JSON
-sidecar containing the full scenario. Operation and setup finalizers consume
+`SPECGATE_NATIVE_CAPTURE`; the first operation starts the session lazily, and
+the JSON sidecar containing the full scenario is atomically rewritten once
+each operation’s declared inputs are recorded and again at every operation
+close. Operation and setup finalizers consume
 their guards and report failure explicitly. Guard destruction performs only
 infallible in-memory cleanup; it never persists, panics, or writes stderr.
 Manually started sessions remain active until `finish`.
-An annotated async operation captures the collector and parent at future construction, opens its span on first poll, and reinstalls context on every poll so migration and same-thread interleaving retain correct parentage. Setup staging remains thread-local, so async setups are unsupported.
+An annotated async operation captures the collector and parent at future
+construction, opens its span on first poll, and reinstalls context on every
+poll, so migration and same-thread interleaving retain correct parentage.
+Setup staging remains thread-local, so async setups are unsupported.
 
 Captured inputs are the registry’s black-box surface, not the raw call:
 `#[spec_setup]` producers record their construction inputs, and the

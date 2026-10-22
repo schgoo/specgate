@@ -81,3 +81,27 @@ Focused discovery, capture, planner, and generated-runner tests must exercise
 semantic input renaming, receiver and parameter setup resolution, async
 completion, and concrete generic typed results. Captures and replay outputs must
 pass the native CTSC validators.
+
+## Candidate-owned execution (2026-10-22)
+
+The owner approved keeping standard engine selection in the binding and custom
+runtime configuration in ordinary candidate code, with Arty as a first-class
+integration alongside Smol and Tokio. The recording crate `specgate-runtime`
+must not depend unconditionally on any async engine.
+
+The previously unused `rust.runtime` field now selects replay execution.
+Its default is `auto`, selecting exactly one supported direct candidate
+dependency, including renamed and development dependencies. Ambiguity is an
+error, not permission to substitute a different runtime. Generated external
+manifests preserve the selected dependency's exact resolved version and
+supported path/registry source; generated test entries use the candidate's
+dependency directly.
+
+An optional `rust.executor` names a crate-rooted candidate wrapper. It replaces
+built-in execution and owns the complete task factory, including construction
+and teardown of setup-owned environments. A factory, rather than an already
+constructed future, lets Arty create non-`Send` futures and receivers on the
+worker that will poll them. Custom wrappers can reuse native-test configuration
+helpers and provide application-owned Arty task capabilities without SpecGate
+inventing a global runtime context. Capture continues to run the original tests
+with their original wrappers. Synchronous replay requires no async engine.

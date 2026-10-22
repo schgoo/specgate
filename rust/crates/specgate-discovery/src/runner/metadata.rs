@@ -19,8 +19,8 @@
 use crate::error::{Error, ErrorKind};
 mod models;
 pub use models::{
-    CandidateDeps, CandidatePackage, Dependency, DependencyBuilder, DependencySource, PackageLocation, PackageSource, RunnerCargo,
-    VersionRequirement,
+    CandidateDeps, CandidatePackage, Dependency, DependencyBuilder, DependencySource, ExecutorDependency, PackageLocation, PackageSource,
+    RunnerCargo, VersionRequirement,
 };
 
 use serde::{Deserialize, Serialize};
@@ -119,7 +119,7 @@ fn override_context(
         Some(runtime_override) => override_source(runtime_package, runtime_override)?,
         None => package_source(runtime_package)?,
     };
-    Ok(CandidatePackage::new(CandidateDeps {
+    let mut context = CandidatePackage::new(CandidateDeps {
         crate_name: candidate
             .targets
             .iter()
@@ -131,7 +131,34 @@ fn override_context(
         version: candidate.version.clone().into(),
         path: package_root.to_path_buf(),
         runtime,
-    }))
+    });
+    context.executors = executor_dependencies(&metadata, &candidate.id);
+    Ok(context)
+}
+
+fn executor_dependencies(metadata: &CargoMetadata, candidate_id: &str) -> BTreeMap<String, ExecutorDependency> {
+    let mut executors = BTreeMap::new();
+    if let Some(node) = metadata
+        .resolve
+        .as_ref()
+        .and_then(|resolve| resolve.nodes.iter().find(|node| node.id == candidate_id))
+    {
+        for dependency in &node.deps {
+            if let Some(package) = metadata.packages.iter().find(|package| package.id == dependency.pkg)
+                && matches!(package.name.as_str(), "arty" | "smol" | "tokio")
+                && dependency.dep_kinds.iter().any(|kind| kind.kind.as_deref() != Some("build"))
+            {
+                executors.insert(
+                    dependency.name.clone(),
+                    ExecutorDependency {
+                        package: package.name.clone().into(),
+                        source: package_source(package).map_err(|error| error.to_string()),
+                    },
+                );
+            }
+        }
+    }
+    executors
 }
 
 /// Serialize a standalone generated Cargo manifest and any registry config
@@ -300,6 +327,15 @@ struct CargoNode {
 #[derive(Deserialize)]
 struct NodeDependency {
     pkg: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    dep_kinds: Vec<DependencyKind>,
+}
+
+#[derive(Deserialize)]
+struct DependencyKind {
+    kind: Option<String>,
 }
 
 fn cargo_metadata(manifest: &Path, package_root: &Path, system: &system::System) -> Result<CargoMetadata, Error> {
@@ -464,9 +500,9 @@ fn package_source(package: &CargoPackage) -> Result<PackageSource, Error> {
         Some(source) if registry_index(source).is_ok() => PackageLocation::Registry(source.into()),
         Some(source) => {
             return Err(failure(format!(
-                "unsupported specgate-runtime Cargo source '{source}' for PackageId '{}'; generated runners cannot preserve this \
+                "unsupported {} Cargo source '{source}' for PackageId '{}'; generated runners cannot preserve this \
                  identity without a graph-wide Cargo source replacement",
-                package.id
+                package.name, package.id
             )));
         }
     };

@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../../../binding-schema.json
+components:
+  fixture.arty_replay:
+    implementations:
+      rust:
+        language: rust
+        sources: arty-replay
+        tests:
+          projects: [arty-replay/Cargo.toml]
+      configured:
+        language: rust
+        sources: arty-replay
+        tests:
+          projects: [arty-replay/Cargo.toml]
+        rust:
+          executor: crate::tests::replay_executor

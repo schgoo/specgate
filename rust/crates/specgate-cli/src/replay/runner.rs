@@ -122,7 +122,7 @@ pub(super) fn cargo_manifest(plan: &Plan) -> Result<specgate_discovery::runner::
         .version(SERDE_VERSION)
         .build()
         .expect("the fixed serde_json replay dependency must be valid");
-    let dependencies = BTreeMap::from([
+    let mut dependencies = BTreeMap::from([
         (
             "candidate".to_string(),
             specgate_discovery::runner::Dependency::local(
@@ -139,13 +139,20 @@ pub(super) fn cargo_manifest(plan: &Plan) -> Result<specgate_discovery::runner::
                 .map_err(|error| Error::wrap(ErrorKind::Linking, "runtime replay dependency is invalid", error))?,
         ),
     ]);
-    let mut cargo = specgate_discovery::runner::runner_cargo("specgate-replay-runner", dependencies)
-        .map_err(|error| Error::wrap(ErrorKind::Linking, "replay runner manifest is invalid", error))?;
-    if plan.links.iter().any(|link| link.is_async) {
-        cargo
-            .manifest
-            .push_str("\n[dependencies.tokio]\nversion = \"1\"\nfeatures = [\"rt\", \"net\", \"time\"]\n");
+    if let model::Executor::Builtin { alias, source } = &plan.target.executor {
+        if dependencies.contains_key(alias) {
+            return failure(format!(
+                "candidate executor dependency alias '{alias}' conflicts with a generated replay dependency"
+            ));
+        }
+        dependencies.insert(
+            alias.clone(),
+            specgate_discovery::runner::Dependency::from_source(source)
+                .map_err(|error| Error::wrap(ErrorKind::Linking, "executor replay dependency is invalid", error))?,
+        );
     }
+    let cargo = specgate_discovery::runner::runner_cargo("specgate-replay-runner", dependencies)
+        .map_err(|error| Error::wrap(ErrorKind::Linking, "replay runner manifest is invalid", error))?;
     Ok(cargo)
 }
 
@@ -154,20 +161,36 @@ pub(super) fn source(plan: &Plan) -> String {
 }
 
 fn source_in(plan: &Plan, harness: bool) -> String {
-    let asynchronous = harness || plan.links.iter().any(|link| link.is_async);
+    let asynchronous = harness || !matches!(plan.target.executor, model::Executor::Synchronous);
     let mut source = if harness {
         String::from("{\nfn run(sidecar: &std::path::Path) -> Result<(), String> {\n")
     } else {
         String::from(
-            "fn run(sidecar: &std::path::Path, publish: impl FnOnce(&std::path::Path, &[u8]) -> std::io::Result<()>) -> Result<(), String> {\n",
+            "fn run(sidecar: &std::path::Path, publish: impl FnOnce(&std::path::Path, &[u8]) -> std::io::Result<()> + Send) -> Result<(), String> {\n",
         )
     };
     source.push_str("    extern crate alloc;\n");
     if asynchronous {
-        if harness {
-            source.push_str("    __specgate::harness::run(async {\n");
-        } else {
-            source.push_str("    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|error| format!(\"failed to start replay executor: {error}\"))?;\n    runtime.block_on(async {\n");
+        match &plan.target.executor {
+            model::Executor::Synchronous => source.push_str("    __specgate::harness::run_sync(async {\n"),
+            model::Executor::Custom { path } => {
+                let path = if harness {
+                    path.clone()
+                } else {
+                    path.replacen("crate::", "candidate::", 1)
+                };
+                writeln!(source, "    {path}(move || async move {{").expect("writing source");
+            }
+            model::Executor::Builtin { alias, source: dependency } => match dependency.package.as_str() {
+                "arty" => {
+                    writeln!(source, "    let runtime = {alias}::runtime::Runtime::new().map_err(|error| format!(\"failed to start Arty replay executor: {{error}}\"))?;\n    let result = runtime.scheduler().block_on(async move |_| {{").expect("writing source");
+                }
+                "smol" => writeln!(source, "    {alias}::block_on(async {{").expect("writing source"),
+                "tokio" => {
+                    writeln!(source, "    let runtime = {alias}::runtime::Builder::new_current_thread().enable_all().build().map_err(|error| format!(\"failed to start Tokio replay executor: {{error}}\"))?;\n    runtime.block_on(async {{").expect("writing source");
+                }
+                _ => unreachable!("validated replay executor"),
+            },
         }
     }
     source.push_str("    let mut captures = Vec::new();\n");
@@ -363,11 +386,13 @@ fn source_in(plan: &Plan, harness: bool) -> String {
         source.push_str("    let json = serde_json::to_vec(&captures).map_err(|error| format!(\"failed to serialize native captures: {error}\"))?;\n    publish(sidecar, &json).map_err(|error| format!(\"failed to write native capture sidecar: {error}\"))?;\n    Ok(())\n");
     }
     if asynchronous {
-        source.push_str(if harness {
-            "    }).map_err(|error| error.to_string())?\n"
-        } else {
-            "    })\n"
-        });
+        match &plan.target.executor {
+            model::Executor::Synchronous => source.push_str("    }).map_err(|error| error.to_string())?\n"),
+            model::Executor::Builtin { source: dependency, .. } if dependency.package.as_str() == "arty" => {
+                source.push_str("    });\n    runtime.stop().map_err(|error| format!(\"failed to stop Arty replay executor: {error}\"))?;\n    result.map_err(|error| format!(\"Arty replay task failed: {error}\"))?\n");
+            }
+            _ => source.push_str("    })\n"),
+        }
     }
     if harness {
         source.push_str("}\nlet sidecar = std::env::var_os(\"SPECGATE_TEST_CAPTURE\").expect(\"missing test replay output\");\nrun(std::path::Path::new(&sidecar)).expect(\"candidate test replay failed\");\n}\n");

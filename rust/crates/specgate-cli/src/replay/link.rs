@@ -139,12 +139,62 @@ pub(super) fn build_plan(bundle: &ReplayBundle, candidate: &Candidate) -> Result
             package_version: candidate.metadata().package_version.clone(),
             package_root: candidate.metadata().package_root.clone(),
             runtime: candidate.metadata().runtime.clone(),
+            executor: select_executor(candidate.metadata(), links.iter().any(|link| link.is_async))?,
         },
         links,
         scenarios,
     };
     serde_json::to_vec(&plan).map_err(|error| format!("failed to serialize target-local invocation plan: {error}"))?;
     Ok(plan)
+}
+
+fn select_executor(candidate: &super::CandidatesInner, asynchronous: bool) -> Result<super::model::Executor, Error> {
+    use specgate_discovery::binding::{LanguageOptions, Runtime};
+    let LanguageOptions::Rust { runtime, executor } = &candidate.executor_options else {
+        return failure("candidate replay executor requires a Rust implementation");
+    };
+    if let Some(path) = executor {
+        let parsed: syn::Path = syn::parse_str(path).map_err(|error| format!("invalid rust.executor path '{path}': {error}"))?;
+        if parsed
+            .segments
+            .iter()
+            .any(|segment| !matches!(segment.arguments, syn::PathArguments::None))
+        {
+            return failure("rust.executor must name a function without generic arguments");
+        }
+        return Ok(super::model::Executor::Custom { path: path.clone() });
+    }
+    if !asynchronous && *runtime == Runtime::Auto {
+        return Ok(super::model::Executor::Synchronous);
+    }
+    let matches = candidate
+        .executors
+        .iter()
+        .filter(|(_, source)| match runtime {
+            Runtime::Auto => true,
+            Runtime::Arty => source.package.as_str() == "arty",
+            Runtime::Smol => source.package.as_str() == "smol",
+            Runtime::Tokio => source.package.as_str() == "tokio",
+        })
+        .collect::<Vec<_>>();
+    match matches.as_slice() {
+        [(alias, dependency)] => Ok(super::model::Executor::Builtin {
+            alias: (*alias).clone(),
+            source: dependency
+                .source
+                .as_ref()
+                .map_err(|diagnostic| {
+                    Error::from(format!(
+                        "candidate executor cannot be used by a generated runner: {diagnostic}; configure rust.executor"
+                    ))
+                })?
+                .clone(),
+        }),
+        [] => failure(
+            "no matching replay executor in the candidate's direct dependencies; add arty, smol, or tokio, or configure rust.executor",
+        ),
+        _ => failure("candidate has multiple matching replay executors; select rust.runtime or configure rust.executor"),
+    }
 }
 
 pub(super) fn link_operation(reference: &specgate_ctsc::replay::model::RegistryOp, candidate: &Candidate) -> Result<Link, Error> {

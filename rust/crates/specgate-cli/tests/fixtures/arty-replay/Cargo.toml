@@ -1,0 +1,13 @@
+[package]
+name = "specgate-arty-replay-fixture"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+specgate = { path = "../../../../specgate" }
+
+[dev-dependencies]
+candidate_engine = { package = "arty", version = "0.5", features = ["test-util"] }

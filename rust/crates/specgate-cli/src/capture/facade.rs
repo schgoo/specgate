@@ -13,7 +13,7 @@ const DEFAULT_CAPTURE_ROOT: &str = ".specgate/captures";
 // Ordinary capture publishes evidence from failing tests; golden generation opts into rejecting them.
 const REJECT_FAILURES: bool = false;
 
-/// Capture passing tests for one Rust implementation of a component as a native CTSC bundle.
+/// Capture passing tests for one Rust or C# implementation of a component as a native CTSC bundle.
 ///
 /// An empty implementation label auto-selects the component's sole
 /// implementation and errors when several are declared. The component is

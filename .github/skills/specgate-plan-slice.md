@@ -6,8 +6,9 @@ Read-only.
 ## Steps
 
 1. Read the user directive, `AGENTS.md`, `docs/digests/llm.md`,
-   `docs/specgate-ctsc-migration.md`, the relevant CTSC contracts, and affected
-   source and tests.
+   `docs/status.md`, `docs/reference/limitations.md`, the relevant CTSC
+   contracts, and affected source and tests. For user-facing workflow changes,
+   also read the affected guide under `docs/guides/`.
 2. Confirm prerequisites. Stop if required implementation, toolchain, fixture,
    or human decision is missing.
 3. Define:

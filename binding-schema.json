@@ -57,10 +57,21 @@
           "properties": {
             "runtime": {
               "type": "string",
-              "enum": ["smol", "tokio"],
-              "description": "Rust async runtime. Defaults to smol."
+              "enum": ["auto", "arty", "smol", "tokio"],
+              "description": "Replay executor. Defaults to detecting the only supported direct candidate dependency."
+            },
+            "executor": {
+              "type": "string",
+              "pattern": "^crate::(?:r#)?[A-Za-z_][A-Za-z0-9_]*(?:::(?:r#)?[A-Za-z_][A-Za-z0-9_]*)*$",
+              "description": "Candidate function that runs a replay task factory using custom runtime configuration. Mutually exclusive with an explicit runtime other than auto."
             }
-          }
+          },
+          "allOf": [
+            {
+              "if": { "required": ["executor", "runtime"] },
+              "then": { "properties": { "runtime": { "const": "auto" } } }
+            }
+          ]
         },
         "csharp": {
           "type": "object",
