@@ -52,7 +52,6 @@ macro_rules! spec_component {
     ($component:literal $(,)?) => {
         #[doc(hidden)]
         const __SPECGATE_COMPONENT: &str = $component;
-        $crate::__specgate_test_harness!();
     };
 }
 

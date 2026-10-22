@@ -119,6 +119,15 @@ pub(super) fn build_plan(bundle: &ReplayBundle, candidate: &Candidate) -> Result
         }
     }
     let plan = Plan {
+        dispatch_modules: candidate
+            .metadata()
+            .raw_registry
+            .ops
+            .iter()
+            .map(|operation| operation.module_path.to_string())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect(),
         test_target,
         component_id: bundle.component_id.clone().as_str().into(),
         registry_id: bundle.registry.identity.id.as_str().to_string().into(),
@@ -180,6 +189,7 @@ fn select_executor(candidate: &super::CandidatesInner, asynchronous: bool) -> Re
     match matches.as_slice() {
         [(alias, dependency)] => Ok(super::model::Executor::Builtin {
             alias: (*alias).clone(),
+            features: dependency.features.clone(),
             source: dependency
                 .source
                 .as_ref()
@@ -230,6 +240,13 @@ pub(super) fn link_operation(reference: &specgate_ctsc::replay::model::RegistryO
     if !raw.is_public {
         return failure(format!(
             "candidate operation '{}::{}' is not public",
+            reference.component_id(),
+            reference.name()
+        ));
+    }
+    if raw.consumes_receiver {
+        return failure(format!(
+            "candidate operation '{}::{}' consumes its receiver; replay requires a borrowed &self or &mut self receiver",
             reference.component_id(),
             reference.name()
         ));
@@ -317,6 +334,7 @@ pub(super) fn link_operation(reference: &specgate_ctsc::replay::model::RegistryO
         }
         validate_ident(&producer.fn_name, "candidate setup function name")?;
         setups.push(super::model::Setup {
+            explicit_component: producer.explicit_component,
             module_path: module_path(producer, &candidate.metadata().crate_name)?,
             fn_name: producer.fn_name.to_string(),
             fills: selection.fills.to_string(),
@@ -343,6 +361,16 @@ pub(super) fn link_operation(reference: &specgate_ctsc::replay::model::RegistryO
             if let Some(index) = setups.iter().position(|setup| setup.fills == parameter.name.as_str()) {
                 let native = syn::parse_str::<syn::Type>(parameter.ty.as_str())
                     .map_err(|error| Error::from(format!("invalid candidate parameter type '{}': {error}", parameter.ty)))?;
+                let projection = match &native {
+                    syn::Type::Reference(reference)
+                        if matches!(reference.elem.as_ref(), syn::Type::Slice(_))
+                            || matches!(reference.elem.as_ref(), syn::Type::Path(path) if path.path.is_ident("str")) =>
+                    {
+                        let target = &reference.elem;
+                        Some(quote::quote!(#target).to_string())
+                    }
+                    _ => None,
+                };
                 let borrow = match native {
                     syn::Type::Reference(reference) if reference.mutability.is_some() => "&mut ",
                     syn::Type::Reference(_) => "&",
@@ -351,6 +379,7 @@ pub(super) fn link_operation(reference: &specgate_ctsc::replay::model::RegistryO
                 Ok(super::model::Parameter::Setup {
                     index,
                     borrow: borrow.to_string(),
+                    projection,
                 })
             } else {
                 inputs
@@ -367,6 +396,8 @@ pub(super) fn link_operation(reference: &specgate_ctsc::replay::model::RegistryO
         })
         .collect::<Result<_, _>>()?;
     Ok(Link {
+        explicit_component: raw.explicit_component,
+        native_module: raw.module_path.to_string(),
         component_id: reference.component_id().as_str().into(),
         operation_name: reference.name().as_str().into(),
         module_path: operation_module,
@@ -682,7 +713,7 @@ pub(super) fn module_path(raw: &RawOperation, package_name: impl AsRef<str>) -> 
     let crate_ident = raw
         .test_target
         .as_ref()
-        .filter(|target| !target.library)
+        .filter(|target| target.kind != specgate_discovery::registry::TestTargetKind::Library)
         .map(|target| target.name.replace('-', "_"))
         .filter(|root| segments.first().copied() == Some(root.as_str()))
         .unwrap_or(library_root);

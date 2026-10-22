@@ -150,6 +150,7 @@ pub(crate) enum Executor {
     Builtin {
         alias: String,
         source: specgate_discovery::runner::PackageSource,
+        features: Vec<String>,
     },
     Custom {
         path: String,
@@ -170,6 +171,8 @@ pub(crate) struct Input {
 /// One distinct semantic-to-candidate operation link.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Link {
+    pub(crate) explicit_component: bool,
+    pub(crate) native_module: String,
     /// Owning component identifier.
     pub(crate) component_id: ComponentId,
     /// Semantic operation name.
@@ -197,6 +200,7 @@ pub(crate) struct Link {
 /// One semantically selected setup invocation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Setup {
+    pub(crate) explicit_component: bool,
     pub(crate) module_path: Vec<String>,
     pub(crate) fn_name: String,
     pub(crate) fills: String,
@@ -211,7 +215,12 @@ pub(crate) struct Setup {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum Parameter {
     Input(usize),
-    Setup { index: usize, borrow: String },
+    Setup {
+        index: usize,
+        borrow: String,
+        /// Unsized borrowed target, resolved only in the operation's scope.
+        projection: Option<String>,
+    },
 }
 
 /// One planned invocation with scenario-specific semantic values.
@@ -237,6 +246,8 @@ pub(crate) struct Scenario {
 /// The complete target-local invocation plan built before code generation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Plan {
+    /// Every discovered declaration scope requiring a lexical dispatch include.
+    pub(crate) dispatch_modules: Vec<String>,
     /// Native test target required by test-only or private setup declarations.
     pub(crate) test_target: Option<specgate_discovery::registry::TestTarget>,
     /// Replayed component identifier.
@@ -316,6 +327,7 @@ mod tests {
     #[test]
     fn plan_roundtrip() {
         let plan = Plan {
+            dispatch_modules: Vec::new(),
             test_target: None,
             component_id: ComponentId::from("fixture.component"),
             registry_id: RegistryId::from("urn:ctsc:registry:fixture.component".to_string()),

@@ -181,6 +181,7 @@ pub fn expand_operation(attribute: TokenStream2, item: TokenStream2) -> syn::Res
     let body = function.block.clone();
     let rt = runtime();
     let component = component(owner.as_deref());
+    let explicit_component = owner.is_some();
     let name = if generic_parameters.is_empty() {
         let name = &declarations[0].name;
         quote!(::core::option::Option::Some(#name))
@@ -409,6 +410,10 @@ pub fn expand_operation(attribute: TokenStream2, item: TokenStream2) -> syn::Res
 
     let function_name = function.sig.ident.to_string();
     let is_method = has_receiver(&function);
+    let consumes_receiver = function
+        .sig
+        .receiver()
+        .is_some_and(|receiver| !matches!(receiver.ty.as_ref(), Type::Reference(_)));
     let is_public = matches!(function.vis, syn::Visibility::Public(_));
     let method_bridge = if is_method && std::env::var_os("SPECGATE_TEST_DISPATCH").is_some() {
         let package = std::env::var("CARGO_PKG_NAME").map_err(|error| syn::Error::new_spanned(&function.sig, error))?;
@@ -423,7 +428,7 @@ pub fn expand_operation(attribute: TokenStream2, item: TokenStream2) -> syn::Res
                     macro_rules! __specgate_selected {
                         () => { __specgate_dispatch!(#package, method, #component, #name, #function_ident, [#(#types),*]) };
                     }
-                    include!(env!("SPECGATE_TEST_DISPATCH"))
+                    include!(env!(concat!("SPECGATE_TEST_MODULE_", module_path!())))
                 }
             }
         });
@@ -452,6 +457,7 @@ pub fn expand_operation(attribute: TokenStream2, item: TokenStream2) -> syn::Res
     } else {
         TokenStream2::new()
     };
+    let dependency = super::harness::dependency();
     let metadata = declarations
         .iter()
         .map(|declaration| {
@@ -490,7 +496,7 @@ pub fn expand_operation(attribute: TokenStream2, item: TokenStream2) -> syn::Res
                         macro_rules! __specgate_selected {
                             () => { __specgate_dispatch!(#package, operation, #component, #name, #function_ident, [#(#type_arguments),*]) };
                         }
-                        include!(env!("SPECGATE_TEST_DISPATCH"))
+                        include!(env!(concat!("SPECGATE_TEST_MODULE_", module_path!())))
                     })
                 }
             } else {
@@ -500,6 +506,7 @@ pub fn expand_operation(attribute: TokenStream2, item: TokenStream2) -> syn::Res
             Ok(quote! {
             #[allow(dead_code, non_upper_case_globals, reason = "generated linker metadata is referenced externally")]
             const #const_name: () = {
+                #dependency
                 #[#rt::_private::linkme::distributed_slice(#rt::SPECGATE_OPS)]
                 #[linkme(crate = #rt::_private::linkme)]
                 static __SPECGATE_META: #rt::OpMeta = #rt::OpMeta::const_builder(#rt::OpDeps {
@@ -512,6 +519,8 @@ pub fn expand_operation(attribute: TokenStream2, item: TokenStream2) -> syn::Res
                 })
                 .asynchronous(#is_async)
                 .method(#is_method)
+                .consuming_receiver(#consumes_receiver)
+                .explicit_component(#explicit_component)
                 .public(#is_public)
                 .type_arguments(|| ::std::vec![#(#type_names),*])
                 #replay

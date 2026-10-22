@@ -26,6 +26,8 @@ pub struct OpMeta {
     pub(crate) is_async: bool,
     /// Whether this declaration is a method.
     pub(crate) is_method: bool,
+    pub(crate) consumes_receiver: bool,
+    pub(crate) explicit_component: bool,
     /// Whether this declaration is public.
     pub(crate) is_public: bool,
     /// Raw parameter names and types.
@@ -253,6 +255,8 @@ impl OpMeta {
                 is_setup: false,
                 is_async: false,
                 is_method: false,
+                consumes_receiver: false,
+                explicit_component: false,
                 is_public: false,
                 params: deps.params,
                 return_type: deps.return_type.0,
@@ -309,6 +313,20 @@ impl OpBuilder {
     #[must_use]
     pub const fn method(mut self, value: bool) -> Self {
         self.meta.is_method = value;
+        self
+    }
+
+    /// Record that the method takes ownership rather than borrowing its receiver.
+    #[must_use]
+    pub const fn consuming_receiver(mut self, value: bool) -> Self {
+        self.meta.consumes_receiver = value;
+        self
+    }
+
+    /// Preserve whether the declaration uses a literal component override.
+    #[must_use]
+    pub const fn explicit_component(mut self, value: bool) -> Self {
+        self.meta.explicit_component = value;
         self
     }
 
@@ -584,6 +602,12 @@ impl Discovery {
                 op.is_setup, op.is_async, op.is_method, op.is_public
             );
             write_property(&mut out, ",\"return_type\":", op.return_type);
+            if op.consumes_receiver {
+                out.push_str(",\"consumes_receiver\":true");
+            }
+            if op.explicit_component {
+                out.push_str(",\"explicit_component\":true");
+            }
             if let Some(setup) = op.replay_setup {
                 write_property(&mut out, ",\"replay_output\":", setup.output());
             }

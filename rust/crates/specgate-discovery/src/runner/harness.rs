@@ -1,11 +1,25 @@
-//! Compiler-reported Cargo test targets and annotation-generated entry points.
+//! Compiler-reported Cargo test targets and CLI-injected crate-root entry points.
 
 use super::system::{ProcessRequest, System};
-use crate::{Error, discovery::registry::TestTarget, error::ErrorKind};
+use crate::{
+    Error,
+    discovery::registry::{TestTarget, TestTargetKind},
+    error::ErrorKind,
+};
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// One compiler-reported test executable with an internal annotation hook.
+mod compiler_build;
+
+#[cfg(test)]
+mod compiler {
+    const ROOTS: &[&str] = &[];
+    const FACADES: &[&str] = &[];
+    include!("harness/compiler.rs");
+}
+
+/// One compiler-reported test executable with an internal crate-root hook.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct Binary {
@@ -21,39 +35,84 @@ fn failure(message: impl Into<String>) -> Error {
     Error::message(ErrorKind::Cargo, message)
 }
 
-/// Build and enumerate only annotation-generated entry points.
+/// Build and enumerate only CLI-injected entry points.
 ///
 /// # Errors
 /// Reports Cargo, metadata, and libtest enumeration failures.
-pub fn build(package: &Path, entry: &Path, dispatch: &Path, scratch: &Path, target: Option<&TestTarget>) -> Result<Vec<Binary>, Error> {
-    build_in(package, entry, Some(dispatch), scratch, target, &System::real())
+pub fn build(
+    package: &Path,
+    entry: &Path,
+    dispatch: &Path,
+    module_dispatches: &BTreeMap<String, PathBuf>,
+    scratch: &Path,
+    target: Option<&TestTarget>,
+) -> Result<Vec<Binary>, Error> {
+    build_in(package, entry, Some(dispatch), module_dispatches, scratch, target, &System::real())
 }
 
 fn build_in(
     package: &Path,
     entry: &Path,
     dispatch: Option<&Path>,
+    module_dispatches: &BTreeMap<String, PathBuf>,
     scratch: &Path,
     target: Option<&TestTarget>,
+    system: &System,
+) -> Result<Vec<Binary>, Error> {
+    let wrapper = compiler_build::build(package, scratch, system)?;
+    build_with_wrapper(package, entry, dispatch, module_dispatches, scratch, target, &wrapper, system)
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "test compiler and concrete system adapters are injected independently"
+)]
+fn build_with_wrapper(
+    package: &Path,
+    entry: &Path,
+    dispatch: Option<&Path>,
+    module_dispatches: &BTreeMap<String, PathBuf>,
+    scratch: &Path,
+    target: Option<&TestTarget>,
+    compiler: &compiler_build::Compiler,
     system: &System,
 ) -> Result<Vec<Binary>, Error> {
     entry.to_str().ok_or_else(|| failure("test-harness entry path is not Unicode"))?;
     let request = ProcessRequest::builder(super::cargo_with(system)).arg("test");
     let request = match target {
-        Some(target) if target.library => request.arg("--lib"),
-        Some(target) => request.arg("--test").arg(&target.name),
+        Some(TestTarget {
+            kind: TestTargetKind::Library,
+            ..
+        }) => request.arg("--lib"),
+        Some(TestTarget {
+            kind: TestTargetKind::Binary,
+            name,
+        }) => request.arg("--bin").arg(name),
+        Some(TestTarget {
+            kind: TestTargetKind::Integration,
+            name,
+        }) => request.arg("--test").arg(name),
         None => request.arg("--tests"),
     };
     let request = match dispatch {
         Some(dispatch) => request.env("SPECGATE_TEST_DISPATCH", dispatch),
         None => request.env_remove("SPECGATE_TEST_DISPATCH"),
     };
+    let request = module_dispatches.iter().fold(request, |request, (module, path)| {
+        request.env(format!("SPECGATE_TEST_MODULE_{module}"), path)
+    });
+    let request = match &compiler.build_directory {
+        // Cargo omits filename hashes for C-compatible library artifacts.
+        // Wrapper-specific builds must not overwrite ordinary cached rlibs.
+        Some(path) => request.env("CARGO_BUILD_BUILD_DIR", path),
+        None => request,
+    };
     let request = request
         .arg("--no-run")
         .arg("--quiet")
         .arg("--message-format=json")
         .current_dir(package)
-        .env_remove("RUSTC_WORKSPACE_WRAPPER")
+        .env("RUSTC_WORKSPACE_WRAPPER", &compiler.executable)
         .env_remove("CARGO")
         .env_remove("CARGO_MANIFEST_DIR")
         .env("SPECGATE_TEST_ENTRY", entry)
@@ -92,9 +151,18 @@ fn build_in(
             .as_str()
             .ok_or_else(|| failure("test artifact has no target name"))?
             .to_string();
-        let library = target["kind"]
+        let kinds = target["kind"]
             .as_array()
-            .is_some_and(|kinds| kinds.iter().filter_map(Value::as_str).any(super::metadata::library_kind));
+            .ok_or_else(|| failure("test artifact has no target kind"))?;
+        let kind = if kinds.iter().filter_map(Value::as_str).any(super::metadata::library_kind) {
+            TestTargetKind::Library
+        } else if kinds.iter().any(|kind| kind == "bin") {
+            TestTargetKind::Binary
+        } else if kinds.iter().any(|kind| kind == "test") {
+            TestTargetKind::Integration
+        } else {
+            return Err(failure(format!("unsupported Cargo test target kind for '{name}': {kinds:?}")));
+        };
         let request = ProcessRequest::builder(executable)
             .arg("--list")
             .arg("--format")
@@ -114,17 +182,16 @@ fn build_in(
             .map(str::to_string);
         if let Some(entry) = entry {
             binaries.push(Binary {
-                target: TestTarget { name, library },
+                target: TestTarget { name, kind },
                 executable: PathBuf::from(executable),
                 entry,
             });
         }
     }
     binaries.sort_by(|left, right| {
-        right
-            .target
-            .library
-            .cmp(&left.target.library)
+        left.target
+            .kind
+            .cmp(&right.target.kind)
             .then_with(|| left.target.name.cmp(&right.target.name))
     });
     Ok(binaries)
@@ -133,7 +200,7 @@ fn build_in(
 pub(crate) fn augment(package: &Path, original: &str, scratch: &Path, system: &System) -> Result<String, Error> {
     let entry = scratch.join("test-entry.rs");
     system.filesystem.write(&entry, b"{ let path = std::env::var_os(\"SPECGATE_TEST_METADATA\").expect(\"missing metadata output\"); std::fs::write(path, __specgate::discovery().to_string()).expect(\"failed to write test-target metadata\"); }")?;
-    let binaries = build_in(package, &entry, None, &scratch.join("tests"), None, system)?;
+    let binaries = build_in(package, &entry, None, &BTreeMap::new(), &scratch.join("tests"), None, system)?;
     let mut document: Value = serde_json::from_str(original).map_err(|error| failure(format!("invalid production registry: {error}")))?;
     for (index, binary) in binaries.iter().enumerate() {
         let metadata = scratch.join(format!("test-metadata-{index}.json"));
@@ -207,6 +274,42 @@ mod tests {
     use std::ffi::OsStr;
 
     #[test]
+    fn unhashed_library_builds_use_a_reusable_separate_namespace() {
+        let system = System::builder((
+            FakeFs::default(),
+            FakeProcess::queued([Ok(ProcessOutput {
+                success: true,
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+            })]),
+        ))
+        .build();
+        let namespace = Path::new("shared").join("specgate-harness");
+        build_with_wrapper(
+            Path::new("candidate"),
+            Path::new("entry.rs"),
+            None,
+            &BTreeMap::new(),
+            Path::new("scratch"),
+            None,
+            &compiler_build::Compiler {
+                executable: PathBuf::from("compiler"),
+                build_directory: Some(namespace.clone()),
+            },
+            &system,
+        )
+        .unwrap();
+        let state = system.process.fake_state();
+        let state = state.lock().unwrap();
+        assert!(
+            state.requests[0]
+                .env
+                .iter()
+                .any(|(key, value)| key == "CARGO_BUILD_BUILD_DIR" && value == namespace.as_os_str())
+        );
+    }
+
+    #[test]
     fn generated_builds_disable_incremental_without_replacing_shared_dependencies_or_flags() {
         let system = System::builder((
             FakeFs::default(),
@@ -220,12 +323,17 @@ mod tests {
         ))
         .build();
         for dispatch in [None, Some(Path::new("dispatch.rs"))] {
-            build_in(
+            build_with_wrapper(
                 Path::new("candidate"),
                 Path::new("entry.rs"),
                 dispatch,
+                &BTreeMap::new(),
                 Path::new("scratch"),
                 None,
+                &compiler_build::Compiler {
+                    executable: PathBuf::from("compiler"),
+                    build_directory: None,
+                },
                 &system,
             )
             .unwrap();

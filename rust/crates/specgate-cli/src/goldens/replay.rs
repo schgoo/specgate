@@ -64,11 +64,9 @@ pub(super) fn verify_replay(
                 for (row, check) in &checks {
                     let context = format!("{} [{} -> {}]", row.id, check.reference, check.candidate);
                     if check.mode == ReplayMode::Unsupported {
-                        if let Some(problem) = unsupported_problem(
-                            &context,
-                            check.expect_category.as_deref().expect("validated category"),
-                            &error.to_string(),
-                        ) {
+                        if let Some(problem) =
+                            unsupported_problem(&context, check.expect_category.as_deref().expect("validated category"), &error)
+                        {
                             problems.push(problem);
                         }
                     } else {
@@ -99,7 +97,7 @@ pub(super) fn verify_replay(
                 }
                 (ReplayMode::Unsupported, Err(reason)) => {
                     let expected = check.expect_category.as_deref().expect("validated unsupported category");
-                    if let Some(problem) = unsupported_problem(&context, expected, &reason.to_string()) {
+                    if let Some(problem) = unsupported_problem(&context, expected, &reason) {
                         problems.push(problem);
                     }
                 }
@@ -137,7 +135,7 @@ pub(super) fn verify_replay(
 }
 
 /// Accept only the exact declared planner category, never an unrelated failure.
-pub(super) fn unsupported_problem(context: &str, expected: &str, reason: &str) -> Option<String> {
+pub(super) fn unsupported_problem(context: &str, expected: &str, reason: &crate::replay::Error) -> Option<String> {
     match classify(reason) {
         Some(actual) if actual.code() == expected => None,
         Some(actual) => Some(format!(

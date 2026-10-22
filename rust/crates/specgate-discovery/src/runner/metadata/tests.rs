@@ -40,7 +40,7 @@ fn executor_dependencies_keep_aliases_and_defer_unsupported_sources() {
         ]}
     }))
     .unwrap();
-    let executors = executor_dependencies(&metadata, "candidate");
+    let executors = executor_dependencies(&metadata, "candidate").unwrap();
     assert_eq!(executors.len(), 1);
     let dependency = &executors["candidate_engine"];
     assert_eq!(dependency.package.as_str(), "arty");

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
 using SpecGate.Annotations;
@@ -40,6 +41,7 @@ internal sealed class OperationMetadata
     internal const string ErrorName = "error";
 
     private static readonly ConcurrentDictionary<RuntimeMethodHandle, OperationMetadata> Cache = new();
+    private static readonly ConcurrentDictionary<(RuntimeMethodHandle Method, string Component, string Operation), string> OperationNames = new();
 
     private OperationMetadata(SemanticInput[] inputs, SemanticType? result, Type[]? declaredExceptions)
     {
@@ -89,6 +91,28 @@ internal sealed class OperationMetadata
     }
 
     internal static OperationMetadata For(RuntimeMethodHandle handle) => Cache.GetOrAdd(handle, Describe);
+
+    internal static string OperationName(RuntimeMethodHandle method, string component, string operation) =>
+        OperationNames.GetOrAdd((method, component, operation), static key =>
+        {
+            if (MethodBase.GetMethodFromHandle(key.Method) is not MethodInfo { IsGenericMethod: true } closed)
+            {
+                return key.Operation;
+            }
+
+            Type[] arguments = closed.GetGenericArguments();
+            SpecOperationAttribute[] matches = [.. closed.GetGenericMethodDefinition()
+                .GetCustomAttributes<SpecOperationAttribute>()
+                .Where(annotation => annotation.Spec == key.Component && annotation.TypeArguments.SequenceEqual(arguments))];
+            if (matches.Length != 1)
+            {
+                throw new SpecGateCaptureException(
+                    CaptureRejection.UnsupportedType,
+                    $"specgate: generic operation '{closed}' requires exactly one declared specialization for these type arguments.");
+            }
+
+            return matches[0].Name;
+        });
 
     private static OperationMetadata Describe(RuntimeMethodHandle handle)
     {

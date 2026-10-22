@@ -12,8 +12,21 @@ use serde::Deserialize;
 pub struct TestTarget {
     /// Cargo's target name, not a filesystem or test-layout convention.
     pub name: String,
-    /// Whether Cargo identified this as a library unit-test target.
-    pub library: bool,
+    /// Compiler-reported executable kind used to select the Cargo target.
+    pub kind: TestTargetKind,
+}
+
+/// Cargo target kind containing a libtest executable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum TestTargetKind {
+    /// Library unit tests.
+    Library,
+    /// Binary unit tests.
+    Binary,
+    /// Integration tests.
+    Integration,
 }
 
 // ---------------------------------------------------------------------------
@@ -84,6 +97,10 @@ pub struct Operation {
     pub is_async: bool,
     /// Whether this declaration is a method.
     pub is_method: bool,
+    /// Whether the native method takes ownership of its receiver.
+    pub consumes_receiver: bool,
+    /// Whether the native annotation contains a literal component override.
+    pub explicit_component: bool,
     /// Whether this declaration is public.
     pub is_public: bool,
     /// Raw native return type.
@@ -170,6 +187,8 @@ impl Operation {
                 is_setup: false,
                 is_async: false,
                 is_method: false,
+                consumes_receiver: false,
+                explicit_component: false,
                 is_public: true,
                 return_type: String::new().into(),
                 fills: String::new().into(),
@@ -210,6 +229,11 @@ impl OperationBuilder {
     /// Set method metadata.
     pub const fn method(mut self, value: bool) -> Self {
         self.operation.is_method = value;
+        self
+    }
+    /// Record whether invoking the method consumes its receiver.
+    pub const fn consuming_receiver(mut self, value: bool) -> Self {
+        self.operation.consumes_receiver = value;
         self
     }
     /// Set declaration visibility.
@@ -498,6 +522,10 @@ struct WireOperation {
     is_async: bool,
     #[serde(default)]
     is_method: bool,
+    #[serde(default)]
+    consumes_receiver: bool,
+    #[serde(default)]
+    explicit_component: bool,
     #[serde(default = "default_public")]
     is_public: bool,
     #[serde(default)]
@@ -538,6 +566,8 @@ impl From<WireOperation> for Operation {
             is_setup: wire.is_setup,
             is_async: wire.is_async,
             is_method: wire.is_method,
+            consumes_receiver: wire.consumes_receiver,
+            explicit_component: wire.explicit_component,
             is_public: wire.is_public,
             return_type: wire.return_type.into(),
             fills: wire.fills.into(),

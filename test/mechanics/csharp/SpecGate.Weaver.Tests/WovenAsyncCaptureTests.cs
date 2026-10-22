@@ -38,6 +38,19 @@ public sealed class WovenAsyncCaptureTests
     }
 
     [Fact]
+    public async Task CachedGenericSpecializationsRemainDistinctAcrossCaptureSessions()
+    {
+        for (int iteration = 0; iteration < 2; iteration++)
+        {
+            using CaptureSession session = CaptureScenario.Begin("weaver.generic");
+            Assert.Equal("cached", await AsyncOperations.EchoAsync("cached"));
+            Assert.Equal(iteration, await AsyncOperations.EchoAsync(iteration));
+            OperationSpan[] spans = [.. session.Finish().Operations];
+            Assert.Equal(["echo_string", "echo_i32"], Array.ConvertAll(spans, span => span.OperationName));
+        }
+    }
+
+    [Fact]
     public void UndeclaredGenericSpecializationIsRejectedDuringCapture()
     {
         using CaptureSession session = CaptureScenario.Begin("weaver.generic");

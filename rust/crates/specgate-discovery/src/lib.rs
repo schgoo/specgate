@@ -68,7 +68,8 @@ pub mod registry {
     //! types, or present components without depending on the wire JSON model.
     #[doc(inline)]
     pub use crate::discovery::registry::{
-        ExceptionMetadata, Field, Operation, OperationBuilder, OperationId, Registry, TestTarget, Type, TypeBuilder, TypeId, Variant,
+        ExceptionMetadata, Field, Operation, OperationBuilder, OperationId, Registry, TestTarget, TestTargetKind, Type, TypeBuilder,
+        TypeId, Variant,
     };
     #[doc(inline)]
     pub use crate::discovery::registry_json;

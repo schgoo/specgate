@@ -46,6 +46,7 @@ pub fn expand_setup(attribute: TokenStream2, item: TokenStream2) -> syn::Result<
     let params = collect_parameters(&mut function, !stacked);
     let rt = runtime();
     let component = component(owner.as_deref());
+    let explicit_component = owner.is_some();
     let function_name = function.sig.ident.to_string();
     let const_name = metadata_ident("SETUP", format!("{function_name}:{operation}:{fills:?}"), function.sig.ident.span());
     let fills_metadata = fills.as_deref().map_or_else(
@@ -84,7 +85,6 @@ pub fn expand_setup(attribute: TokenStream2, item: TokenStream2) -> syn::Result<
         });
     }
     let is_public = matches!(function.vis, syn::Visibility::Public(_));
-    let harness = super::harness::entry(&format!("{function_name}:{operation}:{fills:?}"));
     let replay = if std::env::var_os("SPECGATE_TEST_ENTRY").is_some()
         && !is_async
         && function.sig.generics.params.is_empty()
@@ -117,7 +117,14 @@ pub fn expand_setup(attribute: TokenStream2, item: TokenStream2) -> syn::Result<
                     macro_rules! __specgate_selected {
                         () => { __specgate_dispatch!(#package, setup, #component, #operation, #function_name, #declared_fills, #output) };
                     }
-                    include!(env!("SPECGATE_TEST_DISPATCH"))
+                    include!(env!(concat!("SPECGATE_TEST_MODULE_", module_path!())))
+                })
+                .project({
+                    use #rt as __specgate;
+                    macro_rules! __specgate_selected {
+                        () => { __specgate_dispatch!(input, #package, #component, #operation, #function_name, #declared_fills, #output) };
+                    }
+                    include!(env!(concat!("SPECGATE_TEST_MODULE_", module_path!())))
                 })
             }
         } else {
@@ -150,12 +157,13 @@ pub fn expand_setup(attribute: TokenStream2, item: TokenStream2) -> syn::Result<
         ReturnType::Default => "()".to_string(),
         ReturnType::Type(_, ty) => quote!(#ty).to_string(),
     };
+    let dependency = super::harness::dependency();
     let expanded = quote! {
         #function
-        #harness
 
         #[allow(dead_code, non_upper_case_globals, reason = "generated linker metadata is referenced externally")]
         const #const_name: () = {
+            #dependency
             #[#rt::_private::linkme::distributed_slice(#rt::SPECGATE_OPS)]
             #[linkme(crate = #rt::_private::linkme)]
             static __SPECGATE_META: #rt::OpMeta = #rt::OpMeta::const_builder(#rt::OpDeps {
@@ -168,6 +176,7 @@ pub fn expand_setup(attribute: TokenStream2, item: TokenStream2) -> syn::Result<
             })
             .setup(#fills_metadata)
             .method(#is_method)
+            .explicit_component(#explicit_component)
             .asynchronous(#is_async)
             .public(#is_public)
             #replay

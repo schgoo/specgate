@@ -139,17 +139,17 @@ pub(super) fn cargo_manifest(plan: &Plan) -> Result<specgate_discovery::runner::
                 .map_err(|error| Error::wrap(ErrorKind::Linking, "runtime replay dependency is invalid", error))?,
         ),
     ]);
-    if let model::Executor::Builtin { alias, source } = &plan.target.executor {
+    if let model::Executor::Builtin { alias, source, features } = &plan.target.executor {
         if dependencies.contains_key(alias) {
             return failure(format!(
                 "candidate executor dependency alias '{alias}' conflicts with a generated replay dependency"
             ));
         }
-        dependencies.insert(
-            alias.clone(),
-            specgate_discovery::runner::Dependency::from_source(source)
-                .map_err(|error| Error::wrap(ErrorKind::Linking, "executor replay dependency is invalid", error))?,
-        );
+        let mut dependency = specgate_discovery::runner::Dependency::from_source(source)
+            .map_err(|error| Error::wrap(ErrorKind::Linking, "executor replay dependency is invalid", error))?;
+        dependency.features.clone_from(features);
+        dependency.default_features = false;
+        dependencies.insert(alias.clone(), dependency);
     }
     let cargo = specgate_discovery::runner::runner_cargo("specgate-replay-runner", dependencies)
         .map_err(|error| Error::wrap(ErrorKind::Linking, "replay runner manifest is invalid", error))?;
@@ -181,7 +181,9 @@ fn source_in(plan: &Plan, harness: bool) -> String {
                 };
                 writeln!(source, "    {path}(move || async move {{").expect("writing source");
             }
-            model::Executor::Builtin { alias, source: dependency } => match dependency.package.as_str() {
+            model::Executor::Builtin {
+                alias, source: dependency, ..
+            } => match dependency.package.as_str() {
                 "arty" => {
                     writeln!(source, "    let runtime = {alias}::runtime::Runtime::new().map_err(|error| format!(\"failed to start Arty replay executor: {{error}}\"))?;\n    let result = runtime.scheduler().block_on(async move |_| {{").expect("writing source");
                 }
@@ -347,7 +349,7 @@ fn source_in(plan: &Plan, harness: bool) -> String {
                 .iter()
                 .map(|parameter| match parameter {
                     model::Parameter::Input(index) => rendered_inputs[*index].clone(),
-                    model::Parameter::Setup { index, borrow } => format!("{borrow}{}", setup_locals[*index]),
+                    model::Parameter::Setup { index, borrow, .. } => format!("{borrow}{}", setup_locals[*index]),
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
@@ -397,7 +399,7 @@ fn source_in(plan: &Plan, harness: bool) -> String {
     if harness {
         source.push_str("}\nlet sidecar = std::env::var_os(\"SPECGATE_TEST_CAPTURE\").expect(\"missing test replay output\");\nrun(std::path::Path::new(&sidecar)).expect(\"candidate test replay failed\");\n}\n");
         let target = plan.test_target.as_ref().expect("test-harness generation requires a target");
-        let root = if target.library {
+        let root = if target.kind == specgate_discovery::registry::TestTargetKind::Library {
             "crate".to_string()
         } else {
             plan.target.crate_name.clone()
@@ -442,11 +444,29 @@ fn execute_harness(plan: &Plan, scratch: &Path, execution: &Execution, system: &
         .map_err(|error| format!("failed to write test replay entry: {error}"))?;
     let dispatch = scratch.join("test-dispatch.rs");
     system
-        .write(&dispatch, bridge::source(plan))
+        .write(&dispatch, bridge::source(plan, None))
         .map_err(|error| format!("failed to write lexical replay dispatch: {error}"))?;
-    let binaries =
-        specgate_discovery::runner::harness::build(&plan.target.package_root, &entry, &dispatch, scratch, plan.test_target.as_ref())
-            .map_err(|error| Error::wrap(ErrorKind::Linking, "failed to build candidate test replay", error))?;
+    let module_dispatches = plan
+        .dispatch_modules
+        .iter()
+        .enumerate()
+        .map(|(index, module)| {
+            let path = scratch.join(format!("test-module-{index}.rs"));
+            system
+                .write(&path, bridge::source(plan, Some(module)))
+                .map_err(|error| format!("failed to write module-local replay dispatch for '{module}': {error}"))?;
+            Ok((module.clone(), path))
+        })
+        .collect::<Result<BTreeMap<_, _>, Error>>()?;
+    let binaries = specgate_discovery::runner::harness::build(
+        &plan.target.package_root,
+        &entry,
+        &dispatch,
+        &module_dispatches,
+        scratch,
+        plan.test_target.as_ref(),
+    )
+    .map_err(|error| Error::wrap(ErrorKind::Linking, "failed to build candidate test replay", error))?;
     let target = plan.test_target.as_ref().expect("test replay requires a selected target");
     let binary = binaries
         .iter()

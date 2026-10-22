@@ -28,7 +28,7 @@ fn finish(result: syn::Result<proc_macro2::TokenStream>) -> TokenStream {
 #[doc(hidden)]
 #[proc_macro]
 pub fn __specgate_test_harness(_input: TokenStream) -> TokenStream {
-    specgate_annotations_macros_impl::harness::entry("component").into()
+    specgate_annotations_macros_impl::harness::entry("root").into()
 }
 
 /// Mark a function or method as a native CTSC operation boundary.

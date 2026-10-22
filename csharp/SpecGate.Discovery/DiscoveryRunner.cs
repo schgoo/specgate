@@ -112,9 +112,20 @@ internal static class DiscoveryRunner
                 annotatedMethods,
                 nullability);
 
+            object payload;
+            try
+            {
+                payload = document.Build();
+            }
+            catch (GenericSpecializationException exception)
+            {
+                Console.Error.WriteLine("specgate-discovery: " + exception.Message);
+                return 1;
+            }
+
             runnerSystem.WriteAllText(
                 Path.Combine(outputDirectory, componentIndex + ComponentOutputExtension),
-                JsonSerializer.Serialize(document.Build()));
+                JsonSerializer.Serialize(payload));
         }
 
         return 0;

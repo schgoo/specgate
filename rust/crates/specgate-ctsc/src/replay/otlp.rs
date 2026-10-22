@@ -161,11 +161,9 @@ pub(super) fn decode_scenarios(document: &Document, manifest: &ValidatedManifest
             .into());
         }
         if parent.name.as_ref() == SCENARIO_SPAN && span_ref.span.events.iter().any(|event| event.name.as_ref() == ABANDONED_EVENT) {
-            return Err(
-                "unsupported async replay scheduling: a top-level abandoned operation cannot be awaited to completion"
-                    .to_string()
-                    .into(),
-            );
+            return Err(error::Error::scheduling(
+                "unsupported async replay scheduling: a top-level abandoned operation cannot be awaited to completion",
+            ));
         }
         sibling_intervals
             .entry((span_ref.span.trace_id.as_ref(), span_ref.span.parent_span_id.as_ref()))
@@ -182,11 +180,9 @@ pub(super) fn decode_scenarios(document: &Document, manifest: &ValidatedManifest
     for intervals in sibling_intervals.values_mut() {
         intervals.sort_unstable();
         if intervals.windows(2).any(|pair| pair[0].1 > pair[1].0) {
-            return Err(
-                "unsupported async replay scheduling: overlapping sibling operations outside conformance.parallel"
-                    .to_string()
-                    .into(),
-            );
+            return Err(error::Error::scheduling(
+                "unsupported async replay scheduling: overlapping sibling operations outside conformance.parallel",
+            ));
         }
     }
     if spans.iter().any(|span_ref| span_ref.span.name.as_ref() == PARALLEL_SPAN) {

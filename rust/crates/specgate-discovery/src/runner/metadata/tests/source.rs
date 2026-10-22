@@ -34,6 +34,24 @@ fn manifest_escaping() {
 }
 
 #[test]
+fn manifest_preserves_executor_features_without_enabling_defaults() {
+    let mut dependency = Dependency::from_source(&PackageSource::registry(
+        "tokio",
+        "1.48.0",
+        "registry+https://github.com/rust-lang/crates.io-index",
+    ))
+    .unwrap();
+    dependency.features = vec!["rt".to_string()];
+    dependency.default_features = false;
+    let cargo = runner_cargo("executor-features", BTreeMap::from([("engine".to_string(), dependency)])).unwrap();
+    let parsed: toml::Value = toml::from_str(&cargo.manifest).unwrap();
+    let engine = &parsed["dependencies"]["engine"];
+    assert_eq!(engine["features"].as_array().unwrap(), &[toml::Value::String("rt".to_string())]);
+    assert_eq!(engine["default-features"].as_bool(), Some(false));
+    assert_eq!(engine["version"].as_str(), Some("=1.48.0"));
+}
+
+#[test]
 fn explicit_library_kinds() {
     for kind in ["lib", "rlib", "dylib", "cdylib", "staticlib"] {
         assert!(library_kind(kind), "{kind}");

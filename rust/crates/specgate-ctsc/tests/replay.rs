@@ -335,6 +335,11 @@ fn unsupported_async_scheduling_is_rejected_before_invocation() {
         let manifest = make_manifest(&registry, &trace, &["scenario"]);
         let error = decode_replay_bundle_result(&manifest, &registry, &trace).unwrap_err();
         assert!(error.to_string().contains(expected), "{error}");
+        assert!(
+            std::error::Error::source(&error)
+                .unwrap()
+                .is::<specgate_ctsc::replay::UnsupportedScheduling>()
+        );
     }
 }
 

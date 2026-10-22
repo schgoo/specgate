@@ -7,6 +7,9 @@ use std::pin::Pin;
 /// Type-erased synchronous constructor with explicit input failures.
 pub type Constructor = fn(Vec<Value>) -> Result<Box<dyn Any>, CaptureError>;
 
+/// Producer-local ownership-preserving adaptation to an unsized borrowed target.
+pub type Projection = fn(Box<dyn Any>) -> Result<Box<dyn Any>, CaptureError>;
+
 /// Lexically typed invocation whose future may borrow its erased receiver.
 pub type Invocation =
     for<'a> fn(&'a mut dyn Any, Vec<Value>, Vec<Box<dyn Any>>) -> Pin<Box<dyn Future<Output = Result<(), CaptureError>> + 'a>>;
@@ -17,6 +20,7 @@ pub struct Setup {
     invoke: Constructor,
     output: fn() -> &'static str,
     dispatch: Option<Invocation>,
+    projection: Option<Projection>,
 }
 
 impl Setup {
@@ -27,6 +31,7 @@ impl Setup {
             invoke,
             output,
             dispatch: None,
+            projection: None,
         }
     }
 
@@ -34,6 +39,13 @@ impl Setup {
     #[must_use]
     pub const fn dispatch(mut self, dispatch: Option<Invocation>) -> Self {
         self.dispatch = dispatch;
+        self
+    }
+
+    /// Attach a projection that retains the producer's owned native value.
+    #[must_use]
+    pub const fn project(mut self, projection: Option<Projection>) -> Self {
+        self.projection = projection;
         self
     }
 
@@ -61,7 +73,11 @@ pub fn setup(
     inputs: Vec<Value>,
 ) -> Result<Box<dyn Any>, CaptureError> {
     let bridge = setup_bridge(component, operation, module, function, fills)?;
-    (bridge.invoke)(inputs)
+    let value = (bridge.invoke)(inputs)?;
+    match bridge.projection {
+        Some(project) => project(value),
+        None => Ok(value),
+    }
 }
 
 fn setup_bridge(component: &str, operation: &str, module: &str, function: &str, fills: &str) -> Result<Setup, CaptureError> {
@@ -134,6 +150,30 @@ pub fn take<T: Any>(value: Box<dyn Any>) -> Result<T, CaptureError> {
         .map_err(|_value| error("selected setup returned a different native parameter type"))
 }
 
+/// Erase an owned producer behind its shared dereference target.
+///
+/// # Errors
+/// Rejects a value that does not match the producer's native output type.
+pub fn borrowed<T: std::ops::Deref + Any>(value: Box<dyn Any>) -> Result<Box<dyn Any>, CaptureError>
+where
+    T::Target: 'static,
+{
+    let owner: Box<dyn std::ops::Deref<Target = T::Target>> = Box::new(take::<T>(value)?);
+    Ok(Box::new(owner))
+}
+
+/// Erase an owned producer behind its mutable dereference target.
+///
+/// # Errors
+/// Rejects a value that does not match the producer's native output type.
+pub fn borrowed_mut<T: std::ops::DerefMut + Any>(value: Box<dyn Any>) -> Result<Box<dyn Any>, CaptureError>
+where
+    T::Target: 'static,
+{
+    let owner: Box<dyn std::ops::DerefMut<Target = T::Target>> = Box::new(take::<T>(value)?);
+    Ok(Box::new(owner))
+}
+
 /// Primitive construction-input conversion used by generated setup bridges.
 pub trait Input: Sized {
     /// Decode one native construction input.
@@ -186,7 +226,7 @@ impl Input for f32 {
 impl Input for () {
     fn decode(value: Value) -> Result<Self, CaptureError> {
         match value {
-            Value::List(values) if values.is_empty() => Ok(()),
+            Value::Map(values) if values.is_empty() => Ok(()),
             _ => Err(error("expected a unit setup input")),
         }
     }
@@ -229,6 +269,9 @@ mod tests {
 
     #[test]
     fn construction_inputs_are_lossless_and_fail_explicitly() {
+        <()>::decode(crate::ToNativeValue::to_native_value(&())).unwrap();
+        <()>::decode(Value::Map([("unexpected".to_string(), Value::Integer(1))].into_iter().collect())).unwrap_err();
+        <()>::decode(Value::List(Vec::new())).unwrap_err();
         assert_eq!(i32::decode(Value::Integer(7)).unwrap(), 7);
         assert_eq!(u32::decode(Value::Integer(i64::from(u32::MAX))).unwrap(), u32::MAX);
         i32::decode(Value::Integer(i64::MAX)).unwrap_err();
@@ -247,5 +290,18 @@ mod tests {
         assert_eq!(super::run_sync(async { 7 }).unwrap(), 7);
         let error = super::run_sync(std::future::pending::<()>()).unwrap_err();
         assert!(error.to_string().contains("unexpectedly suspended"), "{error}");
+    }
+
+    #[test]
+    fn producer_projections_preserve_owned_unsized_storage() {
+        let value = super::borrowed::<Vec<i32>>(Box::new(vec![2, 3])).unwrap();
+        let owner = super::take::<Box<dyn std::ops::Deref<Target = [i32]>>>(value).unwrap();
+        assert_eq!(&**owner, &[2, 3]);
+
+        let value = super::borrowed_mut::<String>(Box::new("owned".to_string())).unwrap();
+        let mut owner = super::take::<Box<dyn std::ops::DerefMut<Target = str>>>(value).unwrap();
+        (**owner).make_ascii_uppercase();
+        assert_eq!(&**owner, "OWNED");
+        super::borrowed::<String>(Box::new(7_i32)).unwrap_err();
     }
 }

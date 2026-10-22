@@ -2,16 +2,19 @@
 
 use super::{TokenStream2, metadata_ident, quote, runtime};
 
-/// Emit a libtest entry point in the annotated item's lexical module.
-///
-/// The unconditional `option_env!` tracks entry identity even in ordinary
-/// builds, without overriding the candidate's Cargo-configured compiler flags.
+/// Track environment-dependent annotation expansion in every Cargo build.
 #[must_use]
-pub fn entry(identity: &str) -> TokenStream2 {
-    let dependency = quote!(
+pub fn dependency() -> TokenStream2 {
+    quote!(
         const _: ::core::option::Option<&str> = ::core::option_env!("SPECGATE_TEST_ENTRY");
         const _: ::core::option::Option<&str> = ::core::option_env!("SPECGATE_TEST_DISPATCH");
-    );
+    )
+}
+
+/// Emit a libtest entry point at the root selected by the test-build layer.
+#[must_use]
+pub fn entry(identity: &str) -> TokenStream2 {
+    let dependency = dependency();
     if std::env::var_os("SPECGATE_TEST_ENTRY").is_none() {
         return dependency;
     }

@@ -8,6 +8,9 @@ namespace SpecGate.Discovery;
 /// <summary>A method carrying at least one SpecGate operation or setup annotation.</summary>
 internal sealed record AnnotatedMethod(MethodInfo Method, object[] Operations, object[] Setups);
 
+internal sealed class GenericSpecializationException(string message, Exception? innerException = null)
+    : Exception(message, innerException);
+
 /// <summary>
 /// Builds the discovery payload for a single requested component: its operations
 /// and the annotated types those operations reference.
@@ -83,13 +86,25 @@ internal sealed class ComponentDocument
         Type[] arguments = Annotations.Types(operation, "TypeArguments");
         if (arguments.Length != method.GetGenericArguments().Length || arguments.Any(type => type.ContainsGenericParameters))
         {
-            throw new InvalidOperationException(
+            throw new GenericSpecializationException(
                 $"{method} requires one concrete TypeArguments entry per generic method parameter.");
         }
 
         if (method.IsGenericMethodDefinition)
         {
-            method = method.MakeGenericMethod(arguments);
+            try
+            {
+                method = method.MakeGenericMethod(arguments);
+            }
+            catch (ArgumentException constraintFailure)
+            {
+                string types = string.Join(", ", arguments.Select(type => type.FullName ?? type.Name));
+                throw new GenericSpecializationException(
+                    $"operation '{component}::{Annotations.Text(operation, "Name")}' on '{method}' has invalid "
+                    + $"TypeArguments [{types}]: the type arguments do not satisfy its generic constraints. "
+                    + constraintFailure.Message,
+                    constraintFailure);
+            }
         }
 
         NullabilityInfo returnInfo = nullability.Create(method.ReturnParameter);

@@ -42,6 +42,102 @@ pub fn outer() -> bool {
 }
 
 #[cfg(test)]
+mod producer_scopes {
+    use specgate::{SpecEvent, spec_operation, spec_setup};
+
+    #[derive(SpecEvent)]
+    struct ProducerClient {}
+
+    #[derive(SpecEvent)]
+    struct ProducerOffset {
+        #[spec_event]
+        value: i32,
+    }
+
+    impl ProducerClient {
+        #[spec_operation("read", spec = "fixture.producer_scopes")]
+        pub fn read(&self, offset: ProducerOffset) -> i32 {
+            offset.value
+        }
+    }
+
+    mod receiver {
+        use super::*;
+
+        #[spec_setup("read", spec = "fixture.producer_scopes")]
+        pub(super) fn make() -> ProducerClient {
+            ProducerClient {}
+        }
+    }
+
+    mod parameter {
+        use super::*;
+
+        #[spec_setup("read", spec = "fixture.producer_scopes")]
+        pub(super) fn make(value: i32) -> ProducerOffset {
+            ProducerOffset { value }
+        }
+    }
+
+    #[spec_setup("text_len", spec = "fixture.producer_scopes", fills = "value")]
+    fn owned_text(value: String) -> String {
+        value
+    }
+
+    #[spec_operation("text_len", spec = "fixture.producer_scopes")]
+    pub fn text_len(value: &str) -> i32 {
+        value.len() as i32
+    }
+
+    #[spec_setup("unit_input", spec = "fixture.producer_scopes", fills = "value")]
+    fn owned_unit(seed: ()) -> () {
+        seed
+    }
+
+    #[spec_operation("unit_input", spec = "fixture.producer_scopes")]
+    pub fn unit_input(value: ()) -> i32 {
+        let () = value;
+        1
+    }
+
+    #[test]
+    fn distinct_modules_and_owned_coercion() {
+        assert_eq!(receiver::make().read(parameter::make(7)), 7);
+        let value = owned_text("owned native storage".to_string());
+        assert_eq!(text_len(&value), 20);
+        assert_eq!(unit_input(owned_unit(())), 1);
+    }
+}
+
+#[cfg(test)]
+mod consuming {
+    use specgate::{SpecEvent, spec_operation, spec_setup};
+
+    #[derive(SpecEvent)]
+    struct ConsumingClient {
+        #[spec_event]
+        value: String,
+    }
+
+    impl ConsumingClient {
+        #[spec_operation("finish", spec = "fixture.consuming")]
+        pub fn finish(self) -> String {
+            self.value
+        }
+    }
+
+    #[spec_setup("finish", spec = "fixture.consuming")]
+    fn make(value: String) -> ConsumingClient {
+        ConsumingClient { value }
+    }
+
+    #[test]
+    fn capture_non_copy_consuming_receiver() {
+        assert_eq!(make("consumed".to_string()).finish(), "consumed");
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     // A different Item in the producer scope must not resolve method specializations.

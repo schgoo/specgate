@@ -202,6 +202,8 @@ pub struct ExecutorDependency {
     pub package: PackageName,
     /// Exact package source or the diagnostic preventing generated dependency use.
     pub source: Result<PackageSource, String>,
+    /// Cargo-resolved features enabled for this executor package.
+    pub features: Vec<String>,
 }
 
 impl From<PackageSource> for ExecutorDependency {
@@ -209,6 +211,7 @@ impl From<PackageSource> for ExecutorDependency {
         Self {
             package: source.package.clone(),
             source: Ok(source),
+            features: Vec::new(),
         }
     }
 }
@@ -282,6 +285,10 @@ pub struct Dependency {
     pub version: Option<VersionRequirement>,
     /// Optional explicit source.
     pub source: Option<DependencySource>,
+    /// Explicit Cargo features enabled by this dependency.
+    pub features: Vec<String>,
+    /// Whether Cargo should enable the package's default features.
+    pub default_features: bool,
 }
 
 /// Explicit source for a generated manifest dependency.
@@ -320,6 +327,8 @@ impl Dependency {
                 package: package.into(),
                 version: None,
                 source: None,
+                features: Vec::new(),
+                default_features: true,
             },
             version: None,
         }
@@ -336,6 +345,8 @@ impl Dependency {
                 PackageLocation::Path(path) => DependencySource::Path(path.clone()),
                 PackageLocation::Registry(registry) => DependencySource::Registry(registry.clone()),
             }),
+            features: Vec::new(),
+            default_features: true,
         })
     }
 
@@ -352,6 +363,8 @@ impl Dependency {
             package: package.into(),
             version: Some(VersionRequirement::try_new(format!("={}", version.into()))?),
             source: Some(DependencySource::Path(path.as_ref().to_path_buf())),
+            features: Vec::new(),
+            default_features: true,
         })
     }
 }

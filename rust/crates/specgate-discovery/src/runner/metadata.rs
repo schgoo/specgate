@@ -108,7 +108,7 @@ fn override_context(
         .canonicalize(package_root.join("Cargo.toml"))
         .map_err(|source| context(format!("cannot resolve candidate Cargo.toml: {source}"), source))?;
     let package_root = manifest.parent().ok_or_else(|| failure("candidate Cargo.toml has no parent"))?;
-    let metadata = cargo_metadata(&manifest, package_root, system)?;
+    let metadata = cargo_metadata(&manifest, package_root, None, system)?;
     let candidate = metadata
         .packages
         .iter()
@@ -132,11 +132,11 @@ fn override_context(
         path: package_root.to_path_buf(),
         runtime,
     });
-    context.executors = executor_dependencies(&metadata, &candidate.id);
+    context.executors = executor_dependencies(&metadata, &candidate.id)?;
     Ok(context)
 }
 
-fn executor_dependencies(metadata: &CargoMetadata, candidate_id: &str) -> BTreeMap<String, ExecutorDependency> {
+fn executor_dependencies(metadata: &CargoMetadata, candidate_id: &str) -> Result<BTreeMap<String, ExecutorDependency>, Error> {
     let mut executors = BTreeMap::new();
     if let Some(node) = metadata
         .resolve
@@ -153,12 +153,19 @@ fn executor_dependencies(metadata: &CargoMetadata, candidate_id: &str) -> BTreeM
                     ExecutorDependency {
                         package: package.name.clone().into(),
                         source: package_source(package).map_err(|error| error.to_string()),
+                        features: metadata
+                            .resolve
+                            .as_ref()
+                            .and_then(|resolve| resolve.nodes.iter().find(|node| node.id == package.id))
+                            .ok_or_else(|| failure(format!("Cargo metadata omitted resolved features for executor '{}'", package.name)))?
+                            .features
+                            .clone(),
                     },
                 );
             }
         }
     }
-    executors
+    Ok(executors)
 }
 
 /// Serialize a standalone generated Cargo manifest and any registry config
@@ -216,6 +223,8 @@ pub fn runner_cargo(package_name: impl AsRef<str>, dependencies: BTreeMap<String
                     version: dependency.version.map(VersionRequirement::into_string),
                     path,
                     registry,
+                    features: dependency.features,
+                    default_features: (!dependency.default_features).then_some(false),
                 },
             ))
         })
@@ -277,6 +286,10 @@ struct SerializableDependency {
     path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     registry: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    features: Vec<String>,
+    #[serde(rename = "default-features", skip_serializing_if = "Option::is_none")]
+    default_features: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -293,6 +306,8 @@ struct SerializableRegistry {
 struct CargoMetadata {
     packages: Vec<CargoPackage>,
     resolve: Option<CargoResolve>,
+    #[serde(default)]
+    build_directory: Option<PathBuf>,
 }
 
 #[derive(Deserialize)]
@@ -310,6 +325,8 @@ struct CargoPackage {
 struct CargoTarget {
     name: String,
     kind: Vec<String>,
+    #[serde(default)]
+    src_path: Option<PathBuf>,
 }
 
 #[derive(Deserialize)]
@@ -322,6 +339,8 @@ struct CargoNode {
     id: String,
     #[serde(default)]
     deps: Vec<NodeDependency>,
+    #[serde(default)]
+    features: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -338,15 +357,87 @@ struct DependencyKind {
     kind: Option<String>,
 }
 
-fn cargo_metadata(manifest: &Path, package_root: &Path, system: &system::System) -> Result<CargoMetadata, Error> {
+pub(super) struct HarnessConfig {
+    pub roots: Vec<PathBuf>,
+    pub facades: Vec<String>,
+    pub build_directory: Option<PathBuf>,
+}
+
+pub(super) fn harness_config(package: &Path, target: &Path, system: &system::System) -> Result<HarnessConfig, Error> {
+    let manifest = system.filesystem.canonicalize(package.join("Cargo.toml"))?;
+    let metadata = cargo_metadata(&manifest, package, Some(target), system)?;
+    let candidate = metadata
+        .packages
+        .iter()
+        .find(|candidate| same_path(&candidate.manifest_path, &manifest, system))
+        .ok_or_else(|| failure("test-harness package is absent from cargo metadata"))?;
+    let roots = candidate
+        .targets
+        .iter()
+        .map(|target| {
+            target
+                .src_path
+                .clone()
+                .ok_or_else(|| failure("Cargo test target has no source path"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut facades = if candidate.name == FACADE_PACKAGE {
+        vec!["crate".to_string()]
+    } else {
+        let node = metadata
+            .resolve
+            .as_ref()
+            .and_then(|resolve| resolve.nodes.iter().find(|node| node.id == candidate.id))
+            .ok_or_else(|| failure("test-harness package is absent from the resolved dependency graph"))?;
+        node.deps
+            .iter()
+            .filter(|dependency| {
+                metadata
+                    .packages
+                    .iter()
+                    .any(|package| package.id == dependency.pkg && package.name == FACADE_PACKAGE)
+            })
+            .map(|dependency| dependency.name.replace('-', "_"))
+            .collect::<Vec<_>>()
+    };
+    facades.sort();
+    facades.dedup();
+    let build_directory = if candidate.targets.iter().any(|target| {
+        target
+            .kind
+            .iter()
+            .any(|kind| matches!(kind.as_str(), "cdylib" | "staticlib" | "dylib"))
+    }) {
+        use std::hash::{Hash as _, Hasher as _};
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        manifest.hash(&mut hash);
+        let root = metadata
+            .build_directory
+            .ok_or_else(|| failure("Cargo did not report the build directory for an unhashed library target"))?;
+        Some(root.join(format!("specgate-harness-{:016x}", hash.finish())))
+    } else {
+        None
+    };
+    Ok(HarnessConfig {
+        roots,
+        facades,
+        build_directory,
+    })
+}
+
+fn cargo_metadata(manifest: &Path, package_root: &Path, target: Option<&Path>, system: &system::System) -> Result<CargoMetadata, Error> {
     let request = system::ProcessRequest::builder(cargo_with(system))
         .arg("metadata")
         .arg("--format-version")
         .arg(METADATA_VERSION)
         .arg("--manifest-path")
         .arg(manifest)
-        .current_dir(package_root)
-        .build();
+        .current_dir(package_root);
+    let request = match target {
+        Some(target) => request.env("CARGO_TARGET_DIR", target),
+        None => request,
+    }
+    .build();
     let output = system
         .process
         .output(&request)
@@ -447,7 +538,7 @@ fn path_override(path: &Path, system: &system::System) -> Result<RuntimeOverride
     let package_root = manifest
         .parent()
         .ok_or_else(|| failure("SPECGATE_RUNTIME_PATH Cargo.toml has no parent"))?;
-    let metadata = cargo_metadata(&manifest, package_root, system)?;
+    let metadata = cargo_metadata(&manifest, package_root, None, system)?;
     let package = metadata
         .packages
         .iter()

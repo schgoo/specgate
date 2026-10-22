@@ -19,3 +19,10 @@ components:
         sources: typed-integration
         tests:
           projects: [typed-integration/Cargo.toml]
+  fixture.operation_only:
+    implementations:
+      rust:
+        language: rust
+        sources: typed-integration
+        tests:
+          projects: [typed-integration/Cargo.toml]

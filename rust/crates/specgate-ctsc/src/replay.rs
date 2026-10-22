@@ -1,7 +1,7 @@
 //! Verified replay planning from linked capture bundles.
 
 mod error;
-pub use error::Error;
+pub use error::{Error, UnsupportedScheduling};
 
 use crate::registry::Component;
 use serde::Deserialize;
