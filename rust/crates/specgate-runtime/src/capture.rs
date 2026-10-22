@@ -24,6 +24,21 @@ pub(crate) fn is_active() -> bool {
     current_collector().is_some()
 }
 
+/// Reject an undeclared generic call only when capture is requested.
+///
+/// # Errors
+/// Returns an activation error or an undeclared-specialization diagnostic.
+#[doc(hidden)]
+pub fn reject_undeclared_specialization() -> Result<OperationScope, CaptureError> {
+    activate_env()?;
+    if is_active() {
+        return Err("generic operation has no declared specialization for these concrete type arguments"
+            .to_string()
+            .into());
+    }
+    Ok(OperationScope::inactive())
+}
+
 #[derive(Debug, Clone)]
 struct TerminalFailure {
     kind: CaptureErrorKind,

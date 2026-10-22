@@ -95,7 +95,7 @@ public static class SpecGateRuntime
             return OperationScope.Disabled;
         }
 
-        return Open(session, operation, component, method);
+        return Open(session, OperationMetadata.OperationName(method, component, operation), component, method);
     }
 
     private static OperationScope Open(

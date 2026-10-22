@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Reflection.Emit;
 using System.Runtime.Loader;
 using System.Text.Json;
 using SpecGate.Annotations;
@@ -80,6 +81,116 @@ public sealed class ExplodingAttribute : Attribute
 public class DiscoveryRunnerTests
 {
     [Fact]
+    public void GenericSpecializationsPublishConcreteSignatures()
+    {
+        MethodInfo method = typeof(GenericFixture).GetMethod(nameof(GenericFixture.Items))!;
+        AnnotatedMethod[] methods =
+        [
+            new(method,
+                [
+                    new SpecOperationAttribute("numbers") { Spec = "fixtures.generic", TypeArguments = [typeof(int)] },
+                    new SpecOperationAttribute("readings") { Spec = "fixtures.generic", TypeArguments = [typeof(Fixtures.Reading)] },
+                ], []),
+        ];
+        ComponentDocument document = new("fixtures.generic", [typeof(Fixtures.Reading)], methods, new NullabilityInfoContext());
+
+        JsonElement payload = JsonSerializer.SerializeToElement(document.Build());
+        JsonElement[] operations = [.. payload.GetProperty("operations").EnumerateArray()];
+        Assert.Equal(["numbers", "readings"], operations.Select(operation => operation.GetProperty("name").GetString()));
+        Assert.Equal(["List<i32>", "List<Reading>"], operations.Select(operation => operation.GetProperty("return_type").GetString()));
+        Assert.Contains(payload.GetProperty("types").EnumerateArray(), type => type.GetProperty("name").GetString() == "Reading");
+    }
+
+    private static class GenericFixture
+    {
+        [SpecOperation("numbers", Spec = "fixtures.generic", TypeArguments = new[] { typeof(int) })]
+        [SpecOperation("readings", Spec = "fixtures.generic", TypeArguments = new[] { typeof(Fixtures.Reading) })]
+        public static Task<List<T>> Items<T>() where T : notnull => Task.FromResult(new List<T>());
+
+        public static int Reference<T>() where T : class => 0;
+
+        public static int Value<T>() where T : struct => 0;
+
+        public static int Constructible<T>() where T : new() => 0;
+
+        public static int Comparable<T>() where T : IComparable => 0;
+
+        public static int Stream<T>() where T : Stream => 0;
+    }
+
+    [Theory]
+    [InlineData(nameof(GenericFixture.Reference), typeof(int))]
+    [InlineData(nameof(GenericFixture.Value), typeof(string))]
+    [InlineData(nameof(GenericFixture.Constructible), typeof(string))]
+    [InlineData(nameof(GenericFixture.Comparable), typeof(object))]
+    [InlineData(nameof(GenericFixture.Stream), typeof(object))]
+    public void InvalidGenericConstraintsNameTheDeclaredSpecialization(string name, Type argument)
+    {
+        MethodInfo method = typeof(GenericFixture).GetMethod(name)!;
+        AnnotatedMethod[] methods =
+        [
+            new(method,
+                [new SpecOperationAttribute("invalid") { Spec = "fixtures.generic", TypeArguments = [argument] }], []),
+        ];
+        ComponentDocument document = new("fixtures.generic", [], methods, new NullabilityInfoContext());
+
+        GenericSpecializationException failure = Assert.Throws<GenericSpecializationException>(() => document.Build());
+
+        Assert.Contains("fixtures.generic::invalid", failure.Message, StringComparison.Ordinal);
+        Assert.Contains(argument.FullName!, failure.Message, StringComparison.Ordinal);
+        Assert.Contains("generic constraints", failure.Message, StringComparison.Ordinal);
+        Assert.IsType<ArgumentException>(failure.InnerException);
+    }
+
+    [Fact]
+    public void ValidGenericConstraintsStillPublishConcreteSignatures()
+    {
+        MethodInfo method = typeof(GenericFixture).GetMethod(nameof(GenericFixture.Value))!;
+        AnnotatedMethod[] methods =
+        [
+            new(method,
+                [new SpecOperationAttribute("valid") { Spec = "fixtures.generic", TypeArguments = [typeof(int)] }], []),
+        ];
+        ComponentDocument document = new("fixtures.generic", [], methods, new NullabilityInfoContext());
+        JsonElement payload = JsonSerializer.SerializeToElement(document.Build());
+        Assert.Equal("i32", payload.GetProperty("operations")[0].GetProperty("return_type").GetString());
+    }
+
+    [Fact]
+    public void InvalidGenericConstraintsFailThroughTheDiscoveryEntryPoint()
+    {
+        AssemblyBuilder assembly = AssemblyBuilder.DefineDynamicAssembly(
+            new AssemblyName("InvalidGenericSpecialization"), AssemblyBuilderAccess.Run);
+        TypeBuilder holder = assembly.DefineDynamicModule("fixture").DefineType("Holder", TypeAttributes.Public);
+        MethodBuilder method = holder.DefineMethod("Reference", MethodAttributes.Public | MethodAttributes.Static, typeof(void), Type.EmptyTypes);
+        method.DefineGenericParameters("T")[0].SetGenericParameterAttributes(GenericParameterAttributes.ReferenceTypeConstraint);
+        method.SetCustomAttribute(new CustomAttributeBuilder(
+            typeof(SpecOperationAttribute).GetConstructor([typeof(string)])!,
+            ["invalid"],
+            [typeof(SpecOperationAttribute).GetProperty(nameof(SpecOperationAttribute.Spec))!,
+                typeof(SpecOperationAttribute).GetProperty(nameof(SpecOperationAttribute.TypeArguments))!],
+            ["fixtures.invalid", new[] { typeof(int) }]));
+        method.GetILGenerator().Emit(OpCodes.Ret);
+        holder.CreateType();
+        RecordingSystem system = new(assembly);
+
+        Assert.Equal(1, DiscoveryRunner.Run(["out", "assembly.dll", "bin", "fixtures.invalid"], system.Adapter));
+        Assert.DoesNotContain(Path.Combine("out", "0.json"), system.Files.Keys);
+    }
+
+    [Fact]
+    public void GenericSpecializationsPassTheDiscoveryEntryPoint()
+    {
+        RecordingSystem system = new();
+
+        Assert.Equal(0, DiscoveryRunner.Run(["out", "assembly.dll", "bin", "fixtures.generic"], system.Adapter));
+
+        JsonElement[] operations = [.. Document(system, 0).GetProperty("operations").EnumerateArray()];
+        Assert.Equal(["numbers", "readings"], operations.Select(operation => operation.GetProperty("name").GetString()));
+        Assert.Equal(["List<i32>", "List<Reading>"], operations.Select(operation => operation.GetProperty("return_type").GetString()));
+    }
+
+    [Fact]
     public void AMethodDeclaringSeveralComponentsIsRejected()
     {
         MethodInfo method = typeof(Fixtures).GetMethod(nameof(Fixtures.BetaOnly))!;
@@ -121,7 +232,7 @@ public class DiscoveryRunnerTests
 
         Assert.Equal(["out"], system.Directories);
         string[] inventory = JsonSerializer.Deserialize<string[]>(system.Files[Path.Combine("out", "components.json")])!;
-        Assert.Equal(["fixtures.alpha", "fixtures.beta", "fixtures.gamma"], inventory);
+        Assert.Equal(["fixtures.alpha", "fixtures.beta", "fixtures.gamma", "fixtures.generic"], inventory);
     }
 
     /// <summary>
@@ -136,7 +247,7 @@ public class DiscoveryRunnerTests
         Assert.Equal(0, DiscoveryRunner.Run(["out", "assembly.dll", "bin"], system.Adapter));
 
         string[] inventory = JsonSerializer.Deserialize<string[]>(system.Files[Path.Combine("out", "components.json")])!;
-        Assert.Equal(["fixtures.alpha", "fixtures.beta", "fixtures.gamma"], inventory);
+        Assert.Equal(["fixtures.alpha", "fixtures.beta", "fixtures.gamma", "fixtures.generic"], inventory);
         Assert.Equal(
             ["record_reading", "record_reading"],
             Document(system, 0).GetProperty("operations").EnumerateArray().Select(operation => operation.GetProperty("name").GetString()));
@@ -273,13 +384,13 @@ internal sealed class RecordingSystem
 
     internal RunnerSystem Adapter { get; }
 
-    internal RecordingSystem() =>
+    internal RecordingSystem(Assembly? target = null) =>
         Adapter = new RunnerSystem(
             new FileSystemServices(
                 _ => false,
                 Directories.Add,
                 (path, contents) => Files[path] = contents),
-            new AssemblyLoadingServices(_ => Target, (_, _) => Target),
+            new AssemblyLoadingServices(_ => target ?? Target, (_, _) => target ?? Target),
             new DependencyResolutionServices(
                 _ => new AssemblyDependencyResolver(Target.Location),
                 (_, _) => null,

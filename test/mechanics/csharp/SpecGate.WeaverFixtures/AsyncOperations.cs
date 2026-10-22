@@ -10,6 +10,28 @@ namespace SpecGate.WeaverFixtures;
 /// </summary>
 public static class AsyncOperations
 {
+    [SpecOperation("echo_i32", Spec = "weaver.generic", TypeArguments = new[] { typeof(int) })]
+    [SpecOperation("echo_string", Spec = "weaver.generic", TypeArguments = new[] { typeof(string) })]
+    public static async Task<T> EchoAsync<T>([SpecInput("value")] T value)
+    {
+        await Task.Yield();
+        return value;
+    }
+
+    [SpecEvent]
+    public sealed class Item
+    {
+        [SpecEvent]
+        public int Value { get; set; } = 7;
+    }
+
+    [SpecOperation("items", Spec = "weaver.generic", TypeArguments = new[] { typeof(Item) })]
+    public static async Task<List<T>> ItemsAsync<T>() where T : notnull, new()
+    {
+        await Task.Yield();
+        return [new T()];
+    }
+
     [SpecOperation("double", Spec = "weaver.async")]
     public static async Task<int> DoubleAsync([SpecInput("value")] int value)
     {

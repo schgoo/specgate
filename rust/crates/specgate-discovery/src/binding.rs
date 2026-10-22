@@ -40,8 +40,12 @@ const CSHARP_LANGUAGE: &str = "csharp";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[expect(clippy::exhaustive_enums, reason = "the binding schema defines a closed runtime vocabulary")]
 pub enum Runtime {
-    /// Smol executor.
+    /// Select the only supported direct candidate dependency.
     #[default]
+    Auto,
+    /// Arty executor.
+    Arty,
+    /// Smol executor.
     Smol,
     /// Tokio executor.
     Tokio,
@@ -68,6 +72,8 @@ pub enum LanguageOptions {
     Rust {
         /// Selected async runtime.
         runtime: Runtime,
+        /// Optional crate-rooted function that owns replay execution.
+        executor: Option<String>,
     },
     /// Settings of the `csharp` block.
     CSharp {
@@ -244,6 +250,7 @@ struct TestsFile {
 struct RustFile {
     #[serde(default)]
     runtime: RuntimeFile,
+    executor: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -256,6 +263,8 @@ struct CSharpFile {
 #[serde(rename_all = "lowercase")]
 enum RuntimeFile {
     #[default]
+    Auto,
+    Arty,
     Smol,
     Tokio,
 }
@@ -263,6 +272,8 @@ enum RuntimeFile {
 impl From<RuntimeFile> for Runtime {
     fn from(value: RuntimeFile) -> Self {
         match value {
+            RuntimeFile::Auto => Self::Auto,
+            RuntimeFile::Arty => Self::Arty,
             RuntimeFile::Smol => Self::Smol,
             RuntimeFile::Tokio => Self::Tokio,
         }
@@ -527,9 +538,31 @@ pub fn parse_binding(path: impl AsRef<Path>, text: impl AsRef<str>) -> Result<Bi
 fn resolve_implementation_file(base: &Path, context: &str, file: ImplementationFile) -> Result<Implementation, Error> {
     let fail = |message: &str| Error::message(ErrorKind::Binding, format!("{context} {message}"));
     let options = match (file.language, file.rust, file.csharp) {
-        (LanguageFile::Rust, rust, None) => LanguageOptions::Rust {
-            runtime: rust.map(|block| block.runtime).unwrap_or_default().into(),
-        },
+        (LanguageFile::Rust, rust, None) => {
+            let (runtime, executor) = rust.map_or((Runtime::Auto, None), |block| (block.runtime.into(), block.executor));
+            if runtime != Runtime::Auto && executor.is_some() {
+                return Err(fail("must choose rust.runtime or rust.executor, not both"));
+            }
+            if executor.as_ref().is_some_and(|path| {
+                !path.starts_with("crate::")
+                    || path.split("::").skip(1).any(|segment| {
+                        segment.is_empty()
+                            || !segment
+                                .strip_prefix("r#")
+                                .unwrap_or(segment)
+                                .chars()
+                                .enumerate()
+                                .all(|(index, character)| {
+                                    character == '_' || character.is_ascii_alphabetic() || (index > 0 && character.is_ascii_digit())
+                                })
+                    })
+            }) {
+                return Err(fail(
+                    "rust.executor must be a crate-rooted Rust function path such as crate::replay_executor",
+                ));
+            }
+            LanguageOptions::Rust { runtime, executor }
+        }
         (LanguageFile::CSharp, None, csharp) => LanguageOptions::CSharp {
             framework: csharp.and_then(|block| block.framework),
         },
@@ -659,7 +692,13 @@ mod tests {
             rust.implementation.tests,
             Tests::Projects(vec![PathBuf::from("base/crates/orders/tests"), PathBuf::from("shared/tests")])
         );
-        assert_eq!(rust.implementation.options, LanguageOptions::Rust { runtime: Runtime::Tokio });
+        assert_eq!(
+            rust.implementation.options,
+            LanguageOptions::Rust {
+                runtime: Runtime::Tokio,
+                executor: None
+            }
+        );
         let csharp = binding.resolve_implementation("example.orders", Some("cs-main")).unwrap();
         assert_eq!(csharp.language(), Language::CSharp);
         assert_eq!(csharp.implementation.tests, Tests::Command("dotnet test".to_string()));
@@ -672,10 +711,50 @@ mod tests {
     }
 
     #[test]
-    fn rust_runtime_defaults_to_smol() {
+    fn rust_runtime_defaults_to_candidate_detection() {
         let binding = parse_binding("specgate.yaml", VALID).unwrap();
         let users = binding.resolve_implementation("example.users", None).unwrap();
-        assert_eq!(users.implementation.options, LanguageOptions::Rust { runtime: Runtime::Smol });
+        assert_eq!(
+            users.implementation.options,
+            LanguageOptions::Rust {
+                runtime: Runtime::Auto,
+                executor: None
+            }
+        );
+    }
+
+    #[test]
+    fn supports_arty_and_custom_executor_bindings() {
+        let binding = parse_binding("specgate.yaml", implementation("        rust:\n          runtime: arty\n")).unwrap();
+        assert_eq!(
+            binding.resolve_implementation("c", None).unwrap().implementation.options,
+            LanguageOptions::Rust {
+                runtime: Runtime::Arty,
+                executor: None
+            }
+        );
+        let binding = parse_binding(
+            "specgate.yaml",
+            implementation("        rust:\n          executor: crate::replay_executor\n"),
+        )
+        .unwrap();
+        assert_eq!(
+            binding.resolve_implementation("c", None).unwrap().implementation.options,
+            LanguageOptions::Rust {
+                runtime: Runtime::Auto,
+                executor: Some("crate::replay_executor".to_string())
+            }
+        );
+        rejects(
+            &implementation("        rust:\n          runtime: arty\n          executor: crate::run\n"),
+            "not both",
+        );
+        for path in ["run", "crate::", "crate::run()", "crate::run;panic!()", "crate::2run"] {
+            rejects(
+                &implementation(&format!("        rust:\n          executor: \"{path}\"\n")),
+                "crate-rooted Rust function path",
+            );
+        }
     }
 
     #[test]

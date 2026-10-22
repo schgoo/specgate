@@ -88,7 +88,8 @@ sources, so a search for it finds the code that raises it.
 | Message fragment | Cause | Fix |
 | --- | --- | --- |
 | `has a SpecOperation annotation without a Spec component.` | `Spec` missing. | Add `Spec = "<component>"`. |
-| `is a generic method.` | A generic operation. | Use a non-generic method. |
+| `is a generic method.` | A generic setup. | Use a nongeneric setup. |
+| `requires one concrete TypeArguments entry per generic method parameter` | A generic operation lacks a complete specialization. | Supply concrete `TypeArguments` for every generic method parameter. |
 | `is declared on generic type` | Declared on a generic type. | Move it to a non-generic type. |
 | `must take parameters by value.` | `ref`, `out`, `in`, or pointer parameters. | Take parameters by value. |
 | `Iterator capture is not supported;` | An iterator method. | Return a materialized collection. |
@@ -107,10 +108,10 @@ sources, so a search for it finds the code that raises it.
 | Message fragment | Cause | Fix |
 | --- | --- | --- |
 | `replay currently supports only Rust candidates; implementation language is` | Replay onto C#. | Replay onto a Rust implementation. |
-| `is setup-backed; replay does not yet construct setups` | Setup-backed operation. | Not supported yet. |
-| `is a method; replay supports only free functions` | Method operation. | Not supported yet. |
-| `is async; replay supports only synchronous operations` | Async operation. | Not supported yet. |
-| `uses unsupported structured type` | A type replay cannot construct. | See [`../reference/limitations.md`](../reference/limitations.md). |
+| `candidate setup resolution failed` | Setups do not resolve uniquely. | Annotate one matching producer per receiver or injected parameter. |
+| `selected setup producers belong to different Cargo test targets` | Required producers do not share a target. | Keep the environment in one Cargo test target. |
+| `unsupported async replay scheduling:` | Recorded sibling operations overlap. | Record directly awaited calls; overlapping scheduling is unsupported. |
+| `uses unsupported structured type` | An operation or setup input is not a supported primitive. | See [`../reference/limitations.md`](../reference/limitations.md). |
 
 <!-- diagnostics:end -->
 

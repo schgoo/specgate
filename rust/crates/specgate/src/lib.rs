@@ -40,6 +40,8 @@
 )]
 extern crate self as specgate;
 
+#[doc(hidden)]
+pub use specgate_annotations_macros::__specgate_test_harness;
 pub use specgate_annotations_macros::{SpecEvent, spec_operation, spec_setup};
 pub use specgate_runtime::value::Value;
 pub use specgate_runtime::{ComponentId, ImplementationLabel, OperationName, SpecEvent, ToNativeValue};
@@ -75,6 +77,7 @@ macro_rules! spec_trace {
 
 #[doc(hidden)]
 pub mod __rt {
+    pub use specgate_runtime::harness;
     #[doc(hidden)]
     pub mod _private {
         pub use specgate_runtime::__private::linkme;
@@ -82,7 +85,7 @@ pub mod __rt {
     pub use specgate_runtime::capture::{
         Capture, Completion, Config, ConfigDeps, EnvConfig, Observation, OperationScope, OperationSpan, SetupProvenance, SpanBoundary,
         SpanId, Status, TraceId, begin_async_operation, begin_operation, capture_async_context, defer_setup, finish,
-        instrument_async_operation, record_setup, start,
+        instrument_async_operation, record_setup, reject_undeclared_specialization, start,
     };
     pub use specgate_runtime::generated::{FAILURE_MARKER, Stage, report_completion, report_error};
     pub use specgate_runtime::registry::{
@@ -90,5 +93,7 @@ pub mod __rt {
         TYPES as SPECGATE_TYPES, TypeDeps, TypeKind, TypeMeta, TypeName, VariantMeta, VariantName, discovery,
     };
     pub use specgate_runtime::value::Value;
-    pub use specgate_runtime::{ComponentId, ImplementationLabel, OperationName, SpecEvent, ToNativeValue, emit_event, emit_lazy};
+    pub use specgate_runtime::{
+        CaptureError, ComponentId, ImplementationLabel, OperationName, SpecEvent, ToNativeValue, emit_event, emit_lazy,
+    };
 }

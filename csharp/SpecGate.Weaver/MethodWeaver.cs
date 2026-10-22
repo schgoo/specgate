@@ -22,6 +22,22 @@ namespace SpecGate.Weaver;
 /// </remarks>
 internal sealed class MethodWeaver(ModuleDefinition module, RuntimeReferences runtime)
 {
+    private static MethodReference OperationHandle(MethodDefinition method)
+    {
+        if (!method.HasGenericParameters)
+        {
+            return method;
+        }
+
+        GenericInstanceMethod closed = new(method);
+        foreach (GenericParameter parameter in method.GenericParameters)
+        {
+            closed.GenericArguments.Add(parameter);
+        }
+
+        return closed;
+    }
+
     internal void Weave(MethodDefinition method, OperationDeclaration declaration)
     {
         MethodBody body = method.Body;
@@ -151,7 +167,7 @@ internal sealed class MethodWeaver(ModuleDefinition module, RuntimeReferences ru
         // in exactly one place.
         List<Instruction> prologue =
         [
-            il.Create(OpCodes.Ldtoken, method),
+            il.Create(OpCodes.Ldtoken, OperationHandle(method)),
             il.Create(OpCodes.Ldstr, declaration.Operation),
             il.Create(OpCodes.Ldstr, declaration.Component),
             il.Create(OpCodes.Call, runtime.EnterOperation),

@@ -1162,15 +1162,15 @@ mod cases {
         let mut unknown = check;
         unknown["expectCategory"] = serde_json::json!("anything");
         shape_failure(&check_matrix(serde_json::json!([unknown])), "unknown replay failure category");
-        let reason = "operation 'fixture::echo' uses unsupported structured replay type 'Record'";
-        assert!(unsupported_problem("check", "structured-value", reason).is_none());
+        let reason = crate::replay::Error::from("operation 'fixture::echo' uses unsupported structured replay type 'Record'");
+        assert!(unsupported_problem("check", "structured-value", &reason).is_none());
         assert!(
-            unsupported_problem("check", "method-operation", reason)
+            unsupported_problem("check", "method-operation", &reason)
                 .unwrap()
                 .contains("but got 'structured-value'")
         );
         assert!(
-            unsupported_problem("check", "structured-value", "bundle digest mismatch")
+            unsupported_problem("check", "structured-value", &crate::replay::Error::from("bundle digest mismatch"))
                 .unwrap()
                 .contains("unrelated, unclassified")
         );

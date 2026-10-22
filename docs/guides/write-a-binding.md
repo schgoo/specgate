@@ -34,8 +34,13 @@ components:
 - `tests.projects` is required by the schema but **not read** by Rust capture
   today; list the same package
   ([#96](https://github.com/schgoo/specgate/issues/96)).
-- `rust.runtime` (`smol` or `tokio`) is accepted but unused
-  ([#95](https://github.com/schgoo/specgate/issues/95)). Omit it.
+- Replay automatically selects the only supported direct engine dependency:
+  Arty, Smol, or Tokio. With several, set `rust: { runtime: arty }` (or `smol`
+  or `tokio`). Capture still uses your ordinary tests' runtime configuration.
+- For custom configuration, use
+  `rust: { executor: "crate::tests::replay_executor" }`; the function owns setup
+  and async execution. See
+  [runtime configuration](replay-a-candidate.md#runtime-selection-and-custom-configuration).
 
 ### 2. C# implementation
 

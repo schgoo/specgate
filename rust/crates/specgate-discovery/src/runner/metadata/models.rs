@@ -12,6 +12,7 @@
 //! use specgate_discovery::runner::{CandidateDeps, CandidatePackage, Dependency, PackageSource};
 //! let runtime = PackageSource::local("specgate-runtime", "0.6.0", "../runtime");
 //! let candidate = CandidatePackage::new(CandidateDeps {
+//!     crate_name: "demo".to_string(),
 //!     package: "demo".into(),
 //!     version: "1.0.0".into(),
 //!     path: PathBuf::from("demo"),
@@ -157,6 +158,8 @@ impl PackageSource {
     reason = "Cargo identity DTOs intentionally expose every exact package field"
 )]
 pub struct CandidateDeps {
+    /// Compiler-reported library crate name, including custom `[lib] name`.
+    pub crate_name: String,
     /// Candidate package name.
     pub package: PackageName,
     /// Candidate package version.
@@ -174,6 +177,8 @@ pub struct CandidateDeps {
     reason = "Cargo identity DTOs intentionally expose every exact package field"
 )]
 pub struct CandidatePackage {
+    /// Compiler-reported library crate name.
+    pub crate_name: String,
     /// Candidate package name.
     pub package: PackageName,
     /// Candidate package version.
@@ -182,6 +187,33 @@ pub struct CandidatePackage {
     pub path: PathBuf,
     /// Exact runtime source resolved in the candidate graph.
     pub runtime: PackageSource,
+    /// Supported direct executor dependencies, keyed by their Rust crate alias.
+    pub executors: std::collections::BTreeMap<String, ExecutorDependency>,
+}
+
+/// A direct executor dependency with source validation deferred until replay.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "Cargo executor metadata exposes its resolved package and source"
+)]
+pub struct ExecutorDependency {
+    /// Cargo package name, independent of whether a runner can preserve its source.
+    pub package: PackageName,
+    /// Exact package source or the diagnostic preventing generated dependency use.
+    pub source: Result<PackageSource, String>,
+    /// Cargo-resolved features enabled for this executor package.
+    pub features: Vec<String>,
+}
+
+impl From<PackageSource> for ExecutorDependency {
+    fn from(source: PackageSource) -> Self {
+        Self {
+            package: source.package.clone(),
+            source: Ok(source),
+            features: Vec::new(),
+        }
+    }
 }
 
 impl CandidatePackage {
@@ -189,10 +221,12 @@ impl CandidatePackage {
     #[must_use]
     pub fn new(deps: CandidateDeps) -> Self {
         Self {
+            crate_name: deps.crate_name,
             package: deps.package,
             version: deps.version,
             path: deps.path,
             runtime: deps.runtime,
+            executors: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -251,6 +285,10 @@ pub struct Dependency {
     pub version: Option<VersionRequirement>,
     /// Optional explicit source.
     pub source: Option<DependencySource>,
+    /// Explicit Cargo features enabled by this dependency.
+    pub features: Vec<String>,
+    /// Whether Cargo should enable the package's default features.
+    pub default_features: bool,
 }
 
 /// Explicit source for a generated manifest dependency.
@@ -289,6 +327,8 @@ impl Dependency {
                 package: package.into(),
                 version: None,
                 source: None,
+                features: Vec::new(),
+                default_features: true,
             },
             version: None,
         }
@@ -305,6 +345,8 @@ impl Dependency {
                 PackageLocation::Path(path) => DependencySource::Path(path.clone()),
                 PackageLocation::Registry(registry) => DependencySource::Registry(registry.clone()),
             }),
+            features: Vec::new(),
+            default_features: true,
         })
     }
 
@@ -321,6 +363,8 @@ impl Dependency {
             package: package.into(),
             version: Some(VersionRequirement::try_new(format!("={}", version.into()))?),
             source: Some(DependencySource::Path(path.as_ref().to_path_buf())),
+            features: Vec::new(),
+            default_features: true,
         })
     }
 }

@@ -117,6 +117,24 @@ C# capture also rejects, with an error naming the value:
   `[SpecEvent]`-annotated type. Collections are refused because a list and a
   set cannot be told apart once the declared type is erased.
 
+## Candidate replay values
+
+Rust replay accepts lossless primitive operation and setup construction inputs.
+Structured results and declared errors, including lists of annotated records,
+are supported. The candidate's reachable named CTSC declarations must match the
+reference, including declarations reached only by nested observed operations.
+Replay validates recorded candidate outcomes against the reference registry
+before publishing the trace.
+
+Structured inputs and explicit reference-to-candidate shape mappings remain
+unsupported. A tuple payload and a record payload are different declarations;
+replay does not silently translate between them.
+
+Generic operations publish concrete signatures from explicit Rust `types` or
+C# `TypeArguments` annotations. See
+[`../status.md`](../status.md#candidate-replay-and-explicit-generic-operations)
+for specialization syntax and completion-channel restrictions.
+
 ## Names
 
 - Rust field names and C# member names become CTSC field names. Rust fields can

@@ -45,6 +45,9 @@ use std::fmt::Write as _;
 use std::io::Write as _;
 use std::path::PathBuf;
 
+#[doc(hidden)]
+pub mod harness;
+
 // Stable CTSC fault vocabulary emitted when annotated target code unwinds.
 const UNEXPECTED_FAULT: &str = "specgate.unexpected_target_fault";
 /// Stable CTSC observer identifier for target-reported faults; changing it breaks trace-validator compatibility.

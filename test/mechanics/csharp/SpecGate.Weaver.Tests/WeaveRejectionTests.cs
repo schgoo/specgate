@@ -23,12 +23,12 @@ public sealed class WeaveRejectionTests
     }
 
     [Fact]
-    public void RejectsAnnotatedGenericMethod()
+    public void RejectsGenericMethodWithoutConcreteSpecialization()
     {
         WeaveException failure = WeaveFixture("SpecGate.WeaverGenericMethodFixture");
 
         Assert.Contains("Echo", failure.Message, StringComparison.Ordinal);
-        Assert.Contains("generic method", failure.Message, StringComparison.Ordinal);
+        Assert.Contains("concrete TypeArguments", failure.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -57,8 +57,6 @@ public sealed class WeaveRejectionTests
         Directory.CreateDirectory(directory);
         try
         {
-            // The attribute no longer allows repetition, so the compiler cannot build
-            // this input; only a hand-built assembly can reach the weaver's own check.
             string annotations = Path.Combine(AppContext.BaseDirectory, "SpecGate.Annotations.dll");
             File.Copy(annotations, Path.Combine(directory, "SpecGate.Annotations.dll"));
             string target = Path.Combine(directory, "MultiDeclared.dll");

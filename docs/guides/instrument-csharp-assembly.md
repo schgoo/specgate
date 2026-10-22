@@ -40,7 +40,7 @@ public static class Arithmetic
 [it] [smoke] (from `rust/crates/specgate-cli/tests/fixtures/csharp-capture/sources/Operations.cs`)
 
 - `Spec` is the component id and is required for capture.
-- One `[SpecOperation]` per method.
+- Repeat `[SpecOperation]` only for distinct explicit generic specializations.
 - `[SpecInput("name")]` sets an input name; without it the parameter name is
   used.
 
@@ -115,13 +115,22 @@ public sealed class Counter
 ```
 
 The setup's inputs become the operation's inputs. Set `Fills = "param"` when a
-setup produces a parameter rather than the receiver. Setups are captured but
-not replayed ([limitations](../reference/limitations.md)).
+setup produces a parameter rather than the receiver. C# setup inputs can drive
+annotated Rust candidate producers during replay; C# candidate replay remains
+unsupported ([limitations](../reference/limitations.md)).
 
 ### 6. Async operations
 
 Operations returning `Task`, `Task<T>`, `ValueTask`, or `ValueTask<T>` are
 supported; see [`async-capture.md`](async-capture.md).
+
+### 7. Explicit generic specializations
+
+Give each specialization a distinct operation name and concrete type arguments:
+`[SpecOperation("find_items", Spec = "example.client", TypeArguments = new[] { typeof(Item) })]`.
+Repeat the annotation for other specializations. Generic constraints still
+apply; calling an undeclared specialization during capture fails. Open generic
+declaring types and generic setups remain unsupported.
 
 ## Expected output
 
@@ -145,7 +154,8 @@ The weaver fails the capture build with a message naming the method:
 | --- | --- | --- |
 | `Async capture supports operations returning Task, Task<T>, ValueTask, or ValueTask<T>` | An `async void` operation, an async setup, or an `async` method returning another awaitable type. | Return `Task` / `ValueTask` (or a `<T>` form); make setups synchronous. |
 | `Iterator capture is not supported` / `Stream capture is not supported` | An iterator or async iterator. | Return a materialized collection. |
-| `is a generic method` / `is declared on generic type` | Generic method or declaring type. | Declare the operation on a non-generic method and type. |
+| `requires one concrete TypeArguments entry per generic method parameter` | Missing or incomplete specialization. | Supply concrete `TypeArguments` for each generic method parameter. |
+| `is a generic method` / `is declared on generic type` | Generic setup or generic declaring type. | Use a nongeneric setup on a nongeneric type. |
 | `must take parameters by value` | A `ref`, `out`, `in`, or pointer parameter. | Take parameters by value. |
 | `annotation without a Spec component` | `[SpecOperation]` without `Spec`. | Add `Spec = "<component>"`. |
 | `the capture weaver wove no method of` | Discovery found operations but the woven build did not contain them. | Check that `sources` points at the project holding the annotated methods. |

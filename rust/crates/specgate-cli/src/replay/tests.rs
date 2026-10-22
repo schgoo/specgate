@@ -244,6 +244,214 @@ mod cases {
     }
 
     #[test]
+    fn typed_async_setup_replay() {
+        typed_setup_replay("typed-async.yaml", "rust");
+    }
+
+    #[test]
+    fn arty_runtime_replay() {
+        setup_replay("arty-replay.yaml", "configured", "fixture.arty_replay", 1, 1);
+    }
+
+    #[test]
+    fn arty_custom_executor_replay() {
+        setup_replay_to("arty-replay.yaml", "configured", "configured", "fixture.arty_replay", 1, 1);
+    }
+
+    #[test]
+    fn typed_integration_setup_replay() {
+        typed_setup_replay("typed-integration.yaml", "rust");
+    }
+
+    #[test]
+    fn typed_csharp_to_rust_setup_replay() {
+        typed_setup_replay("typed-integration.yaml", "csharp");
+    }
+
+    #[test]
+    fn private_lexical_setup_replay() {
+        let bundle = setup_replay("private-replay.yaml", "rust", "fixture.private_replay", 12, 4);
+        assert_eq!(bundle.observed_operations.len(), 13);
+        assert!(
+            bundle
+                .observed_operations
+                .iter()
+                .any(|operation| operation.operation_name == "inner")
+        );
+        assert!(
+            !bundle
+                .scenarios
+                .iter()
+                .flat_map(|scenario| &scenario.operations)
+                .any(|operation| operation.operation_name == "inner")
+        );
+    }
+
+    #[test]
+    fn test_only_operation_replay() {
+        setup_replay("private-replay.yaml", "rust", "fixture.test_only", 1, 1);
+    }
+
+    #[test]
+    fn integration_local_operation_replay() {
+        setup_replay("typed-integration.yaml", "rust", "fixture.integration_local", 1, 1);
+    }
+
+    #[test]
+    fn operation_only_integration_replay() {
+        setup_replay("typed-integration.yaml", "rust", "fixture.operation_only", 1, 1);
+    }
+
+    #[test]
+    fn binary_unit_operation_replay() {
+        setup_replay("private-replay.yaml", "rust", "fixture.binary_unit", 1, 1);
+    }
+
+    #[test]
+    fn producer_scope_and_owned_borrow_replay() {
+        setup_replay("private-replay.yaml", "rust", "fixture.producer_scopes", 3, 1);
+    }
+
+    #[test]
+    fn consuming_receiver_is_rejected_before_runner_generation() {
+        let cache = tempfile::tempdir().unwrap();
+        let binding = fixture_binding().with_file_name("private-replay.yaml");
+        let capture_dir = cache.path().join("capture");
+        capture(
+            CaptureRequest::builder(CapturePaths { binding: binding.clone() })
+                .component(ComponentId::from("fixture.consuming"))
+                .implementation("rust")
+                .out(&capture_dir)
+                .build()
+                .unwrap(),
+        )
+        .expect("capture a non-Copy consuming receiver");
+        let error = replay(
+            Request::builder(Paths::new(&capture_dir, &binding))
+                .out(cache.path().join("candidate.otlp.json"))
+                .implementation("rust")
+                .build()
+                .unwrap(),
+        )
+        .expect_err("consuming receivers must not reach generated invocation");
+        assert!(error.to_string().contains("consumes its receiver"), "{error}");
+        assert!(!error.to_string().contains("failed to compile"), "{error}");
+    }
+
+    fn typed_setup_replay(binding_name: &str, reference: &str) {
+        setup_replay(binding_name, reference, "fixture.typed_async", 3, 1);
+    }
+
+    fn setup_replay(binding_name: &str, reference: &str, component: &str, operations: u32, scenarios: u32) -> ReplayBundle {
+        setup_replay_to(binding_name, reference, "rust", component, operations, scenarios)
+    }
+
+    fn setup_replay_to(
+        binding_name: &str,
+        reference: &str,
+        candidate: &str,
+        component: &str,
+        operations: u32,
+        scenarios: u32,
+    ) -> ReplayBundle {
+        let cache = tempfile::tempdir().unwrap();
+        let binding = fixture_binding().with_file_name(binding_name);
+        let capture_dir = cache.path().join("capture");
+        let output = cache.path().join("candidate.otlp.json");
+        capture(
+            CaptureRequest::builder(CapturePaths { binding: binding.clone() })
+                .component(ComponentId::from(component))
+                .implementation(reference)
+                .out(&capture_dir)
+                .build()
+                .unwrap(),
+        )
+        .expect("capture a generic async instance operation with typed results");
+        let bundle = specgate_ctsc::replay::decode(
+            std::fs::read(capture_dir.join(manifest_file())).unwrap(),
+            std::fs::read(capture_dir.join(registry_file())).unwrap(),
+            std::fs::read(capture_dir.join(reference_file())).unwrap(),
+        )
+        .unwrap();
+        let report = replay(
+            Request::builder(Paths::new(&capture_dir, &binding))
+                .out(&output)
+                .implementation(candidate)
+                .build()
+                .unwrap(),
+        )
+        .expect("replay selected setups and preserve the shared receiver");
+        assert_eq!(report.operations, operations);
+        assert_eq!(report.scenarios, scenarios);
+        let validation = validate_linked(&output, capture_dir.join(registry_file()), &[]);
+        assert!(validation.valid, "{:#?}", validation.issues);
+        let compared = specgate_ctsc::comparison::compare_with(
+            capture_dir.join(reference_file()),
+            &output,
+            Some(capture_dir.join(registry_file())),
+            [],
+            &specgate_ctsc::comparison::SystemReader::system(),
+        );
+        assert!(compared.equivalent, "{compared:#?}");
+        bundle
+    }
+
+    #[test]
+    fn replay_selects_candidate_executor_identity_and_rejects_ambiguity() {
+        use specgate_discovery::{
+            binding::{LanguageOptions, Runtime},
+            runner::PackageSource,
+        };
+        let mut raw = raw_operation("add");
+        raw.is_async = true;
+        let mut normalized = normalized_operation("add");
+        normalized.is_async = true;
+        let mut candidate = candidate_metadata(raw, normalized);
+        assert_error(&candidate, "no matching replay executor");
+        for (name, version) in [("arty", "0.5.0"), ("smol", "2.0.2"), ("tokio", "1.48.0")] {
+            Arc::make_mut(&mut candidate.inner).executors = BTreeMap::from([(
+                "engine".to_string(),
+                PackageSource::registry(name, version, "registry+https://github.com/rust-lang/crates.io-index").into(),
+            )]);
+            let plan = build_plan(&reference_bundle(), &candidate).unwrap();
+            let manifest = cargo_manifest(&plan).unwrap().manifest;
+            assert!(manifest.contains(&format!("={version}")), "{manifest}");
+            assert!(manifest.contains("engine"), "{manifest}");
+            let code = source(&plan);
+            assert!(
+                code.contains(if name == "arty" {
+                    "engine::runtime::Runtime::new"
+                } else if name == "smol" {
+                    "engine::block_on"
+                } else {
+                    "engine::runtime::Builder"
+                }),
+                "{code}"
+            );
+        }
+        Arc::make_mut(&mut candidate.inner)
+            .executors
+            .insert("arty".to_string(), PackageSource::local("arty", "0.5.0", "arty").into());
+        assert_error(&candidate, "multiple matching replay executors");
+        Arc::make_mut(&mut candidate.inner).executor_options = LanguageOptions::Rust {
+            runtime: Runtime::Arty,
+            executor: None,
+        };
+        let plan = build_plan(&reference_bundle(), &candidate).unwrap();
+        assert!(matches!(plan.target.executor, model::Executor::Builtin { ref alias, .. } if alias == "arty"));
+        Arc::make_mut(&mut candidate.inner).executors.get_mut("arty").unwrap().source =
+            Err("unsupported arty Cargo source 'git+https://example.test/arty'".to_string());
+        assert_error(&candidate, "configure rust.executor");
+        Arc::make_mut(&mut candidate.inner).executor_options = LanguageOptions::Rust {
+            runtime: Runtime::Auto,
+            executor: Some("crate::run_replay".to_string()),
+        };
+        let plan = build_plan(&reference_bundle(), &candidate).unwrap();
+        assert!(source(&plan).contains("candidate::run_replay(move || async move"));
+        assert!(!cargo_manifest(&plan).unwrap().manifest.contains("[dependencies.engine]"));
+    }
+
+    #[test]
     fn candidate_config() {
         let (cache, binding) = configured_candidate();
         let capture_dir = cache.path().join("capture");
@@ -327,6 +535,77 @@ mod cases {
     }
 
     #[test]
+    fn external_runner_preserves_dev_executor_features() {
+        let (cache, binding) = configured_candidate();
+        let candidate = cache.path().join("candidate");
+        let manifest_path = candidate.join("Cargo.toml");
+        let manifest = format!(
+            "{}\n[dev-dependencies]\ntokio={{version=\"1\",default-features=false,features=[\"rt\"]}}\n",
+            std::fs::read_to_string(&manifest_path).unwrap()
+        );
+        std::fs::write(&manifest_path, &manifest).unwrap();
+        std::fs::write(
+            candidate.join("src").join("lib.rs"),
+            "specgate::spec_component!(\"fixture.configured\");\n\
+             #[specgate::spec_operation(\"add\")]\n\
+             pub async fn add(a: i32, b: i32) -> i32 { specgate_config_proof::add(a, b) }\n\
+             #[test]\n\
+             fn capture_async() {\n\
+                 let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();\n\
+                 assert_eq!(runtime.block_on(add(2, 3)), 5);\n\
+             }\n",
+        )
+        .unwrap();
+        let capture_dir = cache.path().join("capture");
+        capture(
+            CaptureRequest::builder(CapturePaths { binding: binding.clone() })
+                .component(ComponentId::from("fixture.configured"))
+                .out(&capture_dir)
+                .build()
+                .unwrap(),
+        )
+        .expect("capture with dev-only Tokio");
+        std::fs::write(&manifest_path, format!("{manifest}\n[lib]\ntest=false\n")).unwrap();
+        let bundle = decode_bundle(
+            std::fs::read(capture_dir.join(manifest_file())).unwrap(),
+            std::fs::read(capture_dir.join(registry_file())).unwrap(),
+            std::fs::read(capture_dir.join(reference_file())).unwrap(),
+        )
+        .unwrap();
+        let candidate = discover_candidate(
+            &binding,
+            None,
+            "fixture.configured",
+            &Discovery::real(),
+            &CommandEnvironment::real(),
+        )
+        .unwrap();
+        let plan = build_plan(&bundle, &candidate).unwrap();
+        assert!(plan.test_target.is_none(), "this regression must use the external runner");
+        let manifest = cargo_manifest(&plan).unwrap().manifest;
+        assert!(manifest.contains("\"rt\""), "{manifest}");
+        assert!(manifest.contains("default-features = false"), "{manifest}");
+        let report = replay(
+            Request::builder(Paths::new(&capture_dir, &binding))
+                .out(cache.path().join("candidate.otlp.json"))
+                .build()
+                .unwrap(),
+        )
+        .expect("external runner preserves the dev executor's rt feature");
+        assert_eq!(report.operations, 1);
+        let validation = validate_linked(&report.output_path, capture_dir.join(registry_file()), &[]);
+        assert!(validation.valid, "{:#?}", validation.issues);
+        let compared = specgate_ctsc::comparison::compare_with(
+            capture_dir.join(reference_file()),
+            &report.output_path,
+            Some(capture_dir.join(registry_file())),
+            [],
+            &specgate_ctsc::comparison::SystemReader::system(),
+        );
+        assert!(compared.equivalent, "{compared:#?}");
+    }
+
+    #[test]
     fn distinct_roots() {
         let system = CommandEnvironment::fake();
         let first = runner::scratch(&system).unwrap();
@@ -381,11 +660,14 @@ mod cases {
 
         let mut asynchronous = raw_operation("add");
         asynchronous.is_async = true;
-        assert_error(&candidate_metadata(asynchronous, normalized_operation("add")), "is async");
+        assert_error(
+            &candidate_metadata(asynchronous, normalized_operation("add")),
+            "async metadata disagrees",
+        );
 
         let mut method = raw_operation("add");
         method.is_method = true;
-        assert_error(&candidate_metadata(method, normalized_operation("add")), "is a method");
+        assert_error(&candidate_metadata(method, normalized_operation("add")), "receiver");
 
         let mut private = raw_operation("add");
         private.is_public = false;
@@ -395,7 +677,20 @@ mod cases {
         let mut setup_operation = raw_operation("add");
         setup_operation.is_setup = true;
         Arc::make_mut(&mut setup.inner).raw_registry.ops.push(setup_operation);
-        assert_error(&setup, "setup-backed");
+        assert_error(&setup, "ambiguously matches");
+    }
+
+    #[test]
+    fn planner_selects_target_for_plain_test_operation() {
+        let mut raw = raw_operation("add");
+        let target: specgate_discovery::registry::TestTarget = serde_json::from_value(serde_json::json!({
+            "name": "custom_library",
+            "kind": "library",
+        }))
+        .unwrap();
+        raw.test_target = Some(target.clone());
+        let plan = build_plan(&reference_bundle(), &candidate_metadata(raw, normalized_operation("add"))).unwrap();
+        assert_eq!(plan.test_target, Some(target));
     }
 
     #[test]
@@ -416,7 +711,174 @@ mod cases {
         let candidate = candidate_metadata(raw_operation("add"), normalized_operation("add"));
         let reason = build_plan(&bundle, &candidate).unwrap_err();
         assert!(reason.to_string().contains("unsupported structured type"));
-        assert_eq!(classify(reason.to_string()), Some(ReplayLimitation::StructuredValue));
+        assert_eq!(classify(&reason), Some(ReplayLimitation::StructuredValue));
+    }
+
+    #[test]
+    fn planner_checks_transitive_structured_outcome_declarations() {
+        let (bundle, mut candidate) = structured_metadata();
+        build_plan(&bundle, &candidate).expect("matching typed collection declarations");
+        candidate.schema.types[0].fields[0].ty = "i64".into();
+        let error = build_plan(&bundle, &candidate).unwrap_err();
+        assert!(error.to_string().contains("Child"), "{error}");
+        assert_eq!(classify(&error), Some(ReplayLimitation::StructuredValue));
+    }
+
+    #[test]
+    fn planner_checks_nested_outcomes_without_scheduling_them() {
+        let (mut bundle, mut candidate) = structured_metadata();
+        let typed = &bundle.registry.operations[0];
+        let nested = replay_model::RegistryOp::builder(replay_model::OpDeps {
+            component_id: typed.component_id().clone(),
+            name: replay_model::OperationName::try_new("inner").unwrap(),
+            inputs: typed.inputs().to_vec(),
+        })
+        .output(typed.output().unwrap().clone())
+        .build()
+        .unwrap();
+        bundle.registry.operations = vec![reference_bundle().registry.operations.remove(0), nested];
+        let mut observed = bundle.scenarios[0].operations[0].clone();
+        observed.operation_name = replay_model::OperationName::try_new("inner").unwrap();
+        bundle.observed_operations.push(observed);
+        let mut inner = candidate.schema.operations[0].clone();
+        inner.name = "inner".into();
+        candidate.schema.operations[0].output = Some("i32".into());
+        candidate.schema.operations.push(inner);
+        let schema = serde_json::to_string(&candidate.schema).unwrap();
+        bundle.registry_document = specgate_ctsc::registry::encode(
+            bundle.registry.identity.id.as_str(),
+            bundle.registry.identity.version.as_str(),
+            specgate_ctsc::registry::Schema::new(&schema),
+        )
+        .unwrap()
+        .registry_json
+        .into_bytes();
+        let plan = build_plan(&bundle, &candidate).unwrap();
+        assert_eq!(plan.links.len(), 1);
+        assert_eq!(plan.links[0].operation_name.as_str(), "add");
+        candidate.schema.types[0].fields[0].ty = "i64".into();
+        let error = build_plan(&bundle, &candidate).unwrap_err();
+        assert!(error.to_string().contains("Child"), "{error}");
+    }
+
+    #[test]
+    fn malformed_structured_candidate_never_publishes() {
+        use specgate::__rt::{self as capture, Value};
+        let (bundle, candidate) = structured_metadata();
+        let plan = build_plan(&bundle, &candidate).unwrap();
+        let config = capture::Config::builder(capture::ConfigDeps {
+            scenario_name: "add".into(),
+            trace_id: "33333333333333333333333333333333".try_into().unwrap(),
+            run_id: "3333333333333301".try_into().unwrap(),
+            scenario_id: "3333333333333302".try_into().unwrap(),
+        })
+        .build()
+        .unwrap();
+        capture::start(config).unwrap();
+        let mut operation = capture::begin_operation("fixture.stateless_add".into(), "add".into()).unwrap();
+        operation.input("a", Value::Integer(2)).unwrap();
+        operation.input("b", Value::Integer(3)).unwrap();
+        operation
+            .result(Value::List(vec![Value::Map(BTreeMap::from([(
+                "child".to_string(),
+                Value::Map(BTreeMap::from([("value".to_string(), Value::String("not an integer".to_string()))])),
+            )]))]))
+            .unwrap();
+        let captures = [capture::finish().unwrap()];
+        let system = CommandEnvironment::fake();
+        system.seed_file("existing.otlp.json", b"original");
+        for out in ["missing.otlp.json", "existing.otlp.json"] {
+            let error = write(&plan, &captures, out, &system).unwrap_err();
+            assert!(error.to_string().contains("failed linked validation"), "{error}");
+        }
+        assert!(!system.exists("missing.otlp.json"));
+        assert_eq!(system.read("existing.otlp.json").unwrap(), b"original");
+    }
+
+    #[test]
+    fn native_raw_identifiers_are_validated_and_preserved() {
+        let mut raw = raw_operation("add");
+        raw.module_path = "specgate_ctsc_fixtures::r#async".into();
+        raw.fn_name = "r#type".into();
+        let plan = build_plan(&reference_bundle(), &candidate_metadata(raw, normalized_operation("add"))).unwrap();
+        assert!(source(&plan).contains("candidate::r#async::r#type("));
+        for invalid in ["async", "r#self", "value; panic!()", "a::b", ""] {
+            assert!(link::validate_ident(invalid, "test").is_err(), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn module_paths_accept_only_library_or_reported_test_roots() {
+        let mut raw = raw_operation("add");
+        raw.test_target = Some(
+            serde_json::from_value(serde_json::json!({
+                "name": "environment-contract",
+                "kind": "integration",
+            }))
+            .unwrap(),
+        );
+        assert_eq!(link::module_path(&raw, "specgate_ctsc_fixtures").unwrap(), ["stateless"]);
+        raw.module_path = "environment_contract::local".into();
+        assert_eq!(link::module_path(&raw, "specgate_ctsc_fixtures").unwrap(), ["local"]);
+        raw.module_path = "unrelated::local".into();
+        assert!(
+            link::module_path(&raw, "specgate_ctsc_fixtures")
+                .unwrap_err()
+                .to_string()
+                .contains("does not begin with crate")
+        );
+        raw.test_target = None;
+        raw.module_path = "environment_contract::local".into();
+        link::module_path(&raw, "specgate_ctsc_fixtures").unwrap_err();
+    }
+
+    fn structured_metadata() -> (ReplayBundle, Candidate) {
+        use specgate_discovery::schema::{Field, TypeDef, TypeKind};
+        let mut operation = normalized_operation("add");
+        operation.output = Some("List<Item>".into());
+        let mut raw = raw_operation("add");
+        raw.return_type = "Vec<Item>".into();
+        let mut candidate = candidate_metadata(raw, operation);
+        candidate.schema.types = vec![
+            TypeDef {
+                name: "Child".into(),
+                kind: TypeKind::Struct,
+                fields: vec![Field {
+                    name: "value".into(),
+                    ty: "i32".into(),
+                }],
+                variants: Vec::new(),
+            },
+            TypeDef {
+                name: "Item".into(),
+                kind: TypeKind::Struct,
+                fields: vec![Field {
+                    name: "child".into(),
+                    ty: "Child".into(),
+                }],
+                variants: Vec::new(),
+            },
+        ];
+        let schema = serde_json::to_string(&candidate.schema).unwrap();
+        let mut bundle = reference_bundle();
+        bundle.registry_document = specgate_ctsc::registry::encode(
+            bundle.registry.identity.id.as_str(),
+            bundle.registry.identity.version.as_str(),
+            specgate_ctsc::registry::Schema::new(&schema),
+        )
+        .unwrap()
+        .registry_json
+        .into_bytes();
+        let operation = &bundle.registry.operations[0];
+        bundle.registry.operations[0] = replay_model::RegistryOp::builder(replay_model::OpDeps {
+            component_id: operation.component_id().clone(),
+            name: operation.name().clone(),
+            inputs: operation.inputs().to_vec(),
+        })
+        .output(ReplayType::list(ReplayType::named("Item", replay_model::TypeOwner::default())))
+        .build()
+        .unwrap();
+        (bundle, candidate)
     }
 
     #[test]
@@ -431,22 +893,47 @@ mod cases {
                 ReplayLimitation::MethodOperation,
             ),
             (
-                "candidate operation 'fixture.fetch::fetch' is async; replay supports only synchronous operations",
-                ReplayLimitation::AsyncOperation,
-            ),
-            (
                 "replay currently supports only Rust candidates; implementation language is 'csharp'",
                 ReplayLimitation::UnsupportedLanguage,
             ),
         ] {
-            assert_eq!(classify(reason), Some(expected), "{reason}");
+            assert_eq!(classify(&Error::from(reason)), Some(expected), "{reason}");
         }
         assert_eq!(
-            classify("operation span '3' result uses unsupported structured replay type named"),
+            classify(&Error::from(
+                "operation span '3' result uses unsupported structured replay type named"
+            )),
             Some(ReplayLimitation::StructuredValue)
         );
-        assert_eq!(classify("candidate is missing operation 'fixture.add::add'"), None);
-        assert_eq!(classify("capture bundle digest mismatch"), None);
+        assert_eq!(classify(&Error::from("candidate is missing operation 'fixture.add::add'")), None);
+        assert_eq!(classify(&Error::from("capture bundle digest mismatch")), None);
+    }
+
+    #[test]
+    fn scheduling_limitation_uses_typed_causes_not_diagnostic_text() {
+        let bundle = repo_root()
+            .join("test")
+            .join("behavior")
+            .join("cases")
+            .join("fixture.async_interleave")
+            .join("expected");
+        let source = decode_bundle(
+            std::fs::read(bundle.join(manifest_file())).unwrap(),
+            std::fs::read(bundle.join(registry_file())).unwrap(),
+            std::fs::read(bundle.join(reference_file())).unwrap(),
+        )
+        .unwrap_err();
+        let decoded = Error::wrap(FailureStage::Capture, "reference decoding failed", source);
+        let wrapped = Error::wrap(FailureStage::Linking, "candidate planning failed", decoded);
+        assert_eq!(classify(&wrapped), Some(ReplayLimitation::AsyncOperation));
+        for message in [
+            "unsupported async replay scheduling: overlapping sibling operations outside conformance.parallel",
+            "unsupported async replay scheduling: a top-level abandoned operation cannot be awaited to completion",
+            "candidate operation is async; replay supports only synchronous operations",
+            "candidate operation is async in normalized discovery",
+        ] {
+            assert_eq!(classify(&Error::from(message)), None, "{message}");
+        }
     }
 
     #[test]
@@ -502,6 +989,8 @@ mod cases {
             },
         ];
         ReplayBundle {
+            registry_document: Vec::new(),
+            observed_operations: Vec::new(),
             component_id: specgate_ctsc::replay::model::ComponentId::try_new("fixture.stateless_add").unwrap(),
             registry: replay_model::Registry {
                 identity: replay_model::RegistryIdentity {
@@ -545,9 +1034,14 @@ mod cases {
             name: name.into(),
             module_path: "specgate_ctsc_fixtures::stateless".into(),
             fn_name: name.into(),
+            type_arguments: Vec::new(),
+            replay_output: None,
+            test_target: None,
             is_setup: false,
             is_async: false,
             is_method: false,
+            consumes_receiver: false,
+            explicit_component: false,
             is_public: true,
             return_type: "i32".into(),
             fills: "".into(),
@@ -597,12 +1091,18 @@ mod cases {
     fn candidate_metadata(raw: RawOperation, normalized: Operation) -> Candidate {
         Candidate {
             inner: Arc::new(CandidatesInner {
+                crate_name: "specgate_ctsc_fixtures".to_string(),
                 target_name: "rust".into(),
                 language: specgate_discovery::binding::Language::Rust,
                 package_name: "specgate-ctsc-fixtures".into(),
                 package_version: "0.1.0".into(),
                 package_root: PathBuf::from("candidate"),
                 runtime: specgate_discovery::runner::PackageSource::local("specgate-runtime", "0.6.0", "resolved-runtime"),
+                executor_options: specgate_discovery::binding::LanguageOptions::Rust {
+                    runtime: specgate_discovery::binding::Runtime::Auto,
+                    executor: None,
+                },
+                executors: BTreeMap::new(),
                 raw_registry: Registry {
                     ops: vec![raw],
                     types: Vec::new(),

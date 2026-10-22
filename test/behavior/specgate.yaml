@@ -24,23 +24,35 @@ components:
       csharp: *csharp_fixtures
   fixture.async_abandon:
     implementations:
-      rust: *rust_fixtures
+      rust: &rust_async
+        language: rust
+        sources: projects/rust/specgate-ctsc-fixtures
+        tests:
+          projects:
+            - projects/rust/specgate-ctsc-fixtures/Cargo.toml
+        rust: { runtime: smol }
   fixture.async_fetch:
     implementations:
-      rust: *rust_fixtures
+      rust: *rust_async
       csharp: *csharp_fixtures
   fixture.async_interleave:
     implementations:
-      rust: *rust_fixtures
+      rust: *rust_async
   fixture.async_migration:
     implementations:
-      rust: *rust_fixtures
+      rust: *rust_async
   fixture.async_smol_timer:
     implementations:
-      rust: *rust_fixtures
+      rust: *rust_async
   fixture.async_tokio_timer:
     implementations:
-      rust: *rust_fixtures
+      rust:
+        language: rust
+        sources: projects/rust/specgate-ctsc-fixtures
+        tests:
+          projects:
+            - projects/rust/specgate-ctsc-fixtures/Cargo.toml
+        rust: { runtime: tokio }
   fixture.catch_all:
     implementations:
       rust: *rust_fixtures
@@ -78,7 +90,7 @@ components:
       rust: *rust_fixtures
   fixture.fallible_unit:
     implementations:
-      rust: *rust_fixtures
+      rust: *rust_async
       csharp: *csharp_fixtures
   fixture.faults:
     implementations:

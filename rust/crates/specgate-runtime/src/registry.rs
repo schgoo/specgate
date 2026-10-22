@@ -26,6 +26,8 @@ pub struct OpMeta {
     pub(crate) is_async: bool,
     /// Whether this declaration is a method.
     pub(crate) is_method: bool,
+    pub(crate) consumes_receiver: bool,
+    pub(crate) explicit_component: bool,
     /// Whether this declaration is public.
     pub(crate) is_public: bool,
     /// Raw parameter names and types.
@@ -39,6 +41,9 @@ pub struct OpMeta {
     /// override) that owns this operation. Extraction groups by component and
     /// derives cross-component `depends_on` from it.
     pub(crate) component: &'static str,
+    type_arguments: Option<fn() -> Vec<&'static str>>,
+    pub(crate) replay_setup: Option<harness::Setup>,
+    pub(crate) replay_operation: Option<harness::Invocation>,
 }
 
 /// One named field with its (stringified) Rust type. Used for both operation
@@ -250,17 +255,42 @@ impl OpMeta {
                 is_setup: false,
                 is_async: false,
                 is_method: false,
+                consumes_receiver: false,
+                explicit_component: false,
                 is_public: false,
                 params: deps.params,
                 return_type: deps.return_type.0,
                 fills: None,
                 component: deps.component.0,
+                type_arguments: None,
+                replay_setup: None,
+                replay_operation: None,
             },
         }
     }
 }
 
 impl OpBuilder {
+    /// Attach an invocation generated in the operation's lexical scope.
+    #[must_use]
+    pub const fn replay_operation(mut self, invoke: Option<harness::Invocation>) -> Self {
+        self.meta.replay_operation = invoke;
+        self
+    }
+
+    /// Attach a generated test-local setup constructor.
+    #[must_use]
+    pub const fn replay_setup(mut self, setup: harness::Setup) -> Self {
+        self.meta.replay_setup = Some(setup);
+        self
+    }
+    /// Declare the concrete native type arguments for this operation.
+    #[must_use]
+    pub const fn type_arguments(mut self, arguments: fn() -> Vec<&'static str>) -> Self {
+        self.meta.type_arguments = Some(arguments);
+        self
+    }
+
     /// Mark setup-producer metadata.
     #[must_use]
     pub const fn setup(mut self, fills: Option<FieldName>) -> Self {
@@ -283,6 +313,20 @@ impl OpBuilder {
     #[must_use]
     pub const fn method(mut self, value: bool) -> Self {
         self.meta.is_method = value;
+        self
+    }
+
+    /// Record that the method takes ownership rather than borrowing its receiver.
+    #[must_use]
+    pub const fn consuming_receiver(mut self, value: bool) -> Self {
+        self.meta.consumes_receiver = value;
+        self
+    }
+
+    /// Preserve whether the declaration uses a literal component override.
+    #[must_use]
+    pub const fn explicit_component(mut self, value: bool) -> Self {
+        self.meta.explicit_component = value;
         self
     }
 
@@ -541,12 +585,32 @@ impl Discovery {
             write_property(&mut out, "{\"name\":", op.name);
             write_property(&mut out, ",\"module_path\":", op.module_path);
             write_property(&mut out, ",\"fn_name\":", op.fn_name);
+            let type_arguments = op.type_arguments.map_or_else(Vec::new, |arguments| arguments());
+            if !type_arguments.is_empty() {
+                out.push_str(",\"type_arguments\":[");
+                for (index, argument) in type_arguments.iter().enumerate() {
+                    if index > 0 {
+                        out.push(',');
+                    }
+                    write_string(&mut out, argument);
+                }
+                out.push(']');
+            }
             let _ = write!(
                 out,
                 ",\"is_setup\":{},\"is_async\":{},\"is_method\":{},\"is_public\":{}",
                 op.is_setup, op.is_async, op.is_method, op.is_public
             );
             write_property(&mut out, ",\"return_type\":", op.return_type);
+            if op.consumes_receiver {
+                out.push_str(",\"consumes_receiver\":true");
+            }
+            if op.explicit_component {
+                out.push_str(",\"explicit_component\":true");
+            }
+            if let Some(setup) = op.replay_setup {
+                write_property(&mut out, ",\"replay_output\":", setup.output());
+            }
             write_property(&mut out, ",\"fills\":", op.fills.unwrap_or(""));
             write_property(&mut out, ",\"component\":", op.component);
             out.push_str(",\"params\":");

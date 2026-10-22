@@ -111,6 +111,56 @@ folded input name is reported rather than guessed. Ordinary runs are unchanged:
 nothing is projected or recorded unless a capture session is active or
 requested.
 
+## Candidate replay and explicit generic operations
+
+Rust candidate replay supports public free functions and setup-backed instance
+methods, including directly awaited async calls and explicit generic
+specializations. Operation and setup construction inputs remain lossless
+primitives. Structured results and declared errors, including collections of
+annotated records, use the existing CTSC projection and linked validators.
+Reachable named declarations, including nested observed outcomes, must match
+the reference. Replay invokes only top-level reference operations; nested
+operations remain observed behavior.
+
+Discovery enumerates actual Cargo libtest targets, including private
+`#[cfg(test)]` and integration-test producers. Replay resolves annotated setups
+by semantic component, operation, and receiver or parameter role. It invokes a
+generated entry in the selected Cargo target, not ordinary candidate tests.
+Producers must be synchronous nongeneric free functions with supported primitive
+construction inputs and owned, downcastable outputs. A replay cannot combine
+setup environments from different Cargo test targets.
+
+Equal receiver producer identities and construction inputs share a receiver
+within one scenario. Separate scenario scopes release receivers and setup
+guards before the next scenario. Concrete downcasts and calls stay in lexical
+bridges: method specializations resolve in the operation module, not the
+receiver producer module. Plain test-only operations also select their recorded
+Cargo target, and integration-local module paths are checked against that
+target's compiler-reported crate root.
+
+Each generic specialization declares its own semantic operation name and
+concrete type arguments. Rust accepts repeatable annotations such as
+`#[spec_operation("find_items", types = "crate::Item")]`; multiple type parameters
+use a comma-separated `types` string. C# uses
+`[SpecOperation("find_items", Spec = "example.client", TypeArguments = new[] { typeof(Item) })]`.
+The original generic constraints remain, including Rust's `'static` requirement
+and C# constraints such as `where T : notnull`. Discovery publishes concrete
+signatures without inferring specializations from tests. Calling an undeclared
+specialization while recording fails explicitly. Open generic declaring types,
+generic setups, and Rust const-generic operation specializations are unsupported.
+Rust substitutions that change syntactic completion channels are rejected,
+including `Option<T>` specialized to `Option<()>` and `T` specialized to
+`Result<i32, String>`; use a concrete return signature. This check does not
+resolve aliases or associated-type projections.
+
+The paired CLI fixture captures a C# generic async client method and replays
+it against a Rust method returning `Vec<Item>`. Private Rust setup producers in
+an arbitrary integration-test target reconstruct the loopback HTTP environment.
+Repeated calls retain receiver state, and strict comparison checks the typed
+collection contents. See the
+[accepted replay decision](decisions/typed-async-client-replay.md) and
+[limitations](reference/limitations.md).
+
 ## Provisional capture sidecars
 
 `specgate capture` runs ordinary tests and never signals "the test ended", so

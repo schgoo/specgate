@@ -174,6 +174,37 @@ fn config() -> specgate::__rt::Config {
     .unwrap()
 }
 
+/// Publish concrete instances of a generic operation without hand-written wrappers.
+#[spec_operation("echo_i32", types = "i32")]
+#[spec_operation("echo_string", types = "String")]
+pub fn generic_echo<T: specgate::ToNativeValue + 'static>(value: T) -> T {
+    value
+}
+
+#[test]
+fn generic_specializations_capture_distinct_concrete_operations() {
+    specgate::__rt::start(config()).unwrap();
+    assert_eq!(generic_echo(7_i32), 7);
+    assert_eq!(generic_echo(String::from("hello")), "hello");
+    let capture = specgate::__rt::finish().unwrap();
+    assert_eq!(capture.operations[0].operation_name, "echo_i32");
+    assert_eq!(capture.operations[1].operation_name, "echo_string");
+    assert_eq!(capture.operations[0].inputs["value"], Value::Integer(7));
+    assert_eq!(capture.operations[1].inputs["value"], Value::String("hello".to_string()));
+    let discovery = specgate::__rt::discovery().json();
+    assert!(discovery.contains("\"type_arguments\":[\"i32\"]"));
+    assert!(!discovery.contains("\"return_type\":\"T\""));
+}
+
+#[test]
+fn undeclared_generic_specializations_fail_capture_not_ordinary_execution() {
+    assert_eq!(generic_echo(9_u32), 9);
+    specgate::__rt::start(config()).unwrap();
+    assert_eq!(generic_echo(9_u32), 9);
+    let error = specgate::__rt::finish().unwrap_err().to_string();
+    assert!(error.contains("no declared specialization"), "{error}");
+}
+
 fn inputs_of(capture: &specgate::__rt::Capture, operation: &str) -> BTreeMap<String, Value> {
     capture
         .operations

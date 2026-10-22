@@ -32,6 +32,9 @@ use super::{
 ///
 /// # Errors
 /// Returns `syn::Error` when the macro input is malformed or uses an unsupported declaration.
+///
+/// # Panics
+/// Panics if primitive setup-input validation and bridge generation disagree.
 pub fn expand_setup(attribute: TokenStream2, item: TokenStream2) -> syn::Result<TokenStream2> {
     let SetupArg {
         operation,
@@ -43,6 +46,7 @@ pub fn expand_setup(attribute: TokenStream2, item: TokenStream2) -> syn::Result<
     let params = collect_parameters(&mut function, !stacked);
     let rt = runtime();
     let component = component(owner.as_deref());
+    let explicit_component = owner.is_some();
     let function_name = function.sig.ident.to_string();
     let const_name = metadata_ident("SETUP", format!("{function_name}:{operation}:{fills:?}"), function.sig.ident.span());
     let fills_metadata = fills.as_deref().map_or_else(
@@ -50,6 +54,7 @@ pub fn expand_setup(attribute: TokenStream2, item: TokenStream2) -> syn::Result<
         |fills| quote!(::core::option::Option::Some(#rt::FieldName::new(#fills))),
     );
     let is_async = function.sig.asyncness.is_some();
+    let is_method = super::has_receiver(&function);
     if !is_async {
         let recorded = params
             .iter()
@@ -80,6 +85,67 @@ pub fn expand_setup(attribute: TokenStream2, item: TokenStream2) -> syn::Result<
         });
     }
     let is_public = matches!(function.vis, syn::Visibility::Public(_));
+    let replay = if std::env::var_os("SPECGATE_TEST_ENTRY").is_some()
+        && !is_async
+        && function.sig.generics.params.is_empty()
+        && !super::has_receiver(&function)
+        && params.iter().all(|(_, ty, _)| primitive(ty).is_some())
+        && owned_output(&function.sig.output)
+    {
+        let function_ident = &function.sig.ident;
+        let bindings = params.iter().map(|(ident, ty, name)| {
+            let (ty, _) = primitive(ty).expect("validated primitive setup input");
+            quote!(let #ident: #ty = #rt::harness::argument(&mut values, #name)?;)
+        });
+        let arguments = params.iter().map(|(ident, ty, _)| {
+            if primitive(ty).expect("validated primitive setup input").1 {
+                quote!(&#ident)
+            } else {
+                quote!(#ident)
+            }
+        });
+        let output = match &function.sig.output {
+            ReturnType::Default => quote!(()),
+            ReturnType::Type(_, ty) => quote!(#ty),
+        };
+        let dispatch = if std::env::var_os("SPECGATE_TEST_DISPATCH").is_some() {
+            let declared_fills = fills.as_deref().unwrap_or_default();
+            let package = std::env::var("CARGO_PKG_NAME").map_err(|error| syn::Error::new_spanned(&function.sig, error))?;
+            quote! {
+                .dispatch({
+                    use #rt as __specgate;
+                    macro_rules! __specgate_selected {
+                        () => { __specgate_dispatch!(#package, setup, #component, #operation, #function_name, #declared_fills, #output) };
+                    }
+                    include!(env!(concat!("SPECGATE_TEST_MODULE_", module_path!())))
+                })
+                .project({
+                    use #rt as __specgate;
+                    macro_rules! __specgate_selected {
+                        () => { __specgate_dispatch!(input, #package, #component, #operation, #function_name, #declared_fills, #output) };
+                    }
+                    include!(env!(concat!("SPECGATE_TEST_MODULE_", module_path!())))
+                })
+            }
+        } else {
+            TokenStream2::new()
+        };
+        quote! {
+            .replay_setup(#rt::harness::Setup::new(
+                |values| {
+                    let mut values = values.into_iter();
+                    #(#bindings)*
+                    if values.next().is_some() {
+                        return ::core::result::Result::Err(#rt::harness::error("unexpected extra setup inputs"));
+                    }
+                    ::core::result::Result::Ok(::std::boxed::Box::new(#function_ident(#(#arguments),*)))
+                },
+                || ::core::any::type_name::<#output>(),
+            ) #dispatch)
+        }
+    } else {
+        TokenStream2::new()
+    };
     let parameter_metadata = params.iter().map(|(_ident, ty, name)| {
         let ty = quote!(#ty).to_string();
         quote!(#rt::FieldMeta::new(
@@ -91,11 +157,13 @@ pub fn expand_setup(attribute: TokenStream2, item: TokenStream2) -> syn::Result<
         ReturnType::Default => "()".to_string(),
         ReturnType::Type(_, ty) => quote!(#ty).to_string(),
     };
+    let dependency = super::harness::dependency();
     let expanded = quote! {
         #function
 
         #[allow(dead_code, non_upper_case_globals, reason = "generated linker metadata is referenced externally")]
         const #const_name: () = {
+            #dependency
             #[#rt::_private::linkme::distributed_slice(#rt::SPECGATE_OPS)]
             #[linkme(crate = #rt::_private::linkme)]
             static __SPECGATE_META: #rt::OpMeta = #rt::OpMeta::const_builder(#rt::OpDeps {
@@ -107,10 +175,47 @@ pub fn expand_setup(attribute: TokenStream2, item: TokenStream2) -> syn::Result<
                 component: #rt::ComponentName::new(#component),
             })
             .setup(#fills_metadata)
+            .method(#is_method)
+            .explicit_component(#explicit_component)
             .asynchronous(#is_async)
             .public(#is_public)
+            #replay
             .build();
         };
     };
     Ok(expanded)
+}
+
+fn primitive(ty: &syn::Type) -> Option<(syn::Type, bool)> {
+    let text = quote!(#ty).to_string().replace(' ', "");
+    match text.as_str() {
+        "&str" => Some((parse_quote!(String), true)),
+        "String" | "bool" | "i32" | "i64" | "u32" | "u64" | "f32" | "f64" | "()" => Some((ty.clone(), false)),
+        _ => None,
+    }
+}
+
+fn owned_output(output: &ReturnType) -> bool {
+    struct Owned(bool);
+    impl syn::visit_mut::VisitMut for Owned {
+        fn visit_type_mut(&mut self, i: &mut syn::Type) {
+            if matches!(
+                i,
+                syn::Type::Reference(_) | syn::Type::ImplTrait(_) | syn::Type::Infer(_) | syn::Type::Macro(_)
+            ) {
+                self.0 = false;
+            }
+            syn::visit_mut::visit_type_mut(self, i);
+        }
+
+        fn visit_lifetime_mut(&mut self, i: &mut syn::Lifetime) {
+            if i.ident != "static" {
+                self.0 = false;
+            }
+        }
+    }
+    let mut output = output.clone();
+    let mut owned = Owned(true);
+    syn::visit_mut::VisitMut::visit_return_type_mut(&mut owned, &mut output);
+    owned.0
 }

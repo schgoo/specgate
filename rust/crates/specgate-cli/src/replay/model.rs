@@ -125,6 +125,8 @@ impl std::fmt::Display for RegistryDigest {
 /// One candidate target described by a serializable replay plan.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Target {
+    /// Compiler-reported candidate library crate name.
+    pub(crate) crate_name: String,
     /// Candidate implementation language.
     pub(crate) language: Language,
     /// Cargo package name.
@@ -135,6 +137,24 @@ pub(crate) struct Target {
     pub(crate) package_root: PathBuf,
     /// Exact resolved runtime package source.
     pub(crate) runtime: specgate_discovery::runner::PackageSource,
+    /// Candidate-owned execution context; never a capture-runtime dependency.
+    #[serde(default)]
+    pub(crate) executor: Executor,
+}
+
+/// How generated replay enters the candidate's async execution context.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum Executor {
+    #[default]
+    Synchronous,
+    Builtin {
+        alias: String,
+        source: specgate_discovery::runner::PackageSource,
+        features: Vec<String>,
+    },
+    Custom {
+        path: String,
+    },
 }
 
 /// One ordered candidate parameter in a statically linked invocation.
@@ -151,6 +171,8 @@ pub(crate) struct Input {
 /// One distinct semantic-to-candidate operation link.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Link {
+    pub(crate) explicit_component: bool,
+    pub(crate) native_module: String,
     /// Owning component identifier.
     pub(crate) component_id: ComponentId,
     /// Semantic operation name.
@@ -159,10 +181,46 @@ pub(crate) struct Link {
     pub(crate) module_path: Vec<String>,
     /// Candidate Rust function name.
     pub(crate) fn_name: String,
+    /// Concrete native generic type arguments.
+    pub(crate) type_arguments: Vec<String>,
     /// Ordered candidate inputs.
     pub(crate) inputs: Vec<Input>,
     /// Optional candidate output type.
     pub(crate) output: Option<ReplayType>,
+    /// Whether the operation must be awaited.
+    pub(crate) is_async: bool,
+    /// Whether the operation is invoked on a setup-produced receiver.
+    pub(crate) is_method: bool,
+    /// Selected native setup producers.
+    pub(crate) setups: Vec<Setup>,
+    /// Native operation parameters, in call order.
+    pub(crate) parameters: Vec<Parameter>,
+}
+
+/// One semantically selected setup invocation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct Setup {
+    pub(crate) explicit_component: bool,
+    pub(crate) module_path: Vec<String>,
+    pub(crate) fn_name: String,
+    pub(crate) fills: String,
+    pub(crate) declared_fills: String,
+    pub(crate) inputs: Vec<usize>,
+    pub(crate) native_module: String,
+    pub(crate) replay_output: Option<String>,
+    pub(crate) test_target: Option<specgate_discovery::registry::TestTarget>,
+}
+
+/// A native argument supplied by a recorded input or a setup result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum Parameter {
+    Input(usize),
+    Setup {
+        index: usize,
+        borrow: String,
+        /// Unsized borrowed target, resolved only in the operation's scope.
+        projection: Option<String>,
+    },
 }
 
 /// One planned invocation with scenario-specific semantic values.
@@ -188,6 +246,10 @@ pub(crate) struct Scenario {
 /// The complete target-local invocation plan built before code generation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Plan {
+    /// Every discovered declaration scope requiring a lexical dispatch include.
+    pub(crate) dispatch_modules: Vec<String>,
+    /// Native test target required by test-only or private setup declarations.
+    pub(crate) test_target: Option<specgate_discovery::registry::TestTarget>,
     /// Replayed component identifier.
     pub(crate) component_id: ComponentId,
     /// Linked registry identifier.
@@ -196,6 +258,10 @@ pub(crate) struct Plan {
     pub(crate) registry_version: RegistryVersion,
     /// Linked registry digest.
     pub(crate) registry_digest: RegistryDigest,
+    /// Exact linked registry document for validating structured candidate outcomes.
+    pub(crate) registry_document: Vec<u8>,
+    /// Whether outcomes require the full structured-value validator.
+    pub(crate) structured_outcomes: bool,
     /// Resolved candidate target.
     pub(crate) target: Target,
     /// Distinct semantic-to-candidate operation links.
@@ -221,7 +287,7 @@ impl Candidate {
 
 #[cfg(test)]
 mod tests {
-    use super::{Language, Plan, RegistryDigest, RegistryId, RegistryVersion, SHA256_WIDTH, Target};
+    use super::{Executor, Language, Plan, RegistryDigest, RegistryId, RegistryVersion, SHA256_WIDTH, Target};
     use specgate_discovery::identity::{ComponentId, PackageName, PackageVersion};
     use specgate_discovery::runner::PackageSource;
     use std::path::PathBuf;
@@ -261,16 +327,22 @@ mod tests {
     #[test]
     fn plan_roundtrip() {
         let plan = Plan {
+            dispatch_modules: Vec::new(),
+            test_target: None,
             component_id: ComponentId::from("fixture.component"),
             registry_id: RegistryId::from("urn:ctsc:registry:fixture.component".to_string()),
             registry_version: RegistryVersion::from("0.1.0".to_string()),
             registry_digest: RegistryDigest::try_new(format!("sha256:{}", "a".repeat(64))).unwrap(),
+            registry_document: Vec::new(),
+            structured_outcomes: false,
             target: Target {
+                crate_name: "fixture".to_string(),
                 language: Language::Rust,
                 package_name: PackageName::from("fixture"),
                 package_version: PackageVersion::from("1.0.0"),
                 package_root: PathBuf::from("fixture"),
                 runtime: PackageSource::local("specgate-runtime", "0.6.0", "../runtime"),
+                executor: Executor::Synchronous,
             },
             links: Vec::new(),
             scenarios: Vec::new(),

@@ -268,7 +268,9 @@ impl Type {
     pub fn record(fields: impl Into<Vec<RegistryInput>>) -> Self {
         Self(TypeKind::Record { fields: fields.into() })
     }
-    pub(crate) fn kind_name(&self) -> &'static str {
+    /// Return the CTSC type discriminator.
+    #[must_use]
+    pub fn kind_name(&self) -> &'static str {
         match &self.0 {
             TypeKind::Primitive { .. } => "primitive",
             TypeKind::Named { .. } => "named",
@@ -648,6 +650,10 @@ pub struct Bundle {
     pub component_id: ComponentId,
     /// Linked registry surface.
     pub registry: Registry,
+    /// Exact verified registry bytes, retained for candidate linked validation.
+    pub registry_document: Vec<u8>,
+    /// Observed operations, including nested operations that must not be invoked separately.
+    pub observed_operations: Vec<Operation>,
     /// Ordered replay scenarios.
     pub scenarios: Vec<Scenario>,
 }

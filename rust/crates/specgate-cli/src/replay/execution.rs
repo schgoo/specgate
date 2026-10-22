@@ -22,12 +22,15 @@ pub(crate) struct Candidates {
 /// runtime source, preserving package identity throughout linking and execution.
 #[derive(Debug, Clone)]
 pub(crate) struct CandidatesInner {
+    pub(super) crate_name: String,
     pub(super) target_name: specgate_discovery::identity::ImplementationLabel,
     pub(super) language: specgate_discovery::binding::Language,
     pub(super) package_name: specgate_discovery::identity::PackageName,
     pub(super) package_version: specgate_discovery::identity::PackageVersion,
     pub(super) package_root: PathBuf,
     pub(super) runtime: specgate_discovery::runner::PackageSource,
+    pub(super) executor_options: specgate_discovery::binding::LanguageOptions,
+    pub(super) executors: std::collections::BTreeMap<String, specgate_discovery::runner::ExecutorDependency>,
     pub(super) raw_registry: Registry,
     pub(super) schemas: HashMap<specgate_discovery::identity::ComponentId, Schema>,
 }
@@ -133,12 +136,15 @@ impl Candidates {
         schemas.shrink_to_fit();
         Ok(Self {
             inner: Arc::new(CandidatesInner {
+                crate_name: cargo.crate_name,
                 target_name,
                 language,
                 package_name: cargo.package,
                 package_version: cargo.version,
                 package_root,
                 runtime: cargo.runtime,
+                executor_options: discovered.implementation.implementation.options,
+                executors: cargo.executors,
                 raw_registry,
                 schemas,
             }),

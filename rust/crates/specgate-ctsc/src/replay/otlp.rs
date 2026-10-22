@@ -24,11 +24,12 @@ struct ScenarioRef<'a> {
     position: usize,
 }
 
-pub(super) fn decode_scenarios(
-    document: &Document,
-    manifest: &ValidatedManifest,
-    registry: &Registry,
-) -> Result<Vec<Scenario>, error::Error> {
+pub(super) struct Decoded {
+    pub scenarios: Vec<Scenario>,
+    pub observed_operations: Vec<Operation>,
+}
+
+pub(super) fn decode_scenarios(document: &Document, manifest: &ValidatedManifest, registry: &Registry) -> Result<Decoded, error::Error> {
     if document.resource_spans.len() != 1 {
         return Err(format!(
             "reference OTLP must contain exactly one resourceSpans entry, found {}",
@@ -147,6 +148,7 @@ pub(super) fn decode_scenarios(
     }
 
     let mut decoded_operations = BTreeMap::new();
+    let mut sibling_intervals = BTreeMap::<_, Vec<_>>::new();
     for span_ref in spans.iter().filter(|span_ref| span_ref.span.name.as_ref() == OPERATION_SPAN) {
         let parent = by_id
             .get(&(span_ref.span.trace_id.as_ref(), span_ref.span.parent_span_id.as_ref()))
@@ -158,10 +160,30 @@ pub(super) fn decode_scenarios(
             )
             .into());
         }
+        if parent.name.as_ref() == SCENARIO_SPAN && span_ref.span.events.iter().any(|event| event.name.as_ref() == ABANDONED_EVENT) {
+            return Err(error::Error::scheduling(
+                "unsupported async replay scheduling: a top-level abandoned operation cannot be awaited to completion",
+            ));
+        }
+        sibling_intervals
+            .entry((span_ref.span.trace_id.as_ref(), span_ref.span.parent_span_id.as_ref()))
+            .or_default()
+            .push((
+                parse_time(&span_ref.span.start_time_unix_nano, || "operation start".to_string())?,
+                parse_time(&span_ref.span.end_time_unix_nano, || "operation end".to_string())?,
+            ));
         decoded_operations.insert(
             (span_ref.span.trace_id.as_ref(), span_ref.span.span_id.as_ref()),
             decode_operation(span_ref.span, registry)?,
         );
+    }
+    for intervals in sibling_intervals.values_mut() {
+        intervals.sort_unstable();
+        if intervals.windows(2).any(|pair| pair[0].1 > pair[1].0) {
+            return Err(error::Error::scheduling(
+                "unsupported async replay scheduling: overlapping sibling operations outside conformance.parallel",
+            ));
+        }
     }
     if spans.iter().any(|span_ref| span_ref.span.name.as_ref() == PARALLEL_SPAN) {
         return Err("reference OTLP parallel spans are unsupported by the first replay slice"
@@ -202,7 +224,10 @@ pub(super) fn decode_scenarios(
             operations,
         });
     }
-    Ok(scenarios)
+    Ok(Decoded {
+        scenarios,
+        observed_operations: decoded_operations.into_values().collect(),
+    })
 }
 
 fn decode_operation(span: &Span, registry: &Registry) -> Result<Operation, error::Error> {
@@ -278,7 +303,9 @@ fn decode_operation(span: &Span, registry: &Registry) -> Result<Operation, error
                 let value = event_attributes
                     .get(RESULT_VALUE)
                     .ok_or_else(|| format!("reference {location} result is missing conformance.result.value"))?;
-                let _ = decode_value(value, output, format!("{location} result"))?;
+                if output.primitive_name().is_some() {
+                    let _ = decode_value(value, output, format!("{location} result"))?;
+                }
             }
             OBS_EVENT => {
                 fill_attribute_map(&mut event_attributes, &event.attributes, format!("{location} observation"))?;
@@ -289,11 +316,8 @@ fn decode_operation(span: &Span, registry: &Registry) -> Result<Operation, error
             // Abandonment is terminal and carries no outcome, exactly like a
             // fault from this decoder's point of view. Counting it is what keeps
             // a result-bearing operation that was abandoned from tripping the
-            // "no result or fault" check below. This is classification only: it
-            // does not decide whether an abandoned reference is replayable:
-            // abandonment is only reachable for async operations, and the
-            // planner already rejects every async candidate before invocation,
-            // so no abandoned reference reaches the invoker.
+            // "no result or fault" check below. Only nested abandonment can be
+            // replayed by invoking its completing enclosing operation.
             ABANDONED_EVENT => has_abandoned = true,
             EMPTY_EVENT => {
                 empty_count += 1;
@@ -319,7 +343,9 @@ fn decode_operation(span: &Span, registry: &Registry) -> Result<Operation, error
                 })?;
                 match (&declared.value_type, event_attributes.get(ERROR_VALUE)) {
                     (Some(value_type), Some(value)) => {
-                        let _ = decode_value(value, value_type, format!("{location} error '{name}'"))?;
+                        if value_type.primitive_name().is_some() {
+                            let _ = decode_value(value, value_type, format!("{location} error '{name}'"))?;
+                        }
                     }
                     (Some(_), None) => return Err(format!("reference {location} error '{name}' is missing its value").into()),
                     (None, Some(_)) => return Err(format!("reference {location} error '{name}' declares no value").into()),

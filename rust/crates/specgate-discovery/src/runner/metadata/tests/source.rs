@@ -34,6 +34,34 @@ fn manifest_escaping() {
 }
 
 #[test]
+fn manifest_preserves_executor_features_without_enabling_defaults() {
+    let mut dependency = Dependency::from_source(&PackageSource::registry(
+        "tokio",
+        "1.48.0",
+        "registry+https://github.com/rust-lang/crates.io-index",
+    ))
+    .unwrap();
+    dependency.features = vec!["rt".to_string()];
+    dependency.default_features = false;
+    let cargo = runner_cargo("executor-features", BTreeMap::from([("engine".to_string(), dependency)])).unwrap();
+    let parsed: toml::Value = toml::from_str(&cargo.manifest).unwrap();
+    let engine = &parsed["dependencies"]["engine"];
+    assert_eq!(engine["features"].as_array().unwrap(), &[toml::Value::String("rt".to_string())]);
+    assert_eq!(engine["default-features"].as_bool(), Some(false));
+    assert_eq!(engine["version"].as_str(), Some("=1.48.0"));
+}
+
+#[test]
+fn explicit_library_kinds() {
+    for kind in ["lib", "rlib", "dylib", "cdylib", "staticlib"] {
+        assert!(library_kind(kind), "{kind}");
+    }
+    for kind in ["bin", "test", "bench", "example", "custom-build"] {
+        assert!(!library_kind(kind), "{kind}");
+    }
+}
+
+#[test]
 fn candidate_root() {
     let cache = InvocationCache::create(CacheScope::new("tests"), CacheLabel::new("metadata-source")).unwrap();
     let runtime = cache.path().join("runtime");
@@ -115,6 +143,7 @@ fn source_mismatch() {
 #[test]
 fn lazy_override() {
     let runtime = CargoPackage {
+        targets: Vec::new(),
         id: "git+https://example.invalid/specgate#specgate-runtime@0.6.0".to_string(),
         name: "specgate-runtime".to_string(),
         version: "0.6.0".to_string(),
@@ -153,6 +182,7 @@ fn registry_source() {
         "sparse+https://registry.example.invalid/index/",
     ] {
         let package = CargoPackage {
+            targets: Vec::new(),
             id: format!("registry-package#{source}"),
             name: "specgate-runtime".to_string(),
             version: "0.6.0".to_string(),

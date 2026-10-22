@@ -6,6 +6,29 @@ use crate::error::ErrorKind;
 use crate::identity::{ComponentId, FieldName, FunctionName, KindName, ModulePath, OperationName, TypeExpression, TypeName, VariantName};
 use serde::Deserialize;
 
+/// Cargo test target containing an annotation-generated replay entry point.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct TestTarget {
+    /// Cargo's target name, not a filesystem or test-layout convention.
+    pub name: String,
+    /// Compiler-reported executable kind used to select the Cargo target.
+    pub kind: TestTargetKind,
+}
+
+/// Cargo target kind containing a libtest executable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum TestTargetKind {
+    /// Library unit tests.
+    Library,
+    /// Binary unit tests.
+    Binary,
+    /// Integration tests.
+    Integration,
+}
+
 // ---------------------------------------------------------------------------
 // Registry model (parsed from discovery JSON)
 // ---------------------------------------------------------------------------
@@ -62,12 +85,22 @@ pub struct Operation {
     pub module_path: ModulePath,
     /// Native function or method name.
     pub fn_name: FunctionName,
+    /// Concrete native generic type arguments, in declaration order.
+    pub type_arguments: Vec<TypeExpression>,
+    /// Compiler-qualified result type of a generated setup bridge.
+    pub replay_output: Option<String>,
+    /// Cargo test target in which this declaration was discovered.
+    pub test_target: Option<TestTarget>,
     /// Whether this declaration is a setup producer.
     pub is_setup: bool,
     /// Whether this declaration is asynchronous.
     pub is_async: bool,
     /// Whether this declaration is a method.
     pub is_method: bool,
+    /// Whether the native method takes ownership of its receiver.
+    pub consumes_receiver: bool,
+    /// Whether the native annotation contains a literal component override.
+    pub explicit_component: bool,
     /// Whether this declaration is public.
     pub is_public: bool,
     /// Raw native return type.
@@ -148,9 +181,14 @@ impl Operation {
                 component: required.component,
                 module_path: String::new().into(),
                 fn_name: String::new().into(),
+                type_arguments: Vec::new(),
+                replay_output: None,
+                test_target: None,
                 is_setup: false,
                 is_async: false,
                 is_method: false,
+                consumes_receiver: false,
+                explicit_component: false,
                 is_public: true,
                 return_type: String::new().into(),
                 fills: String::new().into(),
@@ -191,6 +229,11 @@ impl OperationBuilder {
     /// Set method metadata.
     pub const fn method(mut self, value: bool) -> Self {
         self.operation.is_method = value;
+        self
+    }
+    /// Record whether invoking the method consumes its receiver.
+    pub const fn consuming_receiver(mut self, value: bool) -> Self {
+        self.operation.consumes_receiver = value;
         self
     }
     /// Set declaration visibility.
@@ -468,11 +511,21 @@ struct WireOperation {
     #[serde(default)]
     fn_name: String,
     #[serde(default)]
+    type_arguments: Vec<String>,
+    #[serde(default)]
+    replay_output: Option<String>,
+    #[serde(default)]
+    test_target: Option<TestTarget>,
+    #[serde(default)]
     is_setup: bool,
     #[serde(default)]
     is_async: bool,
     #[serde(default)]
     is_method: bool,
+    #[serde(default)]
+    consumes_receiver: bool,
+    #[serde(default)]
+    explicit_component: bool,
     #[serde(default = "default_public")]
     is_public: bool,
     #[serde(default)]
@@ -507,9 +560,14 @@ impl From<WireOperation> for Operation {
             name: wire.name.into(),
             module_path: wire.module_path.into(),
             fn_name: wire.fn_name.into(),
+            type_arguments: wire.type_arguments.into_iter().map(Into::into).collect(),
+            replay_output: wire.replay_output,
+            test_target: wire.test_target,
             is_setup: wire.is_setup,
             is_async: wire.is_async,
             is_method: wire.is_method,
+            consumes_receiver: wire.consumes_receiver,
+            explicit_component: wire.explicit_component,
             is_public: wire.is_public,
             return_type: wire.return_type.into(),
             fills: wire.fills.into(),

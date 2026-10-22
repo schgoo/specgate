@@ -112,9 +112,20 @@ internal static class DiscoveryRunner
                 annotatedMethods,
                 nullability);
 
+            object payload;
+            try
+            {
+                payload = document.Build();
+            }
+            catch (GenericSpecializationException exception)
+            {
+                Console.Error.WriteLine("specgate-discovery: " + exception.Message);
+                return 1;
+            }
+
             runnerSystem.WriteAllText(
                 Path.Combine(outputDirectory, componentIndex + ComponentOutputExtension),
-                JsonSerializer.Serialize(document.Build()));
+                JsonSerializer.Serialize(payload));
         }
 
         return 0;
@@ -134,7 +145,9 @@ internal static class DiscoveryRunner
     {
         foreach (AnnotatedMethod entry in methods)
         {
-            if (entry.Operations.Length > 1)
+            if (entry.Operations.Length > 1
+                && (!entry.Method.IsGenericMethodDefinition
+                    || entry.Operations.Select(operation => Annotations.Text(operation, "Spec")).Distinct(StringComparer.Ordinal).Count() > 1))
             {
                 string components = string.Join(
                     ", ",

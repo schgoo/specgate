@@ -6,6 +6,8 @@
 //! boundaries; malformed plans are programming-invariant failures.
 use super::*;
 
+mod bridge;
+
 // Generated source uses serde_json 1.x APIs only; retaining the major range
 // lets Cargo select compatible fixes without changing the runner contract.
 const SERDE_VERSION: &str = "1";
@@ -37,6 +39,9 @@ pub(super) fn execute_in(
     system: &CommandEnvironment,
 ) -> Result<Vec<Capture>, Error> {
     let scratch = scratch.as_ref();
+    if plan.test_target.is_some() {
+        return execute_harness(plan, scratch, execution, system);
+    }
     system
         .create_dir_all(scratch.join("src"))
         .map_err(|error| format!("failed to scaffold replay runner {}: {error}", scratch.display()))?;
@@ -117,7 +122,7 @@ pub(super) fn cargo_manifest(plan: &Plan) -> Result<specgate_discovery::runner::
         .version(SERDE_VERSION)
         .build()
         .expect("the fixed serde_json replay dependency must be valid");
-    let dependencies = BTreeMap::from([
+    let mut dependencies = BTreeMap::from([
         (
             "candidate".to_string(),
             specgate_discovery::runner::Dependency::local(
@@ -134,18 +139,68 @@ pub(super) fn cargo_manifest(plan: &Plan) -> Result<specgate_discovery::runner::
                 .map_err(|error| Error::wrap(ErrorKind::Linking, "runtime replay dependency is invalid", error))?,
         ),
     ]);
-    specgate_discovery::runner::runner_cargo("specgate-replay-runner", dependencies)
-        .map_err(|error| Error::wrap(ErrorKind::Linking, "replay runner manifest is invalid", error))
+    if let model::Executor::Builtin { alias, source, features } = &plan.target.executor {
+        if dependencies.contains_key(alias) {
+            return failure(format!(
+                "candidate executor dependency alias '{alias}' conflicts with a generated replay dependency"
+            ));
+        }
+        let mut dependency = specgate_discovery::runner::Dependency::from_source(source)
+            .map_err(|error| Error::wrap(ErrorKind::Linking, "executor replay dependency is invalid", error))?;
+        dependency.features.clone_from(features);
+        dependency.default_features = false;
+        dependencies.insert(alias.clone(), dependency);
+    }
+    let cargo = specgate_discovery::runner::runner_cargo("specgate-replay-runner", dependencies)
+        .map_err(|error| Error::wrap(ErrorKind::Linking, "replay runner manifest is invalid", error))?;
+    Ok(cargo)
 }
 
 pub(super) fn source(plan: &Plan) -> String {
-    let mut source = String::from(
-        "fn run(sidecar: &std::path::Path, publish: impl FnOnce(&std::path::Path, &[u8]) -> std::io::Result<()>) -> Result<(), String> {\n    let mut captures = Vec::new();\n",
-    );
+    source_in(plan, false)
+}
+
+fn source_in(plan: &Plan, harness: bool) -> String {
+    let asynchronous = harness || !matches!(plan.target.executor, model::Executor::Synchronous);
+    let mut source = if harness {
+        String::from("{\nfn run(sidecar: &std::path::Path) -> Result<(), String> {\n")
+    } else {
+        String::from(
+            "fn run(sidecar: &std::path::Path, publish: impl FnOnce(&std::path::Path, &[u8]) -> std::io::Result<()> + Send) -> Result<(), String> {\n",
+        )
+    };
+    source.push_str("    extern crate alloc;\n");
+    if asynchronous {
+        match &plan.target.executor {
+            model::Executor::Synchronous => source.push_str("    __specgate::harness::run_sync(async {\n"),
+            model::Executor::Custom { path } => {
+                let path = if harness {
+                    path.clone()
+                } else {
+                    path.replacen("crate::", "candidate::", 1)
+                };
+                writeln!(source, "    {path}(move || async move {{").expect("writing source");
+            }
+            model::Executor::Builtin {
+                alias, source: dependency, ..
+            } => match dependency.package.as_str() {
+                "arty" => {
+                    writeln!(source, "    let runtime = {alias}::runtime::Runtime::new().map_err(|error| format!(\"failed to start Arty replay executor: {{error}}\"))?;\n    let result = runtime.scheduler().block_on(async move |_| {{").expect("writing source");
+                }
+                "smol" => writeln!(source, "    {alias}::block_on(async {{").expect("writing source"),
+                "tokio" => {
+                    writeln!(source, "    let runtime = {alias}::runtime::Builder::new_current_thread().enable_all().build().map_err(|error| format!(\"failed to start Tokio replay executor: {{error}}\"))?;\n    runtime.block_on(async {{").expect("writing source");
+                }
+                _ => unreachable!("validated replay executor"),
+            },
+        }
+    }
+    source.push_str("    let mut captures = Vec::new();\n");
     // Zero identifies no scenario in generated native-capture IDs; the first
     // scenario therefore starts at one, which feeds every deterministic trace
     // and span identifier below.
     for (scenario_position, scenario) in plan.scenarios.iter().enumerate() {
+        source.push_str("    {\n");
         let identity = u64::try_from(scenario_position)
             .expect("validated replay scenario position must fit u64")
             .checked_add(FIRST_IDENTITY)
@@ -171,7 +226,8 @@ pub(super) fn source(plan: &Plan) -> String {
             string_literal(&scenario_span_id),
         )
         .expect("writing to a String cannot fail");
-        for operation in &scenario.operations {
+        let mut receivers: Vec<(model::Setup, Vec<ReplayInput>, String)> = Vec::new();
+        for (operation_index, operation) in scenario.operations.iter().enumerate() {
             let link = plan
                 .links
                 .get(operation.link_index)
@@ -183,14 +239,7 @@ pub(super) fn source(plan: &Plan) -> String {
                 link.component_id,
                 link.operation_name
             );
-            let mut path = String::from("candidate");
-            for segment in &link.module_path {
-                path.push_str("::");
-                path.push_str(segment);
-            }
-            path.push_str("::");
-            path.push_str(&link.fn_name);
-            let arguments = operation
+            let rendered_inputs = operation
                 .inputs
                 .iter()
                 .zip(&link.inputs)
@@ -205,16 +254,274 @@ pub(super) fn source(plan: &Plan) -> String {
                     );
                     render_value(&input.value, &definition.rust_type)
                 })
+                .collect::<Vec<_>>();
+            let mut setup_locals = Vec::with_capacity(link.setups.len());
+            for (setup_index, setup) in link.setups.iter().enumerate() {
+                let values = setup
+                    .inputs
+                    .iter()
+                    .map(|index| operation.inputs[*index].clone())
+                    .collect::<Vec<_>>();
+                let receiver = setup.fills.is_empty() && link.is_method;
+                if receiver
+                    && let Some((_, _, local)) = receivers.iter().find(|(prior, prior_values, _)| {
+                        prior.module_path == setup.module_path && prior.fn_name == setup.fn_name && prior_values == &values
+                    })
+                {
+                    setup_locals.push(local.clone());
+                    continue;
+                }
+                let local = format!("__sg_setup_{scenario_position}_{operation_index}_{setup_index}");
+                let arguments = setup
+                    .inputs
+                    .iter()
+                    .map(|index| rendered_inputs[*index].as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                if harness {
+                    let values = setup
+                        .inputs
+                        .iter()
+                        .map(|index| format!("__specgate::ToNativeValue::to_native_value(&({}))", rendered_inputs[*index]))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    writeln!(source, "    let mut {local} = __specgate::harness::setup({}, {}, {}, {}, {}, vec![{values}]).map_err(|error| error.to_string())?;",
+                        string_literal(link.component_id.as_str()), string_literal(link.operation_name.as_str()),
+                        string_literal(&setup.native_module), string_literal(&setup.fn_name), string_literal(&setup.declared_fills),
+                    ).expect("writing to a String cannot fail");
+                } else {
+                    let path = invocation_path(&setup.module_path, &setup.fn_name);
+                    writeln!(source, "    let mut {local} = {path}({arguments});").expect("writing to a String cannot fail");
+                }
+                if receiver {
+                    receivers.push((setup.clone(), values, local.clone()));
+                }
+                setup_locals.push(local);
+            }
+            if harness {
+                let inputs = rendered_inputs
+                    .iter()
+                    .map(|value| format!("__specgate::ToNativeValue::to_native_value(&({value}))"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let injected = link
+                    .parameters
+                    .iter()
+                    .filter_map(|parameter| match parameter {
+                        model::Parameter::Setup { index, .. } => Some(setup_locals[*index].as_str()),
+                        model::Parameter::Input(_) => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let (dispatch, receiver) = if link.is_method {
+                    let index = link
+                        .setups
+                        .iter()
+                        .position(|setup| setup.fills.is_empty())
+                        .expect("validated receiver");
+                    let setup = &link.setups[index];
+                    (
+                        format!(
+                            "__specgate::harness::setup_invocation({}, {}, {}, {}, {})",
+                            string_literal(link.component_id.as_str()),
+                            string_literal(link.operation_name.as_str()),
+                            string_literal(&setup.native_module),
+                            string_literal(&setup.fn_name),
+                            string_literal(&setup.declared_fills)
+                        ),
+                        format!("&mut *{}", setup_locals[index]),
+                    )
+                } else {
+                    (
+                        format!(
+                            "__specgate::harness::operation_invocation({}, {})",
+                            string_literal(link.component_id.as_str()),
+                            string_literal(link.operation_name.as_str())
+                        ),
+                        "&mut ()".to_string(),
+                    )
+                };
+                writeln!(source, "    {dispatch}.map_err(|error| error.to_string())?({receiver}, vec![{inputs}], vec![{injected}]).await.map_err(|error| error.to_string())?;").expect("writing source");
+                continue;
+            }
+            let arguments = link
+                .parameters
+                .iter()
+                .map(|parameter| match parameter {
+                    model::Parameter::Input(index) => rendered_inputs[*index].clone(),
+                    model::Parameter::Setup { index, borrow, .. } => format!("{borrow}{}", setup_locals[*index]),
+                })
                 .collect::<Vec<_>>()
                 .join(", ");
-            writeln!(source, "    let _ = {path}({arguments});").expect("writing to a String cannot fail");
+            let mut path = if link.is_method {
+                let index = link
+                    .setups
+                    .iter()
+                    .position(|setup| setup.fills.is_empty())
+                    .expect("a validated method link must have a receiver producer");
+                format!("{}.{}", setup_locals[index], link.fn_name)
+            } else {
+                invocation_path(&link.module_path, &link.fn_name)
+            };
+            if !link.type_arguments.is_empty() {
+                let arguments = link
+                    .type_arguments
+                    .iter()
+                    .map(|argument| {
+                        let mut ty = syn::parse_str::<syn::Type>(argument).expect("validated native generic argument");
+                        qualify_type(&mut ty, &plan.target.crate_name);
+                        quote::quote!(#ty).to_string()
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(path, "::<{arguments}>").expect("writing to a String cannot fail");
+            }
+            let await_suffix = if link.is_async { ".await" } else { "" };
+            writeln!(source, "    let _ = {path}({arguments}){await_suffix};").expect("writing to a String cannot fail");
         }
         source.push_str("    captures.push(specgate_runtime::capture::finish().map_err(|error| error.to_string())?);\n");
+        source.push_str("    }\n");
     }
-    source.push_str(
-        "    let json = serde_json::to_vec(&captures).map_err(|error| format!(\"failed to serialize native captures: {error}\"))?;\n    publish(sidecar, &json).map_err(|error| format!(\"failed to write native capture sidecar: {error}\"))?;\n    Ok(())\n}\n\nfn main() -> Result<(), String> {\n    let sidecar = std::env::args_os().nth(1).ok_or_else(|| \"missing capture sidecar path\".to_string())?;\n    run(std::path::Path::new(&sidecar), |path, bytes| std::fs::write(path, bytes))\n}\n",
-    );
+    if harness {
+        source.push_str("    __specgate::harness::publish(sidecar, &captures).map_err(|error| error.to_string())?;\n    Ok(())\n");
+    } else {
+        source.push_str("    let json = serde_json::to_vec(&captures).map_err(|error| format!(\"failed to serialize native captures: {error}\"))?;\n    publish(sidecar, &json).map_err(|error| format!(\"failed to write native capture sidecar: {error}\"))?;\n    Ok(())\n");
+    }
+    if asynchronous {
+        match &plan.target.executor {
+            model::Executor::Synchronous => source.push_str("    }).map_err(|error| error.to_string())?\n"),
+            model::Executor::Builtin { source: dependency, .. } if dependency.package.as_str() == "arty" => {
+                source.push_str("    });\n    runtime.stop().map_err(|error| format!(\"failed to stop Arty replay executor: {error}\"))?;\n    result.map_err(|error| format!(\"Arty replay task failed: {error}\"))?\n");
+            }
+            _ => source.push_str("    })\n"),
+        }
+    }
+    if harness {
+        source.push_str("}\nlet sidecar = std::env::var_os(\"SPECGATE_TEST_CAPTURE\").expect(\"missing test replay output\");\nrun(std::path::Path::new(&sidecar)).expect(\"candidate test replay failed\");\n}\n");
+        let target = plan.test_target.as_ref().expect("test-harness generation requires a target");
+        let root = if target.kind == specgate_discovery::registry::TestTargetKind::Library {
+            "crate".to_string()
+        } else {
+            plan.target.crate_name.clone()
+        };
+        let mut block: syn::Block = syn::parse_str(&source).expect("generated test replay source is a Rust block");
+        let root: syn::Path = syn::parse_str(&root).expect("validated candidate crate path");
+        syn::visit_mut::VisitMut::visit_block_mut(&mut HarnessPaths { root }, &mut block);
+        source = quote::quote!(#block).to_string();
+    } else {
+        source.push_str("}\n\nfn main() -> Result<(), String> {\n    let sidecar = std::env::args_os().nth(1).ok_or_else(|| \"missing capture sidecar path\".to_string())?;\n    run(std::path::Path::new(&sidecar), |path, bytes| std::fs::write(path, bytes))\n}\n");
+    }
+
     source
+}
+
+struct HarnessPaths {
+    root: syn::Path,
+}
+
+impl syn::visit_mut::VisitMut for HarnessPaths {
+    fn visit_path_mut(&mut self, i: &mut syn::Path) {
+        syn::visit_mut::visit_path_mut(self, i);
+        if i.segments.first().is_some_and(|segment| segment.ident == "candidate") {
+            i.segments.first_mut().expect("nonempty candidate path").ident = self.root.segments[0].ident.clone();
+        } else if i.segments.first().is_some_and(|segment| segment.ident == "specgate_runtime")
+            && i.segments.get(1).is_some_and(|segment| segment.ident == "capture")
+        {
+            let mut path: syn::Path = syn::parse_quote!(__specgate);
+            path.segments.extend(i.segments.iter().skip(2).cloned());
+            *i = path;
+        }
+    }
+}
+
+fn execute_harness(plan: &Plan, scratch: &Path, execution: &Execution, system: &CommandEnvironment) -> Result<Vec<Capture>, Error> {
+    system
+        .create_dir_all(scratch)
+        .map_err(|error| format!("failed to scaffold test replay: {error}"))?;
+    let entry = scratch.join("test-entry.rs");
+    system
+        .write(&entry, source_in(plan, true))
+        .map_err(|error| format!("failed to write test replay entry: {error}"))?;
+    let dispatch = scratch.join("test-dispatch.rs");
+    system
+        .write(&dispatch, bridge::source(plan, None))
+        .map_err(|error| format!("failed to write lexical replay dispatch: {error}"))?;
+    let module_dispatches = plan
+        .dispatch_modules
+        .iter()
+        .enumerate()
+        .map(|(index, module)| {
+            let path = scratch.join(format!("test-module-{index}.rs"));
+            system
+                .write(&path, bridge::source(plan, Some(module)))
+                .map_err(|error| format!("failed to write module-local replay dispatch for '{module}': {error}"))?;
+            Ok((module.clone(), path))
+        })
+        .collect::<Result<BTreeMap<_, _>, Error>>()?;
+    let binaries = specgate_discovery::runner::harness::build(
+        &plan.target.package_root,
+        &entry,
+        &dispatch,
+        &module_dispatches,
+        scratch,
+        plan.test_target.as_ref(),
+    )
+    .map_err(|error| Error::wrap(ErrorKind::Linking, "failed to build candidate test replay", error))?;
+    let target = plan.test_target.as_ref().expect("test replay requires a selected target");
+    let binary = binaries
+        .iter()
+        .find(|binary| &binary.target == target)
+        .ok_or_else(|| Error::from(format!("candidate test target '{}' has no generated replay entry", target.name)))?;
+    let sidecar = scratch.join("candidate-captures.json");
+    let request = ProcessRequest::builder(&binary.executable)
+        .arg(&binary.entry)
+        .args(["--exact", "--test-threads=1", "--nocapture"])
+        .env("SPECGATE_TEST_CAPTURE", &sidecar)
+        .env_remove("SPECGATE_NATIVE_CAPTURE")
+        .current_dir(&plan.target.package_root)
+        .build();
+    let output = execution
+        .run(&request)
+        .map_err(|error| format!("failed to run candidate test replay: {error}"))?;
+    if !output.status.success() {
+        return failure(format!(
+            "candidate test replay failed: {}\n{}",
+            String::from_utf8_lossy(&output.stderr).trim(),
+            String::from_utf8_lossy(&output.stdout).trim()
+        ));
+    }
+    let bytes = system
+        .read(&sidecar)
+        .map_err(|error| format!("candidate test replay wrote no captures: {error}"))?;
+    let captures: Vec<Capture> =
+        serde_json::from_slice(&bytes).map_err(|error| format!("candidate test replay wrote malformed captures: {error}"))?;
+    if captures.len() != plan.scenarios.len() {
+        return failure("candidate test replay produced a different number of scenarios than planned");
+    }
+    Ok(captures)
+}
+
+fn invocation_path(module_path: &[String], function: &str) -> String {
+    std::iter::once("candidate")
+        .chain(module_path.iter().map(String::as_str))
+        .chain(std::iter::once(function))
+        .collect::<Vec<_>>()
+        .join("::")
+}
+
+fn qualify_type(ty: &mut syn::Type, native_crate: &str) {
+    struct NativePaths<'a>(&'a str);
+    impl syn::visit_mut::VisitMut for NativePaths<'_> {
+        fn visit_path_mut(&mut self, i: &mut syn::Path) {
+            syn::visit_mut::visit_path_mut(self, i);
+            if let Some(first) = i.segments.first_mut()
+                && (first.ident == self.0 || first.ident == "crate")
+            {
+                first.ident = syn::parse_quote!(candidate);
+            }
+        }
+    }
+    syn::visit_mut::VisitMut::visit_type_mut(&mut NativePaths(native_crate), ty);
 }
 
 pub(super) fn render_value(value: &ReplayValue, rust_type: impl AsRef<str>) -> String {

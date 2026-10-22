@@ -18,6 +18,35 @@ const RUNTIME_VERSION: &str = "99.0.0";
 mod cache;
 mod source;
 
+#[test]
+fn executor_dependencies_keep_aliases_and_defer_unsupported_sources() {
+    let metadata: CargoMetadata = serde_json::from_value(serde_json::json!({
+        "packages": [
+            {"id": "arty", "name": "arty", "version": "0.5.0", "manifest_path": "arty/Cargo.toml",
+             "source": "git+https://example.invalid/arty"},
+            {"id": "tokio", "name": "tokio", "version": "1.48.0", "manifest_path": "tokio/Cargo.toml",
+             "source": "registry+https://github.com/rust-lang/crates.io-index"},
+            {"id": "smol", "name": "smol", "version": "2.0.2", "manifest_path": "smol/Cargo.toml",
+             "source": "registry+https://github.com/rust-lang/crates.io-index"}
+        ],
+        "resolve": {"nodes": [
+            {"id": "candidate", "deps": [
+                {"pkg": "arty", "name": "candidate_engine", "dep_kinds": [{"kind": "dev"}]},
+                {"pkg": "tokio", "name": "build_engine", "dep_kinds": [{"kind": "build"}]}
+            ]},
+            {"id": "arty", "deps": [
+                {"pkg": "smol", "name": "smol", "dep_kinds": [{"kind": null}]}
+            ]}
+        ]}
+    }))
+    .unwrap();
+    let executors = executor_dependencies(&metadata, "candidate").unwrap();
+    assert_eq!(executors.len(), 1);
+    let dependency = &executors["candidate_engine"];
+    assert_eq!(dependency.package.as_str(), "arty");
+    assert!(dependency.source.as_ref().unwrap_err().contains("unsupported arty Cargo source"));
+}
+
 fn run_capture(candidate: impl AsRef<Path>, runner: impl AsRef<Path>, context: &CandidatePackage) {
     let candidate = candidate.as_ref();
     let runner = runner.as_ref();
@@ -370,5 +399,5 @@ fn fake_system(
 }
 
 fn metadata_json() -> Vec<u8> {
-    br#"{"packages":[{"id":"candidate 0.1.0 (path+file:///candidate)","name":"candidate","version":"0.1.0","manifest_path":"candidate/Cargo.toml","source":null},{"id":"specgate-runtime 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)","name":"specgate-runtime","version":"0.6.0","manifest_path":"cargo/specgate-runtime/Cargo.toml","source":"registry+https://github.com/rust-lang/crates.io-index"}],"resolve":{"nodes":[{"id":"candidate 0.1.0 (path+file:///candidate)","deps":[{"pkg":"specgate-runtime 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)"}]},{"id":"specgate-runtime 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)","deps":[]}]}}"#.to_vec()
+    br#"{"packages":[{"id":"candidate 0.1.0 (path+file:///candidate)","name":"candidate","version":"0.1.0","manifest_path":"candidate/Cargo.toml","source":null,"targets":[{"name":"candidate","kind":["lib"]}]},{"id":"specgate-runtime 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)","name":"specgate-runtime","version":"0.6.0","manifest_path":"cargo/specgate-runtime/Cargo.toml","source":"registry+https://github.com/rust-lang/crates.io-index"}],"resolve":{"nodes":[{"id":"candidate 0.1.0 (path+file:///candidate)","deps":[{"pkg":"specgate-runtime 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)"}]},{"id":"specgate-runtime 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)","deps":[]}]}}"#.to_vec()
 }

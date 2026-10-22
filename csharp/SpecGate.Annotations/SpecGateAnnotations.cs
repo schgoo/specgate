@@ -3,7 +3,7 @@ using System;
 namespace SpecGate.Annotations;
 
 /// <summary>Marks a method as a semantic CTSC operation of exactly one component.</summary>
-[AttributeUsage(AttributeTargets.Method)]
+[AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]
 public sealed class SpecOperationAttribute : Attribute
 {
     /// <summary>Initializes an operation annotation.</summary>
@@ -14,6 +14,9 @@ public sealed class SpecOperationAttribute : Attribute
 
     /// <summary>Gets or sets the owning component identifier.</summary>
     public string? Spec { get; set; }
+
+    /// <summary>Gets or sets the concrete method type arguments for this specialization.</summary>
+    public Type[] TypeArguments { get; set; } = [];
 }
 
 /// <summary>Marks a method as a setup producer for one component operation.</summary>

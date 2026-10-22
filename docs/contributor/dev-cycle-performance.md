@@ -25,6 +25,13 @@ This shares Cargo intermediate artifacts across those builds without changing
 their final target directories. Cargo still resolves the exact dependencies
 and fingerprints their source, features, and compiler configuration.
 
+Generated test-target metadata and replay builds set `CARGO_INCREMENTAL=0`.
+Their entry and dispatch environment changes procedural-macro output; reusing
+that incremental expansion state caused duplicate registrations and Windows
+capture-process crashes when switching back to ordinary tests. Dependency
+artifacts still share the intermediate directory, and caller compiler flags
+are preserved. Ordinary capture builds retain their incremental configuration.
+
 The change applies to both Check and Update. It does not cache registries,
 captures, replay results, comparisons, or validation results. Each invocation
 holds an exclusive OS-backed file lease on its intermediate cache slot until

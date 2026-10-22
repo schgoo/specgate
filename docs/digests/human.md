@@ -40,10 +40,13 @@ divided into reviewable vertical slices.
   future dropped while pending, or a cancelled C# task, is recorded as
   abandoned. In Rust, top-level abandonment drops the scenario; a C#
   cancellation keeps it. Async setups are rejected.
-- Replay supports synchronous public Rust free functions with primitive
-  lossless inputs.
-- Setup-backed methods, structured replay values, explicit mappings, async
-  replay, and C# replay are not implemented.
+- Rust replay supports public functions and setup-backed instance methods,
+  directly awaited async calls, concrete generic specializations, and typed
+  collection results. Private test setups run through generated Cargo test
+  entry points selected by semantic resolution, not by rerunning ordinary tests.
+- Operation/setup construction inputs remain primitive. Async setups,
+  cross-target setup environments, arbitrary concurrent scheduling, explicit
+  type mappings, and C# candidate replay remain unsupported.
 - Observation metadata is not discoverable, so observation-emitting components
   cannot yet produce linked bundles.
 - Only the fixed `ctsc.strict/0.1.0` comparison policy is implemented.

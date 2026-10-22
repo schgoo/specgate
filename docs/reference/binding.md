@@ -45,7 +45,8 @@ All paths are relative to the binding file. Unknown keys are rejected.
 | `…<label>.tests` | yes | Exactly one of `projects` or `command`. |
 | `…<label>.tests.projects` | one of | Non-empty list of test project paths. See language notes below. |
 | `…<label>.tests.command` | one of | A test command. Parsed but rejected by `capture` for every language ([#46](https://github.com/schgoo/specgate/issues/46)). |
-| `…<label>.rust.runtime` | no | `smol` (default) or `tokio`. Only valid when `language: rust`. |
+| `…<label>.rust.runtime` | no | Replay engine: `auto` (default), `arty`, `smol`, or `tokio`. Automatic selection requires exactly one supported direct dependency. Only valid when `language: rust`. |
+| `…<label>.rust.executor` | no | Crate-rooted custom replay wrapper, for example `crate::tests::replay_executor`. Cannot be combined with a runtime other than `auto`. |
 | `…<label>.csharp.framework` | no | Target framework, such as `net10.0`. Only valid when `language: csharp`. |
 
 A component that several projects declare is listed under each component id;
@@ -62,8 +63,22 @@ These describe what the current CLI does, including known gaps.
   (`cargo test` in that directory). It does **not** read `tests.projects`; the
   field is still required by the schema
   ([#96](https://github.com/schgoo/specgate/issues/96)).
-- `rust.runtime` is parsed and validated but not used by any command
-  ([#95](https://github.com/schgoo/specgate/issues/95)).
+- Replay selects the candidate's own Arty, Smol, or Tokio dependency, including
+  renamed and development dependencies. `rust.runtime` resolves ambiguity;
+  no engine is guessed when several match. Capture retains the original tests'
+  runtime configuration and does not use this field.
+  Generated engine dependencies preserve local paths or exact registry
+  versions; use `rust.executor` for other sources, such as Git.
+- `rust.executor` replaces the built-in wrapper with candidate code, surrounding
+  both setup construction and operation execution. The wrapper takes a
+  `FnOnce() -> Future<Output = Result<(), String>>` task factory, constructs the
+  future inside the configured execution context, and returns
+  `Result<(), String>`. The factory may be `Send`; the future need not be.
+  The function must be accessible from the selected generated test entry
+  (`pub(crate)` with accessible parent modules suffices for a test target).
+  See [custom replay execution](../guides/replay-a-candidate.md#runtime-selection-and-custom-configuration).
+- Synchronous replay does not need an executor unless a runtime or custom
+  wrapper is explicitly selected. `specgate-runtime` depends on no async engine.
 - `capture` fails with "is not a Rust package (no Cargo.toml at …)" when
   `sources` has no `Cargo.toml`.
 

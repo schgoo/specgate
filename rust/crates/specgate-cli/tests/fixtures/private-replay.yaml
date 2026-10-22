@@ -1,0 +1,36 @@
+components:
+  fixture.private_replay:
+    implementations:
+      rust:
+        language: rust
+        sources: private-replay
+        tests:
+          projects: [private-replay/Cargo.toml]
+  fixture.test_only:
+    implementations:
+      rust:
+        language: rust
+        sources: private-replay
+        tests:
+          projects: [private-replay/Cargo.toml]
+  fixture.producer_scopes:
+    implementations:
+      rust:
+        language: rust
+        sources: private-replay
+        tests:
+          projects: [private-replay/Cargo.toml]
+  fixture.binary_unit:
+    implementations:
+      rust:
+        language: rust
+        sources: private-replay
+        tests:
+          projects: [private-replay/Cargo.toml]
+  fixture.consuming:
+    implementations:
+      rust:
+        language: rust
+        sources: private-replay
+        tests:
+          projects: [private-replay/Cargo.toml]

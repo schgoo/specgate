@@ -15,7 +15,10 @@ fn rust_target() -> ResolvedImplementation {
         implementation: Implementation::new(
             "candidate",
             Tests::Command("cargo test".to_string()),
-            LanguageOptions::Rust { runtime: Runtime::Smol },
+            LanguageOptions::Rust {
+                runtime: Runtime::Smol,
+                executor: None,
+            },
         )
         .unwrap(),
     }

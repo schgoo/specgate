@@ -64,7 +64,7 @@ value as its result.
 | Abandonment | Dropped while pending: `conformance.abandoned`, status `UNSET`, not propagated to the parent | Cancellation (`IsCanceled`, or `OperationCanceledException` from a `ValueTask`): same marker and status; persisted immediately, so top-level cancellation keeps the scenario |
 | Never finished | Top-level abandonment, or work still open at test end: the scenario is dropped with a diagnostic | An unawaited task still outstanding when the test's session finishes: the open span is recorded as a fault and `InvalidOperationException` is thrown, so that test contributes no scenario |
 | Rejected | Async setups | Async setups, `async void`, async iterators, `async` methods returning other awaitables |
-| Replay | Not supported | Not supported (no C# replay) |
+| Replay | Directly awaited free functions and setup-backed methods use the candidate's Arty, Smol, Tokio, or custom execution wrapper | Captured C# stimuli can replay against Rust async candidates; C# candidate replay is unsupported |
 
 Wrap a future you intend to abandon inside an enclosing annotated operation
 that completes; the abandonment is then recorded on the inner span
@@ -76,6 +76,13 @@ multi-threaded executor, or reaching an operation through a raw
 ([`decisions/async-capture-context.md`](../decisions/async-capture-context.md)).
 Avoid both in capture tests.
 
+Async replay does not reproduce overlapping sibling scheduling. It invokes
+recorded top-level operations sequentially and observes nested calls made by the
+candidate. Nested abandonment can replay through a completing enclosing
+operation; top-level abandonment remains unsupported. Generic async operations
+require explicit concrete specializations, and setup producers must remain
+synchronous. See [`replay-a-candidate.md`](replay-a-candidate.md).
+
 ## Failure modes
 
 | Message fragment | Cause | Fix |
@@ -83,7 +90,7 @@ Avoid both in capture tests.
 | `was still open when the capture ended` | A Rust operation never completed, for example a top-level future dropped while pending. | Await it, or enclose it in an annotated operation that completes. |
 | `native capture cannot instrument an async setup` | Rust async `#[spec_setup]`. | Make the setup synchronous. |
 | `Async capture supports operations returning Task, Task<T>, ValueTask, or ValueTask<T>` | C# `async void`, async setup, or an `async` method returning another awaitable. | Return a supported type; make setups synchronous. |
-| `is async; replay supports only synchronous operations` | Replay onto an async candidate. | Not supported yet; compare captures instead. |
+| `unsupported async replay scheduling:` | Recorded sibling operations overlap. | Record directly awaited calls; overlapping scheduling is unsupported. |
 
 ## Verify
 

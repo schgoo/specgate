@@ -1,0 +1,28 @@
+# yaml-language-server: $schema=../../../../../binding-schema.json
+components:
+  fixture.typed_async:
+    implementations:
+      csharp:
+        language: csharp
+        sources: typed-csharp/sources
+        tests:
+          projects: [typed-csharp/tests/SpecGate.TypedClient.Tests.csproj]
+      rust:
+        language: rust
+        sources: typed-integration
+        tests:
+          projects: [typed-integration/Cargo.toml]
+  fixture.integration_local:
+    implementations:
+      rust:
+        language: rust
+        sources: typed-integration
+        tests:
+          projects: [typed-integration/Cargo.toml]
+  fixture.operation_only:
+    implementations:
+      rust:
+        language: rust
+        sources: typed-integration
+        tests:
+          projects: [typed-integration/Cargo.toml]

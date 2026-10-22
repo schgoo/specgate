@@ -101,8 +101,9 @@ impl Counter {
 
 The setup's inputs (`initial`) become the operation's inputs. Use
 `fills = "param"` when a setup produces a parameter instead of the receiver.
-Setups are captured but not replayed
-([limitations](../reference/limitations.md)).
+Replay reconstructs receivers and injected parameters through annotated
+synchronous nongeneric producers, including private producers in a selected
+Cargo test target ([limitations](../reference/limitations.md)).
 
 ### 4. Return outcomes
 
@@ -124,6 +125,16 @@ contains one fails linked validation
 ### 6. Async operations
 
 `async fn` operations are supported; see [`async-capture.md`](async-capture.md).
+
+### 7. Explicit generic specializations
+
+Declare each concrete specialization with its own semantic operation name:
+`#[spec_operation("find_items", types = "crate::Item")]`. Repeat the annotation
+for other specializations; use comma-separated types for multiple parameters.
+Type paths resolve in the operation's module, and generic constraints still
+apply. Discovery never infers specializations from test calls. See
+[`../status.md`](../status.md#candidate-replay-and-explicit-generic-operations)
+for unsupported specialization shapes.
 
 ## Expected output
 
