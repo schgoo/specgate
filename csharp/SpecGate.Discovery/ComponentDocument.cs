@@ -6,7 +6,7 @@ using System.Reflection;
 namespace SpecGate.Discovery;
 
 /// <summary>A method carrying at least one SpecGate operation or setup annotation.</summary>
-internal sealed record AnnotatedMethod(MethodInfo Method, object[] Operations, object[] Setups);
+internal sealed record AnnotatedMethod(MethodBase Method, object[] Operations, object[] Setups);
 
 internal sealed class GenericSpecializationException(string message, Exception? innerException = null)
     : Exception(message, innerException);
@@ -49,12 +49,12 @@ internal sealed class ComponentDocument
 
         foreach (AnnotatedMethod annotated in annotatedMethods)
         {
-            MethodInfo method = annotated.Method;
+            MethodBase method = annotated.Method;
 
             foreach (object operation in annotated.Operations)
             {
                 if (Annotations.Text(operation, "Spec") != component) continue;
-                operations.Add(BuildOperation(method, operation));
+                operations.Add(BuildOperation((MethodInfo)method, operation));
             }
 
             foreach (object setup in annotated.Setups)
@@ -149,20 +149,22 @@ internal sealed class ComponentDocument
     }
 
     private object BuildSetup(
-        MethodInfo method,
+        MethodBase method,
         object setup,
         string name,
         HashSet<string> selectedOperationNames)
     {
-        NullabilityInfo returnInfo = nullability.Create(method.ReturnParameter);
-        (bool isAsync, Type? inner, NullabilityInfo? innerInfo) = Unwrap(method.ReturnType, returnInfo);
+        MethodInfo? function = method as MethodInfo;
+        NullabilityInfo? returnInfo = function is null ? null : nullability.Create(function.ReturnParameter);
+        Type nativeReturn = function?.ReturnType ?? method.DeclaringType!;
+        (bool isAsync, Type? inner, NullabilityInfo? innerInfo) = Unwrap(nativeReturn, returnInfo);
 
         string returnType;
         string csReturn;
         using (semantic.SuspendCollection())
         {
             returnType = inner is null ? "" : semantic.Render(inner, innerInfo);
-            csReturn = RawTypeNames.Render(method.ReturnType, returnInfo);
+            csReturn = RawTypeNames.Render(nativeReturn, returnInfo);
         }
 
         if (selectedOperationNames.Contains(name)
@@ -177,7 +179,7 @@ internal sealed class ComponentDocument
             name,
             is_setup = true,
             is_async = isAsync,
-            is_method = !method.IsStatic,
+            is_method = method is not ConstructorInfo && !method.IsStatic,
             is_public = method.IsPublic,
             return_type = returnType,
             fills = Annotations.Text(setup, "Fills") ?? "",
@@ -240,6 +242,7 @@ internal sealed class ComponentDocument
                     fields = SpecMembers(type),
                     variants = new List<object>(),
                     component,
+                    property_setup = Annotations.PropertySetup(type),
                 });
             }
         }
@@ -271,23 +274,32 @@ internal sealed class ComponentDocument
     private List<string[]> SpecMembers(Type type)
     {
         var members = new List<string[]>();
+        const BindingFlags selection = BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly;
+        bool all = Annotations.PropertySetup(type)
+            && !type.GetProperties(selection).Cast<MemberInfo>().Concat(type.GetFields(selection))
+                .Any(member => Annotations.Has(member, Annotations.Event, inherit: false));
 
-        foreach (PropertyInfo property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+        foreach (PropertyInfo property in type.GetProperties(selection))
         {
-            if (!Annotations.Has(property, Annotations.Event, inherit: false)) continue;
+            if (!all && !Annotations.Has(property, Annotations.Event, inherit: false)) continue;
+            if (Annotations.PropertySetup(type)
+                && (property.GetMethod is not { IsPublic: true } || property.GetIndexParameters().Length != 0))
+            {
+                throw new GenericSpecializationException($"property setup member '{type.FullName}.{property.Name}' must have a public non-indexed getter.");
+            }
             members.Add([SemanticTypes.NameOf(property), semantic.Render(property.PropertyType, nullability.Create(property))]);
         }
 
-        foreach (FieldInfo field in type.GetFields(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+        foreach (FieldInfo field in type.GetFields(selection))
         {
-            if (!Annotations.Has(field, Annotations.Event, inherit: false)) continue;
+            if (!all && !Annotations.Has(field, Annotations.Event, inherit: false)) continue;
             members.Add([SemanticTypes.NameOf(field), semantic.Render(field.FieldType, nullability.Create(field))]);
         }
 
         return members;
     }
 
-    private List<string[]> BuildParams(MethodInfo method)
+    private List<string[]> BuildParams(MethodBase method)
     {
         var list = new List<string[]>();
         foreach (ParameterInfo parameter in method.GetParameters())
@@ -298,7 +310,7 @@ internal sealed class ComponentDocument
         return list;
     }
 
-    private List<string[]> BuildRawParams(MethodInfo method)
+    private List<string[]> BuildRawParams(MethodBase method)
     {
         var list = new List<string[]>();
         foreach (ParameterInfo parameter in method.GetParameters())

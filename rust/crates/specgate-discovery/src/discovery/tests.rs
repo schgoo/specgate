@@ -52,6 +52,79 @@ fn ambiguous_setups() {
     assert!(raw_inputs(&registry.ops[0], &registry).unwrap_err().contains("ambiguously matches"));
 }
 
+#[test]
+fn property_setups_use_native_identity_and_flat_semantic_field_names() {
+    let document = serde_json::json!({
+        "operations": [{
+            "name": "run", "module_path": "fixture::operations", "fn_name": "run",
+            "return_type": "i32", "component": "demo",
+            "params": [["query", "&'a mut crate::models::Native"]]
+        }],
+        "types": [{
+            "name": "Canonical", "native_name": "Native", "module_path": "fixture::models",
+            "property_setup": true, "kind": "struct", "component": "demo",
+            "fields": [["limit", "u32"], ["tags", "Vec<String>"]]
+        }]
+    });
+    let mut raw = registry(document.to_string());
+    let inputs = raw_inputs(&raw.ops[0], &raw).unwrap();
+    assert_eq!(
+        inputs.iter().map(|input| input.name.as_str()).collect::<Vec<_>>(),
+        ["limit", "tags"]
+    );
+    normalize_registry(&raw, crate::binding::Language::Rust, "demo").unwrap();
+    raw.ops[0].params[0].ty = "Canonical".into();
+    assert_eq!(raw_inputs(&raw.ops[0], &raw).unwrap()[0].name, "query");
+    raw.ops[0].params[0].ty = "Native".into();
+    raw.types[0].property_setup = false;
+    assert_eq!(raw_inputs(&raw.ops[0], &raw).unwrap()[0].name, "query");
+}
+
+#[test]
+fn property_setup_collisions_are_rejected_and_explicit_producers_take_precedence() {
+    let document = serde_json::json!({
+        "operations": [{
+            "name": "run", "module_path": "fixture", "fn_name": "run",
+            "return_type": "i32", "component": "demo",
+            "params": [["query", "Query"], ["limit", "u32"]]
+        }],
+        "types": [{
+            "name": "Query", "native_name": "Query", "module_path": "fixture",
+            "property_setup": true, "kind": "struct", "component": "demo",
+            "fields": [["limit", "u32"]]
+        }]
+    });
+    let mut raw = registry(document.to_string());
+    let error = raw_inputs(&raw.ops[0], &raw).unwrap_err().to_string();
+    assert!(
+        error.contains("setup folding for 'demo::run' produces duplicate input name 'limit'"),
+        "{error}"
+    );
+    let producer = registry(
+        r#"{"operations":[{
+        "name":"run","module_path":"fixture","fn_name":"make","is_setup":true,
+        "return_type":"Query","fills":"query","component":"demo","params":[["initial","u32"]]
+    }],"types":[]}"#,
+    )
+    .ops
+    .remove(0);
+    raw.ops.push(producer);
+    let inputs = raw_inputs(&raw.ops[0], &raw).unwrap();
+    assert_eq!(
+        inputs.iter().map(|input| input.name.as_str()).collect::<Vec<_>>(),
+        ["initial", "limit"]
+    );
+    raw.ops.pop();
+    raw.ops[0].params.pop();
+    raw.types.push(raw.types[0].clone());
+    assert!(
+        raw_inputs(&raw.ops[0], &raw)
+            .unwrap_err()
+            .to_string()
+            .contains("ambiguous property setup type")
+    );
+}
+
 /// A renamed variant can collide in either language, so the rejection lives in
 /// shared normalization rather than in one language's discovery program.
 #[test]

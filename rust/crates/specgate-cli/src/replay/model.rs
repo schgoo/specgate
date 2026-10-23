@@ -215,6 +215,11 @@ pub(crate) struct Setup {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum Parameter {
     Input(usize),
+    Properties {
+        rust_type: String,
+        borrow: String,
+        fields: Vec<(String, usize)>,
+    },
     Setup {
         index: usize,
         borrow: String,

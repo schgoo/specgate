@@ -199,10 +199,11 @@ architecture and status are in `docs/status.md`. Important current boundaries in
   results/errors with matching CTSC declarations;
 - Rust test-only/private setup producers are resolved semantically in actual
   Cargo test targets; generated replay hooks run instead of ordinary tests.
-  Construction inputs remain primitive, and equal receiver producer/input
+  Construction inputs support primitives and recursive lists, sets, string-keyed
+  maps, and optionals. Explicit property setups fold selected fields, and equal receiver producer/input
   identities share state within a scenario;
 - async/generic setups, cross-target setup environments, overlapping sibling
-  scheduling, top-level abandonment, explicit type mappings, structured
+  scheduling, top-level abandonment, explicit type mappings, general record
   construction inputs, and C# candidate replay remain unsupported;
 - `spec_trace!` observations are captured but have no registry declarations,
   so observation-emitting components cannot produce linkable bundles;

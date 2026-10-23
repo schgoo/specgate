@@ -698,7 +698,7 @@ mod cases {
         let mut bundle = reference_bundle();
         let operation = &bundle.registry.operations[0];
         let mut inputs = operation.inputs().to_vec();
-        inputs[0].value_type = ReplayType::list(ReplayType::primitive("i32"));
+        inputs[0].value_type = ReplayType::named("ApplicationRecord", replay_model::TypeOwner::default());
         bundle.registry.operations[0] = replay_model::RegistryOp::builder(replay_model::OpDeps {
             component_id: operation.component_id().clone(),
             name: operation.name().clone(),

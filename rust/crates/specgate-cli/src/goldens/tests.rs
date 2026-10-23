@@ -88,8 +88,8 @@ mod cases {
         check_coverage(&root, &matrix).expect("golden sources should be covered");
         check_replacements(&root, &matrix).unwrap_or_else(|error| panic!("replacement validation failed: {error}"));
         for (classification, count) in [
-            (Classification::ImplementationComponent, 61),
-            (Classification::NegativeFixture, 11),
+            (Classification::ImplementationComponent, 62),
+            (Classification::NegativeFixture, 13),
             (Classification::Replacement, 9),
         ] {
             assert_eq!(matrix.rows.iter().filter(|row| row.classification == classification).count(), count);
@@ -264,7 +264,7 @@ mod cases {
         // absent subtree. Generation must not create that subtree through a link.
         let sentinels = if missing { external.path() } else { &external_root };
         let artifacts = expected_artifacts(&matrix);
-        assert_eq!(artifacts.len(), 194);
+        assert_eq!(artifacts.len(), 199);
         for artifact in &artifacts {
             write_bytes(sentinels.join(artifact), b"external sentinel bytes").unwrap();
         }

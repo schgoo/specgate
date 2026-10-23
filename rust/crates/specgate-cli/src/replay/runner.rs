@@ -309,7 +309,7 @@ fn source_in(plan: &Plan, harness: bool) -> String {
                     .iter()
                     .filter_map(|parameter| match parameter {
                         model::Parameter::Setup { index, .. } => Some(setup_locals[*index].as_str()),
-                        model::Parameter::Input(_) => None,
+                        model::Parameter::Input(_) | model::Parameter::Properties { .. } => None,
                     })
                     .collect::<Vec<_>>()
                     .join(", ");
@@ -348,6 +348,16 @@ fn source_in(plan: &Plan, harness: bool) -> String {
                 .parameters
                 .iter()
                 .map(|parameter| match parameter {
+                    model::Parameter::Properties { rust_type, borrow, fields } => {
+                        let mut ty: syn::Type = syn::parse_str(rust_type).expect("validated property setup type");
+                        qualify_type(&mut ty, &plan.target.crate_name);
+                        let ty = quote::quote!(#ty).to_string();
+                        let values = fields.iter().map(|(name, index)| format!(
+                            "({}.to_string(), specgate_runtime::ToNativeValue::to_native_value(&({})))",
+                            string_literal(name), rendered_inputs[*index]
+                        )).collect::<Vec<_>>().join(", ");
+                        format!("{borrow}<{ty} as specgate_runtime::harness::Input>::decode(specgate_runtime::Value::Map([{values}].into_iter().collect())).map_err(|error| error.to_string())?")
+                    }
                     model::Parameter::Input(index) => rendered_inputs[*index].clone(),
                     model::Parameter::Setup { index, borrow, .. } => format!("{borrow}{}", setup_locals[*index]),
                 })
@@ -525,8 +535,56 @@ fn qualify_type(ty: &mut syn::Type, native_crate: &str) {
 }
 
 pub(super) fn render_value(value: &ReplayValue, rust_type: impl AsRef<str>) -> String {
+    struct Collections;
+    impl syn::visit_mut::VisitMut for Collections {
+        fn visit_type_mut(&mut self, i: &mut syn::Type) {
+            if let syn::Type::Path(path) = i
+                && path.qself.is_none()
+                && path.path.segments.len() == 1
+                && matches!(
+                    path.path.segments[0].ident.to_string().as_str(),
+                    "BTreeMap" | "HashMap" | "BTreeSet" | "HashSet"
+                )
+            {
+                let segment = &path.path.segments[0];
+                path.path = syn::parse_quote!(::std::collections::#segment);
+            }
+            syn::visit_mut::visit_type_mut(self, i);
+        }
+    }
     let rust_type = rust_type.as_ref();
+    let mut qualified: syn::Type = syn::parse_str(rust_type).expect("validated replay input type");
+    syn::visit_mut::VisitMut::visit_type_mut(&mut Collections, &mut qualified);
+    let qualified = quote::quote!(#qualified).to_string();
     let native = rust_type.chars().filter(|character| !character.is_whitespace()).collect::<String>();
+    match value {
+        ReplayValue::List(values) | ReplayValue::Set(values) => {
+            let (_, arguments) = link::native_arguments(rust_type).expect("validated collection input");
+            let elements = values
+                .iter()
+                .map(|value| render_value(value, &arguments[0]))
+                .collect::<Vec<_>>()
+                .join(", ");
+            return format!("[{elements}].into_iter().collect::<{qualified}>()");
+        }
+        ReplayValue::Map(values) => {
+            let (_, arguments) = link::native_arguments(rust_type).expect("validated map input");
+            let elements = values
+                .iter()
+                .map(|(key, value)| format!("(String::from({}), {})", string_literal(key), render_value(value, &arguments[1])))
+                .collect::<Vec<_>>()
+                .join(", ");
+            return format!("[{elements}].into_iter().collect::<{qualified}>()");
+        }
+        ReplayValue::Optional(value) => {
+            let (_, arguments) = link::native_arguments(rust_type).expect("validated optional input");
+            return value.as_ref().map_or_else(
+                || format!("<{qualified}>::None"),
+                |value| format!("Some({})", render_value(value, &arguments[0])),
+            );
+        }
+        _ => {}
+    }
     match (value, native.as_str()) {
         (ReplayValue::Unit, "()") => "()".to_string(),
         (ReplayValue::String(value), "String") => format!("String::from({})", string_literal(value)),

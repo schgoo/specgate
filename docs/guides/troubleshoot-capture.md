@@ -111,7 +111,7 @@ sources, so a search for it finds the code that raises it.
 | `candidate setup resolution failed` | Setups do not resolve uniquely. | Annotate one matching producer per receiver or injected parameter. |
 | `selected setup producers belong to different Cargo test targets` | Required producers do not share a target. | Keep the environment in one Cargo test target. |
 | `unsupported async replay scheduling:` | Recorded sibling operations overlap. | Record directly awaited calls; overlapping scheduling is unsupported. |
-| `uses unsupported structured type` | An operation or setup input is not a supported primitive. | See [`../reference/limitations.md`](../reference/limitations.md). |
+| `uses unsupported structured type` | An operation or setup input is neither a supported primitive/collection nor an explicitly opted-in property setup. | See [`../reference/limitations.md`](../reference/limitations.md). |
 
 <!-- diagnostics:end -->
 

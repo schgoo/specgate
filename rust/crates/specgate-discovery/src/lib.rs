@@ -104,5 +104,5 @@ pub mod setup {
     //! Setups are selected by exact component and operation identity; ordering
     //! and duplicate diagnostics match the main discovery workflow.
     #[doc(inline)]
-    pub use crate::discovery::setup::{MappedInput, SetupBinding, SetupInput, build_inputs, raw_inputs, resolve_setups};
+    pub use crate::discovery::setup::{MappedInput, SetupBinding, SetupInput, build_inputs, property_setup, raw_inputs, resolve_setups};
 }

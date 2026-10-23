@@ -129,6 +129,25 @@ fn decodes_linked_top_level_stimuli_and_ignores_nested_instructions() {
 }
 
 #[test]
+fn decodes_linked_collection_inputs() {
+    let registry = make_registry(
+        r#"{"component":"fixture.replay","operations":[
+            {"name":"items","is_async":false,"inputs":[{"name":"values","ty":"List<i32>"}],"output":"i32"}
+        ],"types":[]}"#,
+    );
+    let capture = structured_native_capture(Value::List(vec![Value::Integer(1), Value::Integer(2)]));
+    let trace = reference_trace(&capture, &registry);
+    let manifest = make_manifest(&registry, trace.as_bytes(), &["structured"]);
+
+    let decoded = decode_replay_bundle_result(&manifest, &registry, trace.as_bytes()).unwrap();
+
+    assert_eq!(
+        decoded.scenarios[0].operations[0].inputs[0].value,
+        ReplayValue::List(vec![ReplayValue::I32(1), ReplayValue::I32(2)])
+    );
+}
+
+#[test]
 fn rejects_digest_linkage_empty_scenario_and_structured_values() {
     let registry = make_registry(
         r#"{"component":"fixture.replay","operations":[
@@ -215,10 +234,13 @@ fn rejects_digest_linkage_empty_scenario_and_structured_values() {
 
     let structured_registry = make_registry(
         r#"{"component":"fixture.replay","operations":[
-            {"name":"items","is_async":false,"inputs":[{"name":"values","ty":"List<i32>"}],"output":"i32"}
-        ],"types":[]}"#,
+            {"name":"items","is_async":false,"inputs":[{"name":"values","ty":"Item"}],"output":"i32"}
+        ],"types":[{"name":"Item","kind":"struct","fields":[{"name":"value","ty":"i32"}],"variants":[]}]}"#,
     );
-    let structured_capture = structured_native_capture();
+    let structured_capture = structured_native_capture(Value::Map(std::collections::BTreeMap::from([(
+        "value".to_string(),
+        Value::Integer(1),
+    )])));
     let structured_trace = reference_trace(&structured_capture, &structured_registry);
     let structured_manifest = make_manifest(&structured_registry, structured_trace.as_bytes(), &["structured"]);
     assert!(
@@ -460,12 +482,10 @@ fn empty_native_capture() -> Capture {
     finish().unwrap()
 }
 
-fn structured_native_capture() -> Capture {
+fn structured_native_capture(input: Value) -> Capture {
     start(config("structured")).unwrap();
     let mut operation = begin_operation(ComponentId::from("fixture.replay"), OperationName::from("items")).unwrap();
-    operation
-        .input("values", Value::List(vec![Value::Integer(1), Value::Integer(2)]))
-        .unwrap();
+    operation.input("values", input).unwrap();
     operation.result(Value::Integer(3)).unwrap();
     finish().unwrap()
 }

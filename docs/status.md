@@ -115,8 +115,11 @@ requested.
 
 Rust candidate replay supports public free functions and setup-backed instance
 methods, including directly awaited async calls and explicit generic
-specializations. Operation and setup construction inputs remain lossless
-primitives. Structured results and declared errors, including collections of
+specializations. Operation and setup construction inputs support lossless
+primitives and recursively supported lists, sets, string-keyed maps, and optionals.
+Explicit property setups fold selected fields into flat inputs and reconstruct
+Rust values; omitted fields require `Default`. C# constructors may declare setups.
+Structured results and declared errors, including collections of
 annotated records, use the existing CTSC projection and linked validators.
 Reachable named declarations, including nested observed outcomes, must match
 the reference. Replay invokes only top-level reference operations; nested
@@ -126,7 +129,7 @@ Discovery enumerates actual Cargo libtest targets, including private
 `#[cfg(test)]` and integration-test producers. Replay resolves annotated setups
 by semantic component, operation, and receiver or parameter role. It invokes a
 generated entry in the selected Cargo target, not ordinary candidate tests.
-Producers must be synchronous nongeneric free functions with supported primitive
+Producers must be synchronous nongeneric free functions with supported
 construction inputs and owned, downcastable outputs. A replay cannot combine
 setup environments from different Cargo test targets.
 

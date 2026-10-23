@@ -177,7 +177,9 @@ internal static class DiscoveryRunner
         [
             .. allTypes
                 .SelectMany(type => type.GetMethods(
-                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+                    .Cast<MethodBase>().Concat(type.GetConstructors(
+                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly)))
                 .Select(method => new AnnotatedMethod(
                     method,
                     Annotations.On(method, Annotations.Operation, inherit: true),
