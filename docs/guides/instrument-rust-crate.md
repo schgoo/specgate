@@ -152,6 +152,36 @@ prints `Complete(component=example.math, scenarios=…, …)` and exits 0. [smok
 None from instrumentation. Capture writes a bundle; see
 [`capture-a-reference.md`](capture-a-reference.md).
 
+Discovery and replay build their internal test entry points in invocation
+scratch, not beside your sources. Read-only source directories work with a
+prepared Cargo lockfile and writable build/cache directories. Existing
+`RUSTC_WORKSPACE_WRAPPER` and `build.rustc-workspace-wrapper` settings are
+respected by chaining the selected wrapper; ordinary `RUSTC_WRAPPER` settings
+remain in effect. A configured wrapper failure is reported as a build failure.
+
+These are compiler wrappers, not a replacement Cargo workspace. Inherited
+wrapper settings also apply to SpecGate's internal helper, discovery, and replay
+scratch crates, so wrappers must accept those crates as well as your targets.
+The contributor golden harness preserves these settings for intentional
+build-negative fixtures too; wrapper errors cannot stand in for the expected
+source diagnostics. Wrapper executable paths must be valid Unicode.
+
+Each instrumented test-target build first runs a dependency-only compiler pass
+against the original sources, then compiles the mirrored sources with the
+crate-root hook. Proc macros can therefore execute twice, though the first pass
+does not perform code generation or linking. Configured workspace wrappers run
+on both passes and must support `--emit=dep-info` and rustc response files
+(`@remappings`). Compatibility with a particular caching wrapper, such as
+sccache, is not guaranteed; an incompatible wrapper must be reconfigured or
+disabled explicitly rather than silently bypassed.
+
+The mirror retains lexical source filenames, including `..`, and recreates
+source symlinks with targets inside scratch so relative module and include
+resolution stays intact. This requires permission to create symlinks in the
+scratch filesystem; on Windows, enable Developer Mode or use an account allowed
+to create symlinks. Paths whose `..` traversal would clamp at the filesystem
+root are rejected rather than allowed to escape the mirror.
+
 ## Failure modes
 
 | Message fragment | Cause | Fix |

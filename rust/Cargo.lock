@@ -45,6 +45,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
+name = "cargo-config2"
+version = "0.1.45"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "855d1b74d8faf6c56e02ddbb8a60f6eae479bba5ee6ee29cddee73fe9484f261"
+dependencies = [
+ "serde",
+ "serde_derive",
+ "toml 1.1.6+spec-1.1.0",
+]
+
+[[package]]
 name = "cfg-if"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -569,7 +580,7 @@ dependencies = [
  "specgate-discovery",
  "syn 2.0.118",
  "tempfile",
- "toml",
+ "toml 0.9.12+spec-1.1.0",
 ]
 
 [[package]]
@@ -592,6 +603,7 @@ dependencies = [
 name = "specgate-discovery"
 version = "0.6.0"
 dependencies = [
+ "cargo-config2",
  "ohno 0.3.9",
  "semver",
  "serde",
@@ -599,7 +611,7 @@ dependencies = [
  "serde_yaml",
  "sha2",
  "tempfile",
- "toml",
+ "toml 0.9.12+spec-1.1.0",
 ]
 
 [[package]]
@@ -697,6 +709,19 @@ dependencies = [
  "toml_parser",
  "toml_writer",
  "winnow 0.7.15",
+]
+
+[[package]]
+name = "toml"
+version = "1.1.6+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "920602543f0911ab71da12c50d59701da54c196d1a2bf5cb4b75667f137a406a"
+dependencies = [
+ "serde_core",
+ "serde_spanned",
+ "toml_datetime 1.1.1+spec-1.1.0",
+ "toml_parser",
+ "winnow 1.0.4",
 ]
 
 [[package]]

@@ -18,6 +18,7 @@ raw-registry = []
 test-util = []
 
 [dependencies]
+cargo-config2 = { workspace = true }
 ohno = { workspace = true }
 semver = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

@@ -130,6 +130,14 @@ Producers must be synchronous nongeneric free functions with supported primitive
 construction inputs and owned, downcastable outputs. A replay cannot combine
 setup environments from different Cargo test targets.
 
+CLI-owned Rust test builds add their crate-root hook only in invocation scratch.
+A dependency-only compiler pass identifies the source files to mirror with
+their relative layout intact. Read-only sources are supported; interrupted
+builds leave no temporary roots beside user code. Candidate-configured workspace
+wrappers are chained rather than replaced, and Cargo retains ordinary outer
+compiler wrappers. Cargo still needs writable build/cache directories and may
+need a writable lockfile when its dependency resolution changes.
+
 Equal receiver producer identities and construction inputs share a receiver
 within one scenario. Separate scenario scopes release receivers and setup
 guards before the next scenario. Concrete downcasts and calls stay in lexical

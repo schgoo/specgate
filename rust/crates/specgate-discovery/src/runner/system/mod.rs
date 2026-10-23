@@ -1,5 +1,6 @@
 //! Concrete crate-private boundaries for scoped operating-system interactions.
 
+mod cargo_config;
 mod environment;
 mod filesystem;
 mod process;
@@ -17,6 +18,7 @@ const FAKE_PID: u32 = 0;
 #[cfg(any(test, feature = "test-util"))]
 const FAKE_EXECUTABLE: &str = "tools/specgate";
 
+use cargo_config::CargoConfig;
 pub(crate) use environment::{Environment, ExecutablePath, ProcessId};
 #[cfg(any(test, feature = "test-util"))]
 pub(crate) use filesystem::{FailureKey, FakeFs};
@@ -34,6 +36,7 @@ fn failure(message: impl Into<String>) -> Error {
 /// Groups concrete operating-system adapters used by discovery workflows.
 #[derive(Clone)]
 pub(crate) struct System {
+    pub(crate) cargo_config: CargoConfig,
     /// Filesystem operations.
     pub(crate) filesystem: Filesystem,
     /// Child-process execution.
@@ -57,12 +60,14 @@ impl System {
             environment: BTreeMap::new(),
             process_id: FAKE_PID,
             executable_path: Ok(PathBuf::from(FAKE_EXECUTABLE)),
+            workspace_wrapper: None,
         }
     }
 
     /// Creates adapters backed by the current operating system.
     pub(crate) fn real() -> Self {
         Self {
+            cargo_config: CargoConfig::real(),
             filesystem: Filesystem::real(),
             process: Process::real(),
             environment: Environment::real(),
@@ -104,10 +109,18 @@ pub(crate) struct SystemBuilder {
     environment: BTreeMap<OsString, OsString>,
     process_id: u32,
     executable_path: Result<PathBuf, String>,
+    workspace_wrapper: Option<PathBuf>,
 }
 
 #[cfg(any(test, feature = "test-util"))]
 impl SystemBuilder {
+    #[cfg(test)]
+    /// Sets the wrapper selected by fake candidate Cargo configuration.
+    pub(crate) fn workspace_wrapper(mut self, wrapper: impl Into<PathBuf>) -> Self {
+        self.workspace_wrapper = Some(wrapper.into());
+        self
+    }
+
     #[cfg(test)]
     /// Sets the complete fake environment.
     pub(crate) fn environment<K>(mut self, environment: BTreeMap<K, OsString>) -> Self
@@ -135,6 +148,7 @@ impl SystemBuilder {
     /// Builds the configured fake system.
     pub(crate) fn build(self) -> System {
         System {
+            cargo_config: CargoConfig::fake(self.workspace_wrapper),
             filesystem: self.filesystem,
             process: Process::fake(self.process),
             environment: Environment::fake(self.environment),

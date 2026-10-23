@@ -23,6 +23,7 @@ impl HttpEnvironment {
             while !signal.load(Ordering::Acquire) {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
+                        stream.set_nonblocking(false).unwrap();
                         stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
                         let mut request = [0_u8; 1024];
                         let count = stream.read(&mut request).unwrap();
