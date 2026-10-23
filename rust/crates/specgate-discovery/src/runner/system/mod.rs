@@ -60,6 +60,7 @@ impl System {
             environment: BTreeMap::new(),
             process_id: FAKE_PID,
             executable_path: Ok(PathBuf::from(FAKE_EXECUTABLE)),
+            workspace_wrapper: None,
         }
     }
 
@@ -108,10 +109,18 @@ pub(crate) struct SystemBuilder {
     environment: BTreeMap<OsString, OsString>,
     process_id: u32,
     executable_path: Result<PathBuf, String>,
+    workspace_wrapper: Option<PathBuf>,
 }
 
 #[cfg(any(test, feature = "test-util"))]
 impl SystemBuilder {
+    #[cfg(test)]
+    /// Sets the wrapper selected by fake candidate Cargo configuration.
+    pub(crate) fn workspace_wrapper(mut self, wrapper: impl Into<PathBuf>) -> Self {
+        self.workspace_wrapper = Some(wrapper.into());
+        self
+    }
+
     #[cfg(test)]
     /// Sets the complete fake environment.
     pub(crate) fn environment<K>(mut self, environment: BTreeMap<K, OsString>) -> Self
@@ -139,7 +148,7 @@ impl SystemBuilder {
     /// Builds the configured fake system.
     pub(crate) fn build(self) -> System {
         System {
-            cargo_config: CargoConfig::fake(None),
+            cargo_config: CargoConfig::fake(self.workspace_wrapper),
             filesystem: self.filesystem,
             process: Process::fake(self.process),
             environment: Environment::fake(self.environment),

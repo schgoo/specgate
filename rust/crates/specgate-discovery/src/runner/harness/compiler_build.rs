@@ -77,3 +77,62 @@ pub(super) fn build(package: &Path, scratch: &Path, system: &System) -> Result<C
         build_directory: config.build_directory,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runner::system::{FakeFs, FakeProcess, ProcessOutput};
+    use std::ffi::OsStr;
+
+    #[test]
+    fn configured_workspace_wrapper_is_embedded_without_clearing_cargo_wrappers() {
+        let package = Path::new("candidate");
+        let manifest = package.join("Cargo.toml");
+        let scratch = Path::new("scratch");
+        for wrapper in [None, Some(PathBuf::from("tools").join("workspace wrapper"))] {
+            let metadata = serde_json::json!({
+                "packages": [{
+                    "id": "facade", "name": "specgate", "version": "0.6.0",
+                    "manifest_path": manifest,
+                    "targets": [{"name": "specgate", "kind": ["lib"], "src_path": package.join("src").join("lib.rs")}]
+                }]
+            });
+            let artifact = serde_json::json!({
+                "reason": "compiler-artifact",
+                "target": {"name": "specgate-test-compiler"},
+                "executable": "compiler-helper"
+            });
+            let builder = System::builder((
+                FakeFs::default(),
+                FakeProcess::queued([metadata, artifact].map(|document| {
+                    Ok(ProcessOutput {
+                        success: true,
+                        stdout: serde_json::to_vec(&document).unwrap(),
+                        stderr: Vec::new(),
+                    })
+                })),
+            ));
+            let system = match &wrapper {
+                Some(wrapper) => builder.workspace_wrapper(wrapper),
+                None => builder,
+            }
+            .build();
+            let compiler = build(package, scratch, &system).unwrap();
+            assert_eq!(compiler.executable, Path::new("compiler-helper"));
+            let generated = system
+                .filesystem
+                .read_to_string(scratch.join("compiler").join("src").join("main.rs"))
+                .unwrap();
+            assert!(generated.contains(&format!("const WRAPPER: Option<&str> = {wrapper:?};")));
+            let state = system.process.fake_state();
+            let state = state.lock().unwrap();
+            assert_eq!(state.requests.len(), 2);
+            for request in &state.requests {
+                for variable in ["RUSTC_WORKSPACE_WRAPPER", "RUSTC_WRAPPER"] {
+                    assert!(!request.env_remove.contains(&OsStr::new(variable).to_os_string()));
+                    assert!(!request.env.iter().any(|(key, _)| key == variable));
+                }
+            }
+        }
+    }
+}

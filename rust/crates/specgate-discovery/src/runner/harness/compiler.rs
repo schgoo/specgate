@@ -4,7 +4,7 @@
 use std::ffi::OsString;
 use std::fs;
 use std::io::{self, Write};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Component, Path, PathBuf, Prefix};
 use std::process::{Command, ExitCode, ExitStatus};
 
 #[cfg_attr(test, allow(dead_code, reason = "standalone compiler entry point is exercised through compile"))]
@@ -18,13 +18,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn compile(
-    mut arguments: Vec<OsString>,
-    roots: &[&str],
-    facades: &[&str],
-    scratch: &Path,
-    wrapper: Option<&str>,
-) -> io::Result<ExitCode> {
+fn compile(mut arguments: Vec<OsString>, roots: &[&str], facades: &[&str], scratch: &Path, wrapper: Option<&str>) -> io::Result<ExitCode> {
     if arguments.is_empty() {
         return Err(io::Error::other("Cargo did not supply a compiler executable"));
     }
@@ -62,13 +56,7 @@ fn compile(
             let mappings = path_mappings(&arguments)?;
             let mirror = root.path.join("sources");
             for dependency in paths.iter().map(|path| cwd.join(path)).chain([source.clone()]) {
-                let copied = mirrored(&mirror, &dependency)?;
-                // Paths such as empty/../module.rs still require empty/ to
-                // exist, even though it contributes no compiler input file.
-                for parent in dependency.ancestors().skip(1) {
-                    fs::create_dir_all(mirrored(&mirror, parent)?)?;
-                }
-                fs::write(copied, fs::read(dependency)?)?;
+                mirror_source(&mirror, &dependency)?;
             }
             let mut text = fs::read_to_string(&source)?;
             text.push('\n');
@@ -77,8 +65,7 @@ fn compile(
             let copied = mirrored(&mirror, &source)?;
             fs::write(&copied, text)?;
             arguments[index] = copied.clone().into_os_string();
-            // The sparse mirror keeps relative modules/includes intact, even
-            // outside the package. Absolute includes still read original files.
+            // Remap rustc's lexical filenames, not their resolved copy targets.
             let mut remappings = Vec::new();
             for dependency in &paths {
                 remap(
@@ -209,12 +196,24 @@ fn mirrored(directory: &Path, source: &Path) -> io::Result<PathBuf> {
         return Err(io::Error::other("source dependency is not absolute"));
     }
     let mut result = directory.to_path_buf();
-    let mut depth = 0;
     for component in source.components() {
         match component {
             Component::Prefix(prefix) => {
+                // canonicalize returns verbatim Windows paths; aliases and
+                // resolved targets must share the same mirror volume.
+                let prefix = match prefix.kind() {
+                    Prefix::VerbatimDisk(drive) => OsString::from(format!("{}:", char::from(drive))),
+                    Prefix::VerbatimUNC(server, share) => {
+                        let mut prefix = OsString::from(r"\\");
+                        prefix.push(server);
+                        prefix.push(r"\");
+                        prefix.push(share);
+                        prefix
+                    }
+                    _ => prefix.as_os_str().to_os_string(),
+                };
                 let mut name = String::from("volume");
-                for byte in prefix.as_os_str().as_encoded_bytes() {
+                for byte in prefix.as_encoded_bytes() {
                     use std::fmt::Write as _;
                     write!(name, "{byte:02x}").expect("writing volume identity");
                 }
@@ -223,17 +222,78 @@ fn mirrored(directory: &Path, source: &Path) -> io::Result<PathBuf> {
             Component::RootDir | Component::CurDir => {}
             Component::Normal(name) => {
                 result.push(name);
-                depth += 1;
             }
             Component::ParentDir => {
-                if depth > 0 {
-                    result.pop();
-                    depth -= 1;
-                }
+                result.push("..");
             }
         }
     }
     Ok(result)
+}
+
+fn mirror_source(directory: &Path, source: &Path) -> io::Result<()> {
+    let mut original = PathBuf::new();
+    for component in source.components() {
+        if component == Component::ParentDir {
+            #[cfg(unix)]
+            let preceding = fs::canonicalize(&original)?;
+            #[cfg(windows)]
+            let preceding = std::path::absolute(&original)?;
+            if preceding.parent().is_none() {
+                return Err(io::Error::other("source dependency traverses above the filesystem root"));
+            }
+        }
+        original.push(component);
+        if matches!(component, Component::Prefix(_)) {
+            continue;
+        }
+        let destination = mirrored(directory, &original)?;
+        match fs::symlink_metadata(&destination) {
+            Ok(_) => continue,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+        let metadata = fs::symlink_metadata(&original)?;
+        if metadata.file_type().is_symlink() {
+            let target = mirrored(directory, &fs::canonicalize(&original)?)?;
+            let is_directory = fs::metadata(&original)?.is_dir();
+            if is_directory {
+                fs::create_dir_all(&target)?;
+            } else {
+                fs::create_dir_all(target.parent().ok_or_else(|| io::Error::other("source file has no parent"))?)?;
+                fs::write(&target, fs::read(&original)?)?;
+            }
+            mirror_link(&target, &destination, is_directory)?;
+        } else if metadata.is_dir() {
+            fs::create_dir_all(&destination)?;
+        } else {
+            fs::write(&destination, fs::read(&original)?)?;
+        }
+    }
+    Ok(())
+}
+
+fn mirror_link(target: &Path, destination: &Path, is_directory: bool) -> io::Result<()> {
+    #[cfg(unix)]
+    let result = {
+        let _ = is_directory;
+        std::os::unix::fs::symlink(target, destination)
+    };
+    #[cfg(windows)]
+    let result = if is_directory {
+        std::os::windows::fs::symlink_dir(target, destination)
+    } else {
+        std::os::windows::fs::symlink_file(target, destination)
+    };
+    result.map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!(
+                "could not recreate source symlink at {} in invocation scratch: {error}",
+                destination.display()
+            ),
+        )
+    })
 }
 
 fn remap(arguments: &mut Vec<OsString>, from: impl AsRef<std::ffi::OsStr>, to: impl AsRef<std::ffi::OsStr>) {
@@ -331,7 +391,10 @@ mod tests {
         let next = TemporaryRoot::create(directory.path()).unwrap();
         assert_ne!(next.path, abandoned);
         next.remove().unwrap();
-        assert_eq!(fs::read_to_string(abandoned.join("in-progress.rs")).unwrap(), "owned by another build");
+        assert_eq!(
+            fs::read_to_string(abandoned.join("in-progress.rs")).unwrap(),
+            "owned by another build"
+        );
     }
 
     #[test]
@@ -342,8 +405,12 @@ mod tests {
         let directory = Path::new(&directory);
         let root = TemporaryRoot::create(&directory.join("scratch")).unwrap();
         fs::write(root.path.join("root.rs"), "interrupted compiler input").unwrap();
-        fs::write(directory.join("ready"), root.path.to_str().unwrap()).unwrap();
-        std::thread::sleep(std::time::Duration::from_secs(30));
+        let pending = directory.join("ready.pending");
+        fs::write(&pending, root.path.to_str().unwrap()).unwrap();
+        fs::rename(pending, directory.join("ready")).unwrap();
+        loop {
+            std::thread::park();
+        }
     }
 
     #[test]
@@ -352,19 +419,28 @@ mod tests {
         let sources = directory.path().join("sources");
         fs::create_dir(&sources).unwrap();
         fs::write(sources.join("root.rs"), "original source").unwrap();
+        let module = module_path!().split_once("::").unwrap().1;
         let mut child = Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "runner::harness::compiler::tests::interruption_worker"])
+            .args(["--exact", &format!("{module}::interruption_worker")])
             .env("SPECGATE_INTERRUPTION_TEST", directory.path())
             .stdout(std::process::Stdio::null())
             .spawn()
             .unwrap();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_mins(2);
         let ready = directory.path().join("ready");
+        let mut exited = None;
         while !ready.exists() && std::time::Instant::now() < deadline {
+            if let Some(status) = child.try_wait().unwrap() {
+                exited = Some(status);
+                break;
+            }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        child.kill().unwrap();
+        if exited.is_none() {
+            child.kill().unwrap();
+        }
         child.wait().unwrap();
+        assert!(exited.is_none(), "interruption worker exited before termination: {exited:?}");
         let abandoned = PathBuf::from(fs::read_to_string(ready).expect("child must allocate its root before termination"));
         assert!(abandoned.starts_with(directory.path().join("scratch")));
         assert!(abandoned.join("root.rs").is_file(), "termination must bypass the root destructor");
@@ -389,7 +465,7 @@ mod tests {
         let data = directory.path().join("data with spaces#$.txt");
         fs::write(&data, "value").unwrap();
         fs::write(&child, "pub fn value() -> i32 { assert_eq!(std::path::Path::new(file!()), std::path::Path::new(&std::env::var(\"EXPECTED_CHILD\").unwrap())); 2 }\n").unwrap();
-        fs::write(&custom, "pub fn value() -> i32 { 3 }\n").unwrap();
+        fs::write(&custom, "pub fn value() -> i32 { assert_eq!(std::path::Path::new(file!()), std::path::Path::new(&std::env::var(\"EXPECTED_CUSTOM\").unwrap())); 3 }\n").unwrap();
         fs::write(&included, "pub fn included() -> i32 { 4 }\n").unwrap();
         fs::write(
             &source,
@@ -447,13 +523,16 @@ macro_rules! __specgate_test_harness {
             ];
             let expected_root;
             let expected_child;
+            let expected_custom;
             if mapped {
                 remap(&mut arguments, directory.path(), "mapped");
                 expected_root = Path::new("mapped").join("sources").join("root.rs");
                 expected_child = Path::new("mapped").join("sources").join("child.rs");
+                expected_custom = Path::new("mapped").join("sources").join("empty/../nested/custom.rs");
             } else {
                 expected_root = input.clone();
                 expected_child = input.parent().unwrap().join("child.rs");
+                expected_custom = input.parent().unwrap().join("empty/../nested/custom.rs");
             }
             let result = compile(
                 arguments,
@@ -462,7 +541,7 @@ macro_rules! __specgate_test_harness {
                 &directory.path().join("scratch"),
                 None,
             );
-            results.push((result, executable, expected_root, expected_child));
+            results.push((result, executable, expected_root, expected_child, expected_custom));
         }
         #[cfg(unix)]
         fs::set_permissions(&sources, writable).unwrap();
@@ -470,18 +549,134 @@ macro_rules! __specgate_test_harness {
             fs::set_permissions(file, permissions).unwrap();
             assert_eq!(fs::read(file).unwrap(), contents);
         }
-        for (result, executable, expected_root, expected_child) in results {
+        for (result, executable, expected_root, expected_child, expected_custom) in results {
             assert_eq!(result.unwrap(), ExitCode::SUCCESS);
             let status = Command::new(executable)
                 .args(["--exact", "generated_entry"])
                 .env("EXPECTED_ROOT", expected_root)
                 .env("EXPECTED_CHILD", expected_child)
+                .env("EXPECTED_CUSTOM", expected_custom)
                 .status()
                 .unwrap();
             assert!(status.success());
         }
         assert_eq!(fs::read_dir(&sources).unwrap().count(), 5);
         assert_eq!(fs::read_dir(directory.path().join("scratch")).unwrap().count(), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mirrored_symlinks_preserve_parent_traversal_and_distinct_dependencies() {
+        let directory = tempfile::tempdir().unwrap();
+        let sources = directory.path().join("sources");
+        let external = directory.path().join("external");
+        fs::create_dir(&sources).unwrap();
+        fs::create_dir_all(external.join("inner")).unwrap();
+        fs::create_dir_all(external.join("one/two/three/four/five/six")).unwrap();
+        std::os::unix::fs::symlink("../external/inner", sources.join("link")).unwrap();
+        std::os::unix::fs::symlink("../external/one/two/three/four/five/six", sources.join("deep")).unwrap();
+        std::os::unix::fs::symlink("../external/value.rs", sources.join("alias.rs")).unwrap();
+        fs::write(
+            external.join("value.rs"),
+            "pub fn value() -> (&'static str, u32) { (file!(), 11) }\n",
+        )
+        .unwrap();
+        fs::write(
+            sources.join("value.rs"),
+            "pub fn value() -> (&'static str, u32) { (file!(), 22) }\n",
+        )
+        .unwrap();
+        fs::write(external.join("data.txt"), "external").unwrap();
+        fs::write(sources.join("data.txt"), "source").unwrap();
+        let source = sources.join("root.rs");
+        fs::write(
+            &source,
+            r#"#[path = "link/../value.rs"] mod linked;
+#[path = "value.rs"] mod direct;
+#[path = "alias.rs"] mod alias;
+#[path = "deep/../../../../../../value.rs"] mod deep;
+#[macro_export]
+macro_rules! __specgate_test_harness { () => {} }
+#[test]
+fn paths() {
+    let sources = std::path::PathBuf::from(std::env::var_os("ORIGINAL_SOURCES").unwrap());
+    assert_eq!(linked::value(), (sources.join("link/../value.rs").to_str().unwrap(), 11));
+    assert_eq!(direct::value(), (sources.join("value.rs").to_str().unwrap(), 22));
+    assert_eq!(alias::value(), (sources.join("alias.rs").to_str().unwrap(), 11));
+    assert_eq!(deep::value(), (sources.join("deep/../../../../../../value.rs").to_str().unwrap(), 11));
+    assert_eq!(include_str!("link/../data.txt"), "external");
+    assert_eq!(include_str!("data.txt"), "source");
+}
+"#,
+        )
+        .unwrap();
+        for instrumented in [false, true] {
+            let executable = directory.path().join(format!("fixture-{instrumented}"));
+            let arguments = vec![
+                rustc(),
+                "--test".into(),
+                "--crate-name=fixture".into(),
+                source.clone().into_os_string(),
+                "-o".into(),
+                executable.clone().into_os_string(),
+            ];
+            let roots = [source.to_str().unwrap()];
+            let status = compile(
+                arguments,
+                if instrumented { &roots } else { &[] },
+                &["crate"],
+                &directory.path().join("scratch"),
+                None,
+            )
+            .unwrap();
+            assert_eq!(status, ExitCode::SUCCESS);
+            assert!(
+                Command::new(executable)
+                    .args(["--exact", "paths"])
+                    .env("ORIGINAL_SOURCES", &sources)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        }
+        assert_eq!(fs::read_dir(directory.path().join("scratch")).unwrap().count(), 0);
+        assert_eq!(fs::read_to_string(external.join("data.txt")).unwrap(), "external");
+        assert!(fs::symlink_metadata(sources.join("link")).unwrap().file_type().is_symlink());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mirrored_sources_reject_root_clamping_parent_traversal() {
+        let directory = tempfile::tempdir().unwrap();
+        let link = directory.path().join("link");
+        std::os::unix::fs::symlink("/", &link).unwrap();
+        let mirror = directory.path().join("mirror");
+        let error = mirror_source(&mirror, &link.join("..")).unwrap_err();
+        assert!(error.to_string().contains("above the filesystem root"), "{error}");
+        assert!(fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 2);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn canonical_windows_paths_share_mirror_volumes_without_losing_lexical_parents() {
+        let directory = Path::new(r"C:\scratch");
+        assert_eq!(
+            mirrored(directory, Path::new(r"C:\source\empty\..\root.rs")).unwrap(),
+            directory.join(r"volume433a\source\empty\..\root.rs")
+        );
+        for (ordinary, verbatim) in [
+            (r"C:\source\root.rs", r"\\?\C:\source\root.rs"),
+            (r"\\server\share\source\root.rs", r"\\?\UNC\server\share\source\root.rs"),
+        ] {
+            assert_eq!(
+                mirrored(directory, Path::new(ordinary)).unwrap(),
+                mirrored(directory, Path::new(verbatim)).unwrap()
+            );
+        }
+        let scratch = tempfile::tempdir().unwrap();
+        let error = mirror_source(scratch.path(), Path::new(r"C:\..\root.rs")).unwrap_err();
+        assert!(error.to_string().contains("above the filesystem root"), "{error}");
     }
 
     #[test]

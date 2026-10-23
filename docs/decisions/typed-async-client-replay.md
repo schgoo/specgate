@@ -60,6 +60,12 @@ the package. The copied root retains inner attributes, relative modules, and
 includes; source-path remapping preserves `file!()` and diagnostics. Absolute
 includes continue to read the original files. Original source files and
 directories are never changed, so read-only test sources are supported.
+Copy destinations resolve symlinks, while compiler-visible remapping prefixes
+retain lexical `..` components. Source symlinks are recreated with targets
+inside the mirror, preserving traversal without merging distinct dependencies.
+Recreating a link requires symlink permission in the scratch filesystem;
+root-clamping parent traversal is rejected because an ordinary directory mirror
+cannot reproduce filesystem-root semantics.
 The invocation owns the mirror and removes it after compilation, including
 compiler failure. An interrupted wrapper can leave only invocation scratch,
 never temporary roots in user sources. Concurrent or subsequent builds do not
@@ -72,6 +78,10 @@ wrappers are resolved from candidate-rooted Cargo configuration and environment,
 then chained for both compiler passes; ordinary outer `RUSTC_WRAPPER` settings
 remain Cargo-owned. A missing or failing configured wrapper is a build failure,
 not permission to bypass it.
+Inherited wrapper settings also apply to internal scratch crates and the
+contributor harness's build-negative fixtures. The dependency-only pass may
+execute proc macros again; wrapper compatibility requirements are documented in
+the [Rust instrumentation guide](../guides/instrument-rust-crate.md#artifacts).
 
 Invocation-specific compiler wrappers and environment dependencies emitted for
 `SPECGATE_TEST_ENTRY` and `SPECGATE_TEST_DISPATCH` keep generated builds isolated

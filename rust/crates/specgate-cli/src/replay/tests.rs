@@ -494,14 +494,32 @@ fn main() -> ExitCode {
         .unwrap();
         let source = candidate.join("src").join("lib.rs");
         let original_source = std::fs::read_to_string(&source).unwrap();
+        std::fs::create_dir(candidate.join("src").join("empty")).unwrap();
+        std::fs::write(
+            candidate.join("src").join("path_identity.rs"),
+            r#"pub fn check() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let expected = root.join("src").join("empty").join("..").join("path_identity.rs");
+    let observed = root.join(file!());
+    assert_eq!(observed, expected, "capture and replay must preserve compiler-visible source paths");
+}
+"#,
+        )
+        .unwrap();
         std::fs::write(
             &source,
-            original_source.replace(
-                "use specgate::",
-                "#[cfg(all(test, not(specgate_workspace_wrapper)))]\n\
-                 compile_error!(\"candidate workspace wrapper was not preserved\");\n\
-                 use specgate::",
-            ),
+            original_source
+                .replace(
+                    "use specgate::",
+                    "#[cfg(all(test, not(specgate_workspace_wrapper)))]\n\
+                     compile_error!(\"candidate workspace wrapper was not preserved\");\n\
+                     #[path = \"empty/../path_identity.rs\"] mod path_identity;\n\
+                     use specgate::",
+                )
+                .replace(
+                    "specgate_config_proof::add(a, b)",
+                    "path_identity::check(); specgate_config_proof::add(a, b)",
+                ),
         )
         .unwrap();
         let capture_dir = cache.path().join("capture");

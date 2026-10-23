@@ -362,7 +362,12 @@ fn generate_with(
 }
 
 fn cargo_build(manifest: &Path, target_dir: &Path, feature: &str) -> std::io::Result<std::process::Output> {
-    std::process::Command::new(cargo_bin())
+    cargo_build_command(manifest, target_dir, feature).output()
+}
+
+fn cargo_build_command(manifest: &Path, target_dir: &Path, feature: &str) -> std::process::Command {
+    let mut command = std::process::Command::new(cargo_bin());
+    command
         .arg("build")
         .arg("--quiet")
         .arg("--message-format=json")
@@ -370,16 +375,23 @@ fn cargo_build(manifest: &Path, target_dir: &Path, feature: &str) -> std::io::Re
         .arg(feature)
         .arg("--manifest-path")
         .arg(manifest)
-        .env_remove("RUSTC_WORKSPACE_WRAPPER")
         .env_remove("CARGO")
         .env_remove("CARGO_MANIFEST_DIR")
-        .env("CARGO_TARGET_DIR", target_dir)
-        .output()
+        .env("CARGO_TARGET_DIR", target_dir);
+    command
 }
 
 #[cfg(test)]
 mod operation_tests {
     use super::*;
+
+    #[test]
+    fn negative_builds_preserve_cargo_compiler_wrappers() {
+        let command = cargo_build_command(Path::new("Cargo.toml"), Path::new("target"), "negative");
+        for variable in ["RUSTC_WORKSPACE_WRAPPER", "RUSTC_WRAPPER"] {
+            assert!(command.get_envs().all(|(key, _)| key != variable));
+        }
+    }
 
     fn unused_discover(
         _binding: &Path,
