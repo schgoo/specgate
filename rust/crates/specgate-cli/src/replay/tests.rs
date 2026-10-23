@@ -454,6 +454,56 @@ mod cases {
     #[test]
     fn candidate_config() {
         let (cache, binding) = configured_candidate();
+        let candidate = cache.path().join("candidate");
+        let wrapper_source = cache.path().join("wrapper.rs");
+        let wrapper = cache.path().join(format!("wrapper{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(
+            &wrapper_source,
+            r#"use std::{fs::OpenOptions, io::Write, process::{Command, ExitCode}};
+fn main() -> ExitCode {
+    let mut args = std::env::args_os().skip(1);
+    let compiler = args.next().expect("missing compiler");
+    let args: Vec<_> = args.collect();
+    let mut log = OpenOptions::new().create(true).append(true)
+        .open(std::env::current_exe().unwrap().with_extension("log")).unwrap();
+    writeln!(log, "{args:?}").unwrap();
+    let status = Command::new(compiler).args(args)
+        .args(["--cfg", "specgate_workspace_wrapper"]).status().unwrap();
+    ExitCode::from(u8::try_from(status.code().unwrap_or(1)).unwrap_or(1))
+}
+"#,
+        )
+        .unwrap();
+        let status = std::process::Command::new(std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into()))
+            .arg("--edition=2024")
+            .arg(&wrapper_source)
+            .arg("-o")
+            .arg(&wrapper)
+            .status()
+            .unwrap();
+        assert!(status.success(), "could not build candidate workspace wrapper");
+        let config = candidate.join(".cargo").join("config.toml");
+        let original_config = std::fs::read_to_string(&config).unwrap();
+        std::fs::write(
+            &config,
+            original_config.replace(
+                "[build]\n",
+                &format!("[build]\nrustc-workspace-wrapper = {:?}\n", cargo_path(&wrapper)),
+            ),
+        )
+        .unwrap();
+        let source = candidate.join("src").join("lib.rs");
+        let original_source = std::fs::read_to_string(&source).unwrap();
+        std::fs::write(
+            &source,
+            original_source.replace(
+                "use specgate::",
+                "#[cfg(all(test, not(specgate_workspace_wrapper)))]\n\
+                 compile_error!(\"candidate workspace wrapper was not preserved\");\n\
+                 use specgate::",
+            ),
+        )
+        .unwrap();
         let capture_dir = cache.path().join("capture");
         let replay_output = cache.path().join("candidate.otlp.json");
         let captured = capture(
@@ -487,6 +537,14 @@ mod cases {
         assert!(
             output.contains("candidate:configured-candidate:candidate"),
             "target label is the output file stem"
+        );
+        let linked = validate_linked(&replay_output, capture_dir.join(registry_file()), &[]);
+        assert!(linked.valid, "wrapped replay must remain linked: {:?}", linked.issues);
+        let log = std::fs::read_to_string(wrapper.with_extension("log")).unwrap();
+        assert!(
+            log.lines()
+                .any(|line| line.contains("--test") && line.contains("sources") && line.contains("root-")),
+            "the candidate workspace wrapper must compile the injected scratch root: {log}"
         );
 
         let refused = replay(

@@ -62,7 +62,6 @@ pub(super) fn build_binaries(
     let request = ProcessRequest::builder(cargo_bin())
         .args(["test", "--no-run", "--quiet", "--message-format=json"])
         .current_dir(package_root)
-        .env_remove("RUSTC_WORKSPACE_WRAPPER")
         .env_remove("CARGO")
         .env_remove("CARGO_MANIFEST_DIR")
         .env("CARGO_TARGET_DIR", scratch.join("target"))

@@ -152,6 +152,13 @@ prints `Complete(component=example.math, scenarios=…, …)` and exits 0. [smok
 None from instrumentation. Capture writes a bundle; see
 [`capture-a-reference.md`](capture-a-reference.md).
 
+Discovery and replay build their internal test entry points in invocation
+scratch, not beside your sources. Read-only source directories work with a
+prepared Cargo lockfile and writable build/cache directories. Existing
+`RUSTC_WORKSPACE_WRAPPER` and `build.rustc-workspace-wrapper` settings are
+respected by chaining the selected wrapper; ordinary `RUSTC_WRAPPER` settings
+remain in effect. A configured wrapper failure is reported as a build failure.
+
 ## Failure modes
 
 | Message fragment | Cause | Fix |

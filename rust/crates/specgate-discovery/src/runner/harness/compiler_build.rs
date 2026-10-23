@@ -12,6 +12,14 @@ pub(super) struct Compiler {
 
 pub(super) fn build(package: &Path, scratch: &Path, system: &System) -> Result<Compiler, Error> {
     let config = crate::runner::metadata::harness_config(package, &scratch.join("target"), system)?;
+    let wrapper = system.cargo_config.workspace_wrapper(package)?;
+    let wrapper = wrapper
+        .as_deref()
+        .map(|path| {
+            path.to_str()
+                .ok_or_else(|| failure("configured Cargo workspace wrapper is not Unicode"))
+        })
+        .transpose()?;
     let directory = scratch.join("compiler");
     system.filesystem.create_dir_all(directory.join("src"))?;
     let cargo = crate::runner::runner_cargo("specgate-test-compiler", BTreeMap::new())?;
@@ -22,8 +30,14 @@ pub(super) fn build(package: &Path, scratch: &Path, system: &System) -> Result<C
         .map(|path| path.to_str().ok_or_else(|| failure("test crate root is not Unicode")))
         .collect::<Result<Vec<_>, _>>()?;
     let source = format!(
-        "const ROOTS: &[&str] = &{roots:?};\nconst FACADES: &[&str] = &{:?};\ninclude!({:?});\n",
-        config.facades, "compiler.rs"
+        "const ROOTS: &[&str] = &{roots:?};\nconst FACADES: &[&str] = &{:?};\n\
+         const SCRATCH: &str = {:?};\nconst WRAPPER: Option<&str> = {wrapper:?};\ninclude!({:?});\n",
+        config.facades,
+        directory
+            .join("roots")
+            .to_str()
+            .ok_or_else(|| failure("compiler scratch path is not Unicode"))?,
+        "compiler.rs"
     );
     system.filesystem.write(directory.join("src").join("main.rs"), source)?;
     system
@@ -36,7 +50,6 @@ pub(super) fn build(package: &Path, scratch: &Path, system: &System) -> Result<C
         .arg("--manifest-path")
         .arg(directory.join("Cargo.toml"))
         .current_dir(package)
-        .env_remove("RUSTC_WORKSPACE_WRAPPER")
         .env_remove("SPECGATE_TEST_ENTRY")
         .env_remove("SPECGATE_TEST_DISPATCH")
         .env_remove("CARGO")

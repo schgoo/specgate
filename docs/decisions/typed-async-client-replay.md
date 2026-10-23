@@ -53,13 +53,25 @@ hooks, and merges test-only declarations into the normal semantic registry.
 Replay compiles the selected target and runs only its generated replay hook.
 The test-build layer inserts one hook at the crate root, not beside an annotated
 operation or inside an `impl`. Users add no harness declaration. A dependency-free
-Cargo compiler wrapper copies the root to a uniquely owned temporary sibling
-file and appends the internal hook invocation. The sibling preserves inner
-attributes, relative modules, and includes; source-path remapping preserves
-`file!()` and diagnostics. Original source files are never rewritten, and the
-temporary file is removed after compilation, including compiler failure.
-Its name cannot become an automatically discovered Cargo target. Test-root
-directories must be writable for these CLI-owned builds.
+Cargo compiler wrapper appends the internal hook invocation to a scratch copy
+of the root. A dependency-only compiler pass against the original root identifies
+the files to mirror, preserving their relative paths, including paths outside
+the package. The copied root retains inner attributes, relative modules, and
+includes; source-path remapping preserves `file!()` and diagnostics. Absolute
+includes continue to read the original files. Original source files and
+directories are never changed, so read-only test sources are supported.
+The invocation owns the mirror and removes it after compilation, including
+compiler failure. An interrupted wrapper can leave only invocation scratch,
+never temporary roots in user sources. Concurrent or subsequent builds do not
+delete another build's scratch files.
+
+The owner approved eliminating source-directory writes in issue #101. The
+dependency-only pass adds compiler work for each instrumented test target but
+does not execute ordinary tests or change target selection. Existing workspace
+wrappers are resolved from candidate-rooted Cargo configuration and environment,
+then chained for both compiler passes; ordinary outer `RUSTC_WRAPPER` settings
+remain Cargo-owned. A missing or failing configured wrapper is a build failure,
+not permission to bypass it.
 
 Invocation-specific compiler wrappers and environment dependencies emitted for
 `SPECGATE_TEST_ENTRY` and `SPECGATE_TEST_DISPATCH` keep generated builds isolated

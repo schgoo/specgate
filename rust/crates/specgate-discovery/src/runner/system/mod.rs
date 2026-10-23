@@ -1,5 +1,6 @@
 //! Concrete crate-private boundaries for scoped operating-system interactions.
 
+mod cargo_config;
 mod environment;
 mod filesystem;
 mod process;
@@ -17,6 +18,7 @@ const FAKE_PID: u32 = 0;
 #[cfg(any(test, feature = "test-util"))]
 const FAKE_EXECUTABLE: &str = "tools/specgate";
 
+use cargo_config::CargoConfig;
 pub(crate) use environment::{Environment, ExecutablePath, ProcessId};
 #[cfg(any(test, feature = "test-util"))]
 pub(crate) use filesystem::{FailureKey, FakeFs};
@@ -34,6 +36,7 @@ fn failure(message: impl Into<String>) -> Error {
 /// Groups concrete operating-system adapters used by discovery workflows.
 #[derive(Clone)]
 pub(crate) struct System {
+    pub(crate) cargo_config: CargoConfig,
     /// Filesystem operations.
     pub(crate) filesystem: Filesystem,
     /// Child-process execution.
@@ -63,6 +66,7 @@ impl System {
     /// Creates adapters backed by the current operating system.
     pub(crate) fn real() -> Self {
         Self {
+            cargo_config: CargoConfig::real(),
             filesystem: Filesystem::real(),
             process: Process::real(),
             environment: Environment::real(),
@@ -135,6 +139,7 @@ impl SystemBuilder {
     /// Builds the configured fake system.
     pub(crate) fn build(self) -> System {
         System {
+            cargo_config: CargoConfig::fake(None),
             filesystem: self.filesystem,
             process: Process::fake(self.process),
             environment: Environment::fake(self.environment),

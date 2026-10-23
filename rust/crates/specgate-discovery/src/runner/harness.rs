@@ -16,6 +16,8 @@ mod compiler_build;
 mod compiler {
     const ROOTS: &[&str] = &[];
     const FACADES: &[&str] = &[];
+    const SCRATCH: &str = "";
+    const WRAPPER: Option<&str> = None;
     include!("harness/compiler.rs");
 }
 
@@ -343,7 +345,7 @@ mod tests {
         assert_eq!(state.requests.len(), 2);
         for request in &state.requests {
             assert!(request.env.iter().any(|(key, value)| key == "CARGO_INCREMENTAL" && value == "0"));
-            for preserved in ["CARGO_BUILD_BUILD_DIR", "RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS"] {
+            for preserved in ["CARGO_BUILD_BUILD_DIR", "RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS", "RUSTC_WRAPPER"] {
                 assert!(!request.env.iter().any(|(key, _)| key == preserved));
                 assert!(!request.env_remove.contains(&OsStr::new(preserved).to_os_string()));
             }
