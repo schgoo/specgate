@@ -192,6 +192,16 @@ public sealed class ValueProjectionTests
     }
 
     [Fact]
+    public void AnOrdinaryEventDoesNotProjectWriteOnlyProperties()
+    {
+        Value address = Single(
+            nameof(Declarations.Nested),
+            [new Address { City = "Oslo", WriteOnly = "ignored" }]);
+
+        Assert.Equal(Map(("city", Value.String("Oslo"))), address);
+    }
+
+    [Fact]
     public void AVariantProjectsAsItsNameOverItsOwnMembers()
     {
         Assert.Equal(
@@ -539,6 +549,9 @@ internal sealed class Address
     public string City { get; init; } = string.Empty;
 
     public string Note { get; init; } = string.Empty;
+
+    [SpecEvent]
+    public string WriteOnly { init => Note = value; }
 }
 
 [SpecEvent]

@@ -19,8 +19,8 @@ public sealed class SpecOperationAttribute : Attribute
     public Type[] TypeArguments { get; set; } = [];
 }
 
-/// <summary>Marks a method as a setup producer for one component operation.</summary>
-[AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]
+/// <summary>Marks a method or constructor as a setup producer for one component operation.</summary>
+[AttributeUsage(AttributeTargets.Method | AttributeTargets.Constructor, AllowMultiple = true)]
 public sealed class SpecSetupAttribute : Attribute
 {
     /// <summary>Initializes a setup annotation.</summary>
@@ -61,6 +61,9 @@ public sealed class SpecEventAttribute : Attribute
 
     /// <summary>Gets the optional semantic name override.</summary>
     public string? Name { get; }
+
+    /// <summary>Gets or sets whether operation arguments are decomposed into setup inputs.</summary>
+    public bool Setup { get; set; }
 }
 
 /// <summary>Declares exception types mapped to a semantic error outcome.</summary>

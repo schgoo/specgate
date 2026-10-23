@@ -82,6 +82,12 @@ internal static class Annotations
     internal static string? Text(object? attribute, string property) =>
         attribute?.GetType().GetProperty(property)?.GetValue(attribute) as string;
 
+    internal static bool PropertySetup(Type type)
+    {
+        object? attribute = FirstOn(type, Event, inherit: false);
+        return attribute?.GetType().GetProperty("Setup")?.GetValue(attribute) is true;
+    }
+
     /// <summary>Reads a <see cref="Type"/> array property from an annotation instance.</summary>
     internal static Type[] Types(object? attribute, string property) =>
         attribute?.GetType().GetProperty(property)?.GetValue(attribute) as Type[] ?? Array.Empty<Type>();

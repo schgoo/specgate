@@ -1,5 +1,8 @@
 //! Setup-backed state, mutations, and multi-step behaviors.
 
+#[path = "../../../../../../cases/fixture.property_setup/rust/property_setup.rs"]
+pub mod property_setup;
+
 #[path = "../../../../../../cases/fixture.multi_field_capture/rust/multi_field_capture.rs"]
 pub mod multi_field_capture;
 #[path = "../../../../../../cases/fixture.multi_mutation/rust/multi_mutation.rs"]

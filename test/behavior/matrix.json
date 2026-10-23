@@ -32,6 +32,24 @@
   },
   "rows": [
     {
+      "id": "component/fixture.property_setup",
+      "artifactDirectory": "behavior/cases/fixture.property_setup/expected",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/stateful",
+      "component": "fixture.property_setup",
+      "sources": [
+        "test/behavior/cases/fixture.property_setup/rust/property_setup.rs",
+        "test/behavior/cases/fixture.property_setup/csharp/PropertySetup.cs"
+      ],
+      "rust": { "binding": "rust", "phases": ["discover", "capture"], "expect": "success" },
+      "csharp": { "binding": "csharp", "phases": ["discover", "capture"], "expect": "success" },
+      "parity": { "mode": "byte-identical" },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [{ "reference": "csharp", "candidate": "rust", "mode": "verified" }],
+      "linkage": { "mode": "linked" },
+      "limitations": []
+    },
+    {
       "id": "replacement/woven-capture-mechanics",
       "classification": "replacement",
       "sourceGroup": "producer/il",
@@ -546,7 +564,7 @@
       "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
         { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
-          "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it." }
+          "reason": "General record and tagged-union inputs without a property-setup opt-in remain unsupported." }
       ],
       "linkage": {
         "mode": "linked"
@@ -617,7 +635,7 @@
       "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
         { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
-          "reason": "Replay supports only lossless primitive and unit values. This component's input or outcome surface is structured, so the planner rejects it." }
+          "reason": "The Offset input is an ordinary record without a property-setup opt-in." }
       ],
       "linkage": {
         "mode": "linked"
@@ -764,8 +782,7 @@
       },
       "reference": { "implementation": "rust", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
-        { "reference": "rust", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
-          "reason": "Replay planning is all-or-nothing per row, and the planner rejects this component before it reaches the async `fetch` operation: `find` takes a `Vec<i32>`, and replay supports only lossless primitive inputs, so the list input is an unsupported structured replay type." }
+        { "reference": "rust", "candidate": "rust", "mode": "verified" }
       ],
       "linkage": {
         "mode": "linked"
@@ -1439,8 +1456,7 @@
       },
       "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
-        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
-          "reason": "The native reference carries structured values unsupported by replay." }
+        { "reference": "csharp", "candidate": "rust", "mode": "verified" }
       ],
       "linkage": {
         "mode": "linked"
@@ -1475,8 +1491,7 @@
       },
       "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
       "checks": [
-        { "reference": "csharp", "candidate": "rust", "mode": "unsupported", "expectCategory": "structured-value",
-          "reason": "The native reference carries structured values unsupported by replay." }
+        { "reference": "csharp", "candidate": "rust", "mode": "verified" }
       ],
       "linkage": {
         "mode": "linked"
@@ -2712,6 +2727,32 @@
           "detail": "The golden records the intentional fixture source the compiler blamed and any diagnostic codes it carried, which is enough to prove the build failed for the declared reason. Rendered diagnostic text, spans, and paths vary by toolchain and are deliberately excluded."
         }
       ]
+    },
+    {
+      "id": "negative/property-collision",
+      "artifactDirectory": "rejection/rust/specgate-ctsc-negative-fixtures/expected/property-collision",
+      "classification": "negative-fixture",
+      "sourceGroup": "negative/discovery",
+      "component": "fixture.property_collision",
+      "sources": ["test/rejection/rust/specgate-ctsc-negative-fixtures/src/lib.rs"],
+      "rust": { "binding": "rust", "phases": ["discover"], "expect": "failure",
+        "artifacts": ["error.json"], "expectCategory": "setup-duplicate-input" },
+      "parity": { "mode": "not-applicable", "reason": "The Rust fixture tests flat property input collision rejection." },
+      "checks": [],
+      "limitations": []
+    },
+    {
+      "id": "negative/missing-default",
+      "artifactDirectory": "rejection/rust/specgate-ctsc-negative-fixtures/expected/missing-default",
+      "classification": "negative-fixture",
+      "sourceGroup": "negative/build",
+      "component": "fixture.missing_default",
+      "sources": ["test/rejection/rust/specgate-ctsc-negative-fixtures/src/templates/missing_default.rs.in"],
+      "rust": { "binding": "rust", "phases": ["build"], "expect": "failure",
+        "artifacts": ["error.json"], "expectCategory": "compile-error", "feature": "missing-default" },
+      "parity": { "mode": "not-applicable", "reason": "Rust requires Default to reconstruct fields omitted by the explicit property setup opt-in." },
+      "checks": [],
+      "limitations": []
     },
     {
       "id": "replacement/mock-runtime",

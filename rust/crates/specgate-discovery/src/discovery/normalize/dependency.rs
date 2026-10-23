@@ -72,7 +72,15 @@ fn direct(component: &ComponentId, traversal: Traversal, registry: &Registry) ->
             operation.component == component.as_str() && (!operation.is_setup || operation_names.contains(operation.name.as_str()))
         }) {
             for parameter in &operation.params {
-                collect_into(&parameter.ty, &mut references);
+                if !operation.is_setup
+                    && let Some(properties) = crate::discovery::setup::property_setup(operation, &parameter.ty, registry)?
+                {
+                    for field in &properties.fields {
+                        collect_into(&field.ty, &mut references);
+                    }
+                } else {
+                    collect_into(&parameter.ty, &mut references);
+                }
             }
             collect_into(&operation.return_type, &mut references);
         }

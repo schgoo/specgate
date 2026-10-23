@@ -292,6 +292,9 @@ internal sealed class SemanticType : IEquatable<SemanticType>
     internal static bool HasSpecEvent(Type type) =>
         type.GetCustomAttribute<SpecEventAttribute>(inherit: false) is not null;
 
+    internal static bool IsPropertySetup(Type type) =>
+        type.GetCustomAttribute<SpecEventAttribute>(inherit: false)?.Setup == true;
+
     /// <summary>
     /// Gets the annotated members of <paramref name="type"/>, matching the
     /// selection <c>specgate discover</c> publishes: public instance members
@@ -306,10 +309,18 @@ internal sealed class SemanticType : IEquatable<SemanticType>
             BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly;
 
         List<SemanticMember> members = [];
+        bool all = IsPropertySetup(type)
+            && !type.GetProperties(Selection).Cast<MemberInfo>().Concat(type.GetFields(Selection)).Any(HasSpecEvent);
         foreach (PropertyInfo property in type.GetProperties(Selection))
         {
-            if (HasSpecEvent(property) && property.CanRead)
+            if ((all || HasSpecEvent(property)) && (property.CanRead || IsPropertySetup(type)))
             {
+                if (IsPropertySetup(type)
+                    && (property.GetMethod is not { IsPublic: true } || property.GetIndexParameters().Length != 0))
+                {
+                    throw new SpecGateCaptureException(CaptureRejection.UnsupportedType,
+                        $"specgate: property setup member '{type.FullName}.{property.Name}' must have a public non-indexed getter.");
+                }
                 members.Add(new SemanticMember(
                     EventName(property),
                     Map(property.PropertyType, NullableFlagReader.ForMember(property)),
@@ -319,7 +330,7 @@ internal sealed class SemanticType : IEquatable<SemanticType>
 
         foreach (FieldInfo field in type.GetFields(Selection))
         {
-            if (HasSpecEvent(field))
+            if (all || HasSpecEvent(field))
             {
                 members.Add(new SemanticMember(
                     EventName(field),

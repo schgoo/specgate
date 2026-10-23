@@ -415,9 +415,44 @@ pub struct TypeMeta {
     fields: &'static [FieldMeta],
     variants: &'static [VariantMeta],
     component: ComponentName,
+    property_setup: Option<RustType>,
 }
 
 impl TypeMeta {
+    pub(crate) fn property_fields(operation: &OpMeta, parameter: &str) -> Result<Option<&'static [FieldMeta]>, CaptureError> {
+        let Some(parameter) = operation.params.iter().find(|field| field.name == parameter) else {
+            return Ok(None);
+        };
+        let mut native = parameter.rust_type.trim();
+        if let Some(reference) = native.strip_prefix('&') {
+            native = reference.trim_start();
+            if native.starts_with('\'') {
+                native = native.split_once(char::is_whitespace).map_or("", |(_, ty)| ty.trim_start());
+            }
+            native = native.strip_prefix("mut ").unwrap_or(native).trim_start();
+        }
+        let native = native.replace(' ', "");
+        let native = native
+            .strip_prefix("crate::")
+            .map(|suffix| format!("{}::{suffix}", operation.module_path.split("::").next().unwrap_or("")))
+            .unwrap_or(native);
+        let mut matches = TYPES.iter().filter(|ty| {
+            ty.component.0 == operation.component
+                && ty
+                    .property_setup
+                    .is_some_and(|name| name.0 == native || format!("{}::{}", ty.module_path, name) == native)
+        });
+        let first = matches.next();
+        if matches.next().is_some() {
+            return Err(CaptureError::setup_collision(
+                operation.component,
+                operation.name,
+                format!("ambiguous property setup type '{native}'"),
+            ));
+        }
+        Ok(first.map(|ty| ty.fields))
+    }
+
     /// Start a const builder with required semantic-type identity metadata.
     ///
     /// # Examples
@@ -454,6 +489,7 @@ impl TypeMeta {
                 fields: &[],
                 variants: &[],
                 component: deps.component,
+                property_setup: None,
             },
         }
     }
@@ -466,6 +502,13 @@ impl TypeMeta {
 }
 
 impl TypeBuilder {
+    /// Opt this native type into operation-entry property setup folding.
+    #[must_use]
+    pub const fn property_setup(mut self, native_name: RustType) -> Self {
+        self.meta.property_setup = Some(native_name);
+        self
+    }
+
     /// Set named struct fields.
     #[must_use]
     pub const fn fields(mut self, fields: &'static [FieldMeta]) -> Self {
@@ -626,6 +669,10 @@ impl Discovery {
             write_property(&mut out, ",\"module_path\":", ty.module_path);
             write_property(&mut out, ",\"kind\":", ty.kind.as_str());
             write_property(&mut out, ",\"component\":", ty.component);
+            if let Some(native_name) = ty.property_setup {
+                out.push_str(",\"property_setup\":true");
+                write_property(&mut out, ",\"native_name\":", native_name);
+            }
             out.push_str(",\"fields\":");
             write_fields(&mut out, ty.fields);
             out.push_str(",\"variants\":[");

@@ -137,6 +137,10 @@ internal sealed class OperationMetadata
         {
             result = ResultOf(function);
         }
+        else if (method is ConstructorInfo)
+        {
+            result = SemanticType.Named(method.DeclaringType!);
+        }
 
         return new OperationMetadata(inputs, result, DeclaredExceptionsOf(method));
     }

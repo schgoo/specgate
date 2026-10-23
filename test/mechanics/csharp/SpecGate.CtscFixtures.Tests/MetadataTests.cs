@@ -120,6 +120,10 @@ public sealed class MetadataTests
             foreach (MemberInfo member in members)
             {
                 SpecEventAttribute? memberEvent = member.GetCustomAttribute<SpecEventAttribute>();
+                if (typeEvent.Setup && memberEvent is null)
+                {
+                    continue;
+                }
                 Assert.NotNull(memberEvent);
                 Assert.False(string.IsNullOrWhiteSpace(memberEvent!.Name));
             }

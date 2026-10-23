@@ -1,0 +1,13 @@
+#[derive(Debug, specgate::SpecEvent)]
+#[spec_component("fixture.missing_default")]
+#[spec_event(setup)]
+pub struct Query {
+    #[spec_event]
+    pub value: i32,
+    pub omitted: String,
+}
+
+#[specgate::spec_operation("read", spec = "fixture.missing_default")]
+pub fn read(query: Query) -> i32 {
+    query.value
+}

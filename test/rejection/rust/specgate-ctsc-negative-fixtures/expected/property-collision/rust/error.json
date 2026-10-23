@@ -1,0 +1,1 @@
+{"case":"negative/property-collision","category":"setup-duplicate-input","component":"fixture.property_collision","detail":{"message":"setup folding for 'fixture.property_collision::read' produces duplicate input name 'value'"},"format":"specgate.ctsc-golden-error","formatVersion":"0.1.0","outcome":"failure","phase":"discover"}
