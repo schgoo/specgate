@@ -37,6 +37,10 @@ fn adds_two_numbers() {
 - Declare `spec_component!("…")` once at the crate root; it sets the crate-wide
   default component. Override it per item with `spec = "…"`, for example
   `#[spec_operation("add", spec = "example.math")]`.
+- Each library, binary, or integration-test target needing discovery/replay
+  hooks must have its own crate-root declaration, even if every operation uses
+  an explicit `spec`. A library's declaration does not cover separate Cargo
+  targets. No generated test is added during ordinary `cargo test` runs.
 - The operation name is the first argument. Operations must be public; discovery
   rejects annotated private functions.
 - Parameter names become input names. Rename one with

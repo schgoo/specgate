@@ -199,6 +199,9 @@ architecture and status are in `docs/status.md`. Important current boundaries in
   results/errors with matching CTSC declarations;
 - Rust test-only/private setup producers are resolved semantically in actual
   Cargo test targets; generated replay hooks run instead of ordinary tests.
+  Each target declares `spec_component!` at its own crate root; the declaration
+  emits the CLI-owned hook without SpecGate compiler wrappers or source copying/writes.
+  Configured compiler wrappers remain under normal Cargo handling.
   Construction inputs remain primitive, and equal receiver producer/input
   identities share state within a scenario;
 - async/generic setups, cross-target setup environments, overlapping sibling

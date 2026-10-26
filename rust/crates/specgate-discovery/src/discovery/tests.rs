@@ -346,7 +346,10 @@ fn runner_failures() {
         assert_eq!(runner::run_in(&context(), &system).unwrap_err(), expected);
         let request = system.process.fake_state().lock().unwrap().requests[0].clone();
         assert_eq!(request.executable, std::ffi::OsString::from("fake-cargo"));
-        assert!(request.env_remove.contains(&std::ffi::OsString::from("RUSTC_WORKSPACE_WRAPPER")));
+        for wrapper in ["RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER"] {
+            assert!(!request.env_remove.contains(&std::ffi::OsString::from(wrapper)));
+            assert!(!request.env.iter().any(|(key, _)| key == wrapper));
+        }
     }
 
     for (key, expected) in [

@@ -93,7 +93,6 @@ pub(super) fn run_in(context: &crate::runner::CandidatePackage, system: &crate::
         .arg("--manifest-path")
         .arg(scratch.path().join("Cargo.toml"))
         .current_dir(&context.path)
-        .env_remove("RUSTC_WORKSPACE_WRAPPER")
         .env_remove("CARGO")
         .env_remove("CARGO_MANIFEST_DIR")
         .env("CARGO_TARGET_DIR", scratch.path().join("target").as_os_str())

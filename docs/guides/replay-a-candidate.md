@@ -59,6 +59,12 @@ the reference's reachable CTSC declarations. See
 [`../status.md`](../status.md#candidate-replay-and-explicit-generic-operations)
 for explicit generic specializations.
 
+Each Cargo target used for generated discovery/replay hooks must declare
+`specgate::spec_component!("…")` at its own crate root, including binary-unit
+and integration-test targets. Explicit operation component arguments do not
+replace that declaration. Generated builds use the original sources, support
+read-only source directories, and leave configured compiler wrappers to Cargo.
+
 ### Runtime selection and custom configuration
 
 Replay supports Arty, Smol, and Tokio. By default it selects the only supported

@@ -82,7 +82,6 @@ pub(super) fn execute_in(
         .arg("--")
         .arg(&sidecar)
         .current_dir(&plan.target.package_root)
-        .env_remove("RUSTC_WORKSPACE_WRAPPER")
         .env_remove("CARGO")
         .env_remove("CARGO_MANIFEST_DIR")
         .env("CARGO_TARGET_DIR", scratch.join("target"))

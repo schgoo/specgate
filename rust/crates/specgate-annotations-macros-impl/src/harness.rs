@@ -11,7 +11,7 @@ pub fn dependency() -> TokenStream2 {
     )
 }
 
-/// Emit a libtest entry point at the root selected by the test-build layer.
+/// Emit a libtest entry point at the root declaring `spec_component!`.
 #[must_use]
 pub fn entry(identity: &str) -> TokenStream2 {
     let dependency = dependency();
