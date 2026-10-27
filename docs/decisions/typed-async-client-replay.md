@@ -88,6 +88,13 @@ change Cargo artifact filenames, so non-native targets need the same isolation.
 The first generated build can recompile dependencies once; later builds reuse
 them within that namespace.
 
+External discovery and replay runners also use isolated build namespaces,
+keyed by their candidate and generated Cargo files. Ordinary capture builds
+can select different dependency features or versions from those runners;
+sharing unhashed native libraries across those graphs can link two runtime
+instances even when their runtime package identity is the same. Runner
+namespaces preserve dependency-cache reuse without consuming those artifacts.
+
 The owner-approved concurrency policy rejects overlapping SpecGate commands
 against the same canonical package sources immediately, rather than waiting
 or creating per-invocation build namespaces. `discover`, `capture`, and `replay`

@@ -54,10 +54,12 @@ fn check_component_hook(crate_types: &[&str]) {
     fs::create_dir_all(package.join(".cargo")).unwrap();
     fs::create_dir_all(&scratch).unwrap();
     let facade = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("specgate");
+    let runtime = facade.parent().unwrap().join("specgate-runtime");
     let manifest = serde_json::json!({
         "package": {"name": "component-hook-fixture", "version": "0.0.0", "edition": "2024"},
         "lib": {"crate-type": crate_types},
         "dependencies": {"sg": {"package": "specgate", "path": facade}},
+        "dev-dependencies": {"specgate-runtime": {"path": runtime, "features": ["test-util"]}},
         "workspace": {},
     });
     fs::write(package.join("Cargo.toml"), toml::to_string(&manifest).unwrap()).unwrap();
@@ -104,7 +106,11 @@ fn check_component_hook(crate_types: &[&str]) {
     .unwrap();
     succeeded(Command::new("rustc").arg(&wrapper_source).arg("-o").arg(&wrapper).output().unwrap());
     let config = serde_json::json!({
-        "build": {"rustc-wrapper": wrapper, "rustc-workspace-wrapper": wrapper}
+        "build": {
+            "build-dir": cache.path().join("shared-build"),
+            "rustc-wrapper": wrapper,
+            "rustc-workspace-wrapper": wrapper
+        }
     });
     fs::write(package.join(".cargo").join("config.toml"), toml::to_string(&config).unwrap()).unwrap();
 
@@ -156,6 +162,17 @@ fn check_component_hook(crate_types: &[&str]) {
     let listed = succeeded(Command::new(binary).args(["--list", "--format", "terse"]).output().unwrap());
     assert_eq!(String::from_utf8(listed.stdout).unwrap(), "ordinary: test\n");
     succeeded(Command::new(binary).arg("--exact").arg("ordinary").output().unwrap());
+
+    for _ in 0..2 {
+        let json = crate::runner::run_discovery(&package).unwrap();
+        let registry: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(registry["operations"][0]["component"], "fixture.component_hook");
+        assert_eq!(registry["operations"][0]["name"], "value");
+        for (path, bytes) in &files {
+            assert_eq!(&fs::read(path).unwrap(), bytes, "discovery overwrote {}", path.display());
+        }
+        ordinary_build(None);
+    }
 
     let readonly_paths = vec![lib.clone(), source.join("support.rs"), source.join("value.txt")];
     #[cfg(unix)]

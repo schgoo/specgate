@@ -356,6 +356,28 @@ struct DependencyKind {
 }
 
 pub(super) fn harness_build_directory(package: &Path, target: &Path, system: &system::System) -> Result<PathBuf, Error> {
+    generated_build_directory(package, target, None, system)
+}
+
+/// Resolve a reusable build directory for an external generated runner.
+///
+/// The namespace includes the canonical candidate manifest and generated Cargo
+/// files. It isolates unhashed native libraries from ordinary builds, generated
+/// test targets, and runners with different dependencies or features.
+///
+/// # Errors
+///
+/// Returns errors resolving the candidate manifest or Cargo's build directory.
+pub fn runner_build_directory(package: impl AsRef<Path>, target: impl AsRef<Path>, cargo: &RunnerCargo) -> Result<PathBuf, Error> {
+    generated_build_directory(package.as_ref(), target.as_ref(), Some(cargo), &system::System::real())
+}
+
+pub(crate) fn generated_build_directory(
+    package: &Path,
+    target: &Path,
+    cargo: Option<&RunnerCargo>,
+    system: &system::System,
+) -> Result<PathBuf, Error> {
     use std::hash::{Hash as _, Hasher as _};
 
     let manifest = system.filesystem.canonicalize(package.join("Cargo.toml"))?;
@@ -364,13 +386,20 @@ pub(super) fn harness_build_directory(package: &Path, target: &Path, system: &sy
         .packages
         .iter()
         .find(|candidate| same_path(&candidate.manifest_path, &manifest, system))
-        .ok_or_else(|| failure("test-harness package is absent from cargo metadata"))?;
+        .ok_or_else(|| failure("generated-build package is absent from cargo metadata"))?;
     let mut hash = std::collections::hash_map::DefaultHasher::new();
     manifest.hash(&mut hash);
+    let scope = if let Some(cargo) = cargo {
+        cargo.manifest.hash(&mut hash);
+        cargo.config.hash(&mut hash);
+        "runner"
+    } else {
+        "harness"
+    };
     let root = metadata
         .build_directory
-        .ok_or_else(|| failure("Cargo did not report the build directory for generated test targets"))?;
-    Ok(root.join(format!("specgate-harness-{:016x}", hash.finish())))
+        .ok_or_else(|| failure("Cargo did not report the build directory for generated targets"))?;
+    Ok(root.join(format!("specgate-{scope}-{:016x}", hash.finish())))
 }
 
 fn cargo_metadata(manifest: &Path, package_root: &Path, target: Option<&Path>, system: &system::System) -> Result<CargoMetadata, Error> {
