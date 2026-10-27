@@ -39,6 +39,7 @@ sources, so a search for it finds the code that raises it.
 
 | Message fragment | Cause | Fix |
 | --- | --- | --- |
+| `package already in use by another SpecGate command` | Another command owns the same package's build and execution artifacts. | Let that command finish, then retry. Commands fail immediately rather than waiting; ordinary `cargo test` parallelism is unchanged. |
 | `is not empty; pass --force to overwrite it` | The capture `--out` directory has files. | Use a new directory or `--force`. |
 | `already exists; pass --force to overwrite it` | The replay `--out` file exists. | Use a new path or `--force`. |
 | `not found in binding` | Unknown `--component`. | Use a component id listed in the message. |
@@ -52,6 +53,7 @@ sources, so a search for it finds the code that raises it.
 
 | Message fragment | Cause | Fix |
 | --- | --- | --- |
+| `__specgate_requires_crate_root_spec_component` | An annotated operation or setup is in a target without its own hook declaration. | Add `specgate::spec_component!("component.id");` at that library, binary, or integration-test crate root, even if its annotations use explicit `spec` values. |
 | `is not a Rust package` | `sources` has no `Cargo.toml`. | Point `sources` at the package directory. |
 | `capture test build failed` | `cargo test --no-run` failed in `sources`. | Fix the build; the message includes Cargo's output. |
 | `capture test build produced no libtest binaries` | The package has no test targets. | Add `#[test]` functions. |

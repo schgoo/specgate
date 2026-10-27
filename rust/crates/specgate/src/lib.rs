@@ -61,6 +61,12 @@ macro_rules! spec_component {
     ($component:literal $(,)?) => {
         #[doc(hidden)]
         const __SPECGATE_COMPONENT: &str = $component;
+        #[doc(hidden)]
+        #[allow(
+            non_upper_case_globals,
+            reason = "the marker names the required user declaration in compiler diagnostics"
+        )]
+        const __specgate_requires_crate_root_spec_component: () = ();
         $crate::__specgate_test_harness!();
     };
 }

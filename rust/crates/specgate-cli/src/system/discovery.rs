@@ -89,23 +89,6 @@ impl Discovery {
         Self { inner: Kind::Real }
     }
 
-    /// Discover the metadata of one component's implementation.
-    pub(crate) fn discover(&self, binding: impl AsRef<Path>, component: &ComponentId, label: Option<&str>) -> Result<Discovered, Failure> {
-        match &self.inner {
-            Kind::Real => {
-                let resolved = specgate_discovery::binding::resolve_implementation(binding.as_ref(), component, label)?;
-                Ok(specgate_discovery::discover_resolved(resolved)?)
-            }
-            #[cfg(any(test, feature = "test-util"))]
-            Kind::Fake(state) => state
-                .lock()
-                .expect("fake discovery lock poisoned")
-                .discovered
-                .pop_front()
-                .expect("fake discovery result queue must be configured before discovery"),
-        }
-    }
-
     /// Resolve the implementation a capture will run, without building it.
     ///
     /// Rejects what capture cannot run yet. The fake backend reports the
@@ -116,10 +99,21 @@ impl Discovery {
         component: &ComponentId,
         label: Option<&str>,
     ) -> Result<specgate_discovery::binding::ResolvedImplementation, Failure> {
+        let resolved = self.resolve(binding, component, label)?;
+        require_capturable(&resolved)?;
+        Ok(resolved)
+    }
+
+    /// Resolve sources before acquiring package ownership or building metadata.
+    pub(crate) fn resolve(
+        &self,
+        binding: impl AsRef<Path>,
+        component: &ComponentId,
+        label: Option<&str>,
+    ) -> Result<specgate_discovery::binding::ResolvedImplementation, Failure> {
         match &self.inner {
             Kind::Real => {
                 let resolved = specgate_discovery::binding::resolve_implementation(binding.as_ref(), component, label)?;
-                require_capturable(&resolved)?;
                 Ok(resolved)
             }
             #[cfg(any(test, feature = "test-util"))]
@@ -182,18 +176,14 @@ impl Discovery {
         }
     }
 
-    pub(crate) fn batch(
+    /// Discover a batch after the caller has acquired package ownership.
+    pub(crate) fn batch_resolved(
         &self,
-        binding: impl AsRef<Path>,
-        anchor: &ComponentId,
-        label: Option<&str>,
+        resolved: specgate_discovery::binding::ResolvedImplementation,
         components: impl AsRef<[ComponentId]>,
     ) -> Result<Batch, Failure> {
         match &self.inner {
-            Kind::Real => {
-                let resolved = specgate_discovery::binding::resolve_implementation(binding.as_ref(), anchor, label)?;
-                Ok(specgate_discovery::discover_many(resolved, components.as_ref())?)
-            }
+            Kind::Real => Ok(specgate_discovery::discover_many(resolved, components.as_ref())?),
             #[cfg(any(test, feature = "test-util"))]
             Kind::Fake(state) => state
                 .lock()

@@ -11,6 +11,22 @@ pub fn dependency() -> TokenStream2 {
     )
 }
 
+/// Require a target-local component only in generated test builds.
+#[must_use]
+pub fn require_component() -> TokenStream2 {
+    let dependency = dependency();
+    let marker = std::env::var_os("SPECGATE_TEST_ENTRY").is_some().then(|| {
+        quote! {
+            #[cfg(test)]
+            const _: () = crate::__specgate_requires_crate_root_spec_component;
+        }
+    });
+    quote! {
+        #dependency
+        #marker
+    }
+}
+
 /// Emit a libtest entry point at the root declaring `spec_component!`.
 #[must_use]
 pub fn entry(identity: &str) -> TokenStream2 {

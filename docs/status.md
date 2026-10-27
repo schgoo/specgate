@@ -147,7 +147,12 @@ injection, source copying, source writes, links, or a dependency prepass.
 Cargo handles configured compiler wrappers normally. Tracked generated-entry
 and dispatch inputs prevent stale expansion. Generated test targets use a
 package-scoped build namespace to protect ordinary artifacts, including
-unhashed native libraries. See the
+unhashed native libraries. Generated builds diagnose a missing crate-root
+declaration even for explicitly qualified operations/setups; a hook-only
+default does not register an unused component. Separate `discover`, `capture`,
+and `replay` commands targeting the same canonical package fail immediately
+while another command owns it, with ownership retained through publication.
+Ordinary `cargo test` parallelism is unchanged. See the
 [ratified replacement](decisions/typed-async-client-replay.md#actual-cargo-test-environments).
 
 Each generic specialization declares its own semantic operation name and

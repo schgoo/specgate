@@ -93,6 +93,10 @@ pub fn capture_with(
         )
         .map_err(|error| FailureContext::with_source(error.to_string(), error))
         .map_err(public_error(CaptureErrorKind::Discovery))?;
+    let _package = system
+        .package_guard(&resolved.implementation.sources)
+        .map_err(|error| FailureContext::with_source(error.to_string(), error))
+        .map_err(public_error(CaptureErrorKind::Execution))?;
     let out = request
         .out()
         .map_or_else(|| default_out(&component, &resolved.label, system), Path::to_path_buf);

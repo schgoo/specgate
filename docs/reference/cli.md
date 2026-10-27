@@ -36,6 +36,13 @@ commands:
 
 ## Commands
 
+`discover`, `capture`, and `replay` exclusively own the selected package from
+discovery through output publication. An overlapping command targeting the
+same canonical package sources fails immediately with exit code 1 and
+`package already in use by another SpecGate command`; retry after the first
+command finishes. Different packages remain independent, and ordinary
+`cargo test` parallelism is unchanged.
+
 ### `discover`
 
 Builds the implementation and writes its CTSC registry (`registry.ctsc.json`)

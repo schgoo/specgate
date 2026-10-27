@@ -58,6 +58,10 @@ a library declaration does not cover separate binary or integration-test crates.
 This includes operation-only targets whose annotations explicitly name their
 components. Operations and setups do not emit tests beside annotated items or
 inside an `impl`.
+Generated test builds diagnose a missing declaration at annotated operations
+and setups, including explicitly qualified declarations; ordinary builds remain
+unchanged. A default component used only to install the hook is not registered
+unless operations or types actually belong to it.
 
 This owner-approved replacement, ratified on 2026-10-23 in
 [#104](https://github.com/schgoo/specgate/issues/104), supersedes compiler-wrapper
@@ -81,7 +85,20 @@ build directory, preventing generated builds from overwriting ordinary cached
 artifacts. This includes explicit native library crate types, which can produce
 unhashed filenames. Environment dependencies invalidate expansion but do not
 change Cargo artifact filenames, so non-native targets need the same isolation.
-Dependencies remain reusable within that namespace.
+The first generated build can recompile dependencies once; later builds reuse
+them within that namespace.
+
+The owner-approved concurrency policy rejects overlapping SpecGate commands
+against the same canonical package sources immediately, rather than waiting
+or creating per-invocation build namespaces. `discover`, `capture`, and `replay`
+acquire an operating-system file lease before discovery and hold it through
+enumeration, execution, and publication. Reusable replay candidates retain the
+lease until their last shared handle is dropped. The lock file lives outside
+the sources, is never unlinked, and does not remain locked after the process
+exits. Different packages remain independent. This is command-level ownership,
+not a change to libtest threading or native operation concurrency; ordinary
+`cargo test` retains parallel test execution.
+
 Each scenario owns a separate scope so its receiver and setup
 guards are dropped before the next scenario starts.
 

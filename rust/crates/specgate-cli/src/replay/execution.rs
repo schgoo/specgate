@@ -22,6 +22,7 @@ pub(crate) struct Candidates {
 /// runtime source, preserving package identity throughout linking and execution.
 #[derive(Debug, Clone)]
 pub(crate) struct CandidatesInner {
+    pub(super) _package: crate::system::PackageGuard,
     pub(super) crate_name: String,
     pub(super) target_name: specgate_discovery::identity::ImplementationLabel,
     pub(super) language: specgate_discovery::binding::Language,
@@ -89,14 +90,21 @@ impl Candidates {
         let anchor = components
             .first()
             .ok_or_else(|| Error::new_message(ErrorKind::Linking, "candidate discovery requires at least one component"))?;
-        let discovered = context
+        let resolved = context
             .discovery
-            .batch(
+            .resolve(
                 input.binding,
                 anchor,
                 input.implementation.map(specgate_discovery::identity::ImplementationLabel::as_str),
-                components,
             )
+            .map_err(|error| Error::wrap(ErrorKind::Linking, "candidate discovery failed", error))?;
+        let package = context
+            .system
+            .package_guard(&resolved.implementation.sources)
+            .map_err(|error| Error::wrap(ErrorKind::Linking, error.to_string(), error))?;
+        let discovered = context
+            .discovery
+            .batch_resolved(resolved, components)
             .map_err(|error| Error::wrap(ErrorKind::Linking, "candidate discovery failed", error))?;
         let language = discovered.implementation.language();
         if language != specgate_discovery::binding::Language::Rust {
@@ -136,6 +144,7 @@ impl Candidates {
         schemas.shrink_to_fit();
         Ok(Self {
             inner: Arc::new(CandidatesInner {
+                _package: package,
                 crate_name: cargo.crate_name,
                 target_name,
                 language,

@@ -64,9 +64,9 @@ fn check_component_hook(crate_types: &[&str]) {
     let lib = source.join("lib.rs");
     let contents = "#![deny(warnings)]\n\
         #![doc = include_str!(\"value.txt\")]\n\
-        sg::spec_component!(\"fixture.component_hook\");\n\
+        sg::spec_component!(\"fixture.unused_hook_default\");\n\
         #[path = \"support.rs\"] mod support;\n\
-        #[sg::spec_operation(\"value\")]\n\
+        #[sg::spec_operation(\"value\", spec = \"fixture.component_hook\")]\n\
         pub fn value() -> i32 {\n\
             assert!(file!().ends_with(\"src/lib.rs\") || file!().ends_with(\"src\\\\lib.rs\"));\n\
             support::value()\n\
@@ -218,6 +218,7 @@ fn check_component_hook(crate_types: &[&str]) {
         assert_eq!(parts.next().unwrap(), marker.to_string());
         assert_eq!(parts.next().unwrap(), value.to_string());
         let registry: Value = serde_json::from_str(parts.next().unwrap()).unwrap();
+        assert!(!registry.to_string().contains("fixture.unused_hook_default"));
         assert_eq!(registry["operations"][0]["component"], "fixture.component_hook");
         assert_eq!(registry["operations"][0]["name"], "value");
         for (path, bytes) in &files {
@@ -242,4 +243,66 @@ fn check_component_hook(crate_types: &[&str]) {
     assert_eq!(String::from_utf8(listed.stdout).unwrap(), "ordinary: test\n");
     let listed = succeeded(Command::new(binary).args(["--list", "--format", "terse"]).output().unwrap());
     assert_eq!(String::from_utf8(listed.stdout).unwrap(), "ordinary: test\n");
+}
+
+#[test]
+fn generated_test_targets_require_local_components_even_with_explicit_specs() {
+    let cache = tempfile::tempdir().unwrap();
+    let package = cache.path().join("candidate");
+    fs::create_dir_all(package.join("src")).unwrap();
+    fs::create_dir_all(package.join("tests")).unwrap();
+    let facade = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("specgate");
+    let manifest = serde_json::json!({
+        "package": {"name": "missing-component-fixture", "version": "0.0.0", "edition": "2024"},
+        "dependencies": {"sg": {"package": "specgate", "path": facade}},
+        "workspace": {},
+    });
+    fs::write(package.join("Cargo.toml"), toml::to_string(&manifest).unwrap()).unwrap();
+    let entry = cache.path().join("entry.rs");
+    fs::write(&entry, "{}").unwrap();
+    let operation = "#[sg::spec_operation(\"value\", spec = \"fixture.explicit\")]\npub fn value() -> i32 { 7 }\n";
+    let setup = "#[sg::spec_setup(\"value\", spec = \"fixture.explicit\", fills = \"initial\")]\nfn initial() -> i32 { 7 }\n";
+    for (target, path, source) in [
+        ("--lib", package.join("src").join("lib.rs"), operation.to_string()),
+        (
+            "--bins",
+            package.join("src").join("main.rs"),
+            format!("{operation}\nfn main() {{}}\n"),
+        ),
+        ("--tests", package.join("tests").join("local.rs"), setup.to_string()),
+    ] {
+        fs::write(package.join("src").join("lib.rs"), "sg::spec_component!(\"fixture.library\");\n").unwrap();
+        fs::write(&path, source).unwrap();
+        let build = |generated| {
+            let mut command = Command::new(crate::runner::cargo_bin());
+            command
+                .args(["test", target, "--no-run", "--quiet"])
+                .current_dir(&package)
+                .env_remove("CARGO")
+                .env_remove("CARGO_MANIFEST_DIR")
+                .env_remove("SPECGATE_TEST_DISPATCH")
+                .env("CARGO_INCREMENTAL", "0")
+                .env("CARGO_TARGET_DIR", cache.path().join("target"));
+            if generated {
+                command.env("SPECGATE_TEST_ENTRY", &entry);
+            } else {
+                command.env_remove("SPECGATE_TEST_ENTRY");
+            }
+            command.output().unwrap()
+        };
+        succeeded(build(false));
+        let rejected = build(true);
+        assert!(
+            !rejected.status.success(),
+            "generated {target} build accepted a missing declaration"
+        );
+        let diagnostics = String::from_utf8_lossy(&rejected.stderr);
+        assert!(
+            diagnostics.contains("__specgate_requires_crate_root_spec_component"),
+            "{diagnostics}"
+        );
+        if path.file_name().unwrap() != "lib.rs" {
+            fs::remove_file(path).unwrap();
+        }
+    }
 }
