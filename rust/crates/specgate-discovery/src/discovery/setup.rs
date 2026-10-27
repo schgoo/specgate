@@ -110,10 +110,21 @@ pub fn property_setup<'a>(op: &Operation, source_type: &str, registry: &'a Regis
         native = native.strip_prefix("mut ").unwrap_or(native).trim_start();
     }
     let native = native.replace(' ', "");
-    let native = native
-        .strip_prefix("crate::")
-        .map(|suffix| format!("{}::{suffix}", op.module_path.split("::").next().unwrap_or("")))
-        .unwrap_or(native);
+    let native = if let Some(suffix) = native.strip_prefix("crate::") {
+        format!("{}::{suffix}", op.module_path.split("::").next().unwrap_or(""))
+    } else if let Some(suffix) = native.strip_prefix("self::") {
+        format!("{}::{suffix}", op.module_path)
+    } else if native.starts_with("super::") {
+        let mut scope = op.module_path.split("::").collect::<Vec<_>>();
+        let mut suffix = native.as_str();
+        while let Some(parent) = suffix.strip_prefix("super::") {
+            scope.pop();
+            suffix = parent;
+        }
+        format!("{}::{suffix}", scope.join("::"))
+    } else {
+        native
+    };
     let matches = registry
         .types
         .iter()

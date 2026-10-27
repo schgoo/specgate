@@ -118,7 +118,8 @@ public sealed class OperationScope
                 continue;
             }
 
-            if (input.Type.Declared is Type type && SemanticType.IsPropertySetup(type))
+            if (input.Type.Declared is Type { IsEnum: false, IsAbstract: false } type
+                && SemanticType.IsPropertySetup(type))
             {
                 foreach (KeyValuePair<string, Value> member in value.AsMap())
                 {

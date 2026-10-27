@@ -1,58 +1,8 @@
 use super::*;
 use specgate::spec_setup;
-use std::io::{Read as _, Write as _};
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-};
-
-struct HttpEnvironment {
-    endpoint: String,
-    stop: Arc<AtomicBool>,
-    worker: Option<std::thread::JoinHandle<()>>,
-}
-
-impl HttpEnvironment {
-    fn new(body: String) -> Self {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let endpoint = listener.local_addr().unwrap().to_string();
-        listener.set_nonblocking(true).unwrap();
-        let stop = Arc::new(AtomicBool::new(false));
-        let signal = Arc::clone(&stop);
-        let worker = std::thread::spawn(move || {
-            while !signal.load(Ordering::Acquire) {
-                match listener.accept() {
-                    Ok((mut stream, _)) => {
-                        stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
-                        let mut request = [0_u8; 1024];
-                        let count = stream.read(&mut request).unwrap();
-                        assert!(count > 0);
-                        write!(
-                            stream,
-                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                            body.len()
-                        )
-                        .unwrap();
-                    }
-                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => std::thread::sleep(std::time::Duration::from_millis(1)),
-                    Err(error) => panic!("test HTTP accept failed: {error}"),
-                }
-            }
-        });
-        Self {
-            endpoint,
-            stop,
-            worker: Some(worker),
-        }
-    }
-}
-
-impl Drop for HttpEnvironment {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::Release);
-        self.worker.take().unwrap().join().expect("test HTTP server completed");
-    }
-}
+#[path = "../../../support/http.rs"]
+mod http;
+use http::HttpEnvironment;
 
 #[spec_setup("find_items", spec = "fixture.typed_async")]
 #[spec_setup("calls", spec = "fixture.typed_async")]

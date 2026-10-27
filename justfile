@@ -16,8 +16,8 @@ export SPECGATE_DISCOVERY_PATH := justfile_directory() / "artifacts" / "discover
 export SPECGATE_WEAVER_PATH := justfile_directory() / "artifacts" / "weaver"
 
 # rustfmt follows #[path] modules, but not include! item fragments that retain
-# the original shared module identities. Keep those four real sources covered.
-fixture_fragments := "test/behavior/cases/comp.core/rust/component.rs test/behavior/cases/comp.app/rust/component.rs test/behavior/cases/fixture.async_smol_timer/rust/async_metadata.rs test/behavior/cases/fixture.async_tokio_timer/rust/async_metadata.rs"
+# the original shared module identities. Keep these shared sources covered.
+fixture_fragments := "test/behavior/cases/comp.core/rust/component.rs test/behavior/cases/comp.app/rust/component.rs test/behavior/cases/fixture.async_smol_timer/rust/async_metadata.rs test/behavior/cases/fixture.async_tokio_timer/rust/async_metadata.rs rust/crates/specgate-cli/tests/support/http.rs"
 
 discovery-tool:
     dotnet build csharp/SpecGate.Discovery/SpecGate.Discovery.csproj --output "{{ SPECGATE_DISCOVERY_PATH }}"

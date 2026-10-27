@@ -43,6 +43,34 @@ mod tests {
     }
 
     #[test]
+    fn nested_sets_are_unordered_but_lists_preserve_order() {
+        let array = |values: Vec<serde_json::Value>| json!({"arrayValue":{"values":values}});
+        let forward = array(vec![json!({"intValue":"1"}), json!({"intValue":"2"})]);
+        let reverse = array(vec![json!({"intValue":"2"}), json!({"intValue":"1"})]);
+        let wrapped = |set| {
+            json!({"kvlistValue":{"values":[{
+                "key":"Some","value":{"kvlistValue":{"values":[{
+                    "key":"items","value":{"arrayValue":{"values":[set]}}
+                }]}}
+            }]}})
+        };
+        let ty = Type::optional(Type::map(Type::primitive("string"), Type::list(Type::set(Type::primitive("i32")))));
+        assert_eq!(
+            decode(wrapped(forward.clone()), &ty).unwrap(),
+            decode(wrapped(reverse.clone()), &ty).unwrap()
+        );
+        let reordered = array(vec![forward, reverse]);
+        let error = decode(reordered.clone(), &Type::set(Type::set(Type::primitive("i32"))))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("duplicate set elements"), "{error}");
+        let Value::Set(lists) = decode(reordered, &Type::set(Type::list(Type::primitive("i32")))).unwrap() else {
+            panic!("expected a set of lists");
+        };
+        assert_eq!(lists.len(), 2);
+    }
+
+    #[test]
     fn malformed_collection_inputs_report_precise_paths() {
         let invalid = json!({"arrayValue":{"values":[{"intValue":"-1"}]}});
         let error = decode(invalid, &Type::list(Type::primitive("u32"))).unwrap_err().to_string();
@@ -80,14 +108,15 @@ pub(super) fn decode_value(value: &AnyValue, value_type: &Type, location: impl A
             .enumerate()
             .map(|(index, item)| decode_value(item, item_type, format!("{location}[{index}]")))
             .collect::<Result<Vec<_>, _>>()?;
-        if value_type.kind_name() == "set" && values.iter().enumerate().any(|(index, value)| values[..index].contains(value)) {
-            return Err(format!("{location} has duplicate set elements").into());
+        if value_type.kind_name() == "set" {
+            let count = values.len();
+            let values = values.into_iter().collect::<std::collections::BTreeSet<_>>();
+            if values.len() != count {
+                return Err(format!("{location} has duplicate set elements").into());
+            }
+            return Ok(Value::Set(values));
         }
-        return Ok(if value_type.kind_name() == "set" {
-            Value::Set(values)
-        } else {
-            Value::List(values)
-        });
+        return Ok(Value::List(values));
     }
     if let Some(inner) = value_type.optional_value() {
         let AnyValue::Kvlist(list) = value else {

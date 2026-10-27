@@ -2,6 +2,84 @@
 
 // Cohesive implementation group for this subsystem.
 
+mod http_fixture {
+    include!("../../tests/support/http.rs");
+    use std::io::Read as _;
+
+    #[test]
+    fn idle_environment_shuts_down() {
+        let environment = HttpEnvironment::new("unused response".to_string());
+        assert!(environment.endpoint.starts_with("127.0.0.1:"));
+        drop(environment);
+    }
+
+    #[test]
+    fn delayed_and_partial_requests_wait_for_complete_headers() {
+        fn assert_pending(stream: &mut std::net::TcpStream) {
+            let error = stream
+                .read(&mut [0_u8])
+                .expect_err("no response before the request headers are complete");
+            assert!(
+                matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut),
+                "{error}"
+            );
+        }
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (stream, _) = listener.accept().unwrap();
+        stream.set_nonblocking(true).unwrap();
+        let worker = std::thread::spawn(move || serve_request(stream, "fixture response"));
+        client.set_read_timeout(Some(std::time::Duration::from_millis(100))).unwrap();
+        assert_pending(&mut client);
+        client.write_all(b"GET /items HTTP/1.1\r\nHost").unwrap();
+        assert_pending(&mut client);
+        client.write_all(b": localhost\r\n\r\n").unwrap();
+        client.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+        let mut response = String::new();
+        client.read_to_string(&mut response).unwrap();
+        worker.join().unwrap();
+        assert_eq!(
+            response,
+            "HTTP/1.1 200 OK\r\nContent-Length: 16\r\nConnection: close\r\n\r\nfixture response"
+        );
+    }
+
+    #[test]
+    fn worker_failure_is_reported_without_aborting() {
+        const CHILD: &str = "SPECGATE_HTTP_FIXTURE_PANIC_CHILD";
+        if let Some(mode) = std::env::var_os(CHILD) {
+            let _server = HttpEnvironment {
+                endpoint: String::new(),
+                stop: Arc::new(AtomicBool::new(false)),
+                worker: Some(std::thread::spawn(|| panic!("intentional HTTP worker panic"))),
+            };
+            assert!(mode != "unwind", "original scenario failure");
+            return;
+        }
+        for mode in ["normal", "unwind"] {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "replay::tests::http_fixture::worker_failure_is_reported_without_aborting",
+                    "--nocapture",
+                ])
+                .env(CHILD, mode)
+                .output()
+                .unwrap();
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert_eq!(output.status.code(), Some(101), "{mode}: {stderr}");
+            assert!(stderr.contains("intentional HTTP worker panic"), "{stderr}");
+            if mode == "unwind" {
+                assert!(stderr.contains("original scenario failure"), "{stderr}");
+                assert!(stderr.contains("test HTTP server failed during cleanup"), "{stderr}");
+            } else {
+                assert!(stderr.contains("test HTTP server failed:"), "{stderr}");
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod cases {
     use super::super::error::FailureStage;
@@ -963,6 +1041,55 @@ mod cases {
             Some("resolved-runtime")
         );
         assert_eq!(cargo.config, None);
+    }
+
+    #[test]
+    fn receiver_cache_ignores_set_order_but_preserves_list_order() {
+        for (kind, semantic_type, rust_type, expected_setups) in [
+            ("set", ReplayType::set(ReplayType::primitive("i32")), "BTreeSet<i32>", 1),
+            ("list", ReplayType::list(ReplayType::primitive("i32")), "Vec<i32>", 2),
+        ] {
+            let candidate = candidate_metadata(raw_operation("add"), normalized_operation("add"));
+            let mut plan = build_plan(&reference_bundle(), &candidate).unwrap();
+            let link = &mut plan.links[0];
+            link.is_method = true;
+            link.inputs = vec![model::Input {
+                name: "items".to_string(),
+                semantic_type: semantic_type.clone(),
+                rust_type: rust_type.to_string(),
+            }];
+            link.parameters.clear();
+            link.setups = vec![model::Setup {
+                explicit_component: false,
+                module_path: vec!["state".to_string()],
+                fn_name: "make".to_string(),
+                fills: String::new(),
+                declared_fills: String::new(),
+                inputs: vec![0],
+                native_module: "specgate_ctsc_fixtures::state".to_string(),
+                replay_output: None,
+                test_target: None,
+            }];
+            plan.scenarios[0].operations = [[1, 2], [2, 1]]
+                .into_iter()
+                .map(|values| PlannedOp {
+                    link_index: 0,
+                    inputs: vec![ReplayInput {
+                        name: "items".to_string(),
+                        value_type: semantic_type.clone(),
+                        value: serde_json::from_value(serde_json::json!({
+                            "kind": kind,
+                            "value": values.map(|value| serde_json::json!({"kind":"i32","value":value}))
+                        }))
+                        .unwrap(),
+                    }],
+                })
+                .collect();
+            let code = source(&plan);
+            syn::parse_file(&code).unwrap();
+            assert_eq!(code.matches("let mut __sg_setup_").count(), expected_setups, "{code}");
+            assert_eq!(code.matches(".add(").count(), 2, "{code}");
+        }
     }
 
     #[test]

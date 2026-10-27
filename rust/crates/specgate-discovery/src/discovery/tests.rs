@@ -73,6 +73,17 @@ fn property_setups_use_native_identity_and_flat_semantic_field_names() {
         ["limit", "tags"]
     );
     normalize_registry(&raw, crate::binding::Language::Rust, "demo").unwrap();
+    for (scope, path) in [
+        ("fixture::models", "self::Native"),
+        ("fixture::operations", "super::models::Native"),
+        ("fixture::operations::nested", "super::super::models::Native"),
+        ("fixture::operations", "&'a mut super::models::Native"),
+    ] {
+        raw.ops[0].module_path = scope.into();
+        raw.ops[0].params[0].ty = path.into();
+        assert_eq!(raw_inputs(&raw.ops[0], &raw).unwrap(), inputs, "{path}");
+        normalize_registry(&raw, crate::binding::Language::Rust, "demo").unwrap();
+    }
     raw.ops[0].params[0].ty = "Canonical".into();
     assert_eq!(raw_inputs(&raw.ops[0], &raw).unwrap()[0].name, "query");
     raw.ops[0].params[0].ty = "Native".into();

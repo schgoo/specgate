@@ -41,7 +41,7 @@ pub fn expand_event(input: TokenStream2) -> syn::Result<TokenStream2> {
         .map(|literal| literal.value());
     let component = component(owner.as_deref());
     let (impl_generics, type_generics, where_clause) = input.generics.split_for_impl();
-    let type_name = event_name(&input.attrs, name.to_string()).unwrap_or_else(|| name.to_string());
+    let mut type_name = event_name(&input.attrs, name.to_string()).unwrap_or_else(|| name.to_string());
     let mut property_setup = false;
     for attribute in input.attrs.iter().filter(|attribute| attribute.path().is_ident("spec_event")) {
         if attribute.meta.require_list().is_ok() && attribute.parse_args::<LitStr>().is_err() {
@@ -49,7 +49,7 @@ pub fn expand_event(input: TokenStream2) -> syn::Result<TokenStream2> {
                 if meta.path.is_ident("setup") {
                     property_setup = true;
                 } else if meta.path.is_ident("name") {
-                    let _ = meta.value()?.parse::<LitStr>()?;
+                    type_name = meta.value()?.parse::<LitStr>()?.value();
                 } else {
                     return Err(meta.error("expected `name` or `setup`"));
                 }
@@ -343,4 +343,25 @@ fn event_name(attributes: impl AsRef<[syn::Attribute]>, default: impl AsRef<str>
 
 fn hygienic_ident(value: impl AsRef<str>) -> Ident {
     Ident::new(value.as_ref(), Span::mixed_site())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn property_setup_name_is_independent_of_attribute_order() {
+        let first = expand_event(quote! {
+            #[spec_event(name = "Canonical", setup)]
+            pub struct Native { pub value: u32 }
+        })
+        .unwrap();
+        let last = expand_event(quote! {
+            #[spec_event(setup, name = "Canonical")]
+            pub struct Native { pub value: u32 }
+        })
+        .unwrap();
+        assert!(last.to_string().contains("\"Canonical\""));
+        assert_eq!(first.to_string(), last.to_string());
+    }
 }

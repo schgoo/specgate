@@ -63,5 +63,13 @@ public static class Operations
         + $"{query.weights.Values.Where(value => value.HasValue).SelectMany(value => value.Value!).Sum()}";
 
     [SpecOperation("subset_renamed", Spec = "fixture.property_setup")]
-    public static uint SubsetRenamed([SpecInput("query")] Subset query, [SpecInput("selected")] uint selected) => query.Selected + selected;
+    public static uint SubsetRenamed([SpecInput("query")] Subset query, [SpecInput("selected")] uint selected)
+    {
+        uint result = query.Selected + selected;
+        query.Selected++;
+        return result;
+    }
+
+    [SpecOperation("module_relative", Spec = "fixture.property_setup")]
+    public static string ModuleRelative([SpecInput("query")] Query query) => query.filter;
 }

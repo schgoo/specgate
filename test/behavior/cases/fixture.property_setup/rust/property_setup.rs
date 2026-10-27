@@ -15,7 +15,7 @@ pub struct Query {
 
 #[derive(Debug, Default, SpecEvent)]
 #[spec_component("fixture.property_setup")]
-#[spec_event(name = "RenamedSubset", setup)]
+#[spec_event(setup, name = "RenamedSubset")]
 pub struct Subset {
     #[spec_event(name = "limit")]
     pub selected: u32,
@@ -70,7 +70,7 @@ pub fn constructor(query: Constructed) -> String {
 }
 
 #[spec_operation("all_fields", spec = "fixture.property_setup")]
-pub fn all_fields(query: Query) -> String {
+pub fn all_fields(query: self::Query) -> String {
     format!(
         "{}:{}:{}:{}:{}",
         query.filter,
@@ -82,8 +82,19 @@ pub fn all_fields(query: Query) -> String {
 }
 
 #[spec_operation("subset_renamed", spec = "fixture.property_setup")]
-pub fn subset_renamed(query: &Subset, selected: u32) -> u32 {
-    query.selected + selected
+pub fn subset_renamed(query: &mut self::Subset, selected: u32) -> u32 {
+    let result = query.selected + selected;
+    query.selected += 1;
+    result
+}
+
+pub mod relative {
+    pub mod operations {
+        #[specgate::spec_operation("module_relative", spec = "fixture.property_setup")]
+        pub fn read(query: &super::super::Query) -> String {
+            query.filter.clone()
+        }
+    }
 }
 
 #[test]
@@ -94,19 +105,18 @@ fn constructor_and_property_inputs_are_behavioral() {
         producer_precedence(produce("producer".to_string())),
         "producer"
     );
-    assert_eq!(
-        all_fields(Query {
-            filter: "x".to_string(),
-            top: Some(10),
-            tags: vec!["a".to_string(), "b".to_string()],
-            allowed: BTreeSet::from(["b".to_string(), "a".to_string()]),
-            weights: BTreeMap::from([
-                ("some".to_string(), Some(vec![2, 3])),
-                ("none".to_string(), None),
-            ]),
-        }),
-        "x:10:a,b:a,b:5"
-    );
+    let query = Query {
+        filter: "x".to_string(),
+        top: Some(10),
+        tags: vec!["a".to_string(), "b".to_string()],
+        allowed: BTreeSet::from(["b".to_string(), "a".to_string()]),
+        weights: BTreeMap::from([
+            ("some".to_string(), Some(vec![2, 3])),
+            ("none".to_string(), None),
+        ]),
+    };
+    assert_eq!(relative::operations::read(&query), "x");
+    assert_eq!(all_fields(query), "x:10:a,b:a,b:5");
     assert_eq!(
         all_fields(Query {
             filter: String::new(),
@@ -117,10 +127,12 @@ fn constructor_and_property_inputs_are_behavioral() {
         }),
         ":0:::0"
     );
-    let subset = Subset {
+    let mut subset = Subset {
         selected: 7,
         cache: "not part of the contract".to_string(),
     };
-    assert_eq!(subset_renamed(&subset, 2), 9);
+    assert_eq!(subset_renamed(&mut subset, 2), 9);
+    assert_eq!(subset_renamed(&mut subset, 2), 10);
+    assert_eq!(subset.selected, 9);
     assert!(!subset.cache.is_empty());
 }

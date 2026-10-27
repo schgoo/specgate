@@ -558,15 +558,8 @@ pub(super) fn render_value(value: &ReplayValue, rust_type: impl AsRef<str>) -> S
     let qualified = quote::quote!(#qualified).to_string();
     let native = rust_type.chars().filter(|character| !character.is_whitespace()).collect::<String>();
     match value {
-        ReplayValue::List(values) | ReplayValue::Set(values) => {
-            let (_, arguments) = link::native_arguments(rust_type).expect("validated collection input");
-            let elements = values
-                .iter()
-                .map(|value| render_value(value, &arguments[0]))
-                .collect::<Vec<_>>()
-                .join(", ");
-            return format!("[{elements}].into_iter().collect::<{qualified}>()");
-        }
+        ReplayValue::List(values) => return render_collection(values, rust_type, &qualified),
+        ReplayValue::Set(values) => return render_collection(values, rust_type, &qualified),
         ReplayValue::Map(values) => {
             let (_, arguments) = link::native_arguments(rust_type).expect("validated map input");
             let elements = values
@@ -598,6 +591,16 @@ pub(super) fn render_value(value: &ReplayValue, rust_type: impl AsRef<str>) -> S
         (ReplayValue::F64Bits(bits), "f64") => format!("f64::from_bits({bits}_u64)"),
         _ => panic!("validated replay value {value:?} cannot be passed losslessly to linked Rust type '{rust_type}'"),
     }
+}
+
+fn render_collection<'a>(values: impl IntoIterator<Item = &'a ReplayValue>, rust_type: &str, qualified: &str) -> String {
+    let (_, arguments) = link::native_arguments(rust_type).expect("validated collection input");
+    let elements = values
+        .into_iter()
+        .map(|value| render_value(value, &arguments[0]))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("[{elements}].into_iter().collect::<{qualified}>()")
 }
 
 pub(super) fn string_literal(value: impl AsRef<str>) -> String {

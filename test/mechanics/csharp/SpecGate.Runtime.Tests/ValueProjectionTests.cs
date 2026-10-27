@@ -202,6 +202,17 @@ public sealed class ValueProjectionTests
     }
 
     [Fact]
+    public void PropertySetupOptInDoesNotFlattenEnumsOrAbstractUnions()
+    {
+        Assert.Equal(
+            Value.Tagged("Medium", Value.Unit),
+            Named(Capture(nameof(Declarations.Ranked), [Level.Medium]), "level"));
+        Assert.Equal(
+            Value.Tagged("Circle", Map(("radius", Value.Float(2.5)))),
+            Named(Capture(nameof(Declarations.Variants), [new Circle { Radius = 2.5 }]), "shape"));
+    }
+
+    [Fact]
     public void AVariantProjectsAsItsNameOverItsOwnMembers()
     {
         Assert.Equal(
@@ -564,7 +575,7 @@ internal sealed class Person
     public Address Home { get; init; } = new();
 }
 
-[SpecEvent]
+[SpecEvent(Setup = true)]
 internal abstract class Shape;
 
 [SpecEvent]
@@ -586,7 +597,7 @@ internal sealed class Unnamed
 }
 
 /// <summary>An enum whose declaration order contradicts its numeric order.</summary>
-[SpecEvent]
+[SpecEvent(Setup = true)]
 internal enum Level
 {
     Low = 30,

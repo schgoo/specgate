@@ -563,7 +563,7 @@ pub struct Registry {
     pub operations: Vec<RegistryOp>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 /// Lossless primitive or recursively owned collection value supported by replay.
 #[expect(
@@ -592,7 +592,7 @@ pub enum Value {
     /// Ordered recursively decoded inputs.
     List(Vec<Value>),
     /// Unordered duplicate-free inputs.
-    Set(Vec<Value>),
+    Set(BTreeSet<Value>),
     /// String-keyed recursively decoded inputs.
     Map(std::collections::BTreeMap<String, Value>),
     /// Explicit CTSC Some/None value.

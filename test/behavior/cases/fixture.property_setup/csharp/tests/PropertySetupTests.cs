@@ -13,7 +13,7 @@ public sealed class PropertySetupTests
         Assert.Equal("created", Operations.Constructor(new Constructed("created")));
         Assert.Equal(3, Operations.ZeroInputs(new Empty()));
         Assert.Equal("producer", Operations.ProducerPrecedence(Operations.Produce("producer")));
-        Assert.Equal("x:10:a,b:a,b:5", Operations.AllFields(new Query
+        var query = new Query
         {
             filter = "x",
             top = Option<uint>.Some(10),
@@ -24,12 +24,17 @@ public sealed class PropertySetupTests
                 ["some"] = Option<List<int>>.Some([2, 3]),
                 ["none"] = Option<List<int>>.None(),
             },
-        }));
+        };
+        Assert.Equal("x", Operations.ModuleRelative(query));
+        Assert.Equal("x:10:a,b:a,b:5", Operations.AllFields(query));
         Assert.Equal(":0:::0", Operations.AllFields(new Query { top = Option<uint>.None() }));
-        Assert.Equal(9u, Operations.SubsetRenamed(new Subset
+        var subset = new Subset
         {
             Selected = 7,
             Cache = "not part of the contract",
-        }, 2));
+        };
+        Assert.Equal(9u, Operations.SubsetRenamed(subset, 2));
+        Assert.Equal(10u, Operations.SubsetRenamed(subset, 2));
+        Assert.Equal(9u, subset.Selected);
     }
 }
