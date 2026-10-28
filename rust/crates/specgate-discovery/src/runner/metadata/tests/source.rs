@@ -82,6 +82,7 @@ fn candidate_root() {
     std::fs::write(candidate.join("src/lib.rs"), "").unwrap();
 
     let context = candidate_package(&candidate).unwrap();
+    assert!(!context.unhashed_library);
     assert_eq!(context.runtime.path(), Some(runtime.as_path()));
     assert!(
         !context
@@ -90,6 +91,18 @@ fn candidate_root() {
             .unwrap()
             .starts_with(std::env::current_dir().unwrap().join("rust").join("crates"))
     );
+    for kind in ["cdylib", "staticlib", "dylib"] {
+        std::fs::write(
+            candidate.join("Cargo.toml"),
+            format!(
+                "[package]\nname=\"candidate\"\nversion=\"0.1.0\"\nedition=\"2024\"\n\
+                 [lib]\ncrate-type=[\"rlib\",\"{kind}\"]\n\
+                 [dependencies]\nspecgate-runtime={{path=\"../runtime\"}}\n[workspace]\n"
+            ),
+        )
+        .unwrap();
+        assert!(candidate_package(&candidate).unwrap().unhashed_library, "{kind}");
+    }
 }
 
 #[test]

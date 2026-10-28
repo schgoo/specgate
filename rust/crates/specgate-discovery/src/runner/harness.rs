@@ -120,19 +120,13 @@ fn build_with_wrapper(
         .env("CARGO_INCREMENTAL", "0")
         .env("CARGO_TARGET_DIR", scratch.join("target"))
         .build();
-    let output = system.process.output(&request)?;
-    if !output.success {
-        let diagnostics = String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .filter_map(|line| {
-                let message: Value = serde_json::from_str(line).ok()?;
-                message["message"]["rendered"].as_str().map(str::to_string)
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+    let output = system
+        .output(&request)
+        .map_err(|source| Error::cause(ErrorKind::Cargo, "failed to run test-harness build", source))?;
+    if !output.status.success() {
         return Err(failure(format!(
-            "test-harness build failed: {}\n{diagnostics}",
-            String::from_utf8_lossy(&output.stderr).trim(),
+            "test-harness build failed:\n{}",
+            request.diagnostic(Some(&output), &system.environment),
         )));
     }
     let mut binaries = Vec::new();
@@ -168,11 +162,17 @@ fn build_with_wrapper(
             .arg("--format")
             .arg("terse")
             .build();
-        let listed = system.process.output(&request)?;
-        if !listed.success {
+        let listed = system.output(&request).map_err(|source| {
+            Error::cause(
+                ErrorKind::Cargo,
+                format!("failed to enumerate test-harness binary '{name}'"),
+                source,
+            )
+        })?;
+        if !listed.status.success() {
             return Err(failure(format!(
                 "test-harness enumeration failed for '{name}': {}",
-                String::from_utf8_lossy(&listed.stderr)
+                request.diagnostic(Some(&listed), &system.environment)
             )));
         }
         let entry = String::from_utf8_lossy(&listed.stdout)
@@ -211,11 +211,13 @@ pub(crate) fn augment(package: &Path, original: &str, scratch: &Path, system: &S
             .env("SPECGATE_TEST_METADATA", &metadata)
             .env_remove("SPECGATE_NATIVE_CAPTURE")
             .build();
-        let output = system.process.output(&request)?;
-        if !output.success {
+        let output = system
+            .output(&request)
+            .map_err(|source| Error::cause(ErrorKind::Cargo, "failed to run test-target metadata hook", source))?;
+        if !output.status.success() {
             return Err(failure(format!(
-                "test-target metadata hook failed: {}",
-                String::from_utf8_lossy(&output.stderr)
+                "test-target metadata hook failed:\n{}",
+                request.diagnostic(Some(&output), &system.environment)
             )));
         }
         let text = system.filesystem.read_to_string(&metadata)?;
@@ -278,7 +280,7 @@ mod tests {
         let system = System::builder((
             FakeFs::default(),
             FakeProcess::queued([Ok(ProcessOutput {
-                success: true,
+                status: crate::runner::system::test_status(0),
                 stdout: Vec::new(),
                 stderr: Vec::new(),
             })]),
@@ -315,7 +317,7 @@ mod tests {
             FakeFs::default(),
             FakeProcess::queued((0..2).map(|_| {
                 Ok(ProcessOutput {
-                    success: true,
+                    status: crate::runner::system::test_status(0),
                     stdout: Vec::new(),
                     stderr: Vec::new(),
                 })

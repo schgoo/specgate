@@ -52,6 +52,26 @@ pub(crate) struct RequestBuilder {
     request: Request,
 }
 impl Request {
+    fn command(&self) -> Command {
+        let mut command = Command::new(&self.program);
+        command.args(&self.args);
+        if let Some(path) = &self.current_dir {
+            command.current_dir(path);
+        }
+        for (name, value) in &self.environment {
+            if let Some(value) = value {
+                command.env(name, value);
+            } else {
+                command.env_remove(name);
+            }
+        }
+        command
+    }
+
+    pub(crate) fn diagnostic(&self, output: Option<&Output>, system: &super::CommandEnvironment) -> String {
+        specgate_discovery::runner::process_diagnostic(&self.command(), output, |name| system.environment(name))
+    }
+
     /// Start describing a process with its required executable.
     pub(crate) fn builder(program: impl AsRef<OsStr>) -> RequestBuilder {
         RequestBuilder {
@@ -108,21 +128,7 @@ impl Execution {
     /// Execute one complete request and capture all output.
     pub(crate) fn run(&self, request: &Request) -> io::Result<Output> {
         match &self.inner {
-            Kind::Real => {
-                let mut command = Command::new(&request.program);
-                command.args(&request.args);
-                if let Some(dir) = &request.current_dir {
-                    command.current_dir(dir);
-                }
-                for (name, value) in &request.environment {
-                    if let Some(value) = value {
-                        command.env(name, value);
-                    } else {
-                        command.env_remove(name);
-                    }
-                }
-                command.output()
-            }
+            Kind::Real => request.command().output(),
             #[cfg(any(test, feature = "test-util"))]
             Kind::Fake(fake) => {
                 let mut fake = fake.lock().expect("fake execution lock poisoned");

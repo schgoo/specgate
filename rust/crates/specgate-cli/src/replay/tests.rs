@@ -772,6 +772,64 @@ mod cases {
     }
 
     #[test]
+    fn unhashed_library_builds_are_isolated() {
+        for unhashed_library in [false, true] {
+            let mut candidate = candidate_metadata(raw_operation("add"), normalized_operation("add"));
+            Arc::make_mut(&mut candidate.inner).unhashed_library = unhashed_library;
+            let plan = build_plan(&reference_bundle(), &candidate).unwrap();
+            assert_eq!(plan.target.unhashed_library, unhashed_library);
+            let system = CommandEnvironment::fake();
+            let execution = Execution::fake();
+            execution.push(Err(std::io::Error::other("build unavailable")));
+            let scratch = Path::new("scratch");
+            let error = runner::execute_in(&plan, scratch, &execution, &system).unwrap_err();
+            assert!(error.to_string().contains("build unavailable"), "{error}");
+            assert!(error.to_string().contains("status: not started"), "{error}");
+            let mut expected = ProcessRequest::builder(runner::cargo_bin(&system))
+                .args(["run", "--quiet", "--manifest-path"])
+                .arg(scratch.join("Cargo.toml"))
+                .arg("--")
+                .arg(scratch.join("candidate-captures.json"))
+                .current_dir(&plan.target.package_root)
+                .env_remove("RUSTC_WORKSPACE_WRAPPER")
+                .env_remove("CARGO")
+                .env_remove("CARGO_MANIFEST_DIR")
+                .env("CARGO_TARGET_DIR", scratch.join("target"));
+            if unhashed_library {
+                expected = expected.env("CARGO_BUILD_BUILD_DIR", scratch.join("build"));
+            }
+            assert_eq!(execution.requests(), vec![expected.build()]);
+        }
+    }
+
+    #[test]
+    fn subprocess_failures_report_context() {
+        let plan = build_plan(
+            &reference_bundle(),
+            &candidate_metadata(raw_operation("add"), normalized_operation("add")),
+        )
+        .unwrap();
+        let system = CommandEnvironment::fake();
+        system.seed_environment("CARGO_BUILD_BUILD_DIR", "shared-build");
+        let execution = Execution::fake();
+        execution.push(Ok(crate::system::test_output(101, "runner stdout", "duplicate OPERATIONS")));
+        let error = runner::execute_in(&plan, "scratch", &execution, &system).unwrap_err().to_string();
+        for expected in [
+            "candidate replay runner failed:",
+            "\"run\" \"--quiet\"",
+            "working directory:",
+            "status:",
+            "101",
+            "CARGO_BUILD_BUILD_DIR: \"shared-build\" (inherited)",
+            "RUSTC_WORKSPACE_WRAPPER: removed",
+            "runner stdout",
+            "duplicate OPERATIONS",
+        ] {
+            assert!(error.contains(expected), "{error}");
+        }
+    }
+
+    #[test]
     fn planner_limits() {
         let mut bundle = reference_bundle();
         let operation = &bundle.registry.operations[0];
@@ -1224,6 +1282,7 @@ mod cases {
                 package_name: "specgate-ctsc-fixtures".into(),
                 package_version: "0.1.0".into(),
                 package_root: PathBuf::from("candidate"),
+                unhashed_library: false,
                 runtime: specgate_discovery::runner::PackageSource::local("specgate-runtime", "0.6.0", "resolved-runtime"),
                 executor_options: specgate_discovery::binding::LanguageOptions::Rust {
                     runtime: specgate_discovery::binding::Runtime::Auto,

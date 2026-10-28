@@ -89,26 +89,35 @@ pub(super) fn run_in(context: &crate::runner::CandidatePackage, system: &crate::
     } else {
         request
     };
-    let request = request
+    let mut request = request
         .arg("--manifest-path")
         .arg(scratch.path().join("Cargo.toml"))
         .current_dir(&context.path)
         .env_remove("RUSTC_WORKSPACE_WRAPPER")
         .env_remove("CARGO")
         .env_remove("CARGO_MANIFEST_DIR")
-        .env("CARGO_TARGET_DIR", scratch.path().join("target").as_os_str())
-        .build();
+        .env("CARGO_TARGET_DIR", scratch.path().join("target").as_os_str());
+    if context.unhashed_library {
+        // Cargo cannot distinguish stale C-compatible rlibs from another dependency graph.
+        request = request.env("CARGO_BUILD_BUILD_DIR", scratch.path().join("build"));
+    }
+    let request = request.build();
     let output = system
-        .process
         .output(&request)
         .map_err(|source| with_source(format!("failed to run discovery build: {source}"), source))?;
-    if !output.success {
-        let error = format!("discovery build failed: {}", String::from_utf8_lossy(&output.stderr).trim());
+    if !output.status.success() {
+        let error = format!(
+            "discovery build failed:\n{}",
+            request.diagnostic(Some(&output), &system.environment)
+        );
         return Err(failure(error));
     }
     let json = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if json.is_empty() {
-        return Err(failure("discovery build produced no output"));
+        return Err(failure(format!(
+            "discovery build produced no output\n{}",
+            request.diagnostic(Some(&output), &system.environment)
+        )));
     }
     crate::runner::harness::augment(&context.path, &json, scratch.path(), system)
 }

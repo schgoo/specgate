@@ -20,6 +20,21 @@ Map a `capture` (or `replay`) error to its cause and fix.
 A failing test does not fail the capture on its own: it is skipped and listed.
 Capture fails when no passing test produced a scenario for the component.
 
+Rust discovery, capture-build/test-enumeration, and replay-runner failures
+include the stage, quoted command arguments, working directory, and actual
+exit status (or `not started` for launch errors).
+Build/cache context is limited to `CARGO_BUILD_BUILD_DIR`, `CARGO_TARGET_DIR`,
+and `RUSTC_WORKSPACE_WRAPPER`, distinguishing inherited values, overrides,
+removals, and unset variables; the rest of the environment is not dumped.
+Both output streams retain their last 8,192 characters, with truncation marked.
+Cargo JSON compiler messages are rendered as readable diagnostics.
+
+For duplicate runtime registrations or build failures that vary with execution
+order, compare this context between passing and failing invocations. Shared
+Cargo intermediates can reuse incompatible unhashed library artifacts;
+SpecGate isolates these builds for `cdylib`, `staticlib`, and `dylib` candidates
+while retaining shared dependency builds for ordinary Rust libraries.
+
 ## Expected output
 
 After the fix, `Complete(...)` and exit code 0. [smoke]

@@ -68,15 +68,15 @@ fn metadata_failures() {
         (Err("spawn denied".to_string()), "failed to invoke cargo metadata: spawn denied"),
         (
             Ok(system::ProcessOutput {
-                success: false,
+                status: system::test_status(1),
                 stdout: Vec::new(),
                 stderr: b"bad graph\n".to_vec(),
             }),
-            "cargo metadata failed: bad graph",
+            "cargo metadata failed:",
         ),
         (
             Ok(system::ProcessOutput {
-                success: true,
+                status: system::test_status(0),
                 stdout: b"{".to_vec(),
                 stderr: Vec::new(),
             }),
@@ -90,6 +90,11 @@ fn metadata_failures() {
         );
         let error = candidate_in(Path::new("candidate"), &system).unwrap_err();
         assert!(error.contains(expected), "{error}");
+        if expected == "cargo metadata failed:" {
+            for detail in ["command: \"custom-cargo\"", "working directory: candidate", "status:", "bad graph"] {
+                assert!(error.contains(detail), "{error}");
+            }
+        }
         assert_eq!(
             system.process.fake_state().lock().unwrap().requests[0].executable,
             OsString::from("custom-cargo")
@@ -108,7 +113,7 @@ fn metadata_identity() {
     let system = fake_system(
         filesystem,
         vec![Ok(system::ProcessOutput {
-            success: true,
+            status: system::test_status(0),
             stdout: metadata_json(),
             stderr: Vec::new(),
         })],

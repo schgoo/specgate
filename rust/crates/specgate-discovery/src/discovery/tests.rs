@@ -401,6 +401,7 @@ fn runner_failures() {
         .environment(BTreeMap::from([
             ("SPECGATE_CACHE_DIR".to_string(), "cache".into()),
             ("CARGO".to_string(), "fake-cargo".into()),
+            ("CARGO_BUILD_BUILD_DIR".to_string(), "shared-build".into()),
         ]))
         .process_id(7)
         .build()
@@ -410,15 +411,15 @@ fn runner_failures() {
         (Err("spawn denied".to_string()), "failed to run discovery build: spawn denied"),
         (
             Ok(ProcessOutput {
-                success: false,
+                status: crate::runner::system::test_status(1),
                 stdout: Vec::new(),
                 stderr: b"compile denied\n".to_vec(),
             }),
-            "discovery build failed: compile denied",
+            "discovery build failed:",
         ),
         (
             Ok(ProcessOutput {
-                success: true,
+                status: crate::runner::system::test_status(0),
                 stdout: b"  \n".to_vec(),
                 stderr: Vec::new(),
             }),
@@ -427,11 +428,39 @@ fn runner_failures() {
     ];
     for (result, expected) in cases {
         let system = system(result, BTreeMap::new());
-        assert_eq!(runner::run_in(&context(), &system).unwrap_err(), expected);
+        let error = runner::run_in(&context(), &system).unwrap_err().to_string();
+        assert!(error.starts_with(expected), "{error}");
+        for detail in [
+            "command: \"fake-cargo\"",
+            "working directory: candidate",
+            "status:",
+            "CARGO_BUILD_BUILD_DIR: \"shared-build\" (inherited)",
+            "RUSTC_WORKSPACE_WRAPPER: removed",
+        ] {
+            assert!(error.contains(detail), "{error}");
+        }
+        if expected == "discovery build failed:" {
+            assert!(error.contains("compile denied"), "{error}");
+        }
         let request = system.process.fake_state().lock().unwrap().requests[0].clone();
         assert_eq!(request.executable, std::ffi::OsString::from("fake-cargo"));
         assert!(request.env_remove.contains(&std::ffi::OsString::from("RUSTC_WORKSPACE_WRAPPER")));
+        assert!(!request.env.iter().any(|(name, _)| name == "CARGO_BUILD_BUILD_DIR"));
     }
+
+    let isolated_system = system(Err("spawn denied".to_string()), BTreeMap::new());
+    let mut isolated_context = context();
+    isolated_context.unhashed_library = true;
+    assert!(
+        runner::run_in(&isolated_context, &isolated_system)
+            .unwrap_err()
+            .contains("spawn denied")
+    );
+    let request = isolated_system.process.fake_state().lock().unwrap().requests[0].clone();
+    assert!(request.env.contains(&(
+        "CARGO_BUILD_BUILD_DIR".into(),
+        PathBuf::from("scratch/run").join("build").into_os_string()
+    )));
 
     for (key, expected) in [
         ("create_dir_all", "failed to scaffold discovery crate"),
@@ -441,7 +470,7 @@ fn runner_failures() {
         let failures = BTreeMap::from([(key.to_string(), ["denied".to_string()].into())]);
         let system = system(
             Ok(ProcessOutput {
-                success: true,
+                status: crate::runner::system::test_status(0),
                 stdout: b"{}".to_vec(),
                 stderr: Vec::new(),
             }),
@@ -471,7 +500,7 @@ fn registry_failure() {
             .unique_candidates(VecDeque::from([Ok(PathBuf::from("scratch/run"))]))
             .build(),
         FakeProcess::queued([Ok(ProcessOutput {
-            success: true,
+            status: crate::runner::system::test_status(0),
             stdout: b"{}".to_vec(),
             stderr: Vec::new(),
         })]),

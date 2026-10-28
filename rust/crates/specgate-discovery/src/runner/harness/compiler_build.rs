@@ -43,11 +43,13 @@ pub(super) fn build(package: &Path, scratch: &Path, system: &System) -> Result<C
         .env_remove("CARGO_MANIFEST_DIR")
         .env("CARGO_TARGET_DIR", directory.join("target"))
         .build();
-    let output = system.process.output(&request)?;
-    if !output.success {
+    let output = system
+        .output(&request)
+        .map_err(|source| Error::cause(crate::error::ErrorKind::Cargo, "failed to run test-harness compiler build", source))?;
+    if !output.status.success() {
         return Err(failure(format!(
-            "test-harness compiler build failed: {}",
-            String::from_utf8_lossy(&output.stderr)
+            "test-harness compiler build failed:\n{}",
+            request.diagnostic(Some(&output), &system.environment)
         )));
     }
     let executable = String::from_utf8_lossy(&output.stdout)

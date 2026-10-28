@@ -76,7 +76,7 @@ pub(super) fn execute_in(
     if let Some(config) = registry_config {
         request = request.arg("--config").arg(config);
     }
-    let request = request
+    let mut request = request
         .arg("--manifest-path")
         .arg(scratch.join("Cargo.toml"))
         .arg("--")
@@ -85,15 +85,21 @@ pub(super) fn execute_in(
         .env_remove("RUSTC_WORKSPACE_WRAPPER")
         .env_remove("CARGO")
         .env_remove("CARGO_MANIFEST_DIR")
-        .env("CARGO_TARGET_DIR", scratch.join("target"))
-        .build();
-    let output = execution
-        .run(&request)
-        .map_err(|error| format!("failed to run candidate replay runner: {error}"))?;
+        .env("CARGO_TARGET_DIR", scratch.join("target"));
+    if plan.target.unhashed_library {
+        request = request.env("CARGO_BUILD_BUILD_DIR", scratch.join("build"));
+    }
+    let request = request.build();
+    let output = execution.run(&request).map_err(|error| {
+        format!(
+            "failed to run candidate replay runner: {error}\n{}",
+            request.diagnostic(None, system)
+        )
+    })?;
     if !output.status.success() {
         return failure(format!(
-            "candidate replay runner failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
+            "candidate replay runner failed:\n{}",
+            request.diagnostic(Some(&output), system)
         ));
     }
     let captures_json = system
@@ -492,12 +498,11 @@ fn execute_harness(plan: &Plan, scratch: &Path, execution: &Execution, system: &
         .build();
     let output = execution
         .run(&request)
-        .map_err(|error| format!("failed to run candidate test replay: {error}"))?;
+        .map_err(|error| format!("failed to run candidate test replay: {error}\n{}", request.diagnostic(None, system)))?;
     if !output.status.success() {
         return failure(format!(
-            "candidate test replay failed: {}\n{}",
-            String::from_utf8_lossy(&output.stderr).trim(),
-            String::from_utf8_lossy(&output.stdout).trim()
+            "candidate test replay failed:\n{}",
+            request.diagnostic(Some(&output), system)
         ));
     }
     let bytes = system

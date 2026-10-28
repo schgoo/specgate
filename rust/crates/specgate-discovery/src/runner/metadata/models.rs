@@ -189,6 +189,8 @@ pub struct CandidatePackage {
     pub runtime: PackageSource,
     /// Supported direct executor dependencies, keyed by their Rust crate alias.
     pub executors: std::collections::BTreeMap<String, ExecutorDependency>,
+    /// Whether Cargo emits library artifacts without dependency-graph filename hashes.
+    pub unhashed_library: bool,
 }
 
 /// A direct executor dependency with source validation deferred until replay.
@@ -227,6 +229,7 @@ impl CandidatePackage {
             path: deps.path,
             runtime: deps.runtime,
             executors: std::collections::BTreeMap::new(),
+            unhashed_library: false,
         }
     }
 }

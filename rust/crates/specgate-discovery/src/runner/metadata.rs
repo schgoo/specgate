@@ -133,7 +133,17 @@ fn override_context(
         runtime,
     });
     context.executors = executor_dependencies(&metadata, &candidate.id)?;
+    context.unhashed_library = unhashed_library(&candidate.targets);
     Ok(context)
+}
+
+fn unhashed_library(targets: &[CargoTarget]) -> bool {
+    targets.iter().any(|target| {
+        target
+            .kind
+            .iter()
+            .any(|kind| matches!(kind.as_str(), "cdylib" | "staticlib" | "dylib"))
+    })
 }
 
 fn executor_dependencies(metadata: &CargoMetadata, candidate_id: &str) -> Result<BTreeMap<String, ExecutorDependency>, Error> {
@@ -402,12 +412,7 @@ pub(super) fn harness_config(package: &Path, target: &Path, system: &system::Sys
     };
     facades.sort();
     facades.dedup();
-    let build_directory = if candidate.targets.iter().any(|target| {
-        target
-            .kind
-            .iter()
-            .any(|kind| matches!(kind.as_str(), "cdylib" | "staticlib" | "dylib"))
-    }) {
+    let build_directory = if unhashed_library(&candidate.targets) {
         use std::hash::{Hash as _, Hasher as _};
         let mut hash = std::collections::hash_map::DefaultHasher::new();
         manifest.hash(&mut hash);
@@ -439,13 +444,12 @@ fn cargo_metadata(manifest: &Path, package_root: &Path, target: Option<&Path>, s
     }
     .build();
     let output = system
-        .process
         .output(&request)
         .map_err(|source| context(format!("failed to invoke cargo metadata: {source}"), source))?;
-    if !output.success {
+    if !output.status.success() {
         return Err(failure(format!(
-            "cargo metadata failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
+            "cargo metadata failed:\n{}",
+            request.diagnostic(Some(&output), &system.environment)
         )));
     }
     serde_json::from_slice(&output.stdout)

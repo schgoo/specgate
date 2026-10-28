@@ -42,10 +42,11 @@ pub(super) fn execute(
     execution: &Execution,
     sources: impl AsRef<Path>,
     scratch: impl AsRef<Path>,
+    unhashed_library: bool,
 ) -> Result<ExecutedTests, FailureContext> {
     let scratch = scratch.as_ref();
-    let test_binaries = build_binaries(execution, sources, scratch)?;
-    let tests = enumerate_tests(execution, &test_binaries)?;
+    let test_binaries = build_binaries(system, execution, sources, scratch, unhashed_library)?;
+    let tests = enumerate_tests(system, execution, &test_binaries)?;
     run_tests(system, execution, &tests, scratch)
 }
 
@@ -53,27 +54,38 @@ pub(super) fn execute(
 ///
 /// Returns a bounded compiler diagnostic when Cargo fails or emits malformed metadata.
 pub(super) fn build_binaries(
+    system: &CommandEnvironment,
     execution: &Execution,
     package_root: impl AsRef<Path>,
     scratch: impl AsRef<Path>,
+    unhashed_library: bool,
 ) -> Result<Vec<TestBinary>, FailureContext> {
     let package_root = package_root.as_ref();
     let scratch = scratch.as_ref();
-    let request = ProcessRequest::builder(cargo_bin())
+    let mut request = ProcessRequest::builder(cargo_bin())
         .args(["test", "--no-run", "--quiet", "--message-format=json"])
         .current_dir(package_root)
         .env_remove("RUSTC_WORKSPACE_WRAPPER")
         .env_remove("CARGO")
         .env_remove("CARGO_MANIFEST_DIR")
-        .env("CARGO_TARGET_DIR", scratch.join("target"))
-        .build();
-    let output = execution
-        .run(&request)
-        .map_err(|error| FailureContext::with_source(format!("failed to build capture test binaries: {error}"), error))?;
+        .env("CARGO_TARGET_DIR", scratch.join("target"));
+    if unhashed_library {
+        request = request.env("CARGO_BUILD_BUILD_DIR", scratch.join("build"));
+    }
+    let request = request.build();
+    let output = execution.run(&request).map_err(|error| {
+        FailureContext::with_source(
+            format!(
+                "failed to build capture test binaries: {error}\n{}",
+                request.diagnostic(None, system)
+            ),
+            error,
+        )
+    })?;
     if !output.status.success() {
         return Err(FailureContext::domain(format!(
-            "capture test build failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
+            "capture test build failed:\n{}",
+            request.diagnostic(Some(&output), system)
         )));
     }
 
@@ -127,7 +139,11 @@ pub(super) fn build_binaries(
 /// Enumerate non-ignored tests from each built binary without executing test bodies.
 ///
 /// Returns a process diagnostic when a binary cannot be listed.
-pub(super) fn enumerate_tests(execution: &Execution, binaries: impl AsRef<[TestBinary]>) -> Result<Vec<IsolatedTest>, FailureContext> {
+pub(super) fn enumerate_tests(
+    system: &CommandEnvironment,
+    execution: &Execution,
+    binaries: impl AsRef<[TestBinary]>,
+) -> Result<Vec<IsolatedTest>, FailureContext> {
     let binaries = binaries.as_ref();
     let mut tests = Vec::new();
     for binary in binaries {
@@ -135,13 +151,20 @@ pub(super) fn enumerate_tests(execution: &Execution, binaries: impl AsRef<[TestB
             .args(["--list", "--format", "terse"])
             .build();
         let output = execution.run(&request).map_err(|error| {
-            FailureContext::with_source(format!("failed to list tests in {}: {error}", binary.executable.display()), error)
+            FailureContext::with_source(
+                format!(
+                    "failed to list tests in {}: {error}\n{}",
+                    binary.executable.display(),
+                    request.diagnostic(None, system)
+                ),
+                error,
+            )
         })?;
         if !output.status.success() {
             return Err(FailureContext::domain(format!(
                 "capture test enumeration failed for {}: {}",
                 binary.executable.display(),
-                String::from_utf8_lossy(&output.stderr).trim()
+                request.diagnostic(Some(&output), system)
             )));
         }
         for line in String::from_utf8_lossy(&output.stdout).lines() {
@@ -200,7 +223,14 @@ pub(super) fn run_tests(
             .env(Issued::variable(), issued.environment())
             .build();
         let output = execution.run(&request).map_err(|error| {
-            FailureContext::with_source(format!("failed to run isolated test '{}': {error}", test.scenario_name), error)
+            FailureContext::with_source(
+                format!(
+                    "failed to run isolated test '{}': {error}\n{}",
+                    test.scenario_name,
+                    request.diagnostic(None, system)
+                ),
+                error,
+            )
         })?;
         executed.record(issued.settle(system, &test.scenario_name, &output)?);
     }
