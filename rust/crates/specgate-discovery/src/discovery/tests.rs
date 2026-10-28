@@ -396,7 +396,21 @@ fn runner_failures() {
                 .failures(failures.into_iter().map(|(key, errors)| (FailureKey::test(&key), errors)).collect())
                 .unique_candidates([Ok(PathBuf::from("scratch/run"))].into())
                 .build(),
-            FakeProcess::queued([result]),
+            FakeProcess::queued([
+                Ok(ProcessOutput {
+                    status: crate::runner::system::test_status(0),
+                    stdout: serde_json::to_vec(&serde_json::json!({
+                        "packages": [{
+                            "id": "candidate", "name": "candidate", "version": "1.0.0",
+                            "manifest_path": "candidate/Cargo.toml", "source": null
+                        }],
+                        "build_directory": "shared-build"
+                    }))
+                    .unwrap(),
+                    stderr: Vec::new(),
+                }),
+                result,
+            ]),
         ))
         .environment(BTreeMap::from([
             ("SPECGATE_CACHE_DIR".to_string(), "cache".into()),
@@ -434,33 +448,36 @@ fn runner_failures() {
             "command: \"fake-cargo\"",
             "working directory: candidate",
             "status:",
-            "CARGO_BUILD_BUILD_DIR: \"shared-build\" (inherited)",
-            "RUSTC_WORKSPACE_WRAPPER: removed",
+            "CARGO_BUILD_BUILD_DIR:",
+            "(override)",
+            "RUSTC_WORKSPACE_WRAPPER: unset",
         ] {
             assert!(error.contains(detail), "{error}");
         }
         if expected == "discovery build failed:" {
             assert!(error.contains("compile denied"), "{error}");
         }
-        let request = system.process.fake_state().lock().unwrap().requests[0].clone();
+        let request = system.process.fake_state().lock().unwrap().requests[1].clone();
         assert_eq!(request.executable, std::ffi::OsString::from("fake-cargo"));
-        assert!(request.env_remove.contains(&std::ffi::OsString::from("RUSTC_WORKSPACE_WRAPPER")));
-        assert!(!request.env.iter().any(|(name, _)| name == "CARGO_BUILD_BUILD_DIR"));
+        let build_directory = request
+            .env
+            .iter()
+            .find_map(|(key, value)| (key == "CARGO_BUILD_BUILD_DIR").then_some(Path::new(value)))
+            .unwrap();
+        assert_eq!(build_directory.parent(), Some(Path::new("shared-build")));
+        assert!(
+            build_directory
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with("specgate-runner-")
+        );
+        for wrapper in ["RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER"] {
+            assert!(!request.env_remove.contains(&std::ffi::OsString::from(wrapper)));
+            assert!(!request.env.iter().any(|(key, _)| key == wrapper));
+        }
     }
-
-    let isolated_system = system(Err("spawn denied".to_string()), BTreeMap::new());
-    let mut isolated_context = context();
-    isolated_context.unhashed_library = true;
-    assert!(
-        runner::run_in(&isolated_context, &isolated_system)
-            .unwrap_err()
-            .contains("spawn denied")
-    );
-    let request = isolated_system.process.fake_state().lock().unwrap().requests[0].clone();
-    assert!(request.env.contains(&(
-        "CARGO_BUILD_BUILD_DIR".into(),
-        PathBuf::from("scratch/run").join("build").into_os_string()
-    )));
 
     for (key, expected) in [
         ("create_dir_all", "failed to scaffold discovery crate"),

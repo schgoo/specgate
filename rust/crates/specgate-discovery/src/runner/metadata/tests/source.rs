@@ -82,7 +82,6 @@ fn candidate_root() {
     std::fs::write(candidate.join("src/lib.rs"), "").unwrap();
 
     let context = candidate_package(&candidate).unwrap();
-    assert!(!context.unhashed_library);
     assert_eq!(context.runtime.path(), Some(runtime.as_path()));
     assert!(
         !context
@@ -101,7 +100,7 @@ fn candidate_root() {
             ),
         )
         .unwrap();
-        assert!(candidate_package(&candidate).unwrap().unhashed_library, "{kind}");
+        assert_eq!(candidate_package(&candidate).unwrap().crate_name, "candidate", "{kind}");
     }
 }
 

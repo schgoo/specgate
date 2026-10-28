@@ -147,7 +147,6 @@ pub(super) fn build_plan(bundle: &ReplayBundle, candidate: &Candidate) -> Result
             package_name: candidate.metadata().package_name.clone(),
             package_version: candidate.metadata().package_version.clone(),
             package_root: candidate.metadata().package_root.clone(),
-            unhashed_library: candidate.metadata().unhashed_library,
             runtime: candidate.metadata().runtime.clone(),
             executor: select_executor(candidate.metadata(), links.iter().any(|link| link.is_async))?,
         },

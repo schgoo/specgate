@@ -135,9 +135,6 @@ pub(crate) struct Target {
     pub(crate) package_version: PackageVersion,
     /// Absolute package root used to generate the runner.
     pub(crate) package_root: PathBuf,
-    /// Whether the candidate emits Cargo library artifacts without filename hashes.
-    #[serde(default)]
-    pub(crate) unhashed_library: bool,
     /// Exact resolved runtime package source.
     pub(crate) runtime: specgate_discovery::runner::PackageSource,
     /// Candidate-owned execution context; never a capture-runtime dependency.
@@ -349,7 +346,6 @@ mod tests {
                 package_name: PackageName::from("fixture"),
                 package_version: PackageVersion::from("1.0.0"),
                 package_root: PathBuf::from("fixture"),
-                unhashed_library: false,
                 runtime: PackageSource::local("specgate-runtime", "0.6.0", "../runtime"),
                 executor: Executor::Synchronous,
             },

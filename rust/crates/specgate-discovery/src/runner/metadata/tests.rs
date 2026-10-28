@@ -19,6 +19,50 @@ mod cache;
 mod source;
 
 #[test]
+fn generated_runner_build_directories_isolate_cargo_graphs() {
+    use crate::runner::system::{FakeFs, FakeProcess, ProcessOutput, System};
+
+    let output = ProcessOutput {
+        status: system::test_status(0),
+        stdout: serde_json::to_vec(&serde_json::json!({
+            "packages": [
+                {"id": "candidate", "name": "candidate", "version": "1.0.0",
+                 "manifest_path": "candidate/Cargo.toml", "source": null},
+                {"id": "other", "name": "other", "version": "1.0.0",
+                 "manifest_path": "other/Cargo.toml", "source": null}
+            ],
+            "build_directory": "shared-build"
+        }))
+        .unwrap(),
+        stderr: Vec::new(),
+    };
+    let system = System::builder((FakeFs::default(), FakeProcess::queued(vec![Ok(output); 6]))).build();
+    let package = Path::new("candidate");
+    let target = Path::new("scratch/target");
+    let mut cargo = RunnerCargo {
+        manifest: "discovery runner".to_string(),
+        config: None,
+    };
+    let directory = generated_build_directory(package, target, Some(&cargo), &system).unwrap();
+    assert_eq!(directory.parent(), Some(Path::new("shared-build")));
+    assert_eq!(
+        generated_build_directory(package, Path::new("next/target"), Some(&cargo), &system).unwrap(),
+        directory,
+        "invocation paths must not discard reusable dependencies"
+    );
+    assert_ne!(harness_build_directory(package, target, &system).unwrap(), directory);
+    assert_ne!(
+        generated_build_directory(Path::new("other"), target, Some(&cargo), &system).unwrap(),
+        directory
+    );
+    cargo.manifest = "replay runner with executor features".to_string();
+    let replay = generated_build_directory(package, target, Some(&cargo), &system).unwrap();
+    assert_ne!(replay, directory);
+    cargo.config = Some("alternate registry".to_string());
+    assert_ne!(generated_build_directory(package, target, Some(&cargo), &system).unwrap(), replay);
+}
+
+#[test]
 fn executor_dependencies_keep_aliases_and_defer_unsupported_sources() {
     let metadata: CargoMetadata = serde_json::from_value(serde_json::json!({
         "packages": [

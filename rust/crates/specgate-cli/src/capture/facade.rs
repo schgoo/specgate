@@ -93,6 +93,10 @@ pub fn capture_with(
         )
         .map_err(|error| FailureContext::with_source(error.to_string(), error))
         .map_err(public_error(CaptureErrorKind::Discovery))?;
+    let _package = system
+        .package_guard(&resolved.implementation.sources)
+        .map_err(|error| FailureContext::with_source(error.to_string(), error))
+        .map_err(public_error(CaptureErrorKind::Execution))?;
     let out = request
         .out()
         .map_or_else(|| default_out(&component, &resolved.label, system), Path::to_path_buf);
@@ -342,13 +346,7 @@ fn execute_with(
     match resolved.language() {
         specgate_discovery::binding::Language::Rust => {
             let scratch = scratch_dir(system, sources)?;
-            rust::execute(
-                system,
-                execution,
-                sources,
-                scratch.path(),
-                discovered.cargo_context.as_ref().is_some_and(|context| context.unhashed_library),
-            )
+            rust::execute(system, execution, sources, scratch.path())
         }
         specgate_discovery::binding::Language::CSharp => Err(FailureContext::domain(
             "C# tests run through the capture build, which also discovers the metadata; they cannot run from a prior discovery result",

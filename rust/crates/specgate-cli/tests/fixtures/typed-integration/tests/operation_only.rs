@@ -1,6 +1,8 @@
 #![deny(warnings)]
 #![doc = include_str!("operation_only_support/value.txt")]
 
+specgate::spec_component!("fixture.operation_only");
+
 #[path = "operation_only_support/mod.rs"]
 mod support;
 
@@ -20,7 +22,7 @@ pub fn increment(value: i32) -> i32 {
 }
 
 #[test]
-fn operation_without_local_component_or_setup() {
+fn operation_without_setup() {
     assert_eq!(increment(8), 9);
     assert_eq!(include_str!("operation_only_support/value.txt").trim(), "1");
     let _ = Associated::identity as fn(i32) -> i32;

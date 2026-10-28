@@ -53,10 +53,11 @@ pub(super) fn execute_in(
 
     let cargo = cargo_manifest(plan)?;
     system
-        .write(scratch.join("Cargo.toml"), cargo.manifest)
+        .write(scratch.join("Cargo.toml"), &cargo.manifest)
         .map_err(|error| format!("failed to write replay runner manifest: {error}"))?;
     let registry_config = cargo
         .config
+        .as_ref()
         .map(|config| {
             let path = scratch.join("registry-config.toml");
             system
@@ -72,24 +73,24 @@ pub(super) fn execute_in(
 
     let sidecar = scratch.join("candidate-captures.json");
     let _ = system.remove_file(&sidecar);
+    let build_directory = system
+        .runner_build_directory(&plan.target.package_root, scratch.join("target"), &cargo)
+        .map_err(|error| Error::wrap(ErrorKind::Linking, "failed to resolve candidate runner build directory", error))?;
     let mut request = ProcessRequest::builder(cargo_bin(system)).arg("run").arg("--quiet");
     if let Some(config) = registry_config {
         request = request.arg("--config").arg(config);
     }
-    let mut request = request
+    let request = request
         .arg("--manifest-path")
         .arg(scratch.join("Cargo.toml"))
         .arg("--")
         .arg(&sidecar)
         .current_dir(&plan.target.package_root)
-        .env_remove("RUSTC_WORKSPACE_WRAPPER")
         .env_remove("CARGO")
         .env_remove("CARGO_MANIFEST_DIR")
-        .env("CARGO_TARGET_DIR", scratch.join("target"));
-    if plan.target.unhashed_library {
-        request = request.env("CARGO_BUILD_BUILD_DIR", scratch.join("build"));
-    }
-    let request = request.build();
+        .env("CARGO_BUILD_BUILD_DIR", build_directory)
+        .env("CARGO_TARGET_DIR", scratch.join("target"))
+        .build();
     let output = execution.run(&request).map_err(|error| {
         format!(
             "failed to run candidate replay runner: {error}\n{}",

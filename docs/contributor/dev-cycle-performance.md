@@ -364,13 +364,16 @@ command therefore reuses the normal workspace cache, including a caller's
 existing build-directory override, while tests, doctests, and their nested
 Cargo commands inherit invocation-private intermediates.
 
-Candidates whose library targets include `cdylib`, `staticlib`, or `dylib`
-are an exception: discovery, capture, and external replay give each invocation
-its own build directory. Cargo omits dependency-graph hashes from these
-library artifact filenames, so sharing them across native and generated-runner
-dependency graphs can reuse a stale rlib and link two runtime instances.
-Ordinary Rust libraries retain shared dependency compilation. Injected test
-harnesses retain their separate candidate-specific intermediate namespace.
+Generated discovery and replay runners use reusable build namespaces keyed by
+the canonical candidate manifest and generated Cargo files. Component-declared
+test harnesses use a separate package-scoped namespace. These isolate generated
+dependency graphs from ordinary capture builds, which retain shared dependency
+compilation. Cargo omits dependency-graph hashes from `cdylib`, `staticlib`, and
+`dylib` artifacts; sharing those libraries across incompatible graphs can reuse
+a stale rlib and link two runtime instances. Generated builds of ordinary
+libraries also need isolation because tracked macro environment inputs do not
+change artifact filenames. Package leases prevent overlapping SpecGate commands
+from replacing active artifacts without discarding reusable dependencies.
 
 Before #92, a local Windows comparison ran the unchanged `just build test`
 recipe first, then the scoped child-environment version, with the same Rust

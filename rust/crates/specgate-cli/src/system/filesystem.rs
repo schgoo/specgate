@@ -1,4 +1,7 @@
 //! Filesystem, environment, and scratch-allocation boundary.
+mod package;
+pub(crate) use package::PackageGuard;
+
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::{self, Write};
@@ -44,8 +47,11 @@ struct Fake {
     environment: HashMap<OsString, OsString>,
     directories: HashSet<PathBuf>,
     owned_scratch: HashSet<PathBuf>,
+    owned_packages: HashSet<PathBuf>,
+    package_failure: Option<io::Error>,
     next_scratch: u64,
     clock: Option<SystemTime>,
+    runner_build_directory: Option<PathBuf>,
 }
 
 /// Owning invocation-unique scratch directory guard.
@@ -92,6 +98,34 @@ impl CommandEnvironment {
     #[must_use]
     pub const fn real() -> Self {
         Self { inner: Kind::Real }
+    }
+    pub(crate) fn runner_build_directory(
+        &self,
+        package: impl AsRef<Path>,
+        target: impl AsRef<Path>,
+        cargo: &specgate_discovery::runner::RunnerCargo,
+    ) -> io::Result<PathBuf> {
+        match &self.inner {
+            Kind::Real => specgate_discovery::runner::runner_build_directory(package, target, cargo).map_err(io::Error::other),
+            #[cfg(any(test, feature = "test-util"))]
+            Kind::Fake(fake) => fake
+                .lock()
+                .expect("fake system lock poisoned")
+                .runner_build_directory
+                .clone()
+                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "fake runner build directory was not seeded")),
+        }
+    }
+    /// Seed the resolved generated-runner build namespace without invoking Cargo.
+    ///
+    /// # Panics
+    /// Panics when called on a real backend or when fake state is poisoned.
+    #[cfg(any(test, feature = "test-util"))]
+    pub fn seed_runner_build_directory(&self, path: impl AsRef<Path>) {
+        let Kind::Fake(fake) = &self.inner else {
+            panic!("seed_runner_build_directory requires fake system")
+        };
+        fake.lock().expect("fake system lock poisoned").runner_build_directory = Some(path.as_ref().to_path_buf());
     }
     fn take_error(&self) -> Option<io::Error> {
         match &self.inner {

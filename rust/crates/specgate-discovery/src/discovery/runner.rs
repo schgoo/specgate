@@ -59,10 +59,11 @@ pub(super) fn run_in(context: &crate::runner::CandidatePackage, system: &crate::
     let cargo = discovery_cargo(context)?;
     system
         .filesystem
-        .write(scratch.path().join("Cargo.toml"), cargo.manifest)
+        .write(scratch.path().join("Cargo.toml"), &cargo.manifest)
         .map_err(|source| with_source(format!("failed to write discovery manifest: {source}"), source))?;
     let registry_config = cargo
         .config
+        .as_ref()
         .map(|config| {
             let path = scratch.path().join("registry-config.toml");
             system
@@ -81,6 +82,7 @@ pub(super) fn run_in(context: &crate::runner::CandidatePackage, system: &crate::
         .write(scratch.path().join("src").join("main.rs"), main_rs)
         .map_err(|source| with_source(format!("failed to write discovery main.rs: {source}"), source))?;
 
+    let build_directory = crate::runner::generated_build_directory(&context.path, &scratch.path().join("target"), Some(&cargo), system)?;
     let request = crate::runner::system::ProcessRequest::builder(system_cargo(system))
         .arg("run")
         .arg("--quiet");
@@ -89,19 +91,15 @@ pub(super) fn run_in(context: &crate::runner::CandidatePackage, system: &crate::
     } else {
         request
     };
-    let mut request = request
+    let request = request
         .arg("--manifest-path")
         .arg(scratch.path().join("Cargo.toml"))
         .current_dir(&context.path)
-        .env_remove("RUSTC_WORKSPACE_WRAPPER")
         .env_remove("CARGO")
         .env_remove("CARGO_MANIFEST_DIR")
-        .env("CARGO_TARGET_DIR", scratch.path().join("target").as_os_str());
-    if context.unhashed_library {
-        // Cargo cannot distinguish stale C-compatible rlibs from another dependency graph.
-        request = request.env("CARGO_BUILD_BUILD_DIR", scratch.path().join("build"));
-    }
-    let request = request.build();
+        .env("CARGO_BUILD_BUILD_DIR", build_directory)
+        .env("CARGO_TARGET_DIR", scratch.path().join("target").as_os_str())
+        .build();
     let output = system
         .output(&request)
         .map_err(|source| with_source(format!("failed to run discovery build: {source}"), source))?;

@@ -51,27 +51,61 @@ No conventional `tests/` layout or test body is used as a selector.
 Discovery builds the test targets, enumerates only the generated metadata
 hooks, and merges test-only declarations into the normal semantic registry.
 Replay compiles the selected target and runs only its generated replay hook.
-The test-build layer inserts one hook at the crate root, not beside an annotated
-operation or inside an `impl`. Users add no harness declaration. A dependency-free
-Cargo compiler wrapper copies the root to a uniquely owned temporary sibling
-file and appends the internal hook invocation. The sibling preserves inner
-attributes, relative modules, and includes; source-path remapping preserves
-`file!()` and diagnostics. Original source files are never rewritten, and the
-temporary file is removed after compilation, including compiler failure.
-Its name cannot become an automatically discovered Cargo target. Test-root
-directories must be writable for these CLI-owned builds.
+The crate-root `spec_component!` declaration emits the hidden harness macro,
+which generates a libtest entry only when `SPECGATE_TEST_ENTRY` is present.
+Each Cargo target needing a generated hook must declare its own component:
+a library declaration does not cover separate binary or integration-test crates.
+This includes operation-only targets whose annotations explicitly name their
+components. Operations and setups do not emit tests beside annotated items or
+inside an `impl`.
+Generated test builds diagnose a missing declaration at annotated operations
+and setups, including explicitly qualified declarations; ordinary builds remain
+unchanged. A default component used only to install the hook is not registered
+unless operations or types actually belong to it.
 
-Invocation-specific compiler wrappers and environment dependencies emitted for
-`SPECGATE_TEST_ENTRY` and `SPECGATE_TEST_DISPATCH` keep generated builds isolated
-without overriding candidate compiler flags. Operations and setups track these
+This owner-approved replacement, ratified on 2026-10-23 in
+[#104](https://github.com/schgoo/specgate/issues/104), supersedes compiler-wrapper
+crate-root injection. Builds use the original sources directly, including
+read-only roots: no source mirror, sibling copy, source write, symlink,
+remapping response file, helper compiler, or dependency-only compiler pass is
+needed. `file!()`, inner attributes, relative modules, and includes retain
+ordinary Cargo semantics. Configured compiler wrappers remain under Cargo's
+normal handling, without SpecGate overriding or disabling them.
+
+Environment dependencies emitted for `SPECGATE_TEST_ENTRY` and
+`SPECGATE_TEST_DISPATCH`, together with included generated files and
+module-dispatch environment dependencies, invalidate stale expansion.
+Generated test builds disable incremental compilation without overriding
+candidate compiler flags. Operations and setups track the entry and dispatch
 variables inside their named metadata constants, which is valid inside an
 `impl` and does not emit a test there.
 
-Explicit native library crate types can produce unhashed artifact filenames.
-Their wrapper builds use a stable, package-scoped child of Cargo's resolved
+Generated test builds use a stable, package-scoped child of Cargo's resolved
 build directory, preventing generated builds from overwriting ordinary cached
-libraries. Dependencies remain reusable within that namespace. Other targets
-retain the configured build directory unchanged.
+artifacts. This includes explicit native library crate types, which can produce
+unhashed filenames. Environment dependencies invalidate expansion but do not
+change Cargo artifact filenames, so non-native targets need the same isolation.
+The first generated build can recompile dependencies once; later builds reuse
+them within that namespace.
+
+External discovery and replay runners also use isolated build namespaces,
+keyed by their candidate and generated Cargo files. Ordinary capture builds
+can select different dependency features or versions from those runners;
+sharing unhashed native libraries across those graphs can link two runtime
+instances even when their runtime package identity is the same. Runner
+namespaces preserve dependency-cache reuse without consuming those artifacts.
+
+The owner-approved concurrency policy rejects overlapping SpecGate commands
+against the same canonical package sources immediately, rather than waiting
+or creating per-invocation build namespaces. `discover`, `capture`, and `replay`
+acquire an operating-system file lease before discovery and hold it through
+enumeration, execution, and publication. Reusable replay candidates retain the
+lease until their last shared handle is dropped. The lock file lives outside
+the sources, is never unlinked, and does not remain locked after the process
+exits. Different packages remain independent. This is command-level ownership,
+not a change to libtest threading or native operation concurrency; ordinary
+`cargo test` retains parallel test execution.
+
 Each scenario owns a separate scope so its receiver and setup
 guards are dropped before the next scenario starts.
 
@@ -125,8 +159,8 @@ bridges continue to resolve operation types and generic specializations.
 Replay rejects consuming receivers during planning because receiver reuse cannot
 transfer ownership safely. Borrowed `&self` and `&mut self` methods remain
 supported. Library, binary-unit, and integration-test targets retain their Cargo
-target kinds. Operation-only targets receive the same automatic crate-root
-discovery hook without a local component or setup declaration.
+target kinds. Operation-only targets receive the same crate-root discovery
+hook through their local `spec_component!` declaration; no setup is required.
 
 An optional `rust.executor` names a crate-rooted candidate wrapper. It replaces
 built-in execution and owns the complete task factory, including construction

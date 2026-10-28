@@ -42,10 +42,9 @@ pub(super) fn execute(
     execution: &Execution,
     sources: impl AsRef<Path>,
     scratch: impl AsRef<Path>,
-    unhashed_library: bool,
 ) -> Result<ExecutedTests, FailureContext> {
     let scratch = scratch.as_ref();
-    let test_binaries = build_binaries(system, execution, sources, scratch, unhashed_library)?;
+    let test_binaries = build_binaries(system, execution, sources, scratch)?;
     let tests = enumerate_tests(system, execution, &test_binaries)?;
     run_tests(system, execution, &tests, scratch)
 }
@@ -58,21 +57,16 @@ pub(super) fn build_binaries(
     execution: &Execution,
     package_root: impl AsRef<Path>,
     scratch: impl AsRef<Path>,
-    unhashed_library: bool,
 ) -> Result<Vec<TestBinary>, FailureContext> {
     let package_root = package_root.as_ref();
     let scratch = scratch.as_ref();
-    let mut request = ProcessRequest::builder(cargo_bin())
+    let request = ProcessRequest::builder(cargo_bin())
         .args(["test", "--no-run", "--quiet", "--message-format=json"])
         .current_dir(package_root)
-        .env_remove("RUSTC_WORKSPACE_WRAPPER")
         .env_remove("CARGO")
         .env_remove("CARGO_MANIFEST_DIR")
-        .env("CARGO_TARGET_DIR", scratch.join("target"));
-    if unhashed_library {
-        request = request.env("CARGO_BUILD_BUILD_DIR", scratch.join("build"));
-    }
-    let request = request.build();
+        .env("CARGO_TARGET_DIR", scratch.join("target"))
+        .build();
     let output = execution.run(&request).map_err(|error| {
         FailureContext::with_source(
             format!(

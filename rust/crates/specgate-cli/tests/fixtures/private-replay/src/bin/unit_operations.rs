@@ -1,3 +1,5 @@
+specgate::spec_component!("fixture.binary_unit");
+
 fn main() {}
 
 #[cfg(test)]

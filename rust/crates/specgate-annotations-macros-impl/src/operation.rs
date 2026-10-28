@@ -457,7 +457,7 @@ pub fn expand_operation(attribute: TokenStream2, item: TokenStream2) -> syn::Res
     } else {
         TokenStream2::new()
     };
-    let dependency = super::harness::dependency();
+    let dependency = super::harness::require_component();
     let metadata = declarations
         .iter()
         .map(|declaration| {

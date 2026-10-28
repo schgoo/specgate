@@ -67,26 +67,20 @@ mod cases {
     }
 
     #[test]
-    fn unhashed_library_builds_are_isolated() {
-        for unhashed_library in [false, true] {
-            let execution = Execution::fake();
-            execution.push(Err(std::io::Error::other("build unavailable")));
-            let error =
-                rust::build_binaries(&CommandEnvironment::fake(), &execution, "candidate", "scratch", unhashed_library).unwrap_err();
-            assert!(error.diagnostic().contains("build unavailable"), "{error:?}");
-            assert!(error.diagnostic().contains("status: not started"), "{error:?}");
-            let mut expected = ProcessRequest::builder(cargo_bin())
-                .args(["test", "--no-run", "--quiet", "--message-format=json"])
-                .current_dir("candidate")
-                .env_remove("RUSTC_WORKSPACE_WRAPPER")
-                .env_remove("CARGO")
-                .env_remove("CARGO_MANIFEST_DIR")
-                .env("CARGO_TARGET_DIR", Path::new("scratch").join("target"));
-            if unhashed_library {
-                expected = expected.env("CARGO_BUILD_BUILD_DIR", Path::new("scratch").join("build"));
-            }
-            assert_eq!(execution.requests(), vec![expected.build()]);
-        }
+    fn ordinary_builds_preserve_shared_cache_and_wrappers() {
+        let execution = Execution::fake();
+        execution.push(Err(std::io::Error::other("build unavailable")));
+        let error = rust::build_binaries(&CommandEnvironment::fake(), &execution, "candidate", "scratch").unwrap_err();
+        assert!(error.diagnostic().contains("build unavailable"), "{error:?}");
+        assert!(error.diagnostic().contains("status: not started"), "{error:?}");
+        let expected = ProcessRequest::builder(cargo_bin())
+            .args(["test", "--no-run", "--quiet", "--message-format=json"])
+            .current_dir("candidate")
+            .env_remove("CARGO")
+            .env_remove("CARGO_MANIFEST_DIR")
+            .env("CARGO_TARGET_DIR", Path::new("scratch").join("target"))
+            .build();
+        assert_eq!(execution.requests(), vec![expected]);
     }
 
     #[test]
@@ -95,7 +89,7 @@ mod cases {
         system.seed_environment("CARGO_BUILD_BUILD_DIR", "shared-build");
         let execution = Execution::fake();
         execution.push(Ok(crate::system::test_output(101, "compiler output", "build failure")));
-        let error = rust::build_binaries(&system, &execution, "candidate", "scratch", false).unwrap_err();
+        let error = rust::build_binaries(&system, &execution, "candidate", "scratch").unwrap_err();
         for expected in [
             "capture test build failed:",
             "\"test\" \"--no-run\"",
@@ -103,7 +97,7 @@ mod cases {
             "status:",
             "101",
             "CARGO_BUILD_BUILD_DIR: \"shared-build\" (inherited)",
-            "RUSTC_WORKSPACE_WRAPPER: removed",
+            "RUSTC_WORKSPACE_WRAPPER: unset",
             "compiler output",
             "build failure",
         ] {

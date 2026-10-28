@@ -13,6 +13,11 @@ operations/setups/types, and exercise behavior through ordinary tests.
 reference traces; `specgate replay` invokes a candidate from the captured
 semantic inputs.
 
+Each Cargo target needing generated discovery/replay hooks declares
+`spec_component!` at its own crate root. A library declaration does not cover
+separate binary or integration-test crates. Ordinary tests gain no generated
+entry; CLI-owned builds use original sources and Cargo’s configured wrappers.
+
 Async operations open at first poll and keep their construction parent
 across executor-thread migration and same-thread interleaving. A future
 dropped while pending is recorded as abandoned. Async setups are
