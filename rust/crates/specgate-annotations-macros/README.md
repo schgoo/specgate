@@ -23,14 +23,16 @@ Generic operation methods declare concrete specializations explicitly with
 with distinct semantic names for additional type combinations; multiple type
 arguments use a comma-separated string. Generic parameters keep their authored
 bounds and require `'static` for specialization dispatch. Setup construction
-inputs remain primitive; synchronous annotated test-only producers can rebuild
-private replay environments through generated Cargo test entry points.
+inputs support primitives and recursive collections and optionals;
+`#[spec_event(setup)]` opts a `SpecEvent` type into property-setup folding.
+Synchronous annotated test-only producers can rebuild private replay
+environments through generated Cargo test entry points.
 
 
 ---
 
 Part of the [SpecGate](https://github.com/schgoo/specgate) project.
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQbJSusbBjLO7EbSlASCvKRTqwbmd2gsLYkxMobU3WiDiuhvKthYvRhcoQbZodQe5IR3Kwb9-110Pk18jkb6DFtHdsNZhQbwChIog6Yj_1hZIGDeBtzcGVjZ2F0ZS1hbm5vdGF0aW9ucy1tYWNyb3NlMC42LjB4G3NwZWNnYXRlX2Fubm90YXRpb25zX21hY3Jvcw
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQbJSusbBjLO7EbSlASCvKRTqwbmd2gsLYkxMobU3WiDiuhvKthYvRhcoQbLk7LxAnZ79UbhtdpAK2mIg0bqnXJ6e4gMU0bMI3KHBuPzTlhZIGDeBtzcGVjZ2F0ZS1hbm5vdGF0aW9ucy1tYWNyb3NlMC42LjB4G3NwZWNnYXRlX2Fubm90YXRpb25zX21hY3Jvcw
  [__link0]: https://docs.rs/specgate-annotations-macros/0.6.0/specgate_annotations_macros/attr.spec_operation.html
  [__link1]: https://docs.rs/specgate-annotations-macros/0.6.0/specgate_annotations_macros/attr.spec_setup.html

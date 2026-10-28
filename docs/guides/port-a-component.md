@@ -23,7 +23,8 @@ inputs against the port, and compare.
 Replay supports only Rust candidates. It covers public free functions,
 setup-backed methods borrowing `&self` or `&mut self`, directly awaited async
 calls, and explicit generic specializations. Operation and setup construction
-inputs must be primitives. The full list is in
+inputs must be primitives, recursively supported collections and optionals, or
+opted-in property setups. The full list is in
 [limitations](../reference/limitations.md).
 
 ## Steps
@@ -143,11 +144,14 @@ equivalent: true
 
 The golden matrix replays this case on every `just check`.
 
-If the setup instead took a structured value, such as a polygon record, replay
-would fail with `uses unsupported structured type` or `uses unsupported
-structured replay type` (the `structured-value` limitation). Report that
-limitation and ask before changing the boundary
-([#102](https://github.com/schgoo/specgate/issues/102)).
+If the setup instead took a record, such as a polygon, opt the record in as a
+property setup so replay deconstructs it into its fields (see the Rust and C#
+instrumentation guides), or give it an explicit setup producer. Deconstruction
+is one level deep: a polygon whose `points` field is a list of `Point` records
+still needs a producer. A record input with neither fails with
+`uses unsupported structured type` or `uses unsupported structured replay type`
+(the `structured-value` limitation). Report that limitation and ask before
+changing the boundary.
 
 ## Expected output
 

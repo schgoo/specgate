@@ -7,6 +7,11 @@ under `docs/decisions/`, or `docs/contributor/roadmap.md`. Generate with `just c
 
 ### Added
 
+- Rust replay accepts recursive list, set, string-keyed map, and optional
+  inputs. Property setups (`#[spec_event(setup)]`, `[SpecEvent(Setup = true)]`)
+  fold a parameter object's selected fields into flat inputs and rebuild the
+  Rust value with `Default` for omitted fields; C# constructors may declare
+  `[SpecSetup]` (#102, #105).
 - One shared native golden bundle per component across all languages, including
   one canonical registry flat under `component/<id>/` and no per-language successful-component artifacts, selecting
   C# for paired fixtures and Rust for Rust-only fixtures, with independent strict
