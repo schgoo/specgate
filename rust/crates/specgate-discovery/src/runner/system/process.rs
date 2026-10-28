@@ -34,6 +34,23 @@ pub(crate) struct Request {
 }
 
 impl Request {
+    fn command(&self) -> Command {
+        let mut command = Command::new(&self.executable);
+        command.args(&self.args);
+        if let Some(path) = &self.current_dir {
+            command.current_dir(path);
+        }
+        for name in &self.env_remove {
+            command.env_remove(name);
+        }
+        command.envs(self.env.iter().cloned());
+        command
+    }
+
+    pub(crate) fn diagnostic(&self, output: Option<&ProcessOutput>, environment: &super::Environment) -> String {
+        crate::runner::process_diagnostic(&self.command(), output, |name| environment.var_os(name))
+    }
+
     /// Starts a request for the required executable.
     /// Returns the configured request.
     pub(crate) fn builder(executable: impl AsRef<OsStr>) -> RequestBuilder {
@@ -82,11 +99,18 @@ impl RequestBuilder {
 }
 
 /// Captured status and byte streams from a completed child process.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ProcessOutput {
-    pub(crate) success: bool,
-    pub(crate) stdout: Vec<u8>,
-    pub(crate) stderr: Vec<u8>,
+pub(crate) type ProcessOutput = std::process::Output;
+
+#[cfg(test)]
+pub(crate) fn test_status(code: i32) -> std::process::ExitStatus {
+    #[cfg(unix)]
+    {
+        std::os::unix::process::ExitStatusExt::from_raw(code << 8)
+    }
+    #[cfg(windows)]
+    {
+        std::os::windows::process::ExitStatusExt::from_raw(u32::try_from(code).expect("non-negative test exit code"))
+    }
 }
 
 /// Executes requests through the operating system or a deterministic fake queue.
@@ -154,25 +178,7 @@ impl Process {
     /// Panics if fake process state is poisoned or no fake result was queued.
     pub(crate) fn output(&self, request: &Request) -> Result<ProcessOutput, Error> {
         match &self.inner {
-            ProcessKind::Real => {
-                let mut command = Command::new(&request.executable);
-                command.args(&request.args);
-                if let Some(path) = &request.current_dir {
-                    command.current_dir(path);
-                }
-                for name in &request.env_remove {
-                    command.env_remove(name);
-                }
-                for (key, value) in &request.env {
-                    command.env(key, value);
-                }
-                let output = command.output()?;
-                Ok(ProcessOutput {
-                    success: output.status.success(),
-                    stdout: output.stdout,
-                    stderr: output.stderr,
-                })
-            }
+            ProcessKind::Real => Ok(request.command().output()?),
             #[cfg(any(test, feature = "test-util"))]
             ProcessKind::Fake(state) => {
                 let mut state = state.lock().expect("fake process mutex poisoned");
@@ -208,13 +214,16 @@ mod tests {
     #[test]
     fn fake_execution() {
         let expected = ProcessOutput {
-            success: true,
+            status: test_status(0),
             stdout: b"ok".to_vec(),
             stderr: Vec::new(),
         };
         let process = Process::fake(FakeProcess::queued([Ok(expected.clone())]));
         let request = Request::builder("tool").arg("run").build();
-        assert_eq!(process.output(&request).unwrap(), expected);
+        let output = process.output(&request).unwrap();
+        assert_eq!(output.status, expected.status);
+        assert_eq!(output.stdout, expected.stdout);
+        assert_eq!(output.stderr, expected.stderr);
         assert_eq!(process.fake_state().lock().unwrap().requests, [request]);
     }
     #[test]
@@ -236,7 +245,7 @@ mod tests {
         let executable = std::env::current_exe().expect("current test executable");
         let request = Request::builder(executable).arg("--list").env("SPECGATE_PROCESS_TEST", "1").build();
         let output = Process::real().output(&request).expect("run current test executable");
-        assert!(output.success);
+        assert!(output.status.success());
         assert!(!output.stdout.is_empty());
     }
 }

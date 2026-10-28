@@ -52,6 +52,90 @@ fn ambiguous_setups() {
     assert!(raw_inputs(&registry.ops[0], &registry).unwrap_err().contains("ambiguously matches"));
 }
 
+#[test]
+fn property_setups_use_native_identity_and_flat_semantic_field_names() {
+    let document = serde_json::json!({
+        "operations": [{
+            "name": "run", "module_path": "fixture::operations", "fn_name": "run",
+            "return_type": "i32", "component": "demo",
+            "params": [["query", "&'a mut crate::models::Native"]]
+        }],
+        "types": [{
+            "name": "Canonical", "native_name": "Native", "module_path": "fixture::models",
+            "property_setup": true, "kind": "struct", "component": "demo",
+            "fields": [["limit", "u32"], ["tags", "Vec<String>"]]
+        }]
+    });
+    let mut raw = registry(document.to_string());
+    let inputs = raw_inputs(&raw.ops[0], &raw).unwrap();
+    assert_eq!(
+        inputs.iter().map(|input| input.name.as_str()).collect::<Vec<_>>(),
+        ["limit", "tags"]
+    );
+    normalize_registry(&raw, crate::binding::Language::Rust, "demo").unwrap();
+    for (scope, path) in [
+        ("fixture::models", "self::Native"),
+        ("fixture::operations", "super::models::Native"),
+        ("fixture::operations::nested", "super::super::models::Native"),
+        ("fixture::operations", "&'a mut super::models::Native"),
+    ] {
+        raw.ops[0].module_path = scope.into();
+        raw.ops[0].params[0].ty = path.into();
+        assert_eq!(raw_inputs(&raw.ops[0], &raw).unwrap(), inputs, "{path}");
+        normalize_registry(&raw, crate::binding::Language::Rust, "demo").unwrap();
+    }
+    raw.ops[0].params[0].ty = "Canonical".into();
+    assert_eq!(raw_inputs(&raw.ops[0], &raw).unwrap()[0].name, "query");
+    raw.ops[0].params[0].ty = "Native".into();
+    raw.types[0].property_setup = false;
+    assert_eq!(raw_inputs(&raw.ops[0], &raw).unwrap()[0].name, "query");
+}
+
+#[test]
+fn property_setup_collisions_are_rejected_and_explicit_producers_take_precedence() {
+    let document = serde_json::json!({
+        "operations": [{
+            "name": "run", "module_path": "fixture", "fn_name": "run",
+            "return_type": "i32", "component": "demo",
+            "params": [["query", "Query"], ["limit", "u32"]]
+        }],
+        "types": [{
+            "name": "Query", "native_name": "Query", "module_path": "fixture",
+            "property_setup": true, "kind": "struct", "component": "demo",
+            "fields": [["limit", "u32"]]
+        }]
+    });
+    let mut raw = registry(document.to_string());
+    let error = raw_inputs(&raw.ops[0], &raw).unwrap_err().to_string();
+    assert!(
+        error.contains("setup folding for 'demo::run' produces duplicate input name 'limit'"),
+        "{error}"
+    );
+    let producer = registry(
+        r#"{"operations":[{
+        "name":"run","module_path":"fixture","fn_name":"make","is_setup":true,
+        "return_type":"Query","fills":"query","component":"demo","params":[["initial","u32"]]
+    }],"types":[]}"#,
+    )
+    .ops
+    .remove(0);
+    raw.ops.push(producer);
+    let inputs = raw_inputs(&raw.ops[0], &raw).unwrap();
+    assert_eq!(
+        inputs.iter().map(|input| input.name.as_str()).collect::<Vec<_>>(),
+        ["initial", "limit"]
+    );
+    raw.ops.pop();
+    raw.ops[0].params.pop();
+    raw.types.push(raw.types[0].clone());
+    assert!(
+        raw_inputs(&raw.ops[0], &raw)
+            .unwrap_err()
+            .to_string()
+            .contains("ambiguous property setup type")
+    );
+}
+
 /// A renamed variant can collide in either language, so the rejection lives in
 /// shared normalization rather than in one language's discovery program.
 #[test]
@@ -314,7 +398,7 @@ fn runner_failures() {
                 .build(),
             FakeProcess::queued([
                 Ok(ProcessOutput {
-                    success: true,
+                    status: crate::runner::system::test_status(0),
                     stdout: serde_json::to_vec(&serde_json::json!({
                         "packages": [{
                             "id": "candidate", "name": "candidate", "version": "1.0.0",
@@ -331,6 +415,7 @@ fn runner_failures() {
         .environment(BTreeMap::from([
             ("SPECGATE_CACHE_DIR".to_string(), "cache".into()),
             ("CARGO".to_string(), "fake-cargo".into()),
+            ("CARGO_BUILD_BUILD_DIR".to_string(), "shared-build".into()),
         ]))
         .process_id(7)
         .build()
@@ -340,15 +425,15 @@ fn runner_failures() {
         (Err("spawn denied".to_string()), "failed to run discovery build: spawn denied"),
         (
             Ok(ProcessOutput {
-                success: false,
+                status: crate::runner::system::test_status(1),
                 stdout: Vec::new(),
                 stderr: b"compile denied\n".to_vec(),
             }),
-            "discovery build failed: compile denied",
+            "discovery build failed:",
         ),
         (
             Ok(ProcessOutput {
-                success: true,
+                status: crate::runner::system::test_status(0),
                 stdout: b"  \n".to_vec(),
                 stderr: Vec::new(),
             }),
@@ -357,7 +442,21 @@ fn runner_failures() {
     ];
     for (result, expected) in cases {
         let system = system(result, BTreeMap::new());
-        assert_eq!(runner::run_in(&context(), &system).unwrap_err(), expected);
+        let error = runner::run_in(&context(), &system).unwrap_err().to_string();
+        assert!(error.starts_with(expected), "{error}");
+        for detail in [
+            "command: \"fake-cargo\"",
+            "working directory: candidate",
+            "status:",
+            "CARGO_BUILD_BUILD_DIR:",
+            "(override)",
+            "RUSTC_WORKSPACE_WRAPPER: unset",
+        ] {
+            assert!(error.contains(detail), "{error}");
+        }
+        if expected == "discovery build failed:" {
+            assert!(error.contains("compile denied"), "{error}");
+        }
         let request = system.process.fake_state().lock().unwrap().requests[1].clone();
         assert_eq!(request.executable, std::ffi::OsString::from("fake-cargo"));
         let build_directory = request
@@ -388,7 +487,7 @@ fn runner_failures() {
         let failures = BTreeMap::from([(key.to_string(), ["denied".to_string()].into())]);
         let system = system(
             Ok(ProcessOutput {
-                success: true,
+                status: crate::runner::system::test_status(0),
                 stdout: b"{}".to_vec(),
                 stderr: Vec::new(),
             }),
@@ -418,7 +517,7 @@ fn registry_failure() {
             .unique_candidates(VecDeque::from([Ok(PathBuf::from("scratch/run"))]))
             .build(),
         FakeProcess::queued([Ok(ProcessOutput {
-            success: true,
+            status: crate::runner::system::test_status(0),
             stdout: b"{}".to_vec(),
             stderr: Vec::new(),
         })]),

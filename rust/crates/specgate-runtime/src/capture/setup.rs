@@ -361,7 +361,41 @@ pub(super) fn validate_declared_folding(operations: &[registry::OpMeta]) -> Resu
         let setups = operations
             .iter()
             .filter(|candidate| candidate.is_setup && candidate.component == operation.component && candidate.name == operation.name);
-        plan_declared_setups(operation.component, operation.name, operation, setups)?;
+        let (required, filled) = plan_declared_setups(operation.component, operation.name, operation, setups)?;
+        let mut names = BTreeSet::new();
+        for setup in required {
+            let producer = operations
+                .iter()
+                .find(|candidate| {
+                    candidate.is_setup
+                        && candidate.component == setup.key.component_id.as_str()
+                        && candidate.name == setup.key.operation_name.as_str()
+                        && candidate.module_path == setup.key.module_path.as_str()
+                        && candidate.fn_name == setup.key.fn_name.as_str()
+                })
+                .expect("planned setup belongs to declaration set");
+            for field in producer.params {
+                if !names.insert(field.name()) {
+                    return Err(CaptureError::setup_collision(
+                        operation.component,
+                        operation.name,
+                        format!("setup folding produces duplicate input name '{}'", field.name()),
+                    ));
+                }
+            }
+        }
+        for parameter in operation.params.iter().filter(|field| !filled.contains(field.name())) {
+            let properties = registry::TypeMeta::property_fields(operation, parameter.name())?;
+            for field in properties.unwrap_or(std::slice::from_ref(parameter)) {
+                if !names.insert(field.name()) {
+                    return Err(CaptureError::setup_collision(
+                        operation.component,
+                        operation.name,
+                        format!("setup folding produces duplicate input name '{}'", field.name()),
+                    ));
+                }
+            }
+        }
     }
     Ok(())
 }

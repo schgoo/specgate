@@ -29,6 +29,7 @@ pub(super) enum ErrorCategory {
     UnknownFill,
     AmbiguousFill,
     DuplicateFill,
+    DuplicateInput,
     ExtraReceiver,
     Other,
     Compile,
@@ -46,6 +47,7 @@ impl ErrorCategory {
             Self::UnknownFill => "setup-unknown-fill",
             Self::AmbiguousFill => "setup-ambiguous-fill",
             Self::DuplicateFill => "setup-duplicate-fill",
+            Self::DuplicateInput => "setup-duplicate-input",
             Self::ExtraReceiver => "setup-extra-receiver",
             Self::Other => "unclassified",
             Self::Compile => "compile-error",
@@ -170,6 +172,8 @@ pub(super) fn error_category(message: impl AsRef<str>) -> ErrorCategory {
         ErrorCategory::AmbiguousFill
     } else if message.contains(DUPLICATE_FILL) {
         ErrorCategory::DuplicateFill
+    } else if message.contains("produces duplicate input name") {
+        ErrorCategory::DuplicateInput
     } else if message.contains(EXTRA_RECEIVER) {
         ErrorCategory::ExtraReceiver
     } else {

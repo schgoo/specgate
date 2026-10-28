@@ -71,13 +71,13 @@ internal readonly struct SetupKey : IEquatable<SetupKey>
 /// <summary>One setup declaration, resolved to the component it prepares for.</summary>
 internal sealed class SetupDeclaration
 {
-    internal SetupDeclaration(MethodInfo method, SetupKey key)
+    internal SetupDeclaration(MethodBase method, SetupKey key)
     {
         Method = method;
         Key = key;
     }
 
-    internal MethodInfo Method { get; }
+    internal MethodBase Method { get; }
 
     internal SetupKey Key { get; }
 
@@ -160,12 +160,12 @@ internal sealed class SetupRegistry
 
     private static SetupRegistry Describe(Assembly assembly)
     {
-        List<MethodInfo> annotated = [];
+        List<MethodBase> annotated = [];
         Dictionary<string, List<string>> operationOwners = new(StringComparer.Ordinal);
 
         foreach (Type type in assembly.GetTypes())
         {
-            foreach (MethodInfo method in type.GetMethods(Selection))
+            foreach (MethodBase method in type.GetMethods(Selection).Cast<MethodBase>().Concat(type.GetConstructors(Selection)))
             {
                 foreach (SpecOperationAttribute operation in
                     method.GetCustomAttributes<SpecOperationAttribute>(inherit: false))
@@ -195,7 +195,7 @@ internal sealed class SetupRegistry
         }
 
         List<SetupDeclaration> setups = [];
-        foreach (MethodInfo method in annotated)
+        foreach (MethodBase method in annotated)
         {
             foreach (SpecSetupAttribute setup in method.GetCustomAttributes<SpecSetupAttribute>(inherit: false))
             {
@@ -216,7 +216,7 @@ internal sealed class SetupRegistry
         return new SetupRegistry(setups.Count == 0 ? NoSetups : [.. setups]);
     }
 
-    private static SetupDeclaration Declare(MethodInfo method, SpecSetupAttribute setup, string component) =>
+    private static SetupDeclaration Declare(MethodBase method, SpecSetupAttribute setup, string component) =>
         new(
             method,
             new SetupKey(

@@ -20,6 +20,21 @@ Map a `capture` (or `replay`) error to its cause and fix.
 A failing test does not fail the capture on its own: it is skipped and listed.
 Capture fails when no passing test produced a scenario for the component.
 
+Rust discovery, capture-build/test-enumeration, and replay-runner failures
+include the stage, quoted command arguments, working directory, and actual
+exit status (or `not started` for launch errors).
+Build/cache context is limited to `CARGO_BUILD_BUILD_DIR`, `CARGO_TARGET_DIR`,
+and `RUSTC_WORKSPACE_WRAPPER`, distinguishing inherited values, overrides,
+removals, and unset variables; the rest of the environment is not dumped.
+Both output streams retain their last 8,192 characters, with truncation marked.
+Cargo JSON compiler messages are rendered as readable diagnostics.
+
+For duplicate runtime registrations or build failures that vary with execution
+order, compare this context between passing and failing invocations. Shared
+Cargo intermediates can reuse incompatible unhashed library artifacts;
+SpecGate isolates these builds for `cdylib`, `staticlib`, and `dylib` candidates
+while retaining shared dependency builds for ordinary Rust libraries.
+
 ## Expected output
 
 After the fix, `Complete(...)` and exit code 0. [smoke]
@@ -113,7 +128,7 @@ sources, so a search for it finds the code that raises it.
 | `candidate setup resolution failed` | Setups do not resolve uniquely. | Annotate one matching producer per receiver or injected parameter. |
 | `selected setup producers belong to different Cargo test targets` | Required producers do not share a target. | Keep the environment in one Cargo test target. |
 | `unsupported async replay scheduling:` | Recorded sibling operations overlap. | Record directly awaited calls; overlapping scheduling is unsupported. |
-| `uses unsupported structured type` | An operation or setup input is not a supported primitive. | See [`../reference/limitations.md`](../reference/limitations.md). |
+| `uses unsupported structured type` | An operation or setup input is neither a supported primitive/collection nor an explicitly opted-in property setup. | See [`../reference/limitations.md`](../reference/limitations.md). |
 
 <!-- diagnostics:end -->
 

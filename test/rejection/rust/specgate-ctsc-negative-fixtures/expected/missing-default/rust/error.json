@@ -1,0 +1,1 @@
+{"case":"negative/missing-default","category":"compile-error","component":"fixture.missing_default","detail":{"diagnosticCodes":["E0277"],"feature":"missing-default","intentionalSources":["missing_default.rs.in"]},"format":"specgate.ctsc-golden-error","formatVersion":"0.1.0","outcome":"failure","phase":"build"}

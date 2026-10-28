@@ -139,7 +139,7 @@ One OTLP JSON candidate trace. Scenario names match the reference.
 | `candidate setup resolution failed` | Setups do not resolve uniquely to a receiver or injected parameter. | Annotate one matching producer per role. |
 | `selected setup producers belong to different Cargo test targets` | No single target contains the environment. | Keep the required producers in one Cargo target. |
 | `unsupported async replay scheduling:` | Recorded sibling operations overlap. | Record directly awaited calls; overlapping scheduling is unsupported. |
-| `uses unsupported structured type` | An operation or setup input is not a supported primitive. | See [`../reference/limitations.md`](../reference/limitations.md). |
+| `uses unsupported structured type` | An operation or setup input is neither a supported primitive/collection nor an explicitly opted-in property setup. | See [`../reference/limitations.md`](../reference/limitations.md). |
 | `already exists; pass --force to overwrite it` | The output file exists. | Pass `--force` or another `--out`. |
 
 ## Verify

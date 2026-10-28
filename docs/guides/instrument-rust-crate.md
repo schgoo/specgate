@@ -115,6 +115,15 @@ Replay reconstructs receivers and injected parameters through annotated
 synchronous nongeneric producers, including private producers in a selected
 Cargo test target ([limitations](../reference/limitations.md)).
 
+For simple parameter objects, add `#[spec_event(setup)]` beside
+`#[derive(SpecEvent)]`. Without member annotations, every field is selected;
+otherwise only annotated fields are selected. Selected fields must be public
+and become flat operation inputs. Replay decodes them into a struct literal,
+using `..Default::default()` for omitted fields. The opt-in promises that those
+defaults preserve the contract; use an explicit producer for construction
+invariants. Supported field inputs include recursive `Vec`, `Option`, sets, and
+string-keyed maps. Ordinary `SpecEvent` projection does not enable reconstruction.
+
 ### 4. Return outcomes
 
 | Return type | Recorded outcome |

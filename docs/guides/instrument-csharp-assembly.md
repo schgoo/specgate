@@ -126,6 +126,18 @@ setup produces a parameter rather than the receiver. C# setup inputs can drive
 annotated Rust candidate producers during replay; C# candidate replay remains
 unsupported ([limitations](../reference/limitations.md)).
 
+`[SpecSetup]` may also annotate a constructor: its declaring type is the
+produced value, and its parameters are the construction inputs.
+
+For object-initializer parameters, use `[SpecEvent(Setup = true)]` on the type.
+Without member annotations, all public instance fields and readable properties
+declared on the type participate; otherwise only annotated members participate.
+Capture reads their final values at operation entry and folds their semantic
+names into flat inputs. Rename members to resolve collisions; names are never
+automatically prefixed. Explicit setup producers take precedence over property
+folding for the parameters they fill. Rust candidates opt in separately and
+promise that any omitted fields may safely use `Default`.
+
 ### 6. Async operations
 
 Operations returning `Task`, `Task<T>`, `ValueTask`, or `ValueTask<T>` are

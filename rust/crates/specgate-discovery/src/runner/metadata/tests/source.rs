@@ -90,6 +90,18 @@ fn candidate_root() {
             .unwrap()
             .starts_with(std::env::current_dir().unwrap().join("rust").join("crates"))
     );
+    for kind in ["cdylib", "staticlib", "dylib"] {
+        std::fs::write(
+            candidate.join("Cargo.toml"),
+            format!(
+                "[package]\nname=\"candidate\"\nversion=\"0.1.0\"\nedition=\"2024\"\n\
+                 [lib]\ncrate-type=[\"rlib\",\"{kind}\"]\n\
+                 [dependencies]\nspecgate-runtime={{path=\"../runtime\"}}\n[workspace]\n"
+            ),
+        )
+        .unwrap();
+        assert_eq!(candidate_package(&candidate).unwrap().crate_name, "candidate", "{kind}");
+    }
 }
 
 #[test]

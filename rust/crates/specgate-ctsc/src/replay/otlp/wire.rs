@@ -84,7 +84,6 @@ pub(super) enum DoubleValue {
     Symbol(String),
 }
 
-#[expect(dead_code, reason = "deserialization validates array payloads before typed replay decoding")]
 #[derive(Deserialize)]
 pub(super) struct ArrayValue {
     #[serde(default)]

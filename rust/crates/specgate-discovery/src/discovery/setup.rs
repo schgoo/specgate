@@ -95,6 +95,57 @@ pub struct MappedInput {
     pub value_type: SpecType,
 }
 
+/// Resolve a type's explicit property-setup opt-in in the operation's component.
+///
+/// # Errors
+/// Rejects ambiguous native type identities instead of selecting a declaration.
+pub fn property_setup<'a>(op: &Operation, source_type: &str, registry: &'a Registry) -> Result<Option<&'a crate::registry::Type>, Error> {
+    let normalized = normalize(source_type);
+    let mut native = normalized.trim();
+    if let Some(reference) = native.strip_prefix('&') {
+        native = reference.trim_start();
+        if native.starts_with('\'') {
+            native = native.split_once(char::is_whitespace).map_or("", |(_, ty)| ty.trim_start());
+        }
+        native = native.strip_prefix("mut ").unwrap_or(native).trim_start();
+    }
+    let native = native.replace(' ', "");
+    let native = if let Some(suffix) = native.strip_prefix("crate::") {
+        format!("{}::{suffix}", op.module_path.split("::").next().unwrap_or(""))
+    } else if let Some(suffix) = native.strip_prefix("self::") {
+        format!("{}::{suffix}", op.module_path)
+    } else if native.starts_with("super::") {
+        let mut scope = op.module_path.split("::").collect::<Vec<_>>();
+        let mut suffix = native.as_str();
+        while let Some(parent) = suffix.strip_prefix("super::") {
+            scope.pop();
+            suffix = parent;
+        }
+        format!("{}::{suffix}", scope.join("::"))
+    } else {
+        native
+    };
+    let matches = registry
+        .types
+        .iter()
+        .filter(|ty| {
+            ty.property_setup
+                && ty.component == op.component
+                && (ty.native_name == native
+                    || (ty.native_name.is_empty() && ty.name.as_str() == native)
+                    || format!("{}::{}", ty.module_path, ty.native_name) == native)
+        })
+        .collect::<Vec<_>>();
+    match matches.as_slice() {
+        [] => Ok(None),
+        [ty] => Ok(Some(*ty)),
+        _ => Err(failure(format!(
+            "ambiguous property setup type '{source_type}' for '{}::{}'",
+            op.component, op.name
+        ))),
+    }
+}
+
 /// Fold exact component-scoped setup producers into one operation's public
 /// input surface.
 ///
@@ -180,6 +231,8 @@ pub(super) fn fold_operation<'a>(op: &Operation, registry: &'a Registry) -> Resu
     for parameter in &op.params {
         if let Some(injected) = param_injection.get(parameter.name.as_str()) {
             inputs.extend(injected.iter().cloned());
+        } else if let Some(properties) = property_setup(op, parameter.ty.as_str(), registry)? {
+            inputs.extend(properties.fields.iter().cloned());
         } else {
             inputs.push(parameter.clone());
         }

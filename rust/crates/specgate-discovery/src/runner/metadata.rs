@@ -416,13 +416,12 @@ fn cargo_metadata(manifest: &Path, package_root: &Path, target: Option<&Path>, s
     }
     .build();
     let output = system
-        .process
         .output(&request)
         .map_err(|source| context(format!("failed to invoke cargo metadata: {source}"), source))?;
-    if !output.success {
+    if !output.status.success() {
         return Err(failure(format!(
-            "cargo metadata failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
+            "cargo metadata failed:\n{}",
+            request.diagnostic(Some(&output), &system.environment)
         )));
     }
     serde_json::from_slice(&output.stdout)

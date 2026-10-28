@@ -201,11 +201,11 @@ pub fn expand_operation(attribute: TokenStream2, item: TokenStream2) -> syn::Res
     let begin_async = begin_fragment(&rt, &component, &name, true);
     let input_records = params
         .iter()
-        .filter(|(_ident, ty, _name)| !is_mut_ref(ty))
-        .map(|(ident, _ty, semantic_name)| {
+        .map(|(ident, ty, semantic_name)| {
+            let value = if is_mut_ref(ty) { quote!(&*#ident) } else { quote!(&#ident) };
             quote! {
                 if let ::std::result::Result::Err(error) =
-                    __sg_scope.input_lazy(#semantic_name, || #rt::ToNativeValue::to_native_value(&#ident))
+                    __sg_scope.input_lazy(#semantic_name, || #rt::ToNativeValue::to_native_value(#value))
                 {
                     #rt::report_error(#rt::Stage::OperationInput, &error);
                 }

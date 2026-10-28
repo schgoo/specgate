@@ -343,6 +343,12 @@ pub struct Type {
     pub variants: Vec<Variant>,
     /// Owning component identifier.
     pub component: ComponentId,
+    /// Whether arguments of this type contribute their fields as setup inputs.
+    pub property_setup: bool,
+    /// Native Rust type name, independent of semantic renaming.
+    pub native_name: String,
+    /// Native module containing the type declaration.
+    pub module_path: String,
 }
 
 /// Required identity and kind used to initialize a [`TypeBuilder`].
@@ -389,12 +395,23 @@ impl Type {
                 fields: Vec::new(),
                 variants: Vec::new(),
                 component: required.component,
+                property_setup: false,
+                native_name: String::new(),
+                module_path: String::new(),
             },
         }
     }
 }
 
 impl TypeBuilder {
+    /// Declare operation-entry property decomposition and its native identity.
+    pub fn property_setup(mut self, enabled: bool, native_name: String, module_path: String) -> Self {
+        self.metadata.property_setup = enabled;
+        self.metadata.native_name = native_name;
+        self.metadata.module_path = module_path;
+        self
+    }
+
     /// Set raw struct fields.
     pub fn fields(mut self, fields: Vec<Field>) -> Self {
         self.metadata.fields = fields;
@@ -614,11 +631,18 @@ struct WireType {
     fields: Vec<(String, String)>,
     #[serde(default)]
     variants: Vec<WireVariant>,
+    #[serde(default)]
+    property_setup: bool,
+    #[serde(default)]
+    native_name: String,
+    #[serde(default)]
+    module_path: String,
 }
 
 impl From<WireType> for Type {
     fn from(wire: WireType) -> Self {
         Type::builder(TypeId::new(wire.component, wire.name, wire.kind))
+            .property_setup(wire.property_setup, wire.native_name, wire.module_path)
             .fields(wire.fields.into_iter().map(Field::from).collect())
             .variants(
                 wire.variants

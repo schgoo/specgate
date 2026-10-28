@@ -101,16 +101,21 @@ pub(super) fn run_in(context: &crate::runner::CandidatePackage, system: &crate::
         .env("CARGO_TARGET_DIR", scratch.path().join("target").as_os_str())
         .build();
     let output = system
-        .process
         .output(&request)
         .map_err(|source| with_source(format!("failed to run discovery build: {source}"), source))?;
-    if !output.success {
-        let error = format!("discovery build failed: {}", String::from_utf8_lossy(&output.stderr).trim());
+    if !output.status.success() {
+        let error = format!(
+            "discovery build failed:\n{}",
+            request.diagnostic(Some(&output), &system.environment)
+        );
         return Err(failure(error));
     }
     let json = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if json.is_empty() {
-        return Err(failure("discovery build produced no output"));
+        return Err(failure(format!(
+            "discovery build produced no output\n{}",
+            request.diagnostic(Some(&output), &system.environment)
+        )));
     }
     crate::runner::harness::augment(&context.path, &json, scratch.path(), system)
 }

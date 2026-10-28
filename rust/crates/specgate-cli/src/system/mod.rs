@@ -18,6 +18,21 @@ pub(crate) use filesystem::Scratch;
 pub(crate) use timestamp::run_id;
 
 #[cfg(test)]
+pub(crate) fn test_output(code: u32, stdout: &str, stderr: &str) -> std::process::Output {
+    #[cfg(unix)]
+    let status = <std::process::ExitStatus as std::os::unix::process::ExitStatusExt>::from_raw(
+        i32::try_from(code).expect("test exit code fits i32") << 8,
+    );
+    #[cfg(windows)]
+    let status = <std::process::ExitStatus as std::os::windows::process::ExitStatusExt>::from_raw(code);
+    std::process::Output {
+        status,
+        stdout: stdout.as_bytes().to_vec(),
+        stderr: stderr.as_bytes().to_vec(),
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::{CommandEnvironment, Execution, ProcessRequest};
 
