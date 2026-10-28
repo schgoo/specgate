@@ -114,6 +114,13 @@ under `docs/decisions/`, or `docs/contributor/roadmap.md`. Generate with `just c
 
 ### Documentation
 
+- The agent quick path starts by choosing the boundary: annotate the requested
+  API, reuse its existing tests, record semantic inputs, get approval before
+  substituting an API or scenario wrapper, and report what the comparison
+  establishes. It also links three executable fixtures as examples to follow,
+  separated from aggregate-fixture plumbing. `port-a-component.md` drops the
+  stale "free synchronous functions only" replay claim and adds a setup-backed
+  worked example (#107).
 - Task guides in `docs/guides/` and reference pages in `docs/reference/` (CLI,
   binding, value mapping, bundle, limitations); `docs/status.md` and
   `docs/reference/limitations.md` replace `docs/specgate-ctsc-migration.md`,

@@ -1,5 +1,9 @@
 # SpecGate LLM digest
 
+> **Audience: SpecGate developers, not SpecGate users.** This digest is for
+> agents changing the SpecGate repository itself. To use SpecGate on another
+> codebase, follow [`docs/guides/README.md`](../guides/README.md) instead.
+
 Operational summary for coding agents. This file is not independently
 authoritative; update the source contract or implementation document first.
 
@@ -15,10 +19,10 @@ The active CLI surface is `discover`, `capture`, `replay`, `validate`, and
 Rust.
 
 To use SpecGate on a codebase, follow `docs/guides/README.md` (agent quick
-path) and the facts in `docs/reference/` (`cli.md`, `binding.md`,
-`value-mapping.md`, `bundle.md`, `limitations.md`). CLI stdout lines are not
-yet a stable contract; exit codes are 0 success, 1 failure or negative
-verdict, 2 usage error.
+path, starting at step 0 for an existing API) and the facts in
+`docs/reference/` (`cli.md`, `binding.md`, `value-mapping.md`, `bundle.md`,
+`limitations.md`). CLI stdout lines are not yet a stable contract; exit codes
+are 0 success, 1 failure or negative verdict, 2 usage error.
 
 ## Ownership boundaries
 

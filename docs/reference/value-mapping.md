@@ -127,8 +127,10 @@ Replay validates recorded candidate outcomes against the reference registry
 before publishing the trace.
 
 Structured inputs and explicit reference-to-candidate shape mappings remain
-unsupported. A tuple payload and a record payload are different declarations;
-replay does not silently translate between them.
+unsupported; structured inputs fail with the `structured-value` replay category
+([#102](https://github.com/schgoo/specgate/issues/102)). A tuple payload and a
+record payload are different declarations; replay does not silently translate
+between them.
 
 Generic operations publish concrete signatures from explicit Rust `types` or
 C# `TypeArguments` annotations. See
