@@ -136,6 +136,12 @@ mod cases {
         let component = specgate_discovery::identity::ComponentId::from("fixture.cli.replay");
         let candidates = Candidates::discover(fixture_binding(), Some(&"rust".into()), std::slice::from_ref(&component))
             .expect("focused candidate discovery");
+        let package_root = candidates.package_root.clone();
+        let system = CommandEnvironment::real();
+        assert_eq!(
+            system.package_guard(&package_root).unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
         let candidates = Candidates::discover_with(
             &DiscoveryInput {
                 binding: Path::new("unused"),
@@ -218,6 +224,19 @@ mod cases {
             linked_validation.valid,
             "native linked validation failed: {:#?}",
             linked_validation.issues
+        );
+        let retained = candidates.component(&component).expect("retain one reusable component");
+        drop(candidates);
+        assert_eq!(
+            system.package_guard(&package_root).unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock,
+            "component handles retain ownership after the candidates collection is dropped"
+        );
+        drop(retained);
+        drop(
+            system
+                .package_guard(&package_root)
+                .expect("the last component handle releases ownership"),
         );
 
         let unsupported_output = output_dir("unsupported-language").with_extension("otlp.json");
@@ -585,6 +604,7 @@ mod cases {
         let manifest = cargo_manifest(&plan).unwrap().manifest;
         assert!(manifest.contains("\"rt\""), "{manifest}");
         assert!(manifest.contains("default-features = false"), "{manifest}");
+        drop(candidate);
         let report = replay(
             Request::builder(Paths::new(&capture_dir, &binding))
                 .out(cache.path().join("candidate.otlp.json"))
@@ -1091,6 +1111,7 @@ mod cases {
     fn candidate_metadata(raw: RawOperation, normalized: Operation) -> Candidate {
         Candidate {
             inner: Arc::new(CandidatesInner {
+                _package: CommandEnvironment::fake().package_guard("candidate").unwrap(),
                 crate_name: "specgate_ctsc_fixtures".to_string(),
                 target_name: "rust".into(),
                 language: specgate_discovery::binding::Language::Rust,

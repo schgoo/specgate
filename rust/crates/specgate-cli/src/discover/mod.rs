@@ -61,7 +61,11 @@ pub fn discover(request: DiscoverRequest) -> Result<DiscoverReport, failure::Dis
 pub fn discover_with(request: &Request, system: &CommandEnvironment, discovery: &Discovery) -> Result<Report, Error> {
     let label = selected_implementation(request.implementation());
     let component = specgate_discovery::identity::ComponentId::from(request.component());
-    let discovered = discovery.discover(request.binding(), &component, label)?;
+    let resolved = discovery.resolve(request.binding(), &component, label)?;
+    let _package = system
+        .package_guard(&resolved.implementation.sources)
+        .map_err(|error| Error::discovery(error.to_string(), error))?;
+    let discovered = discovery.discover_resolved(resolved)?;
     publish_schema(request, &discovered.schema, system)
 }
 
@@ -146,7 +150,11 @@ pub fn batch_with(
         .iter()
         .map(|request| specgate_discovery::identity::ComponentId::from(request.component()))
         .collect::<Vec<_>>();
-    let batch = discovery.batch(first.binding(), &anchor, label, &components)?;
+    let resolved = discovery.resolve(first.binding(), &anchor, label)?;
+    let _package = system
+        .package_guard(&resolved.implementation.sources)
+        .map_err(|error| Error::discovery(error.to_string(), error))?;
+    let batch = discovery.batch_resolved(resolved, &components)?;
     requests
         .into_iter()
         .map(|request| {
@@ -307,6 +315,17 @@ mod tests {
         let discovery = Discovery::fake();
         discovery.push_batch(Ok(clone_batch(&discovered)));
         let system = CommandEnvironment::fake();
+        let sources = discovered.implementation.implementation.sources.clone();
+        let owner = system.package_guard(&sources).unwrap();
+        let busy = batch_with(
+            [fixture_request("fixture.cli.replay", binding.clone(), "busy/replay.json")],
+            &system,
+            &discovery,
+        )
+        .expect_err("an owned package is rejected before consuming discovery metadata");
+        assert_eq!(busy.stage(), ErrorKind::Discovery);
+        assert!(busy.to_string().contains("package already in use"));
+        drop(owner);
         let report = batch_with(
             [fixture_request("fixture.cli.replay", binding.clone(), "published/replay.json")],
             &system,
@@ -335,6 +354,11 @@ mod tests {
         )
         .expect_err("missing component metadata");
         assert_eq!(missing.stage(), ErrorKind::Discovery);
+        drop(
+            system
+                .package_guard(&sources)
+                .expect("a failed discovery releases package ownership"),
+        );
 
         discovery.push_batch(Ok(discovered));
         system.fail_next("publication denied");
@@ -345,6 +369,11 @@ mod tests {
         )
         .expect_err("publication failure");
         assert_eq!(publication.stage(), ErrorKind::Publication);
+        drop(
+            system
+                .package_guard(&sources)
+                .expect("a failed publication releases package ownership"),
+        );
     }
 
     #[test]

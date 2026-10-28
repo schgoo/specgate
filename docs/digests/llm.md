@@ -199,8 +199,17 @@ architecture and status are in `docs/status.md`. Important current boundaries in
   results/errors with matching CTSC declarations;
 - Rust test-only/private setup producers are resolved semantically in actual
   Cargo test targets; generated replay hooks run instead of ordinary tests.
+  Each target declares `spec_component!` at its own crate root; the declaration
+  emits the CLI-owned hook without SpecGate compiler wrappers or source copying/writes.
+  Generated builds diagnose missing declarations even with explicit `spec` values;
+  a hook-only default does not register an unused component.
+  Configured compiler wrappers remain under normal Cargo handling.
   Construction inputs remain primitive, and equal receiver producer/input
   identities share state within a scenario;
+- `discover`, `capture`, and `replay` reject overlapping commands against the
+  same canonical package sources immediately and retain ownership through
+  publication; reusable replay handles share the lease. Ordinary `cargo test`
+  parallelism is unchanged;
 - async/generic setups, cross-target setup environments, overlapping sibling
   scheduling, top-level abandonment, explicit type mappings, structured
   construction inputs, and C# candidate replay remain unsupported;

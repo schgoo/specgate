@@ -138,6 +138,23 @@ receiver producer module. Plain test-only operations also select their recorded
 Cargo target, and integration-local module paths are checked against that
 target's compiler-reported crate root.
 
+Each Cargo target needing generated discovery/replay hooks declares
+`spec_component!` at its own crate root, including operation-only, binary-unit,
+and integration-test crates. The declaration emits the hidden hook only for
+CLI-owned builds with `SPECGATE_TEST_ENTRY`; ordinary tests gain no generated
+entry. Builds use original, potentially read-only sources without compiler
+injection, source copying, source writes, links, or a dependency prepass.
+Cargo handles configured compiler wrappers normally. Tracked generated-entry
+and dispatch inputs prevent stale expansion. Generated test targets use a
+package-scoped build namespace to protect ordinary artifacts, including
+unhashed native libraries. Generated builds diagnose a missing crate-root
+declaration even for explicitly qualified operations/setups; a hook-only
+default does not register an unused component. Separate `discover`, `capture`,
+and `replay` commands targeting the same canonical package fail immediately
+while another command owns it, with ownership retained through publication.
+Ordinary `cargo test` parallelism is unchanged. See the
+[ratified replacement](decisions/typed-async-client-replay.md#actual-cargo-test-environments).
+
 Each generic specialization declares its own semantic operation name and
 concrete type arguments. Rust accepts repeatable annotations such as
 `#[spec_operation("find_items", types = "crate::Item")]`; multiple type parameters

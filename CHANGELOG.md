@@ -59,6 +59,9 @@ under `docs/decisions/`, or `docs/contributor/roadmap.md`. Generate with `just c
 
 ### Changed
 
+- **Breaking:** Rust discovery and replay require `spec_component!("...")` in each participating library, binary, and integration-test crate root, including explicitly qualified operations/setups; generated builds use original sources and preserve configured compiler wrappers (#104).
+- `discover`, `capture`, and `replay` reject overlapping commands against the same package immediately while retaining reusable generated-build caches and ordinary `cargo test` parallelism (#106).
+
 - Retired duplicate C# woven behavioral tests and unused fixtures; setup rejection
   tests now exercise woven boundaries outside the captured native test project (#47).
 - Bindings use `components.<id>.implementations.<label>` with `language`,

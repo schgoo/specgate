@@ -157,7 +157,7 @@ pub fn expand_setup(attribute: TokenStream2, item: TokenStream2) -> syn::Result<
         ReturnType::Default => "()".to_string(),
         ReturnType::Type(_, ty) => quote!(#ty).to_string(),
     };
-    let dependency = super::harness::dependency();
+    let dependency = super::harness::require_component();
     let expanded = quote! {
         #function
 

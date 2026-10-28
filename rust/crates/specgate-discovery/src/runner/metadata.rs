@@ -325,8 +325,6 @@ struct CargoPackage {
 struct CargoTarget {
     name: String,
     kind: Vec<String>,
-    #[serde(default)]
-    src_path: Option<PathBuf>,
 }
 
 #[derive(Deserialize)]
@@ -357,72 +355,51 @@ struct DependencyKind {
     kind: Option<String>,
 }
 
-pub(super) struct HarnessConfig {
-    pub roots: Vec<PathBuf>,
-    pub facades: Vec<String>,
-    pub build_directory: Option<PathBuf>,
+pub(super) fn harness_build_directory(package: &Path, target: &Path, system: &system::System) -> Result<PathBuf, Error> {
+    generated_build_directory(package, target, None, system)
 }
 
-pub(super) fn harness_config(package: &Path, target: &Path, system: &system::System) -> Result<HarnessConfig, Error> {
+/// Resolve a reusable build directory for an external generated runner.
+///
+/// The namespace includes the canonical candidate manifest and generated Cargo
+/// files. It isolates unhashed native libraries from ordinary builds, generated
+/// test targets, and runners with different dependencies or features.
+///
+/// # Errors
+///
+/// Returns errors resolving the candidate manifest or Cargo's build directory.
+pub fn runner_build_directory(package: impl AsRef<Path>, target: impl AsRef<Path>, cargo: &RunnerCargo) -> Result<PathBuf, Error> {
+    generated_build_directory(package.as_ref(), target.as_ref(), Some(cargo), &system::System::real())
+}
+
+pub(crate) fn generated_build_directory(
+    package: &Path,
+    target: &Path,
+    cargo: Option<&RunnerCargo>,
+    system: &system::System,
+) -> Result<PathBuf, Error> {
+    use std::hash::{Hash as _, Hasher as _};
+
     let manifest = system.filesystem.canonicalize(package.join("Cargo.toml"))?;
     let metadata = cargo_metadata(&manifest, package, Some(target), system)?;
-    let candidate = metadata
+    metadata
         .packages
         .iter()
         .find(|candidate| same_path(&candidate.manifest_path, &manifest, system))
-        .ok_or_else(|| failure("test-harness package is absent from cargo metadata"))?;
-    let roots = candidate
-        .targets
-        .iter()
-        .map(|target| {
-            target
-                .src_path
-                .clone()
-                .ok_or_else(|| failure("Cargo test target has no source path"))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let mut facades = if candidate.name == FACADE_PACKAGE {
-        vec!["crate".to_string()]
+        .ok_or_else(|| failure("generated-build package is absent from cargo metadata"))?;
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    manifest.hash(&mut hash);
+    let scope = if let Some(cargo) = cargo {
+        cargo.manifest.hash(&mut hash);
+        cargo.config.hash(&mut hash);
+        "runner"
     } else {
-        let node = metadata
-            .resolve
-            .as_ref()
-            .and_then(|resolve| resolve.nodes.iter().find(|node| node.id == candidate.id))
-            .ok_or_else(|| failure("test-harness package is absent from the resolved dependency graph"))?;
-        node.deps
-            .iter()
-            .filter(|dependency| {
-                metadata
-                    .packages
-                    .iter()
-                    .any(|package| package.id == dependency.pkg && package.name == FACADE_PACKAGE)
-            })
-            .map(|dependency| dependency.name.replace('-', "_"))
-            .collect::<Vec<_>>()
+        "harness"
     };
-    facades.sort();
-    facades.dedup();
-    let build_directory = if candidate.targets.iter().any(|target| {
-        target
-            .kind
-            .iter()
-            .any(|kind| matches!(kind.as_str(), "cdylib" | "staticlib" | "dylib"))
-    }) {
-        use std::hash::{Hash as _, Hasher as _};
-        let mut hash = std::collections::hash_map::DefaultHasher::new();
-        manifest.hash(&mut hash);
-        let root = metadata
-            .build_directory
-            .ok_or_else(|| failure("Cargo did not report the build directory for an unhashed library target"))?;
-        Some(root.join(format!("specgate-harness-{:016x}", hash.finish())))
-    } else {
-        None
-    };
-    Ok(HarnessConfig {
-        roots,
-        facades,
-        build_directory,
-    })
+    let root = metadata
+        .build_directory
+        .ok_or_else(|| failure("Cargo did not report the build directory for generated targets"))?;
+    Ok(root.join(format!("specgate-{scope}-{:016x}", hash.finish())))
 }
 
 fn cargo_metadata(manifest: &Path, package_root: &Path, target: Option<&Path>, system: &system::System) -> Result<CargoMetadata, Error> {

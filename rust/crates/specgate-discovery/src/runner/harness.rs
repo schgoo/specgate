@@ -1,4 +1,4 @@
-//! Compiler-reported Cargo test targets and CLI-injected crate-root entry points.
+//! Compiler-reported Cargo test targets and component-declared crate-root hooks.
 
 use super::system::{ProcessRequest, System};
 use crate::{
@@ -9,15 +9,6 @@ use crate::{
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-
-mod compiler_build;
-
-#[cfg(test)]
-mod compiler {
-    const ROOTS: &[&str] = &[];
-    const FACADES: &[&str] = &[];
-    include!("harness/compiler.rs");
-}
 
 /// One compiler-reported test executable with an internal crate-root hook.
 #[derive(Debug, Clone)]
@@ -35,7 +26,7 @@ fn failure(message: impl Into<String>) -> Error {
     Error::message(ErrorKind::Cargo, message)
 }
 
-/// Build and enumerate only CLI-injected entry points.
+/// Build and enumerate only component-declared generated entry points.
 ///
 /// # Errors
 /// Reports Cargo, metadata, and libtest enumeration failures.
@@ -59,22 +50,31 @@ fn build_in(
     target: Option<&TestTarget>,
     system: &System,
 ) -> Result<Vec<Binary>, Error> {
-    let wrapper = compiler_build::build(package, scratch, system)?;
-    build_with_wrapper(package, entry, dispatch, module_dispatches, scratch, target, &wrapper, system)
+    let build_directory = super::metadata::harness_build_directory(package, &scratch.join("target"), system)?;
+    build_with_directory(
+        package,
+        entry,
+        dispatch,
+        module_dispatches,
+        scratch,
+        target,
+        &build_directory,
+        system,
+    )
 }
 
 #[expect(
     clippy::too_many_arguments,
-    reason = "test compiler and concrete system adapters are injected independently"
+    reason = "build directory and concrete system adapters are injected independently"
 )]
-fn build_with_wrapper(
+fn build_with_directory(
     package: &Path,
     entry: &Path,
     dispatch: Option<&Path>,
     module_dispatches: &BTreeMap<String, PathBuf>,
     scratch: &Path,
     target: Option<&TestTarget>,
-    compiler: &compiler_build::Compiler,
+    build_directory: &Path,
     system: &System,
 ) -> Result<Vec<Binary>, Error> {
     entry.to_str().ok_or_else(|| failure("test-harness entry path is not Unicode"))?;
@@ -101,23 +101,19 @@ fn build_with_wrapper(
     let request = module_dispatches.iter().fold(request, |request, (module, path)| {
         request.env(format!("SPECGATE_TEST_MODULE_{module}"), path)
     });
-    let request = match &compiler.build_directory {
-        // Cargo omits filename hashes for C-compatible library artifacts.
-        // Wrapper-specific builds must not overwrite ordinary cached rlibs.
-        Some(path) => request.env("CARGO_BUILD_BUILD_DIR", path),
-        None => request,
-    };
     let request = request
         .arg("--no-run")
         .arg("--quiet")
         .arg("--message-format=json")
         .current_dir(package)
-        .env("RUSTC_WORKSPACE_WRAPPER", &compiler.executable)
         .env_remove("CARGO")
         .env_remove("CARGO_MANIFEST_DIR")
         .env("SPECGATE_TEST_ENTRY", entry)
         // Environment-dependent macro expansion must not reuse incremental state.
         .env("CARGO_INCREMENTAL", "0")
+        // Environment changes invalidate expansion but do not change artifact
+        // filenames, including the unhashed native libraries Cargo also builds.
+        .env("CARGO_BUILD_BUILD_DIR", build_directory)
         .env("CARGO_TARGET_DIR", scratch.join("target"))
         .build();
     let output = system.process.output(&request)?;
@@ -273,6 +269,76 @@ mod tests {
     use crate::runner::system::{FakeFs, FakeProcess, ProcessOutput};
     use std::ffi::OsStr;
 
+    mod native;
+
+    #[test]
+    fn component_builds_need_only_metadata_and_cargo_test_without_source_io() {
+        use crate::runner::system::FailureKey;
+        for kind in ["lib", "bin", "test", "cdylib", "staticlib", "dylib"] {
+            let package = Path::new("candidate");
+            let metadata = serde_json::json!({
+                "packages": [{
+                    "id": "candidate", "name": "candidate", "version": "0.0.0",
+                    "manifest_path": package.join("Cargo.toml"),
+                    "source": null, "targets": [{"name": "candidate", "kind": [kind]}]
+                }],
+                "build_directory": "shared"
+            });
+            let system = System::builder((
+                FakeFs::builder()
+                    .failures(
+                        ["write", "read_to_string", "read_dir", "create_dir_all"]
+                            .map(|operation| (FailureKey::test(operation), ["unexpected source I/O".to_string()].into()))
+                            .into(),
+                    )
+                    .build(),
+                FakeProcess::queued([
+                    Ok(ProcessOutput {
+                        success: true,
+                        stdout: serde_json::to_vec(&metadata).unwrap(),
+                        stderr: Vec::new(),
+                    }),
+                    Ok(ProcessOutput {
+                        success: true,
+                        stdout: Vec::new(),
+                        stderr: Vec::new(),
+                    }),
+                ]),
+            ))
+            .build();
+            build_in(
+                package,
+                Path::new("entry.rs"),
+                None,
+                &BTreeMap::new(),
+                Path::new("scratch"),
+                None,
+                &system,
+            )
+            .unwrap();
+            let state = system.process.fake_state();
+            let state = state.lock().unwrap();
+            assert_eq!(state.requests.len(), 2);
+            assert_eq!(state.requests[0].args[0], "metadata");
+            assert_eq!(state.requests[1].args[0], "test");
+            let namespace = &state.requests[1]
+                .env
+                .iter()
+                .find(|(key, _)| key == "CARGO_BUILD_BUILD_DIR")
+                .unwrap()
+                .1;
+            assert_eq!(Path::new(namespace).parent(), Some(Path::new("shared")));
+            assert!(
+                Path::new(namespace)
+                    .file_name()
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .starts_with("specgate-harness-")
+            );
+        }
+    }
+
     #[test]
     fn unhashed_library_builds_use_a_reusable_separate_namespace() {
         let system = System::builder((
@@ -285,17 +351,14 @@ mod tests {
         ))
         .build();
         let namespace = Path::new("shared").join("specgate-harness");
-        build_with_wrapper(
+        build_with_directory(
             Path::new("candidate"),
             Path::new("entry.rs"),
             None,
             &BTreeMap::new(),
             Path::new("scratch"),
             None,
-            &compiler_build::Compiler {
-                executable: PathBuf::from("compiler"),
-                build_directory: Some(namespace.clone()),
-            },
+            &namespace,
             &system,
         )
         .unwrap();
@@ -310,7 +373,7 @@ mod tests {
     }
 
     #[test]
-    fn generated_builds_disable_incremental_without_replacing_shared_dependencies_or_flags() {
+    fn generated_builds_isolate_artifacts_without_replacing_flags_or_wrappers() {
         let system = System::builder((
             FakeFs::default(),
             FakeProcess::queued((0..2).map(|_| {
@@ -323,17 +386,14 @@ mod tests {
         ))
         .build();
         for dispatch in [None, Some(Path::new("dispatch.rs"))] {
-            build_with_wrapper(
+            build_with_directory(
                 Path::new("candidate"),
                 Path::new("entry.rs"),
                 dispatch,
                 &BTreeMap::new(),
                 Path::new("scratch"),
                 None,
-                &compiler_build::Compiler {
-                    executable: PathBuf::from("compiler"),
-                    build_directory: None,
-                },
+                Path::new("shared").join("specgate-harness").as_path(),
                 &system,
             )
             .unwrap();
@@ -343,7 +403,7 @@ mod tests {
         assert_eq!(state.requests.len(), 2);
         for request in &state.requests {
             assert!(request.env.iter().any(|(key, value)| key == "CARGO_INCREMENTAL" && value == "0"));
-            for preserved in ["CARGO_BUILD_BUILD_DIR", "RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS"] {
+            for preserved in ["RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS", "RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER"] {
                 assert!(!request.env.iter().any(|(key, _)| key == preserved));
                 assert!(!request.env_remove.contains(&OsStr::new(preserved).to_os_string()));
             }

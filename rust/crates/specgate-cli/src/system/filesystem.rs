@@ -1,4 +1,7 @@
 //! Filesystem, environment, and scratch-allocation boundary.
+mod package;
+pub(crate) use package::PackageGuard;
+
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::{self, Write};
@@ -44,6 +47,8 @@ struct Fake {
     environment: HashMap<OsString, OsString>,
     directories: HashSet<PathBuf>,
     owned_scratch: HashSet<PathBuf>,
+    owned_packages: HashSet<PathBuf>,
+    package_failure: Option<io::Error>,
     next_scratch: u64,
     clock: Option<SystemTime>,
 }

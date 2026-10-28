@@ -1,5 +1,7 @@
 use typed_client::*;
 
+specgate::spec_component!("fixture.integration_local");
+
 #[path = "../../typed-async/src/setup.rs"]
 mod annotated_environment;
 

@@ -370,7 +370,6 @@ fn cargo_build(manifest: &Path, target_dir: &Path, feature: &str) -> std::io::Re
         .arg(feature)
         .arg("--manifest-path")
         .arg(manifest)
-        .env_remove("RUSTC_WORKSPACE_WRAPPER")
         .env_remove("CARGO")
         .env_remove("CARGO_MANIFEST_DIR")
         .env("CARGO_TARGET_DIR", target_dir)

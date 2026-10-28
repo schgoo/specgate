@@ -13,6 +13,7 @@ pub(crate) use discovery::Failure as DiscoveryFailure;
 pub use execution::Execution;
 pub(crate) use execution::{Request as ProcessRequest, RequestBuilder as ProcessRequestBuilder};
 pub use filesystem::CommandEnvironment;
+pub(crate) use filesystem::PackageGuard;
 pub(crate) use filesystem::Scratch;
 pub(crate) use timestamp::run_id;
 

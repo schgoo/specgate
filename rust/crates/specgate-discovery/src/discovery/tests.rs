@@ -312,7 +312,21 @@ fn runner_failures() {
                 .failures(failures.into_iter().map(|(key, errors)| (FailureKey::test(&key), errors)).collect())
                 .unique_candidates([Ok(PathBuf::from("scratch/run"))].into())
                 .build(),
-            FakeProcess::queued([result]),
+            FakeProcess::queued([
+                Ok(ProcessOutput {
+                    success: true,
+                    stdout: serde_json::to_vec(&serde_json::json!({
+                        "packages": [{
+                            "id": "candidate", "name": "candidate", "version": "1.0.0",
+                            "manifest_path": "candidate/Cargo.toml", "source": null
+                        }],
+                        "build_directory": "shared-build"
+                    }))
+                    .unwrap(),
+                    stderr: Vec::new(),
+                }),
+                result,
+            ]),
         ))
         .environment(BTreeMap::from([
             ("SPECGATE_CACHE_DIR".to_string(), "cache".into()),
@@ -344,9 +358,26 @@ fn runner_failures() {
     for (result, expected) in cases {
         let system = system(result, BTreeMap::new());
         assert_eq!(runner::run_in(&context(), &system).unwrap_err(), expected);
-        let request = system.process.fake_state().lock().unwrap().requests[0].clone();
+        let request = system.process.fake_state().lock().unwrap().requests[1].clone();
         assert_eq!(request.executable, std::ffi::OsString::from("fake-cargo"));
-        assert!(request.env_remove.contains(&std::ffi::OsString::from("RUSTC_WORKSPACE_WRAPPER")));
+        let build_directory = request
+            .env
+            .iter()
+            .find_map(|(key, value)| (key == "CARGO_BUILD_BUILD_DIR").then_some(Path::new(value)))
+            .unwrap();
+        assert_eq!(build_directory.parent(), Some(Path::new("shared-build")));
+        assert!(
+            build_directory
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with("specgate-runner-")
+        );
+        for wrapper in ["RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER"] {
+            assert!(!request.env_remove.contains(&std::ffi::OsString::from(wrapper)));
+            assert!(!request.env.iter().any(|(key, _)| key == wrapper));
+        }
     }
 
     for (key, expected) in [
