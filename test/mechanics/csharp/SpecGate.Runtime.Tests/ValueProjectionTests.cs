@@ -192,6 +192,27 @@ public sealed class ValueProjectionTests
     }
 
     [Fact]
+    public void AnOrdinaryEventDoesNotProjectWriteOnlyProperties()
+    {
+        Value address = Single(
+            nameof(Declarations.Nested),
+            [new Address { City = "Oslo", WriteOnly = "ignored" }]);
+
+        Assert.Equal(Map(("city", Value.String("Oslo"))), address);
+    }
+
+    [Fact]
+    public void PropertySetupOptInDoesNotFlattenEnumsOrAbstractUnions()
+    {
+        Assert.Equal(
+            Value.Tagged("Medium", Value.Unit),
+            Named(Capture(nameof(Declarations.Ranked), [Level.Medium]), "level"));
+        Assert.Equal(
+            Value.Tagged("Circle", Map(("radius", Value.Float(2.5)))),
+            Named(Capture(nameof(Declarations.Variants), [new Circle { Radius = 2.5 }]), "shape"));
+    }
+
+    [Fact]
     public void AVariantProjectsAsItsNameOverItsOwnMembers()
     {
         Assert.Equal(
@@ -539,6 +560,9 @@ internal sealed class Address
     public string City { get; init; } = string.Empty;
 
     public string Note { get; init; } = string.Empty;
+
+    [SpecEvent]
+    public string WriteOnly { init => Note = value; }
 }
 
 [SpecEvent]
@@ -551,7 +575,7 @@ internal sealed class Person
     public Address Home { get; init; } = new();
 }
 
-[SpecEvent]
+[SpecEvent(Setup = true)]
 internal abstract class Shape;
 
 [SpecEvent]
@@ -573,7 +597,7 @@ internal sealed class Unnamed
 }
 
 /// <summary>An enum whose declaration order contradicts its numeric order.</summary>
-[SpecEvent]
+[SpecEvent(Setup = true)]
 internal enum Level
 {
     Low = 30,

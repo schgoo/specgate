@@ -191,7 +191,25 @@ fn primitive(ty: &syn::Type) -> Option<(syn::Type, bool)> {
     match text.as_str() {
         "&str" => Some((parse_quote!(String), true)),
         "String" | "bool" | "i32" | "i64" | "u32" | "u64" | "f32" | "f64" | "()" => Some((ty.clone(), false)),
-        _ => None,
+        _ => {
+            let syn::Type::Path(path) = ty else {
+                return None;
+            };
+            let segment = path.path.segments.last()?;
+            let syn::PathArguments::AngleBracketed(arguments) = &segment.arguments else {
+                return None;
+            };
+            let count = match segment.ident.to_string().as_str() {
+                "Vec" | "Option" | "BTreeSet" | "HashSet" => 1,
+                "BTreeMap" | "HashMap" => 2,
+                _ => return None,
+            };
+            (arguments.args.len() == count
+                && arguments.args.iter().all(
+                    |argument| matches!(argument, syn::GenericArgument::Type(ty) if primitive(ty).is_some_and(|(_, borrowed)| !borrowed)),
+                ))
+            .then(|| (ty.clone(), false))
+        }
     }
 }
 

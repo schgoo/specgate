@@ -99,6 +99,31 @@ fn invocation(link: &Link) -> impl quote::ToTokens {
     for (position, parameter) in link.parameters.iter().enumerate() {
         let local = quote::format_ident!("__sg_argument_{position}");
         match parameter {
+            model::Parameter::Properties { rust_type, borrow, fields } => {
+                let mut native: syn::Type = syn::parse_str(rust_type).expect("validated property setup type");
+                if let syn::Type::Path(path) = &mut native {
+                    let root = &mut path.path.segments.first_mut().expect("property setup has a native module").ident;
+                    if link.native_module.split("::").next().is_some_and(|module| root == module) {
+                        *root = syn::Ident::new("crate", root.span());
+                    }
+                }
+                let values = fields.iter().map(|(name, index)| {
+                    quote::quote! {
+                        (#name.to_string(), inputs.get(#index)
+                            .ok_or_else(|| __specgate::harness::error("missing property setup input"))?.clone())
+                    }
+                });
+                bindings.push(quote::quote! {
+                    let mut #local = <#native as __specgate::harness::Input>::decode(
+                        __specgate::Value::Map([#(#values),*].into_iter().collect())
+                    )?;
+                });
+                arguments.push(match borrow.as_str() {
+                    "&" => quote::quote!(&#local),
+                    "&mut " => quote::quote!(&mut #local),
+                    _ => quote::quote!(#local),
+                });
+            }
             model::Parameter::Input(index) => {
                 let definition = &link.inputs[*index];
                 let borrowed = definition.rust_type.replace(' ', "") == "&str";
@@ -160,5 +185,43 @@ fn invocation(link: &Link) -> impl quote::ToTokens {
         }
         let _ = #call(#(#arguments),*) #awaited;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Link, invocation, model};
+    use quote::ToTokens as _;
+
+    #[test]
+    fn property_reconstruction_keeps_external_crate_paths_in_lexical_bridges() {
+        let mut link = Link {
+            explicit_component: true,
+            native_module: "integration::operations".into(),
+            component_id: "fixture.property_setup".into(),
+            operation_name: "run".into(),
+            module_path: vec!["operations".into()],
+            fn_name: "run".into(),
+            type_arguments: Vec::new(),
+            inputs: Vec::new(),
+            output: None,
+            is_async: false,
+            is_method: false,
+            setups: Vec::new(),
+            parameters: vec![model::Parameter::Properties {
+                rust_type: "library::Query".into(),
+                borrow: "&mut ".into(),
+                fields: vec![("filter".into(), 0)],
+            }],
+        };
+        let external = invocation(&link).into_token_stream().to_string();
+        assert!(
+            external.contains("library :: Query as __specgate :: harness :: Input"),
+            "{external}"
+        );
+        link.native_module = "library::operations".into();
+        let local = invocation(&link).into_token_stream().to_string();
+        assert!(local.contains("crate :: Query as __specgate :: harness :: Input"), "{local}");
+        assert!(local.contains("& mut __sg_argument_0"), "{local}");
     }
 }

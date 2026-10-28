@@ -87,7 +87,7 @@ components:
       csharp: *csharp_fixtures
   fixture.extract:
     implementations:
-      rust: *rust_fixtures
+      rust: *rust_async
   fixture.fallible_unit:
     implementations:
       rust: *rust_async
@@ -201,6 +201,10 @@ components:
     implementations:
       rust: *rust_fixtures
       csharp: *csharp_fixtures
+  fixture.property_setup:
+    implementations:
+      rust: *rust_fixtures
+      csharp: *csharp_fixtures
   fixture.setup_with_params:
     implementations:
       rust: *rust_fixtures
@@ -294,5 +298,11 @@ components:
     implementations:
       rust: *rust_negative
   fixture.compile_error:
+    implementations:
+      rust: *rust_negative
+  fixture.missing_default:
+    implementations:
+      rust: *rust_negative
+  fixture.property_collision:
     implementations:
       rust: *rust_negative

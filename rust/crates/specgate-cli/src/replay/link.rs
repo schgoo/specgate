@@ -381,6 +381,33 @@ pub(super) fn link_operation(reference: &specgate_ctsc::replay::model::RegistryO
                     borrow: borrow.to_string(),
                     projection,
                 })
+            } else if let Some(properties) =
+                specgate_discovery::setup::property_setup(raw, parameter.ty.as_str(), &candidate.metadata().raw_registry)
+                    .map_err(|error| Error::wrap(super::ErrorKind::Linking, "candidate property setup resolution failed", error))?
+            {
+                let native: syn::Type =
+                    syn::parse_str(parameter.ty.as_str()).map_err(|error| Error::from(format!("invalid property setup type: {error}")))?;
+                let borrow = match &native {
+                    syn::Type::Reference(reference) if reference.mutability.is_some() => "&mut ",
+                    syn::Type::Reference(_) => "&",
+                    _ => "",
+                };
+                let rust_type = format!("{}::{}", properties.module_path, properties.native_name);
+                Ok(super::model::Parameter::Properties {
+                    rust_type,
+                    borrow: borrow.to_string(),
+                    fields: properties
+                        .fields
+                        .iter()
+                        .map(|field| {
+                            inputs
+                                .iter()
+                                .position(|input| input.name == field.name.as_str())
+                                .map(|index| (field.name.to_string(), index))
+                                .ok_or_else(|| Error::from(format!("missing property setup field '{}'", field.name)))
+                        })
+                        .collect::<Result<_, _>>()?,
+                })
             } else {
                 inputs
                     .iter()
@@ -442,7 +469,7 @@ pub(super) fn validate_inputs(reference: &specgate_ctsc::replay::model::Registry
             &reference_input.value_type,
             ValueContext::new(reference.component_id().as_str(), reference.name().as_str(), &reference_input.name),
         )?;
-        if candidate_input.ty != expected_type {
+        if candidate_input.ty.as_str() != expected_type {
             return failure(format!(
                 "candidate operation '{}::{}' input '{}' type mismatch: expected '{}', found '{}'",
                 reference.component_id(),
@@ -616,7 +643,7 @@ fn named_references(value: &serde_json::Value, component: &str, pending: &mut Ve
 
 fn outcome_type_name(value_type: &ReplayType, context: ValueContext<'_>) -> Result<String, Error> {
     if value_type.primitive_name().is_some() {
-        return semantic_name(value_type, context).map(str::to_string);
+        return semantic_name(value_type, context);
     }
     if let Some((name, owner)) = value_type.named_parts() {
         return Ok(match owner.component_id() {
@@ -658,19 +685,34 @@ impl<'a> ValueContext<'a> {
     }
 }
 
-pub(super) fn semantic_name<'a>(value_type: &'a ReplayType, context: ValueContext<'_>) -> Result<&'a str, Error> {
+pub(super) fn semantic_name(value_type: &ReplayType, context: ValueContext<'_>) -> Result<String, Error> {
     let ValueContext {
         component,
         operation,
         name: value_name,
     } = context;
+    if let Some(item) = value_type.element_type() {
+        let constructor = if value_type.kind_name() == "set" { "set" } else { "List" };
+        return Ok(format!("{constructor}<{}>", semantic_name(item, context)?));
+    }
+    if let Some(inner) = value_type.optional_value() {
+        return Ok(format!("Option<{}>", semantic_name(inner, context)?));
+    }
+    if let Some((keys, values)) = value_type.map_types() {
+        if keys.primitive_name() != Some("string") {
+            return failure(format!(
+                "operation '{component}::{operation}' value '{value_name}' requires string map keys"
+            ));
+        }
+        return Ok(format!("map<string, {}>", semantic_name(values, context)?));
+    }
     let Some(name) = value_type.primitive_name() else {
         return failure(format!(
             "operation '{component}::{operation}' value '{value_name}' uses unsupported structured type"
         ));
     };
     match name {
-        "unit" | "string" | "bool" | "i32" | "i64" | "u32" | "u64" | "f32" | "f64" => Ok(name),
+        "unit" | "string" | "bool" | "i32" | "i64" | "u32" | "u64" | "f32" | "f64" => Ok(name.to_string()),
         other => failure(format!(
             "operation '{component}::{operation}' value '{value_name}' uses unsupported primitive '{other}'"
         )),
@@ -686,7 +728,35 @@ pub(super) fn check_rust(semantic_type: &ReplayType, rust_type: impl AsRef<str>,
     } = context;
     let semantic = semantic_name(semantic_type, context)?;
     let native = rust_type.chars().filter(|character| !character.is_whitespace()).collect::<String>();
-    let supported = match semantic {
+    if semantic_type.primitive_name().is_none() {
+        let (constructor, arguments) = native_arguments(rust_type)?;
+        if arguments.iter().any(|argument| argument.contains('&')) {
+            return failure(format!(
+                "candidate operation '{component}::{operation}' input '{input}' uses borrowed collection elements; replay requires owned elements"
+            ));
+        }
+        if let Some(item) = semantic_type.element_type() {
+            let supported = if semantic_type.kind_name() == "set" {
+                matches!(constructor.as_str(), "BTreeSet" | "HashSet")
+            } else {
+                constructor == "Vec"
+            };
+            if supported && arguments.len() == 1 {
+                return check_rust(item, &arguments[0], context);
+            }
+        } else if let Some(inner) = semantic_type.optional_value() {
+            if constructor == "Option" && arguments.len() == 1 {
+                return check_rust(inner, &arguments[0], context);
+            }
+        } else if let Some((keys, values)) = semantic_type.map_types()
+            && matches!(constructor.as_str(), "BTreeMap" | "HashMap")
+            && arguments.len() == 2
+        {
+            check_rust(keys, &arguments[0], context)?;
+            return check_rust(values, &arguments[1], context);
+        }
+    }
+    let supported = match semantic.as_str() {
         "unit" => native == "()",
         "string" => native == "String" || native == "&str",
         "bool" => native == "bool",
@@ -705,6 +775,27 @@ pub(super) fn check_rust(semantic_type: &ReplayType, rust_type: impl AsRef<str>,
             "candidate operation '{component}::{operation}' input '{input}' uses unsupported Rust type '{rust_type}' for semantic type '{semantic}'"
         ))
     }
+}
+
+pub(super) fn native_arguments(rust_type: &str) -> Result<(String, Vec<String>), Error> {
+    let parsed: syn::Type =
+        syn::parse_str(rust_type).map_err(|error| Error::from(format!("invalid Rust replay input type '{rust_type}': {error}")))?;
+    let syn::Type::Path(path) = parsed else {
+        return failure(format!("unsupported Rust collection input type '{rust_type}'"));
+    };
+    let segment = path.path.segments.last().ok_or_else(|| Error::from("missing collection type"))?;
+    let syn::PathArguments::AngleBracketed(arguments) = &segment.arguments else {
+        return failure(format!("missing Rust collection type arguments for '{rust_type}'"));
+    };
+    let arguments = arguments
+        .args
+        .iter()
+        .map(|argument| match argument {
+            syn::GenericArgument::Type(ty) => Ok(quote::quote!(#ty).to_string()),
+            _ => failure(format!("unsupported Rust collection type argument in '{rust_type}'")),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((segment.ident.to_string(), arguments))
 }
 
 pub(super) fn module_path(raw: &RawOperation, package_name: impl AsRef<str>) -> Result<Vec<String>, Error> {

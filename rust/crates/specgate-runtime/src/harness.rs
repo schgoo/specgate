@@ -174,7 +174,7 @@ where
     Ok(Box::new(owner))
 }
 
-/// Primitive construction-input conversion used by generated setup bridges.
+/// Lossless construction-input conversion used by generated setup bridges.
 pub trait Input: Sized {
     /// Decode one native construction input.
     ///
@@ -231,6 +231,85 @@ impl Input for () {
         }
     }
 }
+
+impl<T: Input> Input for Vec<T> {
+    fn decode(value: Value) -> Result<Self, CaptureError> {
+        let Value::List(values) = value else {
+            return Err(error("expected a list input"));
+        };
+        values
+            .into_iter()
+            .enumerate()
+            .map(|(index, value)| T::decode(value).map_err(|source| error(format!("list input [{index}]: {source}"))))
+            .collect()
+    }
+}
+
+impl<T: Input> Input for Option<T> {
+    fn decode(value: Value) -> Result<Self, CaptureError> {
+        let Value::Map(mut values) = value else {
+            return Err(error("expected a Some/None optional input"));
+        };
+        if values.len() != 1 {
+            return Err(error("expected exactly one Some/None optional tag"));
+        }
+        if let Some(value) = values.remove("Some") {
+            return T::decode(value)
+                .map(Some)
+                .map_err(|source| error(format!("optional input .Some: {source}")));
+        }
+        match values.remove("None") {
+            Some(Value::Map(unit)) if unit.is_empty() => Ok(None),
+            _ => Err(error("expected a unit None payload")),
+        }
+    }
+}
+
+macro_rules! set_input {
+    ($set:ident, [$($bounds:tt)+] $(, $hasher:ident)?) => {
+        impl<T: Input + $($bounds)+ $(, $hasher: std::hash::BuildHasher + Default)?> Input for std::collections::$set<T $(, $hasher)?> {
+            fn decode(value: Value) -> Result<Self, CaptureError> {
+                let Value::Set(values) = value else {
+                    return Err(error("expected a set input"));
+                };
+                let mut result = Self::default();
+                for (index, value) in values.into_iter().enumerate() {
+                    let value = T::decode(value)
+                        .map_err(|source| error(format!("set input [{index}]: {source}")))?;
+                    if !result.insert(value) {
+                        return Err(error("duplicate set input element"));
+                    }
+                }
+                Ok(result)
+            }
+        }
+    };
+}
+
+set_input!(BTreeSet, [Ord]);
+set_input!(HashSet, [Eq + std::hash::Hash], S);
+
+macro_rules! map_input {
+    ($map:ident $(, $hasher:ident)?) => {
+        impl<T: Input $(, $hasher: std::hash::BuildHasher + Default)?> Input for std::collections::$map<String, T $(, $hasher)?> {
+            fn decode(value: Value) -> Result<Self, CaptureError> {
+                let Value::Map(values) = value else {
+                    return Err(error("expected a string-keyed map input"));
+                };
+                values
+                    .into_iter()
+                    .map(|(key, value)| {
+                        let decoded = T::decode(value).map_err(|source| error(format!("map input [{key:?}]: {source}")))?;
+                        Ok((key, decoded))
+                    })
+                    .collect()
+            }
+        }
+    };
+}
+
+map_input!(BTreeMap);
+map_input!(HashMap, S);
 
 /// Decode the next construction input without silently supplying missing values.
 ///
@@ -290,6 +369,36 @@ mod tests {
         assert_eq!(super::run_sync(async { 7 }).unwrap(), 7);
         let error = super::run_sync(std::future::pending::<()>()).unwrap_err();
         assert!(error.to_string().contains("unexpectedly suspended"), "{error}");
+    }
+
+    #[test]
+    fn collection_inputs_decode_recursively_and_reject_loss() {
+        use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+
+        let some = Value::Map(BTreeMap::from([("Some".to_string(), Value::List(vec![Value::Unsigned(u64::MAX)]))]));
+        let values = Value::Map(BTreeMap::from([
+            ("present".to_string(), some),
+            (
+                "absent".to_string(),
+                Value::Map(BTreeMap::from([("None".to_string(), Value::Map(BTreeMap::new()))])),
+            ),
+        ]));
+        let decoded = BTreeMap::<String, Option<Vec<u64>>>::decode(values.clone()).unwrap();
+        assert_eq!(decoded["present"], Some(vec![u64::MAX]));
+        assert_eq!(decoded["absent"], None);
+        assert_eq!(
+            HashMap::<String, Option<Vec<u64>>>::decode(values).unwrap()["present"],
+            Some(vec![u64::MAX])
+        );
+        let set = Value::Set(BTreeSet::from([Value::Integer(1), Value::Integer(2)]));
+        assert_eq!(BTreeSet::<i32>::decode(set.clone()).unwrap(), BTreeSet::from([1, 2]));
+        assert_eq!(HashSet::<i32>::decode(set).unwrap(), HashSet::from([1, 2]));
+        BTreeSet::<i32>::decode(Value::Set(BTreeSet::from([Value::String("invalid".to_string())]))).unwrap_err();
+        Option::<i32>::decode(Value::Map(BTreeMap::new())).unwrap_err();
+        Option::<i32>::decode(Value::Map(BTreeMap::from([("None".to_string(), Value::Integer(0))]))).unwrap_err();
+        let invalid = Value::Map(BTreeMap::from([("entry".to_string(), Value::List(vec![Value::Integer(-1)]))]));
+        let error = BTreeMap::<String, Vec<u32>>::decode(invalid).unwrap_err().to_string();
+        assert!(error.contains("entry") && error.contains("[0]"), "{error}");
     }
 
     #[test]

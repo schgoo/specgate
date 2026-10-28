@@ -67,6 +67,63 @@ mod cases {
     }
 
     #[test]
+    fn ordinary_builds_preserve_shared_cache_and_wrappers() {
+        let execution = Execution::fake();
+        execution.push(Err(std::io::Error::other("build unavailable")));
+        let error = rust::build_binaries(&CommandEnvironment::fake(), &execution, "candidate", "scratch").unwrap_err();
+        assert!(error.diagnostic().contains("build unavailable"), "{error:?}");
+        assert!(error.diagnostic().contains("status: not started"), "{error:?}");
+        let expected = ProcessRequest::builder(cargo_bin())
+            .args(["test", "--no-run", "--quiet", "--message-format=json"])
+            .current_dir("candidate")
+            .env_remove("CARGO")
+            .env_remove("CARGO_MANIFEST_DIR")
+            .env("CARGO_TARGET_DIR", Path::new("scratch").join("target"))
+            .build();
+        assert_eq!(execution.requests(), vec![expected]);
+    }
+
+    #[test]
+    fn subprocess_failures_report_context() {
+        let system = CommandEnvironment::fake();
+        system.seed_environment("CARGO_BUILD_BUILD_DIR", "shared-build");
+        let execution = Execution::fake();
+        execution.push(Ok(crate::system::test_output(101, "compiler output", "build failure")));
+        let error = rust::build_binaries(&system, &execution, "candidate", "scratch").unwrap_err();
+        for expected in [
+            "capture test build failed:",
+            "\"test\" \"--no-run\"",
+            "working directory: candidate",
+            "status:",
+            "101",
+            "CARGO_BUILD_BUILD_DIR: \"shared-build\" (inherited)",
+            "RUSTC_WORKSPACE_WRAPPER: unset",
+            "compiler output",
+            "build failure",
+        ] {
+            assert!(error.diagnostic().contains(expected), "{error:?}");
+        }
+
+        let binaries = [rust::TestBinary {
+            label: "fixture".to_string(),
+            executable: PathBuf::from("fixture-tests"),
+            is_library: true,
+        }];
+        execution.push(Ok(crate::system::test_output(7, "enumeration output", "enumeration failure")));
+        let error = rust::enumerate_tests(&system, &execution, &binaries).unwrap_err();
+        for expected in [
+            "capture test enumeration failed for fixture-tests",
+            "command: \"fixture-tests\" \"--list\" \"--format\" \"terse\"",
+            "status:",
+            "7",
+            "enumeration output",
+            "enumeration failure",
+        ] {
+            assert!(error.diagnostic().contains(expected), "{error:?}");
+        }
+    }
+
+    #[test]
     fn stable_bundle() {
         let root = output_dir("focused");
         let _ = std::fs::remove_dir_all(&root);

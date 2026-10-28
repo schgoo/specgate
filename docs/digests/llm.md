@@ -204,14 +204,15 @@ architecture and status are in `docs/status.md`. Important current boundaries in
   Generated builds diagnose missing declarations even with explicit `spec` values;
   a hook-only default does not register an unused component.
   Configured compiler wrappers remain under normal Cargo handling.
-  Construction inputs remain primitive, and equal receiver producer/input
+  Construction inputs support primitives and recursive lists, sets, string-keyed
+  maps, and optionals. Explicit property setups fold selected fields, and equal receiver producer/input
   identities share state within a scenario;
 - `discover`, `capture`, and `replay` reject overlapping commands against the
   same canonical package sources immediately and retain ownership through
   publication; reusable replay handles share the lease. Ordinary `cargo test`
   parallelism is unchanged;
 - async/generic setups, cross-target setup environments, overlapping sibling
-  scheduling, top-level abandonment, explicit type mappings, structured
+  scheduling, top-level abandonment, explicit type mappings, general record
   construction inputs, and C# candidate replay remain unsupported;
 - `spec_trace!` observations are captured but have no registry declarations,
   so observation-emitting components cannot produce linkable bundles;

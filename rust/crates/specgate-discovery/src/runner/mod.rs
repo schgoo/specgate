@@ -6,11 +6,13 @@
 //! composition shared by real and fake adapters.
 
 pub(crate) mod cache;
+mod diagnostics;
 pub mod harness;
 mod metadata;
 pub(crate) mod system;
 
 pub use crate::discovery::runner::{cargo_bin, run_discovery};
+pub use diagnostics::process_diagnostic;
 pub use metadata::{
     CandidateDeps, CandidatePackage, Dependency, DependencyBuilder, ExecutorDependency, PackageSource, RunnerCargo, candidate_package,
     runner_build_directory, runner_cargo,

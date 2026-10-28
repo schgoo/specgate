@@ -118,6 +118,17 @@ public sealed class OperationScope
                 continue;
             }
 
+            if (input.Type.Declared is Type { IsEnum: false, IsAbstract: false } type
+                && SemanticType.IsPropertySetup(type))
+            {
+                foreach (KeyValuePair<string, Value> member in value.AsMap())
+                {
+                    Merge(folded, producers, member.Key, member.Value,
+                        $"property setup parameter '{input.Name}'");
+                }
+                continue;
+            }
+
             Merge(folded, producers, input.Name, value, $"operation parameter '{input.Name}'");
         }
 

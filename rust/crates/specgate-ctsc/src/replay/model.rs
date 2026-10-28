@@ -563,12 +563,12 @@ pub struct Registry {
     pub operations: Vec<RegistryOp>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
-/// Lossless primitive value supported by replay.
+/// Lossless primitive or recursively owned collection value supported by replay.
 #[expect(
     clippy::exhaustive_enums,
-    reason = "replay values are a closed CTSC primitive algebra exhaustively encoded by runners"
+    reason = "replay values are a closed CTSC input algebra exhaustively encoded by runners"
 )]
 pub enum Value {
     /// Unit value.
@@ -589,6 +589,14 @@ pub enum Value {
     F32Bits(u32),
     /// Exact IEEE-754 binary64 bits.
     F64Bits(u64),
+    /// Ordered recursively decoded inputs.
+    List(Vec<Value>),
+    /// Unordered duplicate-free inputs.
+    Set(BTreeSet<Value>),
+    /// String-keyed recursively decoded inputs.
+    Map(std::collections::BTreeMap<String, Value>),
+    /// Explicit CTSC Some/None value.
+    Optional(Option<Box<Value>>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -602,7 +610,7 @@ pub struct Input {
     pub name: String,
     /// Declared semantic type.
     pub value_type: Type,
-    /// Decoded primitive value.
+    /// Decoded input value.
     pub value: Value,
 }
 

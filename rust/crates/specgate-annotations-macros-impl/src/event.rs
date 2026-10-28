@@ -41,7 +41,29 @@ pub fn expand_event(input: TokenStream2) -> syn::Result<TokenStream2> {
         .map(|literal| literal.value());
     let component = component(owner.as_deref());
     let (impl_generics, type_generics, where_clause) = input.generics.split_for_impl();
-    let type_name = event_name(&input.attrs, name.to_string()).unwrap_or_else(|| name.to_string());
+    let mut type_name = event_name(&input.attrs, name.to_string()).unwrap_or_else(|| name.to_string());
+    let mut property_setup = false;
+    for attribute in input.attrs.iter().filter(|attribute| attribute.path().is_ident("spec_event")) {
+        if attribute.meta.require_list().is_ok() && attribute.parse_args::<LitStr>().is_err() {
+            attribute.parse_nested_meta(|meta| {
+                if meta.path.is_ident("setup") {
+                    property_setup = true;
+                } else if meta.path.is_ident("name") {
+                    type_name = meta.value()?.parse::<LitStr>()?.value();
+                } else {
+                    return Err(meta.error("expected `name` or `setup`"));
+                }
+                Ok(())
+            })?;
+        }
+    }
+    if property_setup && (!input.generics.params.is_empty() || !matches!(input.data, Data::Struct(_))) {
+        return Err(syn::Error::new_spanned(
+            name,
+            "property setups require a nongeneric named-field struct",
+        ));
+    }
+    let mut reconstruction = TokenStream2::new();
 
     let (projection, fields, variants, kind) = match &input.data {
         Data::Struct(data) => {
@@ -54,9 +76,66 @@ pub fn expand_event(input: TokenStream2) -> syn::Result<TokenStream2> {
                 .filter_map(|field| {
                     let ident = field.ident.as_ref()?;
                     event_field(&field.attrs, ident.to_string())
+                        .or_else(|| {
+                            (property_setup
+                                && !named
+                                    .named
+                                    .iter()
+                                    .any(|field| field.attrs.iter().any(|attribute| attribute.path().is_ident("spec_event"))))
+                            .then(|| (ident.to_string(), false))
+                        })
                         .map(|(semantic_name, path_projection)| (ident, &field.ty, semantic_name, path_projection))
                 })
                 .collect::<Vec<_>>();
+            if property_setup {
+                let mut semantic_names = std::collections::BTreeSet::new();
+                for (ident, _, semantic_name, path_projection) in &selected {
+                    if let Some(field) = named.named.iter().find(|field| field.ident.as_ref() == Some(*ident))
+                        && !matches!(field.vis, syn::Visibility::Public(_))
+                    {
+                        return Err(syn::Error::new_spanned(
+                            field,
+                            "property setup inputs must be public so generated replay runners can reconstruct them",
+                        ));
+                    }
+                    if *path_projection {
+                        return Err(syn::Error::new_spanned(
+                            name,
+                            "property setup fields cannot use a lossy path projection; use an explicit producer",
+                        ));
+                    }
+                    if !semantic_names.insert(semantic_name) {
+                        return Err(syn::Error::new_spanned(
+                            name,
+                            format!("property setup produces duplicate input name '{semantic_name}'"),
+                        ));
+                    }
+                }
+                let fields = selected.iter().map(|(ident, ty, semantic_name, _)| {
+                    quote! {
+                        #ident: <#ty as #rt::harness::Input>::decode(
+                            values.remove(#semantic_name).ok_or_else(|| #rt::harness::error(
+                                concat!("missing property setup input '", #semantic_name, "'")
+                            ))?
+                        )?
+                    }
+                });
+                let omitted = (selected.len() != named.named.len()).then(|| quote!(..::core::default::Default::default()));
+                reconstruction = quote! {
+                    impl #rt::harness::Input for #name {
+                        fn decode(value: #rt::Value) -> ::core::result::Result<Self, #rt::CaptureError> {
+                            let #rt::Value::Map(mut values) = value else {
+                                return ::core::result::Result::Err(#rt::harness::error("expected property setup inputs"));
+                            };
+                            let result = Self { #(#fields,)* #omitted };
+                            if !values.is_empty() {
+                                return ::core::result::Result::Err(#rt::harness::error("unexpected property setup inputs"));
+                            }
+                            ::core::result::Result::Ok(result)
+                        }
+                    }
+                };
+            }
             let values_ident = hygienic_ident("__specgate_struct_values");
             let inserts = selected.iter().map(|(ident, _ty, semantic_name, path_projection)| {
                 let value = if *path_projection {
@@ -202,7 +281,9 @@ pub fn expand_event(input: TokenStream2) -> syn::Result<TokenStream2> {
             return Err(syn::Error::new_spanned(name, "SpecEvent supports structs and enums only"));
         }
     };
+    let property_metadata = property_setup.then(|| quote!(.property_setup(#rt::RustType::new(stringify!(#name)))));
     let expanded = quote! {
+        #reconstruction
         impl #impl_generics #rt::ToNativeValue for #name #type_generics #where_clause {
             fn to_native_value(&self) -> #rt::Value {
                 #projection
@@ -223,6 +304,7 @@ pub fn expand_event(input: TokenStream2) -> syn::Result<TokenStream2> {
             })
             .fields(#fields)
             .variants(#variants)
+            #property_metadata
             .build();
         };
     };
@@ -261,4 +343,25 @@ fn event_name(attributes: impl AsRef<[syn::Attribute]>, default: impl AsRef<str>
 
 fn hygienic_ident(value: impl AsRef<str>) -> Ident {
     Ident::new(value.as_ref(), Span::mixed_site())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn property_setup_name_is_independent_of_attribute_order() {
+        let first = expand_event(quote! {
+            #[spec_event(name = "Canonical", setup)]
+            pub struct Native { pub value: u32 }
+        })
+        .unwrap();
+        let last = expand_event(quote! {
+            #[spec_event(setup, name = "Canonical")]
+            pub struct Native { pub value: u32 }
+        })
+        .unwrap();
+        assert!(last.to_string().contains("\"Canonical\""));
+        assert_eq!(first.to_string(), last.to_string());
+    }
 }

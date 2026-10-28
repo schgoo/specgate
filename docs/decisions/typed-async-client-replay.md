@@ -173,10 +173,11 @@ with their original wrappers. Synchronous replay requires no async engine.
 
 ## Canonical adapters and structured inputs
 
-**Accepted direction; structured-input reconstruction is not implemented.**
+**Accepted direction; general structured-input reconstruction is not implemented.**
 The owner selected design-first work for structured inputs and cross-language
 shape differences, with candidate-code adapters exposing one shared CTSC
-contract. This decision does not expand the current replay capability.
+contract. The later [constructor and property setup decision](constructor-and-property-setups.md)
+implements a narrower opt-in and recursive collection inputs.
 
 Adapters are ordinary annotated operation boundaries. They expose canonical
 contract types, convert canonical arguments to application types, invoke the
@@ -197,8 +198,11 @@ Native application declarations do not need to change.
 Structured input support requires a separate, opt-in, fallible reconstruction
 contract. Capture projection alone is insufficient: `SpecEvent` can select only
 some fields, and those fields may not reconstruct a valid application value.
-An automatic inverse must not fill omitted fields with `Default`. Types with
-construction invariants must use explicit constructors or adapters.
+Projection alone must not fill omitted fields with `Default`. The separately
+ratified [constructor and property setup decision](constructor-and-property-setups.md)
+allows defaulting only for explicitly opted-in property setups: that opt-in
+promises omitted fields may safely be defaulted. Types with construction
+invariants must use explicit constructors or adapters.
 
 The planned reconstruction path must:
 
@@ -214,7 +218,7 @@ The planned reconstruction path must:
   and runtime bridge rather than merely removing the existing input rejection.
 
 The exact public reconstruction API is not ratified here. Until that vertical
-slice is implemented, structured operation inputs remain unsupported and
+slice is implemented, general record and tagged-union operation inputs remain unsupported and
 canonical structured input adapters are a design, not an advertised workaround.
 
 ## C# specialization validation and caching

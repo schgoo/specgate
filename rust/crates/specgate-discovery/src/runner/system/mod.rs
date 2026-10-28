@@ -25,6 +25,8 @@ pub(crate) use filesystem::{Filesystem, UniqueDirectory};
 pub(crate) use process::FakeProcess;
 #[cfg(any(test, feature = "test-util"))]
 pub(crate) use process::ProcessOutput;
+#[cfg(test)]
+pub(crate) use process::test_status;
 pub(crate) use process::{Process, Request as ProcessRequest};
 
 fn failure(message: impl Into<String>) -> Error {
@@ -47,6 +49,16 @@ pub(crate) struct System {
 }
 
 impl System {
+    pub(crate) fn output(&self, request: &ProcessRequest) -> Result<std::process::Output, Error> {
+        self.process.output(request).map_err(|source| {
+            Error::cause(
+                ErrorKind::System,
+                format!("{source}\n{}", request.diagnostic(None, &self.environment)),
+                source,
+            )
+        })
+    }
+
     #[cfg(any(test, feature = "test-util"))]
     /// Starts a deterministic system from fake filesystem and process adapters.
     pub(crate) fn builder(dependencies: impl Into<SystemDeps>) -> SystemBuilder {

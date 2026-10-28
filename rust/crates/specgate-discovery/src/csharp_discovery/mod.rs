@@ -85,7 +85,7 @@ fn build_project(
         .process
         .output(&build)
         .map_err(|source| with_source(format!("failed to invoke dotnet build for C# {context}: {source}"), source))?;
-    if !build_out.success {
+    if !build_out.status.success() {
         let stderr = String::from_utf8_lossy(&build_out.stderr);
         let stdout = String::from_utf8_lossy(&build_out.stdout);
         let combined = format!("{stderr}\n{stdout}");
@@ -269,7 +269,7 @@ fn reflect(built: &BuildOutput, components: &[impl AsRef<str>], scratch: &Path, 
         .process
         .output(&request)
         .map_err(|source| with_source(format!("failed to invoke dotnet for C# discovery: {source}"), source))?;
-    if !output.success {
+    if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
         let combined = format!("{stderr}\n{stdout}");
@@ -397,7 +397,7 @@ mod tests {
 
     fn success() -> crate::runner::system::ProcessOutput {
         crate::runner::system::ProcessOutput {
-            success: true,
+            status: crate::runner::system::test_status(0),
             stdout: Vec::new(),
             stderr: Vec::new(),
         }
@@ -412,7 +412,7 @@ mod tests {
         );
 
         let build_nonzero = fake_system(vec![Ok(crate::runner::system::ProcessOutput {
-            success: false,
+            status: crate::runner::system::test_status(1),
             stdout: b"stdout line".to_vec(),
             stderr: b"stderr line".to_vec(),
         })]);
@@ -426,7 +426,7 @@ mod tests {
             ),
             (
                 Ok(crate::runner::system::ProcessOutput {
-                    success: false,
+                    status: crate::runner::system::test_status(1),
                     stdout: b"runner stdout".to_vec(),
                     stderr: b"runner stderr".to_vec(),
                 }),
@@ -646,7 +646,7 @@ mod tests {
             diagnostics
         });
         let system = fake_system(vec![Ok(crate::runner::system::ProcessOutput {
-            success: false,
+            status: crate::runner::system::test_status(1),
             stdout: b"stdout omitted\n".to_vec(),
             stderr: stderr.into_bytes(),
         })]);

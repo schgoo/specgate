@@ -23,7 +23,7 @@ fn generated_runner_build_directories_isolate_cargo_graphs() {
     use crate::runner::system::{FakeFs, FakeProcess, ProcessOutput, System};
 
     let output = ProcessOutput {
-        success: true,
+        status: system::test_status(0),
         stdout: serde_json::to_vec(&serde_json::json!({
             "packages": [
                 {"id": "candidate", "name": "candidate", "version": "1.0.0",

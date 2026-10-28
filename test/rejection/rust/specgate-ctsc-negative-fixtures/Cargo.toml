@@ -6,6 +6,7 @@ publish = false
 
 [features]
 compile-error = []
+missing-default = []
 
 [dependencies]
 specgate = { path = "../../../../rust/crates/specgate" }

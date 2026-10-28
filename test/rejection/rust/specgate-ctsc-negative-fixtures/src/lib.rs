@@ -147,6 +147,27 @@ pub mod private_operation {
 pub mod unresolved_type;
 pub mod value_surfaces;
 
+pub mod property_collision {
+    use specgate::{SpecEvent, spec_operation};
+
+    #[derive(Debug, SpecEvent)]
+    #[spec_component("fixture.property_collision")]
+    #[spec_event(setup)]
+    pub struct Query {
+        pub value: i32,
+    }
+
+    #[spec_operation("read", spec = "fixture.property_collision")]
+    pub fn read(query: Query, value: i32) -> i32 {
+        query.value + value
+    }
+}
+
+#[cfg(feature = "missing-default")]
+mod missing_default {
+    include!("templates/missing_default.rs.in");
+}
+
 #[cfg(feature = "compile-error")]
 mod compile_error {
     include!("templates/compile_error.rs.in");
