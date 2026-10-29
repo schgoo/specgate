@@ -25,6 +25,8 @@ just clippy
 just format-check
 just deny
 just readme-check
+just docs-check
+just docs-impact
 just changelog
 just ctsc-validate
 just ctsc-smoke
@@ -124,5 +126,8 @@ Only declared case and rejection `expected/` directories are generated product o
   claim otherwise.
 - Crate READMEs are generated from crate-level docs. Edit `lib.rs`, then run
   `just readme`.
+- Behavior changes update the pages `docs/contributor/docs-impact.json` maps to
+  the changed code and search the docs for the old rule's wording. Use a
+  `Docs-Impact: none <reason>` trailer only after checking every listed page.
 - Use `ohno` for new Rust error types.
 - Use LF except `.ps1`, `.cmd`, and `.bat`.

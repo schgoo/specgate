@@ -50,6 +50,9 @@ Use the observe → plan → act → verify loop described in
   mechanisms.
 - Regenerate generated CTSC goldens with `just ctsc-goldens-update`; never edit
   them manually.
+- Update the docs that describe changed behavior and resolve
+  `just docs-impact` findings
+  ([documentation impact](CONTRIBUTING.md#documentation-impact)).
 - Run focused recipes while iterating and `just check` from the repository root
   before commit or handoff. Release and packaging changes also run
   `just package-smoke`.

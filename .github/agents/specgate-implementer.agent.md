@@ -20,7 +20,9 @@ boundaries. Use existing CTSC registry, trace, capture, replay, validator,
 comparator, and golden-matrix mechanisms rather than adding a parallel
 assertion path.
 
-Add focused tests and directly related documentation. Regenerate generated
+Add focused tests and directly related documentation; update the pages that
+`docs/contributor/docs-impact.json` maps to the changed code and resolve every
+`just docs-impact` finding. Regenerate generated
 goldens; never hand-edit them. Use focused `just` recipes while iterating, then
 run `just check`. Release or packaging work also runs `just package-smoke`.
 

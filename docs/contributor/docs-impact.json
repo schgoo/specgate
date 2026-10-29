@@ -1,0 +1,150 @@
+{
+  "$comment": "Maps product source areas to the pages that describe them. See CONTRIBUTING.md#documentation-impact.",
+  "rules": [
+    {
+      "id": "rust-annotations",
+      "code": [
+        "rust/crates/specgate/src/**",
+        "rust/crates/specgate-annotations-macros/src/**",
+        "rust/crates/specgate-annotations-macros-impl/src/**",
+        "rust/crates/specgate-runtime/src/generated.rs",
+        "rust/crates/specgate-runtime/src/registry.rs",
+        "rust/crates/specgate-runtime/src/value.rs"
+      ],
+      "docs": [
+        "docs/guides/instrument-rust-crate.md",
+        "docs/guides/async-capture.md",
+        "docs/reference/value-mapping.md",
+        "docs/reference/limitations.md",
+        "docs/decisions/constructor-and-property-setups.md"
+      ]
+    },
+    {
+      "id": "rust-capture",
+      "code": [
+        "rust/crates/specgate-runtime/src/lib.rs",
+        "rust/crates/specgate-runtime/src/capture.rs",
+        "rust/crates/specgate-runtime/src/capture/**"
+      ],
+      "docs": [
+        "docs/guides/capture-a-reference.md",
+        "docs/guides/async-capture.md",
+        "docs/guides/troubleshoot-capture.md",
+        "docs/reference/bundle.md",
+        "docs/reference/limitations.md"
+      ]
+    },
+    {
+      "id": "csharp-capture",
+      "code": [
+        "csharp/SpecGate.Annotations/**",
+        "csharp/SpecGate.Runtime/**",
+        "csharp/SpecGate.Weaver/**"
+      ],
+      "docs": [
+        "docs/guides/instrument-csharp-assembly.md",
+        "docs/guides/async-capture.md",
+        "docs/guides/capture-a-reference.md",
+        "docs/guides/troubleshoot-capture.md",
+        "docs/reference/value-mapping.md",
+        "docs/reference/limitations.md",
+        "docs/decisions/constructor-and-property-setups.md"
+      ]
+    },
+    {
+      "id": "discovery",
+      "code": [
+        "rust/crates/specgate-discovery/src/discovery/**",
+        "rust/crates/specgate-discovery/src/csharp_discovery/**",
+        "rust/crates/specgate-discovery/src/runner/**",
+        "rust/crates/specgate-cli/src/discover/**",
+        "csharp/SpecGate.Discovery/**"
+      ],
+      "docs": [
+        "docs/guides/capture-a-reference.md",
+        "docs/guides/instrument-rust-crate.md",
+        "docs/guides/instrument-csharp-assembly.md",
+        "docs/guides/troubleshoot-capture.md",
+        "docs/reference/value-mapping.md",
+        "docs/reference/limitations.md"
+      ]
+    },
+    {
+      "id": "binding",
+      "code": [
+        "binding-schema.json",
+        "rust/crates/specgate-discovery/src/binding.rs",
+        "rust/crates/specgate-discovery/src/identity.rs"
+      ],
+      "docs": [
+        "docs/reference/binding.md",
+        "docs/guides/write-a-binding.md"
+      ]
+    },
+    {
+      "id": "cli-capture",
+      "code": [
+        "rust/crates/specgate-cli/src/lib.rs",
+        "rust/crates/specgate-cli/src/main.rs",
+        "rust/crates/specgate-cli/src/main/**",
+        "rust/crates/specgate-cli/src/capture/**",
+        "rust/crates/specgate-cli/src/capture_failure.rs"
+      ],
+      "docs": [
+        "docs/reference/cli.md",
+        "docs/guides/capture-a-reference.md",
+        "docs/guides/troubleshoot-capture.md"
+      ]
+    },
+    {
+      "id": "replay",
+      "code": [
+        "rust/crates/specgate-cli/src/replay/**",
+        "rust/crates/specgate-ctsc/src/replay.rs",
+        "rust/crates/specgate-ctsc/src/replay/**",
+        "rust/crates/specgate-runtime/src/harness.rs"
+      ],
+      "docs": [
+        "docs/guides/README.md",
+        "docs/guides/replay-a-candidate.md",
+        "docs/guides/port-a-component.md",
+        "docs/reference/value-mapping.md",
+        "docs/reference/limitations.md"
+      ]
+    },
+    {
+      "id": "ctsc-documents",
+      "code": [
+        "rust/crates/specgate-ctsc/src/lib.rs",
+        "rust/crates/specgate-ctsc/src/capture.rs",
+        "rust/crates/specgate-ctsc/src/capture/**",
+        "rust/crates/specgate-ctsc/src/comparison.rs",
+        "rust/crates/specgate-ctsc/src/comparison/**",
+        "rust/crates/specgate-ctsc/src/registry.rs",
+        "rust/crates/specgate-ctsc/src/registry/**",
+        "rust/crates/specgate-ctsc/src/validation/**"
+      ],
+      "docs": [
+        "docs/ctsc/registry.md",
+        "docs/ctsc/trace.md",
+        "docs/ctsc/comparison.md",
+        "docs/reference/bundle.md",
+        "docs/guides/validate-and-compare.md"
+      ]
+    },
+    {
+      "id": "internal",
+      "reason": "Error plumbing, process and filesystem adapters, reporting, and the golden harness are not described by product docs.",
+      "code": [
+        "rust/crates/specgate-discovery/src/lib.rs",
+        "rust/crates/specgate-discovery/src/error.rs",
+        "rust/crates/specgate-discovery/src/error_core.rs",
+        "rust/crates/specgate-discovery/src/test_util.rs",
+        "rust/crates/specgate-cli/src/reporting.rs",
+        "rust/crates/specgate-cli/src/system/**",
+        "rust/crates/specgate-cli/src/goldens/**"
+      ],
+      "docs": []
+    }
+  ]
+}

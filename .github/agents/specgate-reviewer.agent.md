@@ -21,7 +21,9 @@ proc-macro, task-runner, and validation-script changes.
 
 Check the approved scope, relevant CTSC contracts, runtime identity rules,
 golden-matrix exactness, generated artifact provenance, tests, and
-documentation. Run focused validation and `just check`; run
+documentation. Search the docs for statements the change made stale, and
+check every `Docs-Impact` trailer against the pages it skips. Run focused
+validation, `just docs-impact`, and `just check`; run
 `just package-smoke` when packaging or release behavior changed.
 
 Return blocking findings with exact acceptance criteria, or confirm readiness

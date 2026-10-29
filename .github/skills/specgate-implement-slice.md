@@ -21,6 +21,10 @@ Implement one approved SpecGate slice end to end.
   the affected page under `docs/guides/` or `docs/reference/`; `just docs-check`
   keeps the usage snapshot, links, binding examples, and quoted diagnostics in
   sync.
+- Check every page that `docs/contributor/docs-impact.json` lists for the
+  changed code, and search the docs for the old rule's wording. Add a
+  `Docs-Impact: none <reason>` trailer only after checking every listed page
+  ([documentation impact](../../CONTRIBUTING.md#documentation-impact)).
 - Use `ohno` for new Rust error types.
 - Add only necessary comments and keep LF line endings except for `.ps1`,
   `.cmd`, and `.bat`.

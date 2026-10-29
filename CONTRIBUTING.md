@@ -149,7 +149,9 @@ check, and the retained C# build/tests/format/analyzers.
 - every `specgate.yaml` in the repository, and every documentation YAML block
   whose first line is `# yaml-language-server: $schema=<relative path>/binding-schema.json`,
   against `binding-schema.json` and the binding loader
-  (`rust/crates/specgate-discovery/tests/binding_examples.rs`).
+  (`rust/crates/specgate-discovery/tests/binding_examples.rs`);
+- the [documentation impact](#documentation-impact) map
+  (`scripts/docs-impact.ps1`).
 
 Each check runs its own regression tests, which prove it fails on bad input.
 
@@ -181,6 +183,27 @@ definition hashes match. Exact justified exceptions live in
 
 Use Conventional Commits and keep changes scoped. The changelog is generated
 from commit subjects, so the subject is the entry a reader sees.
+
+## Documentation impact
+
+Behavior changes must update every page that describes the behavior.
+[`docs/contributor/docs-impact.json`](docs/contributor/docs-impact.json)
+assigns every non-test product source to the pages that describe it. A rule
+with no pages gives a `reason`. `just docs-check` fails when a source is
+uncovered, a glob matches nothing, or a listed page is missing.
+
+The pull-request CI job runs [`scripts/docs-impact.ps1`](scripts/docs-impact.ps1)
+against the base branch; run `just docs-impact` locally before opening a pull
+request. A rule fails when its code changed but none of its pages did. If you
+checked every listed page and none needs a change, add a commit trailer:
+
+```text
+Docs-Impact: none <reason>
+```
+
+The map only proves that a page was touched, not that its prose is true. When
+behavior changes, also search the docs for the old rule's wording; limits are
+often restated outside the mapped pages.
 
 ## Changelog
 
