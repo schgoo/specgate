@@ -55,9 +55,9 @@ operation parameter it fills.
 This recursive step does not descend into optional, list, set, or map elements.
 Containers of supported primitive values remain supported; records inside
 containers and undeclared record reconstruction remain outside this slice.
-C# rejects a null nested property-setup member as `NullValue`. Rust has no
-equivalent, because a nested record can be null only inside `Option`, which is
-not decomposed.
+C# rejects null in a non-nullable nested property-setup member as `NullValue`,
+as it rejects null in any non-nullable declared type. A nullable member (`T?`)
+maps to `optional`, the same as Rust `Option<T>`, and is not decomposed.
 
 ## Boundaries
 

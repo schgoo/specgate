@@ -137,8 +137,9 @@ names into flat inputs. A member whose type is itself `Setup = true` is folded
 recursively, including in setup-producer arguments; records inside collections
 are not. Rename members with `[SpecEvent("...")]` to resolve collisions; names
 are never automatically prefixed. Duplicate names and types that reach
-themselves are rejected as `AmbiguousDeclaration`, and a null property-setup
-value as `NullValue`. Explicit setup producers take precedence over property
+themselves are rejected as `AmbiguousDeclaration`, and null in a non-nullable
+property-setup parameter or member as `NullValue`. A nullable member (`T?`) is
+an optional and is not decomposed. Explicit setup producers take precedence over property
 folding for the parameters they fill. Rust candidates opt in separately and
 promise that any omitted fields may safely use `Default`.
 

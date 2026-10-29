@@ -102,7 +102,7 @@ sources, so a search for it finds the code that raises it.
 | `the test result records a failed outcome` | The test failed; it is skipped. | Fix the test. |
 | `produces duplicate input name` | Two flattened property-setup leaves, producer inputs, or parameters share a semantic name (`AmbiguousDeclaration`). | Rename one member with `[SpecEvent("...")]`. |
 | `recursive property setup type` | An opted-in property-setup type reaches itself through opted-in members (`AmbiguousDeclaration`). | Remove `Setup = true` from one type in the cycle. |
-| `requires a non-null` | A property-setup argument or nested property-setup member is null (`NullValue`). | Pass a non-null value. |
+| `requires a non-null` | A non-nullable property-setup argument or nested member is null (`NullValue`). | Pass a non-null value, or declare the member nullable (`T?`) if absence is valid. |
 | `instead of Passed, so its recording was not published` | The test ended with another outcome, such as skipped; it is skipped. | Make the test run and pass. |
 
 ### C# weave
