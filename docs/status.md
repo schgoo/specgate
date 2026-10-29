@@ -115,10 +115,10 @@ requested.
 
 Rust candidate replay supports public free functions and setup-backed instance
 methods, including directly awaited async calls and explicit generic
-specializations. Operation and setup construction inputs support lossless
+specializations. <!-- docs-claim property-setup-depth: rust/crates/specgate-discovery/src/discovery/setup.rs::fold_operation rust/crates/specgate-cli/src/replay/link.rs::link_operation rust/crates/specgate-annotations-macros-impl/src/setup.rs::expand_setup csharp/SpecGate.Runtime/SetupStaging.cs --> Operation and setup construction inputs support lossless
 primitives and recursively supported lists, sets, string-keyed maps, and optionals.
 Explicit property setups fold selected fields into flat inputs and reconstruct
-Rust values; omitted fields require `Default`. C# constructors may declare setups.
+Rust values; omitted fields require `Default`. <!-- /docs-claim property-setup-depth --> C# constructors may declare setups.
 Structured results and declared errors, including collections of
 annotated records, use the existing CTSC projection and linked validators.
 Reachable named declarations, including nested observed outcomes, must match

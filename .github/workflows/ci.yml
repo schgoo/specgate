@@ -47,3 +47,14 @@ jobs:
       - name: Packaged-context smoke
         if: matrix.os == 'ubuntu-latest'
         run: just package-smoke
+
+  docs-impact:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Check docs impact
+        shell: pwsh
+        run: ./scripts/docs-impact.ps1 -Base "origin/${{ github.base_ref }}"

@@ -18,7 +18,7 @@ capture its tests as reference behavior.
 
 ### 1. Declare the component and its operations
 
-```rust
+```rust ignore
 use specgate::{spec_component, spec_operation};
 
 spec_component!("example.math");
@@ -115,6 +115,7 @@ Replay reconstructs receivers and injected parameters through annotated
 synchronous nongeneric producers, including private producers in a selected
 Cargo test target ([limitations](../reference/limitations.md)).
 
+<!-- docs-claim property-setup-depth: rust/crates/specgate-discovery/src/discovery/setup.rs::fold_operation rust/crates/specgate-cli/src/replay/link.rs::link_operation rust/crates/specgate-annotations-macros-impl/src/setup.rs::expand_setup csharp/SpecGate.Runtime/SetupStaging.cs -->
 For simple parameter objects, add `#[spec_event(setup)]` beside
 `#[derive(SpecEvent)]`. Without member annotations, every field is selected;
 otherwise only annotated fields are selected. Selected fields must be public
@@ -123,6 +124,7 @@ using `..Default::default()` for omitted fields. The opt-in promises that those
 defaults preserve the contract; use an explicit producer for construction
 invariants. Supported field inputs include recursive `Vec`, `Option`, sets, and
 string-keyed maps. Ordinary `SpecEvent` projection does not enable reconstruction.
+<!-- /docs-claim property-setup-depth -->
 
 ### 4. Return outcomes
 

@@ -119,6 +119,7 @@ C# capture also rejects, with an error naming the value:
 
 ## Candidate replay values
 
+<!-- docs-claim property-setup-depth: rust/crates/specgate-discovery/src/discovery/setup.rs::fold_operation rust/crates/specgate-cli/src/replay/link.rs::link_operation rust/crates/specgate-annotations-macros-impl/src/setup.rs::expand_setup csharp/SpecGate.Runtime/SetupStaging.cs -->
 Rust replay accepts lossless primitives and recursively supported lists, sets,
 string-keyed maps, and optionals as operation and setup construction inputs.
 Classes and structs opted in as property setups (`#[spec_event(setup)]`,
@@ -134,7 +135,7 @@ before publishing the trace.
 Other record inputs, including record-typed fields of a property setup, and
 explicit reference-to-candidate shape mappings remain unsupported; record
 inputs fail with the `structured-value` replay category
-([constructor and property setups](../decisions/constructor-and-property-setups.md)).
+([constructor and property setups](../decisions/constructor-and-property-setups.md)). <!-- /docs-claim property-setup-depth -->
 A tuple payload and a record payload are different declarations; replay does
 not silently translate between them.
 

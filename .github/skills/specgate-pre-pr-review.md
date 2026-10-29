@@ -19,7 +19,9 @@ running validation.
      intentional;
    - crate README changes originate from crate-level docs;
    - user-visible behavior changes are reflected in `docs/guides/` and
-     `docs/reference/`;
+     `docs/reference/`, every page listed for the changed code in
+     `docs/contributor/docs-impact.json` was checked, a search for the old
+     rule's wording finds no stale statement, and `just docs-impact` passes;
    - no human-owned decision was silently finalized.
 3. Run focused validation and the complete gate:
 

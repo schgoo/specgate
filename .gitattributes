@@ -2,7 +2,8 @@
 * text=auto eol=lf
 
 # Rust source
-*.rs text eol=lf
+*.rs text eol=lf diff=rust
+*.cs diff=csharp
 *.toml text eol=lf
 
 # Scripts

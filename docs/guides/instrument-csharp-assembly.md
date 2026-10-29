@@ -129,6 +129,7 @@ unsupported ([limitations](../reference/limitations.md)).
 `[SpecSetup]` may also annotate a constructor: its declaring type is the
 produced value, and its parameters are the construction inputs.
 
+<!-- docs-claim property-setup-depth: rust/crates/specgate-discovery/src/discovery/setup.rs::fold_operation rust/crates/specgate-cli/src/replay/link.rs::link_operation rust/crates/specgate-annotations-macros-impl/src/setup.rs::expand_setup csharp/SpecGate.Runtime/SetupStaging.cs -->
 For object-initializer parameters, use `[SpecEvent(Setup = true)]` on the type.
 Without member annotations, all public instance fields and readable properties
 declared on the type participate; otherwise only annotated members participate.
@@ -137,6 +138,7 @@ names into flat inputs. Rename members to resolve collisions; names are never
 automatically prefixed. Explicit setup producers take precedence over property
 folding for the parameters they fill. Rust candidates opt in separately and
 promise that any omitted fields may safely use `Default`.
+<!-- /docs-claim property-setup-depth -->
 
 ### 6. Async operations
 

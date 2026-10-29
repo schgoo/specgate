@@ -70,6 +70,9 @@ includes a "which guide" table and the agent quick path.
   → act → verify workflow.
 - [`contributor/roadmap.md`](contributor/roadmap.md) — tiered plan to MVP, V2,
   and V3, and the open questions gating each tier.
+- [`contributor/docs-impact.json`](contributor/docs-impact.json) — which pages
+  describe each product source; checked with claim anchors by
+  [`just docs-impact`](../CONTRIBUTING.md#documentation-impact).
 - [`contributor/dev-cycle-performance.md`](contributor/dev-cycle-performance.md)
   — gate timings, golden build cache internals, and smoke and workspace-test
   compilation-reuse measurements.
