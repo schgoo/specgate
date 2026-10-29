@@ -8,7 +8,7 @@
 use super::{
     CAPTURE_ENV, CLOCK_STEP, Capture, CommandEnvironment, Config, ConfigDeps, EnvConfig, ExecutedTests, FailedTest, FailureContext,
     FailureReason, INDEX_WIDTH, Path, PathBuf, START_TIME, failure_summary, reject_persistence, run_span, scenario_span, trace_id,
-    unfinalized_operation, unfinalized_summary,
+    unfinalized_operation, unfinalized_summary, unrecordable_operation, unrecordable_summary,
 };
 use std::process::Output;
 
@@ -149,6 +149,13 @@ impl Issued {
                 scenario_name: scenario_name.to_string(),
                 reason: FailureReason::Unfinalized,
                 summary: unfinalized_summary(operation),
+            }));
+        }
+        if let Some((operation, message)) = unrecordable_operation(&capture) {
+            return Ok(Settled::Failed(FailedTest {
+                scenario_name: scenario_name.to_string(),
+                reason: FailureReason::Unrecordable,
+                summary: unrecordable_summary(operation, message),
             }));
         }
         Ok(Settled::Captured(capture))

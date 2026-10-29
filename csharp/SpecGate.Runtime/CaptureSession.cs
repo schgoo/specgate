@@ -26,6 +26,7 @@ public sealed class CaptureSession : IDisposable
 {
     private readonly List<PendingOperation> _operations = [];
     private readonly Dictionary<SetupKey, SortedDictionary<string, Value>> _setups = [];
+    private readonly Dictionary<SetupKey, string> _unrecordableSetups = [];
     private readonly object _gate = new();
     private readonly object _persistGate = new();
     private readonly SidecarWriter? _sidecar;
@@ -465,6 +466,36 @@ public sealed class CaptureSession : IDisposable
     }
 
     /// <summary>
+    /// Records that a setup declaration ran successfully but observed a value
+    /// that cannot be recorded, so no operation it prepares can be recorded
+    /// either.
+    /// </summary>
+    /// <remarks>
+    /// The first diagnostic wins and is kept for the rest of the session: an
+    /// operation attributed to this declaration cannot tell which run built its
+    /// instance.
+    /// </remarks>
+    internal void RecordUnrecordableSetup(SetupKey key, string reason)
+    {
+        lock (_gate)
+        {
+            _unrecordableSetups.TryAdd(key, reason);
+        }
+    }
+
+    /// <summary>
+    /// Why a setup declaration's construction inputs could not be recorded, or
+    /// <see langword="null"/> when nothing prevented it.
+    /// </summary>
+    internal string? UnrecordableSetup(SetupKey key)
+    {
+        lock (_gate)
+        {
+            return _unrecordableSetups.TryGetValue(key, out string? reason) ? reason : null;
+        }
+    }
+
+    /// <summary>
     /// The construction inputs committed for one setup declaration, or
     /// <see langword="null"/> when it has not run successfully in this session.
     /// </summary>
@@ -538,6 +569,34 @@ internal static class NativeFault
 
     /// <summary>The stable observer identifier for target-reported faults.</summary>
     internal const string TargetObserver = "target";
+
+    /// <summary>
+    /// The fault type recorded in place of an operation's outcome when one of its
+    /// values could not be recorded, so the command-line tool drops the scenario
+    /// with a diagnostic instead of encoding an incomplete operation.
+    /// </summary>
+    internal const string UnrecordableValue = "specgate.unrecordable_value";
+
+    /// <summary>
+    /// Whether a rejection is reported as an unrecordable-value diagnostic rather
+    /// than thrown into the test.
+    /// </summary>
+    /// <remarks>
+    /// Only a null in a non-optional position qualifies: the target behaved as
+    /// written, and the declaration, not the test, may be what is wrong.
+    /// </remarks>
+    internal static bool IsDiagnostic(SpecGateCaptureException exception) =>
+        exception.Rejection == CaptureRejection.NullValue;
+
+    /// <summary>Describes an unrecordable value by its position.</summary>
+    internal static string Unrecordable(string position, SpecGateCaptureException exception)
+    {
+        const string Prefix = "specgate: ";
+        string detail = exception.Message.StartsWith(Prefix, StringComparison.Ordinal)
+            ? exception.Message[Prefix.Length..]
+            : exception.Message;
+        return $"{position}: {detail}";
+    }
 }
 
 /// <summary>One operation span while it is still being recorded.</summary>

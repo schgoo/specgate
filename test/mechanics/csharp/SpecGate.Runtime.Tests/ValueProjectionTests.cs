@@ -246,11 +246,21 @@ public sealed class ValueProjectionTests
         Assert.Equal(CaptureRejection.AmbiguousDeclaration, cycle.Rejection);
         Assert.Contains("recursive property setup", cycle.Message, StringComparison.Ordinal);
         Assert.Equal(
-            CaptureRejection.NullValue,
-            Reject(nameof(Declarations.PropertyInputs), [null]).Rejection);
-        Assert.Equal(
             CaptureRejection.TypeMismatch,
             Reject(nameof(Declarations.PropertyInputs), [new object()]).Rejection);
+    }
+
+    [Fact]
+    public void ANullPropertySetupOrNestedMemberIsReportedNotThrown()
+    {
+        FaultCompletion top = Unrecordable(nameof(Declarations.PropertyInputs), [null]);
+        Assert.Contains("parameter 'value'", top.Message, StringComparison.Ordinal);
+        Assert.Contains("requires a non-null", top.Message, StringComparison.Ordinal);
+
+        FaultCompletion nested = Unrecordable(
+            nameof(Declarations.PropertyInputs), [new PropertyRequest { Group = null! }]);
+        Assert.Contains("parameter 'value'", nested.Message, StringComparison.Ordinal);
+        Assert.Contains("PropertyGroup", nested.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -307,12 +317,31 @@ public sealed class ValueProjectionTests
                 [new SortedDictionary<int, string> { [1] = "one" }]).Rejection);
     }
 
+    /// <summary>
+    /// A null where the declaration is not optional does not fail the test: the
+    /// operation runs as written and its span carries an unrecordable-value
+    /// fault naming the position, which capture reports when it drops the
+    /// scenario.
+    /// </summary>
     [Fact]
-    public void ANullInANonNullableDeclarationIsRejected()
+    public void ANullInANonNullableDeclarationIsReportedNotThrown()
     {
+        FaultCompletion fault = Unrecordable(nameof(Declarations.Nested), [null]);
+
+        Assert.Equal("target", fault.Observer);
         Assert.Equal(
-            CaptureRejection.NullValue,
-            Reject(nameof(Declarations.Nested), [null]).Rejection);
+            "parameter 'home' of 'fixture.projection::Nested': a null was observed where "
+            + "'SpecGate.Runtime.Tests.Address' is required. Declare the parameter, member, or return "
+            + "value nullable to record absence.",
+            fault.Message);
+    }
+
+    [Fact]
+    public void ANullReturnValueInANonNullableDeclarationIsReportedNotThrown()
+    {
+        FaultCompletion fault = Unrecordable(nameof(Declarations.Echo), ["text"], result: null);
+
+        Assert.StartsWith("return value of", fault.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -510,6 +539,15 @@ public sealed class ValueProjectionTests
             () => SpecGateRuntime.RecordInputs(scope, arguments));
     }
 
+    private static FaultCompletion Unrecordable(
+        string declaration, object?[] arguments, object? result = null)
+    {
+        OperationSpan span = Capture(declaration, arguments, result);
+        FaultCompletion fault = Assert.IsType<FaultCompletion>(span.OperationCompletion);
+        Assert.Equal("specgate.unrecordable_value", fault.FaultType);
+        return fault;
+    }
+
     /// <summary>Declarations standing in for the woven methods under capture.</summary>
     private static class Declarations
     {
@@ -562,6 +600,8 @@ public sealed class ValueProjectionTests
         internal static void Structured(Person person) => _ = person;
 
         internal static void Nested(Address home) => _ = home;
+
+        internal static string Echo(string text) => text;
 
         internal static void Variants(Shape shape) => _ = shape;
 

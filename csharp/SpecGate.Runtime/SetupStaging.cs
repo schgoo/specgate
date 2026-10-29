@@ -20,15 +20,18 @@ public sealed class SetupStaging
     private readonly CaptureSession _session;
     private readonly SetupDeclaration[] _declarations;
     private readonly SortedDictionary<string, Value> _inputs;
+    private readonly string? _unrecordable;
 
     private SetupStaging(
         CaptureSession session,
         SetupDeclaration[] declarations,
-        SortedDictionary<string, Value> inputs)
+        SortedDictionary<string, Value> inputs,
+        string? unrecordable)
     {
         _session = session;
         _declarations = declarations;
         _inputs = inputs;
+        _unrecordable = unrecordable;
     }
 
     /// <summary>
@@ -62,20 +65,31 @@ public sealed class SetupStaging
         }
 
         SortedDictionary<string, Value> inputs = new(Utf8KeyComparer.Instance);
+        string? unrecordable = null;
         for (int index = 0; index < declared.Length; index++)
         {
-            foreach (KeyValuePair<string, Value> leaf in InputFolding.Project(declared[index], arguments[index]))
+            try
             {
-                if (!inputs.TryAdd(leaf.Key, leaf.Value))
+                foreach (KeyValuePair<string, Value> leaf in InputFolding.Project(declared[index], arguments[index]))
                 {
-                    throw new SpecGateCaptureException(
-                        CaptureRejection.AmbiguousDeclaration,
-                        $"specgate: setup '{declarations[0].Key.Producer}' produces duplicate input name '{leaf.Key}'.");
+                    if (!inputs.TryAdd(leaf.Key, leaf.Value))
+                    {
+                        throw new SpecGateCaptureException(
+                            CaptureRejection.AmbiguousDeclaration,
+                            $"specgate: setup '{declarations[0].Key.Producer}' produces duplicate input name '{leaf.Key}'.");
+                    }
                 }
+            }
+            catch (SpecGateCaptureException exception) when (NativeFault.IsDiagnostic(exception))
+            {
+                // The producer still runs as written; only the operations it
+                // prepares become unrecordable, and only if one is invoked.
+                unrecordable ??= NativeFault.Unrecordable(
+                    $"parameter '{declared[index].Name}' of setup '{declarations[0].Key.Producer}'", exception);
             }
         }
 
-        return new SetupStaging(session, declarations, inputs);
+        return new SetupStaging(session, declarations, inputs, unrecordable);
     }
 
     /// <summary>
@@ -87,6 +101,12 @@ public sealed class SetupStaging
     {
         foreach (SetupDeclaration declaration in _declarations)
         {
+            if (_unrecordable is not null)
+            {
+                _session.RecordUnrecordableSetup(declaration.Key, _unrecordable);
+                continue;
+            }
+
             _session.RecordSetup(declaration.Key, _inputs);
         }
     }

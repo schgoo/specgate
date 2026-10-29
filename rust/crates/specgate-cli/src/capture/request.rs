@@ -36,6 +36,10 @@ pub struct CaptureReport {
     /// Written capture manifest path.
     #[spec_event(path)]
     pub manifest_path: PathBuf,
+    /// One line per test dropped because it observed a value that cannot be
+    /// recorded, such as a null in a non-nullable C# position.
+    #[spec_event]
+    pub(super) warnings: Vec<String>,
 }
 
 impl CaptureReport {
@@ -43,6 +47,13 @@ impl CaptureReport {
     #[must_use]
     pub fn component_id(&self) -> &str {
         self.component_id.as_str()
+    }
+
+    /// Tests dropped from the bundle because they observed a value that cannot
+    /// be recorded, each with the offending position and a suggested fix.
+    #[must_use]
+    pub fn warnings(&self) -> &[String] {
+        &self.warnings
     }
 
     /// Number of captured test scenarios.

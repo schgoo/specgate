@@ -117,6 +117,7 @@ non-Rust implementation in `require_capturable`.
     | sidecar missing, test failed | `FailedTest::TestFailed` |
     | duplicate, malformed or foreign sidecar (identity differs from the issued config, or path outside scratch) | explicit whole-batch error |
     | unfinalized recording | `FailedTest::Unfinalized` |
+    | `specgate.unrecordable_value` fault (a null in a non-nullable position) | `FailedTest::Unrecordable`; ordinary capture also prints a `warning:` line |
 
     The sidecar is deleted before every run. Fixed ids, start time 0, clock step
     1, CRLF stripped and no machine paths in artifacts keep bundles

@@ -16,6 +16,9 @@ under `docs/decisions/`, or `docs/contributor/roadmap.md`. Generate with `just c
   setup-producer arguments, into flat semantic leaves; duplicate leaf names and
   cyclic property-setup types are rejected, and records inside containers are
   not decomposed (#110).
+- A null in a non-nullable C# position no longer fails the test; capture drops
+  the scenario with a `specgate.unrecordable_value` fault and prints a
+  `warning:` line suggesting a nullable declaration (#110).
 - One shared native golden bundle per component across all languages, including
   one canonical registry flat under `component/<id>/` and no per-language successful-component artifacts, selecting
   C# for paired fixtures and Rust for Rust-only fixtures, with independent strict

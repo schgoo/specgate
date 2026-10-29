@@ -155,6 +155,7 @@ mod cases {
                 registry_path: requests[0].out.join(REGISTRY_FILE),
                 trace_path: requests[0].out.join(TRACE_FILE),
                 manifest_path: requests[0].out.join(MANIFEST_FILE),
+                warnings: Vec::new(),
             }
         );
         assert_eq!(reports[2].scenarios, 1);

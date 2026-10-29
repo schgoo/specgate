@@ -51,6 +51,11 @@ pub(super) enum FailureReason {
     /// executed, inconclusive, aborted), so whatever it recorded must not be
     /// published as a scenario.
     NotPassed,
+    /// The test passed, but an operation observed a value CTSC cannot record
+    /// against its declaration (a null in a non-nullable C# position). The
+    /// scenario is dropped and the user is warned. See
+    /// `docs/decisions/null-values-are-capture-diagnostics.md`.
+    Unrecordable,
 }
 
 /// One enumerated test that produced no usable capture.
@@ -170,6 +175,41 @@ pub(super) fn unfinalized_summary(operation: &str) -> String {
          subsequent annotated operation, or a target that exits the process inside an open operation. If the operation was abandoned, \
          enclose it in an annotated operation that completes."
     )
+}
+
+/// Stable fault category a capture runtime writes for an operation that
+/// observed a value it cannot record against the operation's declaration.
+const UNRECORDABLE_FAULT: &str = "specgate.unrecordable_value";
+
+/// Report the first operation whose observed values could not be recorded, if
+/// any, with the runtime's description of the offending position.
+pub(super) fn unrecordable_operation(capture: &Capture) -> Option<(&str, &str)> {
+    capture.operations.iter().find_map(|operation| match &operation.completion {
+        Some(Completion::Fault { fault_type, message, .. }) if fault_type == UNRECORDABLE_FAULT => {
+            Some((operation.operation_name.as_str(), message.as_str()))
+        }
+        _ => None,
+    })
+}
+
+/// Explain why a scenario with an unrecordable value contributes no capture,
+/// and ask whether the declaration should admit absence.
+pub(super) fn unrecordable_summary(operation: &str, message: &str) -> String {
+    format!(
+        "operation '{operation}' observed a value that cannot be recorded ({message}); the scenario contributes no capture. If \
+         absence is valid there, declare the position nullable (`T?`) so the registry declares it optional<T>; otherwise fix the \
+         code that passed null."
+    )
+}
+
+/// Render one warning line per scenario dropped for an unrecordable value.
+pub(super) fn unrecordable_warnings(executed: &ExecutedTests) -> Vec<String> {
+    executed
+        .failures
+        .iter()
+        .filter(|failure| failure.reason == FailureReason::Unrecordable)
+        .map(|failure| format!("{}: {}", failure.scenario_name, failure.summary))
+        .collect()
 }
 
 /// Persist one final bundle artifact through the injected command environment.

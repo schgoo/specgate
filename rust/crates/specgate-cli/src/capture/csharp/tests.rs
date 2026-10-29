@@ -2,7 +2,7 @@
 
 //! Fake-driven tests of the C# runner and the sidecar protocol it settles with.
 //! No process is spawned and no real file is touched.
-use super::super::reject_failures;
+use super::super::{reject_failures, unrecordable_warnings};
 use super::*;
 use specgate_discovery::registry::Registry;
 use specgate_discovery::schema::normalize_registry;
@@ -808,6 +808,36 @@ fn an_unfinalized_sidecar_is_reported() {
         panic!("an unfinalized recording must fail its test");
     };
     assert_eq!(failure.reason, FailureReason::Unfinalized);
+}
+
+#[test]
+fn an_unrecordable_value_drops_the_scenario_with_a_warning() {
+    let fault = serde_json::json!({
+        "kind": "fault", "order": 1, "time_unix_nano": 2, "fault_type": "specgate.unrecordable_value",
+        "message": "parameter 'home' of 'fixture.native::fetch': a null was observed", "observer": "target",
+    });
+    let Settled::Failed(failure) = settle_with(Some(sidecar("Ns.C.M", &fault, true)), &output(0, "", "")).unwrap() else {
+        panic!("an unrecordable value must drop its scenario");
+    };
+    assert_eq!(failure.reason, FailureReason::Unrecordable);
+    assert!(failure.summary.contains("operation 'fetch'"), "{}", failure.summary);
+    assert!(failure.summary.contains("parameter 'home'"), "{}", failure.summary);
+    assert!(failure.summary.contains("optional<T>"), "{}", failure.summary);
+
+    let executed = ExecutedTests {
+        failures: vec![
+            failure,
+            FailedTest {
+                scenario_name: "Ns.C.Other".to_string(),
+                reason: FailureReason::TestFailed,
+                summary: "exit code 1".to_string(),
+            },
+        ],
+        ..ExecutedTests::default()
+    };
+    let warnings = unrecordable_warnings(&executed);
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(warnings[0].starts_with("Ns.C.M: operation 'fetch'"), "{warnings:?}");
 }
 
 #[test]

@@ -55,8 +55,11 @@ operation parameter it fills.
 This recursive step does not descend into optional, list, set, or map elements.
 Containers of supported primitive values remain supported; records inside
 containers and undeclared record reconstruction remain outside this slice.
-C# rejects null in a non-nullable nested property-setup member as `NullValue`,
-as it rejects null in any non-nullable declared type. A nullable member (`T?`)
+A null in a non-nullable nested property-setup member is reported like a null
+in any non-nullable declared position: the test still runs, and capture drops
+the scenario with a warning (see
+[`null-values-are-capture-diagnostics.md`](null-values-are-capture-diagnostics.md)).
+A nullable member (`T?`)
 maps to `optional`, the same as Rust `Option<T>`, and is not decomposed.
 
 ## Boundaries

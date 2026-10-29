@@ -5,7 +5,7 @@ use super::{
     BTreeSet, CaptureManifest, CaptureReport, ComponentId, Discovered, ExecutedTests, FORMAT_VERSION, FailureContext, Language,
     MANIFEST_FILE, MANIFEST_FORMAT, Path, PathBuf, REGISTRY_FILE, REGISTRY_PREFIX, REGISTRY_VERSION, Reference, RegistryDto, RegistryId,
     Scenarios, TRACE_FILE, TargetDto, Tool, Version, WireDigest, artifact_path, ctsc_capture, encode_otlp, encode_registries,
-    normalize_registry, sha256_digest,
+    normalize_registry, sha256_digest, unrecordable_warnings,
 };
 use specgate_ctsc::validation::DocumentBytes;
 
@@ -179,6 +179,7 @@ pub(super) fn encode_bundle(
             registry_path: artifact_path(&request.out, REGISTRY_FILE),
             trace_path: artifact_path(&request.out, TRACE_FILE),
             manifest_path: artifact_path(&request.out, MANIFEST_FILE),
+            warnings: unrecordable_warnings(executed),
         },
     })
 }

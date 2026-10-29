@@ -63,18 +63,36 @@ public sealed class SetupMatchingTests
     }
 
     [Fact]
-    public void AFilledArgumentIsStillProjectedBeforeItIsDiscarded()
+    public void ANullFilledArgumentIsStillReportedBeforeItIsDiscarded()
     {
         using CaptureSession session = CaptureScenario.Begin(Component);
 
         RunSetup(nameof(SetupDeclarations.MakeFilled));
 
         // 'box' is filled by the setup and is not recorded, but an argument that
-        // cannot be represented in CTSC is still a defect in both producers.
-        SpecGateCaptureException rejection = Reject(
-            session, nameof(SetupDeclarations.Filled), "filled", [null, 1]);
+        // cannot be represented in CTSC is still reported by both producers.
+        OperationSpan span = Operate(session, nameof(SetupDeclarations.Filled), "filled", [null, 1]);
 
-        Assert.Equal(CaptureRejection.NullValue, rejection.Rejection);
+        FaultCompletion fault = Assert.IsType<FaultCompletion>(span.OperationCompletion);
+        Assert.Equal("specgate.unrecordable_value", fault.FaultType);
+        Assert.Contains("parameter 'box'", fault.Message, StringComparison.Ordinal);
+        Assert.Empty(span.Inputs);
+    }
+
+    [Fact]
+    public void ANullSetupInputMakesThePreparedOperationUnrecordable()
+    {
+        using CaptureSession session = CaptureScenario.Begin(Component);
+
+        // The producer itself still runs and commits; the diagnostic surfaces
+        // on the operation it prepares, because that is what cannot be recorded.
+        RunSetup(nameof(SetupDeclarations.MakeNamed), [null]);
+        OperationSpan span = Operate(
+            session, nameof(SetupDeclarations.FromName), "from_name", [new BoxOne(), 2]);
+
+        FaultCompletion fault = Assert.IsType<FaultCompletion>(span.OperationCompletion);
+        Assert.Equal("specgate.unrecordable_value", fault.FaultType);
+        Assert.Contains("parameter 'name' of setup", fault.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -159,5 +177,12 @@ internal static class SetupDeclarations
 
     [SpecOperation("filled", Spec = "fixture.setup_matching")]
     internal static int Filled([SpecInput("box")] BoxOne box, [SpecInput("count")] int count) =>
+        box.Value + count;
+
+    [SpecSetup("from_name", Spec = "fixture.setup_matching")]
+    internal static BoxOne MakeNamed([SpecInput("name")] string name) => new() { Value = name.Length };
+
+    [SpecOperation("from_name", Spec = "fixture.setup_matching")]
+    internal static int FromName([SpecInput("box")] BoxOne box, [SpecInput("count")] int count) =>
         box.Value + count;
 }

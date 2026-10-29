@@ -42,6 +42,8 @@ public sealed class OperationScope
 
     internal bool Completed { get; private set; }
 
+    private string? _unrecordable;
+
     /// <summary>Gets the span identifier, or <see langword="null"/> when not recording.</summary>
     public SpanId? SpanId => Pending?.SpanId;
 
@@ -90,6 +92,12 @@ public sealed class OperationScope
 
         foreach (FoldedSetup setup in folding.Required)
         {
+            if (Session.UnrecordableSetup(setup.Key) is { } reason)
+            {
+                MarkUnrecordable(reason);
+                continue;
+            }
+
             SortedDictionary<string, Value> inputs = Session.SetupInputs(setup.Key)
                 ?? throw new SpecGateCaptureException(
                     CaptureRejection.SetupMissing,
@@ -106,27 +114,46 @@ public sealed class OperationScope
         for (int index = 0; index < declared.Length; index++)
         {
             SemanticInput input = declared[index];
-            if (folding.Filled.Contains(input.Name))
+            try
             {
-                // A filled argument is projected and then discarded, mirroring
-                // the generated Rust code at
-                // `rust/crates/specgate-runtime/src/capture.rs:179-202`, where the
-                // value is projected before `input()` drops the filled name. An
-                // unrepresentable value in a filled position has to fail in both
-                // producers, not just one.
-                _ = ValueProjector.Project(input.Type, arguments[index]);
-                continue;
-            }
+                if (folding.Filled.Contains(input.Name))
+                {
+                    // A filled argument is projected and then discarded, mirroring
+                    // the generated Rust code at
+                    // `rust/crates/specgate-runtime/src/capture.rs:179-202`, where the
+                    // value is projected before `input()` drops the filled name. An
+                    // unrepresentable value in a filled position has to fail in both
+                    // producers, not just one.
+                    _ = ValueProjector.Project(input.Type, arguments[index]);
+                    continue;
+                }
 
-            foreach (KeyValuePair<string, Value> leaf in InputFolding.Project(input, arguments[index]))
+                foreach (KeyValuePair<string, Value> leaf in InputFolding.Project(input, arguments[index]))
+                {
+                    Merge(folded, producers, leaf.Key, leaf.Value, $"operation parameter '{input.Name}'");
+                }
+            }
+            catch (SpecGateCaptureException exception) when (NativeFault.IsDiagnostic(exception))
             {
-                Merge(folded, producers, leaf.Key, leaf.Value, $"operation parameter '{input.Name}'");
+                MarkUnrecordable(NativeFault.Unrecordable(
+                    $"parameter '{input.Name}' of '{Component}::{Operation}'", exception));
             }
         }
 
-        Pending.RecordInputs(folded);
+        if (_unrecordable is null)
+        {
+            Pending.RecordInputs(folded);
+        }
+
         Session.Persist();
     }
+
+    /// <summary>
+    /// Remembers the first value this operation could not record. The operation
+    /// keeps running as written; only its completion is replaced by an
+    /// unrecordable-value fault the command-line tool reports.
+    /// </summary>
+    private void MarkUnrecordable(string reason) => _unrecordable ??= reason;
 
     /// <remarks>
     /// Rust asserts here, because a folded surface with two inputs of one name is
@@ -160,7 +187,21 @@ public sealed class OperationScope
     internal ReturnOutcome? ProjectResult(object? result)
     {
         SemanticType? declared = OperationMetadata.For(Method).Result;
-        return declared is null ? null : ValueProjector.ProjectReturn(declared, result);
+        if (declared is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return ValueProjector.ProjectReturn(declared, result);
+        }
+        catch (SpecGateCaptureException exception) when (NativeFault.IsDiagnostic(exception))
+        {
+            MarkUnrecordable(NativeFault.Unrecordable(
+                $"return value of '{Component}::{Operation}'", exception));
+            return null;
+        }
     }
 
     /// <summary>
@@ -188,7 +229,7 @@ public sealed class OperationScope
                 new ErrorCompletion(order, time, OperationMetadata.ErrorName, returned.Value),
             { } returned => (order, time) => new ResultCompletion(order, time, returned.Value!),
         };
-        Session!.Complete(Pending!, completion);
+        Finish(completion);
     }
 
     /// <summary>
@@ -220,7 +261,7 @@ public sealed class OperationScope
                 NativeFault.UnexpectedTargetFault,
                 NativeFault.UnwoundMessage,
                 NativeFault.TargetObserver);
-        Session!.Complete(Pending!, completion);
+        Finish(completion);
     }
 
     /// <summary>
@@ -235,7 +276,22 @@ public sealed class OperationScope
             return;
         }
 
-        Session!.Complete(Pending!, (order, time) => new AbandonedCompletion(order, time));
+        Finish((order, time) => new AbandonedCompletion(order, time));
+    }
+
+    /// <summary>
+    /// Completes the span, replacing its outcome with an unrecordable-value
+    /// fault when one of its values could not be recorded.
+    /// </summary>
+    private void Finish(Func<ulong, long, Completion>? completion)
+    {
+        if (_unrecordable is { } reason)
+        {
+            completion = (order, time) => new FaultCompletion(
+                order, time, NativeFault.UnrecordableValue, reason, NativeFault.TargetObserver);
+        }
+
+        Session!.Complete(Pending!, completion);
     }
 
     private bool TryBeginCompletion()
