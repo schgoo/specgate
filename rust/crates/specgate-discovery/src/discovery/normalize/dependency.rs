@@ -71,23 +71,18 @@ fn direct(component: &ComponentId, traversal: Traversal, registry: &Registry) ->
         for operation in registry.ops.iter().filter(|operation| {
             operation.component == component.as_str() && (!operation.is_setup || operation_names.contains(operation.name.as_str()))
         }) {
-            for parameter in &operation.params {
-                if !operation.is_setup
-                    && let Some(properties) = crate::discovery::setup::property_setup(operation, &parameter.ty, registry)?
-                {
-                    for field in &properties.fields {
-                        collect_into(&field.ty, &mut references);
-                    }
-                } else {
-                    collect_into(&parameter.ty, &mut references);
-                }
+            for parameter in crate::discovery::setup::raw_parameters(operation, registry)? {
+                collect_into(&parameter.source_type, &mut references);
             }
             collect_into(&operation.return_type, &mut references);
         }
     }
     for ty in registry.types.iter().filter(|ty| ty.component == component.as_str()) {
         for field in &ty.fields {
-            collect_into(&field.ty, &mut references);
+            collect_into(
+                &crate::discovery::setup::property_field_type(ty, &field.ty, registry)?,
+                &mut references,
+            );
         }
         for variant in &ty.variants {
             for field in &variant.fields {
@@ -264,7 +259,12 @@ pub(super) fn dependency_types(
                         .map(|field| {
                             Ok(Field {
                                 name: field.name.clone(),
-                                ty: map_dependency(&field.ty, syntax, &type_names, &qualifier)?,
+                                ty: map_dependency(
+                                    crate::discovery::setup::property_field_type(ty, &field.ty, registry)?,
+                                    syntax,
+                                    &type_names,
+                                    &qualifier,
+                                )?,
                             })
                         })
                         .collect::<Result<Vec<_>, Error>>()?;

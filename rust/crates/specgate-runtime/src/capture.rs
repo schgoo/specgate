@@ -208,40 +208,19 @@ impl OperationScope {
             if operation.filled_parameters.contains(name) {
                 return Ok(());
             }
-            let properties = registry::OPERATIONS
-                .iter()
-                .find(|meta| {
-                    !meta.is_setup && meta.component == operation.component_id.as_str() && meta.name == operation.operation_name.as_str()
-                })
-                .map(|meta| registry::TypeMeta::property_fields(meta, name))
-                .transpose()?
-                .flatten();
-            if let Some(fields) = properties {
-                let Value::Map(mut values) = value else {
-                    return Err(CaptureError::message(
-                        CaptureErrorKind::Configuration,
-                        "property setup did not project named fields",
-                    ));
-                };
-                for field in fields {
-                    let field_name = field.name();
-                    let value = values.remove(field_name).ok_or_else(|| {
-                        CaptureError::message(
-                            CaptureErrorKind::Configuration,
-                            format!("property setup omitted field '{field_name}'"),
-                        )
-                    })?;
-                    assert!(
-                        operation.inputs.insert(field_name.to_string(), value).is_none(),
-                        "setup folding produces duplicate input name '{field_name}'"
-                    );
-                }
-                return Ok(());
+            let declaration = registry::OPERATIONS.iter().find(|meta| {
+                !meta.is_setup && meta.component == operation.component_id.as_str() && meta.name == operation.operation_name.as_str()
+            });
+            let inputs = match declaration {
+                Some(meta) => registry::TypeMeta::fold_input(meta, name, value)?,
+                None => vec![(name.to_string(), value)],
+            };
+            for (name, value) in inputs {
+                assert!(
+                    operation.inputs.insert(name.clone(), value).is_none(),
+                    "native operation input '{name}' cannot be recorded twice"
+                );
             }
-            assert!(
-                operation.inputs.insert(name.to_string(), value).is_none(),
-                "native operation input '{name}' cannot be recorded twice"
-            );
             Ok(())
         })
     }

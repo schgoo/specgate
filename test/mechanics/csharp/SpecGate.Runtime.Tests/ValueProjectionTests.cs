@@ -213,6 +213,47 @@ public sealed class ValueProjectionTests
     }
 
     [Fact]
+    public void NestedPropertySetupsRecordOnlyFlatSemanticLeaves()
+    {
+        var request = new PropertyRequest
+        {
+            Group = new PropertyGroup { Leaf = new PropertyLeaf { Selected = 7 } },
+        };
+        OperationSpan span = Capture(nameof(Declarations.PropertyInputs), [request]);
+        Assert.Equal(["limit"], span.Inputs.Keys);
+        request.Group.Leaf.Selected = 9;
+        Assert.Equal(Value.Integer(7), Named(span, "limit"));
+    }
+
+    [Fact]
+    public void PropertySetupExpansionStopsAtContainers()
+    {
+        OperationSpan span = Capture(
+            nameof(Declarations.PropertyList),
+            [new List<PropertyLeaf> { new() { Selected = 7 } }]);
+        Assert.Equal(Value.List([Map(("limit", Value.Integer(7)))]), Named(span, "values"));
+    }
+
+    [Fact]
+    public void NestedPropertySetupCollisionsAndCyclesAreExplicitRejections()
+    {
+        SpecGateCaptureException collision = Reject(
+            nameof(Declarations.CollidingProperties), [new PropertyRequest(), 3]);
+        Assert.Equal(CaptureRejection.AmbiguousDeclaration, collision.Rejection);
+        Assert.Contains("limit", collision.Message, StringComparison.Ordinal);
+        SpecGateCaptureException cycle = Reject(
+            nameof(Declarations.CyclicProperties), [new RecursiveProperty()]);
+        Assert.Equal(CaptureRejection.AmbiguousDeclaration, cycle.Rejection);
+        Assert.Contains("recursive property setup", cycle.Message, StringComparison.Ordinal);
+        Assert.Equal(
+            CaptureRejection.NullValue,
+            Reject(nameof(Declarations.PropertyInputs), [null]).Rejection);
+        Assert.Equal(
+            CaptureRejection.TypeMismatch,
+            Reject(nameof(Declarations.PropertyInputs), [new object()]).Rejection);
+    }
+
+    [Fact]
     public void AVariantProjectsAsItsNameOverItsOwnMembers()
     {
         Assert.Equal(
@@ -532,6 +573,14 @@ public sealed class ValueProjectionTests
 
         internal static void Collided(Collided value) => _ = value;
 
+        internal static void PropertyInputs(PropertyRequest value) => _ = value;
+
+        internal static void PropertyList(List<PropertyLeaf> values) => _ = values;
+
+        internal static void CollidingProperties(PropertyRequest value, int limit) => _ = (value, limit);
+
+        internal static void CyclicProperties(RecursiveProperty value) => _ = value;
+
         internal static void Erased(object value) => _ = value;
 
         internal static void Unrepresentable(byte value) => _ = value;
@@ -563,6 +612,36 @@ internal sealed class Address
 
     [SpecEvent]
     public string WriteOnly { init => Note = value; }
+}
+
+[SpecEvent(Setup = true)]
+internal sealed class PropertyRequest
+{
+    public PropertyGroup Group { get; set; } = new();
+}
+
+[SpecEvent(Setup = true)]
+internal sealed class PropertyGroup
+{
+    public PropertyLeaf Leaf { get; set; } = new();
+    public EmptyProperty Empty { get; set; } = new();
+}
+
+[SpecEvent(Setup = true)]
+internal sealed class PropertyLeaf
+{
+    [SpecEvent("limit")]
+    public int Selected { get; set; }
+    public string Omitted { get; set; } = "";
+}
+
+[SpecEvent(Setup = true)]
+internal sealed class EmptyProperty;
+
+[SpecEvent(Setup = true)]
+internal sealed class RecursiveProperty
+{
+    public RecursiveProperty Child { get; set; } = null!;
 }
 
 [SpecEvent]

@@ -206,6 +206,7 @@ pub(crate) struct Setup {
     pub(crate) fills: String,
     pub(crate) declared_fills: String,
     pub(crate) inputs: Vec<usize>,
+    pub(crate) parameters: Vec<Parameter>,
     pub(crate) native_module: String,
     pub(crate) replay_output: Option<String>,
     pub(crate) test_target: Option<specgate_discovery::registry::TestTarget>,
@@ -218,7 +219,7 @@ pub(crate) enum Parameter {
     Properties {
         rust_type: String,
         borrow: String,
-        fields: Vec<(String, usize)>,
+        fields: Vec<(String, PropertyValue)>,
     },
     Setup {
         index: usize,
@@ -226,6 +227,13 @@ pub(crate) enum Parameter {
         /// Unsized borrowed target, resolved only in the operation's scope.
         projection: Option<String>,
     },
+}
+
+/// A leaf input or a nested native record reconstructed from flat inputs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum PropertyValue {
+    Input(usize),
+    Properties(Vec<(String, PropertyValue)>),
 }
 
 /// One planned invocation with scenario-specific semantic values.

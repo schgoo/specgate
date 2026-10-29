@@ -419,11 +419,8 @@ pub struct TypeMeta {
 }
 
 impl TypeMeta {
-    pub(crate) fn property_fields(operation: &OpMeta, parameter: &str) -> Result<Option<&'static [FieldMeta]>, CaptureError> {
-        let Some(parameter) = operation.params.iter().find(|field| field.name == parameter) else {
-            return Ok(None);
-        };
-        let mut native = parameter.rust_type.trim();
+    fn property_type(operation: &OpMeta, source_type: &str) -> Result<Option<&'static Self>, CaptureError> {
+        let mut native = source_type.trim();
         if let Some(reference) = native.strip_prefix('&') {
             native = reference.trim_start();
             if native.starts_with('\'') {
@@ -461,7 +458,68 @@ impl TypeMeta {
                 format!("ambiguous property setup type '{native}'"),
             ));
         }
-        Ok(first.map(|ty| ty.fields))
+        Ok(first)
+    }
+
+    pub(crate) fn input_fields(operation: &OpMeta, parameter: FieldMeta) -> Result<Vec<(FieldMeta, Vec<&'static str>)>, CaptureError> {
+        fn visit(
+            operation: &OpMeta,
+            field: FieldMeta,
+            path: &mut Vec<&'static str>,
+            visiting: &mut Vec<&'static TypeMeta>,
+            inputs: &mut Vec<(FieldMeta, Vec<&'static str>)>,
+        ) -> Result<(), CaptureError> {
+            let Some(properties) = TypeMeta::property_type(operation, field.rust_type())? else {
+                inputs.push((field, path.clone()));
+                return Ok(());
+            };
+            if visiting.iter().any(|ancestor| std::ptr::eq(*ancestor, properties)) {
+                return Err(CaptureError::setup_collision(
+                    operation.component,
+                    operation.name,
+                    format!("recursive property setup type '{}'", properties.name),
+                ));
+            }
+            visiting.push(properties);
+            let scoped = OpMeta {
+                module_path: properties.module_path.as_str(),
+                ..*operation
+            };
+            for child in properties.fields {
+                path.push(child.name());
+                visit(&scoped, *child, path, visiting, inputs)?;
+                path.pop();
+            }
+            visiting.pop();
+            Ok(())
+        }
+        let mut inputs = Vec::new();
+        visit(operation, parameter, &mut Vec::new(), &mut Vec::new(), &mut inputs)?;
+        Ok(inputs)
+    }
+
+    pub(crate) fn fold_input(operation: &OpMeta, name: &str, mut value: Value) -> Result<Vec<(String, Value)>, CaptureError> {
+        let Some(parameter) = operation.params.iter().find(|field| field.name() == name) else {
+            return Ok(vec![(name.to_string(), value)]);
+        };
+        Self::input_fields(operation, *parameter)?
+            .into_iter()
+            .map(|(field, path)| {
+                let mut projected = &mut value;
+                for member in path {
+                    let Value::Map(values) = projected else {
+                        return Err(CaptureError::message(
+                            CaptureErrorKind::Configuration,
+                            "property setup did not project named fields",
+                        ));
+                    };
+                    projected = values.get_mut(member).ok_or_else(|| {
+                        CaptureError::message(CaptureErrorKind::Configuration, format!("property setup omitted field '{member}'"))
+                    })?;
+                }
+                Ok((field.name().to_string(), std::mem::replace(projected, Value::Map(BTreeMap::new()))))
+            })
+            .collect()
     }
 
     /// Start a const builder with required semantic-type identity metadata.

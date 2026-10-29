@@ -106,7 +106,6 @@ public sealed class OperationScope
         for (int index = 0; index < declared.Length; index++)
         {
             SemanticInput input = declared[index];
-            Value value = ValueProjector.Project(input.Type, arguments[index]);
             if (folding.Filled.Contains(input.Name))
             {
                 // A filled argument is projected and then discarded, mirroring
@@ -115,21 +114,14 @@ public sealed class OperationScope
                 // value is projected before `input()` drops the filled name. An
                 // unrepresentable value in a filled position has to fail in both
                 // producers, not just one.
+                _ = ValueProjector.Project(input.Type, arguments[index]);
                 continue;
             }
 
-            if (input.Type.Declared is Type { IsEnum: false, IsAbstract: false } type
-                && SemanticType.IsPropertySetup(type))
+            foreach (KeyValuePair<string, Value> leaf in InputFolding.Project(input, arguments[index]))
             {
-                foreach (KeyValuePair<string, Value> member in value.AsMap())
-                {
-                    Merge(folded, producers, member.Key, member.Value,
-                        $"property setup parameter '{input.Name}'");
-                }
-                continue;
+                Merge(folded, producers, leaf.Key, leaf.Value, $"operation parameter '{input.Name}'");
             }
-
-            Merge(folded, producers, input.Name, value, $"operation parameter '{input.Name}'");
         }
 
         Pending.RecordInputs(folded);

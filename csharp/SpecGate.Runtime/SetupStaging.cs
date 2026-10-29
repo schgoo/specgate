@@ -64,7 +64,15 @@ public sealed class SetupStaging
         SortedDictionary<string, Value> inputs = new(Utf8KeyComparer.Instance);
         for (int index = 0; index < declared.Length; index++)
         {
-            inputs.Add(declared[index].Name, ValueProjector.Project(declared[index].Type, arguments[index]));
+            foreach (KeyValuePair<string, Value> leaf in InputFolding.Project(declared[index], arguments[index]))
+            {
+                if (!inputs.TryAdd(leaf.Key, leaf.Value))
+                {
+                    throw new SpecGateCaptureException(
+                        CaptureRejection.AmbiguousDeclaration,
+                        $"specgate: setup '{declarations[0].Key.Producer}' produces duplicate input name '{leaf.Key}'.");
+                }
+            }
         }
 
         return new SetupStaging(session, declarations, inputs);

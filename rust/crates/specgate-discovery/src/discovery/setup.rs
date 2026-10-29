@@ -100,6 +100,15 @@ pub struct MappedInput {
 /// # Errors
 /// Rejects ambiguous native type identities instead of selecting a declaration.
 pub fn property_setup<'a>(op: &Operation, source_type: &str, registry: &'a Registry) -> Result<Option<&'a crate::registry::Type>, Error> {
+    property_type(op.component.as_str(), op.module_path.as_str(), source_type, registry)
+}
+
+fn property_type<'a>(
+    component: &str,
+    module_path: &str,
+    source_type: &str,
+    registry: &'a Registry,
+) -> Result<Option<&'a crate::registry::Type>, Error> {
     let normalized = normalize(source_type);
     let mut native = normalized.trim();
     if let Some(reference) = native.strip_prefix('&') {
@@ -111,11 +120,11 @@ pub fn property_setup<'a>(op: &Operation, source_type: &str, registry: &'a Regis
     }
     let native = native.replace(' ', "");
     let native = if let Some(suffix) = native.strip_prefix("crate::") {
-        format!("{}::{suffix}", op.module_path.split("::").next().unwrap_or(""))
+        format!("{}::{suffix}", module_path.split("::").next().unwrap_or(""))
     } else if let Some(suffix) = native.strip_prefix("self::") {
-        format!("{}::{suffix}", op.module_path)
+        format!("{module_path}::{suffix}")
     } else if native.starts_with("super::") {
-        let mut scope = op.module_path.split("::").collect::<Vec<_>>();
+        let mut scope = module_path.split("::").collect::<Vec<_>>();
         let mut suffix = native.as_str();
         while let Some(parent) = suffix.strip_prefix("super::") {
             scope.pop();
@@ -130,7 +139,7 @@ pub fn property_setup<'a>(op: &Operation, source_type: &str, registry: &'a Regis
         .iter()
         .filter(|ty| {
             ty.property_setup
-                && ty.component == op.component
+                && ty.component == component
                 && (ty.native_name == native
                     || (ty.native_name.is_empty() && ty.name.as_str() == native)
                     || format!("{}::{}", ty.module_path, ty.native_name) == native)
@@ -140,10 +149,75 @@ pub fn property_setup<'a>(op: &Operation, source_type: &str, registry: &'a Regis
         [] => Ok(None),
         [ty] => Ok(Some(*ty)),
         _ => Err(failure(format!(
-            "ambiguous property setup type '{source_type}' for '{}::{}'",
-            op.component, op.name
+            "ambiguous property setup type '{source_type}' in '{component}' module '{module_path}'"
         ))),
     }
+}
+
+pub(super) fn property_field_type(
+    declaration: &crate::registry::Type,
+    source_type: &TypeExpression,
+    registry: &Registry,
+) -> Result<TypeExpression, Error> {
+    Ok(property_type(
+        declaration.component.as_str(),
+        &declaration.module_path,
+        source_type.as_str(),
+        registry,
+    )?
+    .map_or_else(|| source_type.clone(), |properties| properties.name.as_str().into()))
+}
+
+fn append_parameter(
+    op: &Operation,
+    parameter: &Field,
+    registry: &Registry,
+    visiting: &mut Vec<(String, String)>,
+    inputs: &mut Vec<Field>,
+) -> Result<(), Error> {
+    let Some(properties) = property_setup(op, &parameter.ty, registry)? else {
+        inputs.push(parameter.clone());
+        return Ok(());
+    };
+    let identity = (properties.module_path.clone(), properties.name.to_string());
+    if visiting.contains(&identity) {
+        return Err(failure(format!(
+            "recursive property setup type '{}' for '{}::{}'",
+            properties.name, op.component, op.name
+        )));
+    }
+    visiting.push(identity);
+    let mut scoped = op.clone();
+    scoped.module_path = properties.module_path.clone().into();
+    for field in &properties.fields {
+        append_parameter(&scoped, field, registry, visiting, inputs)?;
+    }
+    visiting.pop();
+    Ok(())
+}
+
+fn parameter_fields(op: &Operation, registry: &Registry) -> Result<Vec<Field>, Error> {
+    let mut inputs = Vec::new();
+    for parameter in &op.params {
+        append_parameter(op, parameter, registry, &mut Vec::new(), &mut inputs)?;
+    }
+    Ok(inputs)
+}
+
+/// Recursively decompose declared parameters without selecting setup producers.
+///
+/// This is the construction-input surface of a producer itself.
+///
+/// # Errors
+/// Rejects ambiguous or cyclic property-setup declarations.
+pub fn raw_parameters(op: &Operation, registry: &Registry) -> Result<Vec<SetupInput>, Error> {
+    Ok(parameter_fields(op, registry)?
+        .into_iter()
+        .map(|field| SetupInput {
+            name: field.name,
+            source_type: field.ty,
+        })
+        .collect())
 }
 
 /// Fold exact component-scoped setup producers into one operation's public
@@ -192,7 +266,10 @@ pub(super) fn fold_operation<'a>(op: &Operation, registry: &'a Registry) -> Resu
         };
 
         if let Some(target_name) = &target {
-            if param_injection.insert(target_name.clone(), setup.params.clone()).is_some() {
+            if param_injection
+                .insert(target_name.clone(), parameter_fields(setup, registry)?)
+                .is_some()
+            {
                 return Err(failure(format!(
                     "multiple setups for '{}::{}' fill parameter '{target_name}'",
                     op.component, op.name
@@ -206,7 +283,7 @@ pub(super) fn fold_operation<'a>(op: &Operation, registry: &'a Registry) -> Resu
         }
         folded_setups.push(FoldedSetup {
             fills: target.unwrap_or_default(),
-            inputs: setup.params.clone(),
+            inputs: parameter_fields(setup, registry)?,
             output: setup.return_type.clone(),
             producer: setup,
         });
@@ -226,15 +303,13 @@ pub(super) fn fold_operation<'a>(op: &Operation, registry: &'a Registry) -> Resu
             .sum::<usize>();
     let mut inputs = Vec::with_capacity(input_capacity);
     if let Some(setup) = receiver_setup {
-        inputs.extend(setup.params.iter().cloned());
+        inputs.extend(parameter_fields(setup, registry)?);
     }
     for parameter in &op.params {
         if let Some(injected) = param_injection.get(parameter.name.as_str()) {
             inputs.extend(injected.iter().cloned());
-        } else if let Some(properties) = property_setup(op, parameter.ty.as_str(), registry)? {
-            inputs.extend(properties.fields.iter().cloned());
         } else {
-            inputs.push(parameter.clone());
+            append_parameter(op, parameter, registry, &mut Vec::new(), &mut inputs)?;
         }
     }
     let mut names = BTreeSet::new();

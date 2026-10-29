@@ -279,17 +279,19 @@ fn source_in(plan: &Plan, harness: bool) -> String {
                     continue;
                 }
                 let local = format!("__sg_setup_{scenario_position}_{operation_index}_{setup_index}");
-                let arguments = setup
-                    .inputs
-                    .iter()
-                    .map(|index| rendered_inputs[*index].as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ");
                 if harness {
                     let values = setup
-                        .inputs
+                        .parameters
                         .iter()
-                        .map(|index| format!("__specgate::ToNativeValue::to_native_value(&({}))", rendered_inputs[*index]))
+                        .map(|parameter| match parameter {
+                            model::Parameter::Input(index) => {
+                                format!("__specgate::ToNativeValue::to_native_value(&({}))", rendered_inputs[*index])
+                            }
+                            model::Parameter::Properties { fields, .. } => property_map(fields, "__specgate", &|index| {
+                                format!("__specgate::ToNativeValue::to_native_value(&({}))", rendered_inputs[index])
+                            }),
+                            model::Parameter::Setup { .. } => unreachable!("producer parameters do not select explicit setups"),
+                        })
                         .collect::<Vec<_>>()
                         .join(", ");
                     writeln!(source, "    let mut {local} = __specgate::harness::setup({}, {}, {}, {}, {}, vec![{values}]).map_err(|error| error.to_string())?;",
@@ -297,6 +299,12 @@ fn source_in(plan: &Plan, harness: bool) -> String {
                         string_literal(&setup.native_module), string_literal(&setup.fn_name), string_literal(&setup.declared_fills),
                     ).expect("writing to a String cannot fail");
                 } else {
+                    let arguments = setup
+                        .parameters
+                        .iter()
+                        .map(|parameter| native_argument(parameter, &rendered_inputs, &plan.target.crate_name))
+                        .collect::<Vec<_>>()
+                        .join(", ");
                     let path = invocation_path(&setup.module_path, &setup.fn_name);
                     writeln!(source, "    let mut {local} = {path}({arguments});").expect("writing to a String cannot fail");
                 }
@@ -355,18 +363,8 @@ fn source_in(plan: &Plan, harness: bool) -> String {
                 .parameters
                 .iter()
                 .map(|parameter| match parameter {
-                    model::Parameter::Properties { rust_type, borrow, fields } => {
-                        let mut ty: syn::Type = syn::parse_str(rust_type).expect("validated property setup type");
-                        qualify_type(&mut ty, &plan.target.crate_name);
-                        let ty = quote::quote!(#ty).to_string();
-                        let values = fields.iter().map(|(name, index)| format!(
-                            "({}.to_string(), specgate_runtime::ToNativeValue::to_native_value(&({})))",
-                            string_literal(name), rendered_inputs[*index]
-                        )).collect::<Vec<_>>().join(", ");
-                        format!("{borrow}<{ty} as specgate_runtime::harness::Input>::decode(specgate_runtime::Value::Map([{values}].into_iter().collect())).map_err(|error| error.to_string())?")
-                    }
-                    model::Parameter::Input(index) => rendered_inputs[*index].clone(),
                     model::Parameter::Setup { index, borrow, .. } => format!("{borrow}{}", setup_locals[*index]),
+                    parameter => native_argument(parameter, &rendered_inputs, &plan.target.crate_name),
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
@@ -393,6 +391,7 @@ fn source_in(plan: &Plan, harness: bool) -> String {
                     .join(", ");
                 write!(path, "::<{arguments}>").expect("writing to a String cannot fail");
             }
+
             let await_suffix = if link.is_async { ".await" } else { "" };
             writeln!(source, "    let _ = {path}({arguments}){await_suffix};").expect("writing to a String cannot fail");
         }
@@ -430,6 +429,37 @@ fn source_in(plan: &Plan, harness: bool) -> String {
     }
 
     source
+}
+
+fn native_argument(parameter: &model::Parameter, inputs: &[String], crate_name: &str) -> String {
+    match parameter {
+        model::Parameter::Input(index) => inputs[*index].clone(),
+        model::Parameter::Properties { rust_type, borrow, fields } => {
+            let mut ty: syn::Type = syn::parse_str(rust_type).expect("validated property setup type");
+            qualify_type(&mut ty, crate_name);
+            let ty = quote::quote!(#ty).to_string();
+            let value = property_map(fields, "specgate_runtime", &|index| {
+                format!("specgate_runtime::ToNativeValue::to_native_value(&({}))", inputs[index])
+            });
+            format!("{borrow}<{ty} as specgate_runtime::harness::Input>::decode({value}).map_err(|error| error.to_string())?")
+        }
+        model::Parameter::Setup { .. } => unreachable!("injected setups are rendered separately"),
+    }
+}
+
+fn property_map(fields: &[(String, model::PropertyValue)], runtime: &str, leaf: &impl Fn(usize) -> String) -> String {
+    let members = fields
+        .iter()
+        .map(|(name, value)| {
+            let value = match value {
+                model::PropertyValue::Input(index) => leaf(*index),
+                model::PropertyValue::Properties(fields) => property_map(fields, runtime, leaf),
+            };
+            format!("({}.to_string(), {value})", string_literal(name))
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{runtime}::Value::Map([{members}].into_iter().collect())")
 }
 
 struct HarnessPaths {

@@ -205,8 +205,10 @@ architecture and status are in `docs/status.md`. Important current boundaries in
   a hook-only default does not register an unused component.
   Configured compiler wrappers remain under normal Cargo handling.
   Construction inputs support primitives and recursive lists, sets, string-keyed
-  maps, and optionals. Explicit property setups fold selected fields, and equal receiver producer/input
-  identities share state within a scenario;
+  maps, and optionals. Explicit property setups recursively fold nested opted-in
+  records, including producer arguments, into flat semantic leaves. Duplicate
+  leaf names and cyclic expansions are rejected; records inside containers are
+  not decomposed. Equal receiver producer/input identities share state within a scenario;
 - `discover`, `capture`, and `replay` reject overlapping commands against the
   same canonical package sources immediately and retain ownership through
   publication; reusable replay handles share the lease. Ordinary `cargo test`

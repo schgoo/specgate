@@ -186,7 +186,7 @@ fn check_component_hook(crate_types: &[&str]) {
     let module_dispatch = scratch.join("module.rs");
     fs::write(
         &module_dispatch,
-        "{ macro_rules! __specgate_dispatch { ($($unused:tt)*) => { None::<__specgate::harness::Invocation> }; } __specgate_selected!() }",
+        "{ macro_rules! __specgate_dispatch { ($($unused:tt)*) => { None }; } __specgate_selected!() }",
     )
     .unwrap();
     let modules = BTreeMap::from([("component_hook_fixture".to_string(), module_dispatch)]);
