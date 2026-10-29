@@ -107,6 +107,12 @@ Run from the repository root:
 just check
 ```
 
+`just check` is the union of three independent lanes, which CI runs as parallel
+jobs on each OS: `just check-rust` (build and Rust tests), `just check-static`
+(clippy, formatting, licenses, READMEs, docs, and the C# build/tests/format),
+and `just check-ctsc` (CTSC validation, smoke, and the golden matrix). Add a new
+gate recipe to one lane, not directly to `check`.
+
 Rust tests that drive C# need the prebuilt discovery and weaver tools. `just test`
 builds them and exports `SPECGATE_DISCOVERY_PATH` and `SPECGATE_WEAVER_PATH`; to run
 `cargo test` directly, run `just discovery-tool weaver-tool` first and export the
@@ -123,9 +129,11 @@ threads explicitly created inside tests are unaffected. Wrapper regressions run
 first, including a real Cargo fixture proving warm executable reuse and shared
 dependency compilation across isolated candidate targets. The caller's
 environment is unchanged; cleanup restores the working directory and removes
-scratch. There is no persistent test cache or CI cache configuration. `just test`
-also runs the separate `test` workspace with its original Cargo command
-and parallelism.
+scratch. There is no persistent test cache or CI cache configuration.
+`just rust-test` skips the golden harness unit tests (`goldens::tests::cases`),
+which `just ctsc-goldens-harness-tests` runs in parallel; `just test` includes
+that recipe and also runs the separate `test` workspace with its original Cargo
+command and parallelism.
 
 The runner owns the `value` and `force` entries of Cargo's
 `env.CARGO_BUILD_BUILD_DIR` table for its child processes. If custom Cargo
