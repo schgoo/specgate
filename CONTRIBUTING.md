@@ -223,8 +223,7 @@ is tagged.
 Run `just agent-plugin` after changing a bundled page, the manifest, or the
 workspace version. `just docs-check` fails when the committed plugin differs
 from a fresh build, when a link or anchor in it does not resolve, or when a
-`SKILL.md` reaches 500 lines. Publishing the plugin to a marketplace is a
-release step outside this repository.
+`SKILL.md` reaches 500 lines.
 
 ## Changelog
 

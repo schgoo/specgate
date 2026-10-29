@@ -210,12 +210,6 @@ function Build-Plugin([string]$Out) {
     foreach ($key in $claude.Keys) { $copilot[$key] = $claude[$key] }
     $copilot.skills = 'skills/'
     Write-Text $Out 'plugin.json' (ConvertTo-PluginJson $copilot)
-    $agency = [ordered]@{
-        engines   = @('claude', 'copilot')
-        category  = 'developer-tools'
-        platforms = @('windows', 'linux', 'macos')
-    }
-    Write-Text $Out 'agency.json' (ConvertTo-PluginJson $agency)
 
     $readme = [Text.StringBuilder]::new()
     [void]$readme.Append("# SpecGate agent plugin`n`n")
