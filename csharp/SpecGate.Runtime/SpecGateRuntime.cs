@@ -32,6 +32,12 @@ public static class SpecGateRuntime
     /// <param name="component">The only component recorded by this session.</param>
     /// <param name="config">The deterministic protocol configuration.</param>
     /// <exception cref="InvalidOperationException">A session is already active.</exception>
+    /// <remarks>
+    /// A session records one scenario. <c>[SpecSetup]</c> provenance lasts for
+    /// the whole session: a setup's first committed inputs, or its first
+    /// unrecordable-value diagnostic, apply to every operation it prepares
+    /// until the session is disposed. Begin a new session for each scenario.
+    /// </remarks>
     public static CaptureSession BeginSession(string component, CaptureConfig config)
     {
         if (string.IsNullOrEmpty(component))
