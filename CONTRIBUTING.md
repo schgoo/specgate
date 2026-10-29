@@ -205,6 +205,27 @@ The map only proves that a page was touched, not that its prose is true. When
 behavior changes, also search the docs for the old rule's wording; limits are
 often restated outside the mapped pages.
 
+## Agent plugin
+
+`plugins/specgate/` is an agent plugin (Claude Code and Copilot CLI) that
+teaches an agent to install and use SpecGate in its own project, without the
+contributor rules in this repository. It is generated; do not edit it by hand.
+
+[`docs/contributor/agent-plugin.json`](docs/contributor/agent-plugin.json)
+lists the bundled guide and reference pages and maps each skill to the guides
+it contains. [`scripts/agent-plugin.ps1`](scripts/agent-plugin.ps1) copies the
+bundle under `plugins/specgate/docs/`, builds one `SKILL.md` per skill, and
+reads the plugin version from `rust/Cargo.toml`. It strips check tags and
+`Source of truth` sections and rewrites links to files outside the bundle to
+GitHub URLs pinned to `v<version>`, so those links resolve once that release
+is tagged.
+
+Run `just agent-plugin` after changing a bundled page, the manifest, or the
+workspace version. `just docs-check` fails when the committed plugin differs
+from a fresh build, when a link or anchor in it does not resolve, or when a
+`SKILL.md` reaches 500 lines. Publishing the plugin to a marketplace is a
+release step outside this repository.
+
 ## Changelog
 
 `CHANGELOG.md` entries are one line per change. `just changelog` previews

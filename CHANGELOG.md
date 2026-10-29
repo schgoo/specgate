@@ -68,6 +68,9 @@ under `docs/decisions/`, or `docs/contributor/roadmap.md`. Generate with `just c
   each operation's recorded inputs and at every close.
 - `specgate-discovery`, a focused crate owning one strict target-binding
   resolver shared by all CLI commands.
+- `plugins/specgate`, an agent plugin generated from the user guides with one
+  skill per task (install, instrument Rust or C#, capture, replay, validate and
+  compare, troubleshoot); `just docs-check` fails when it is stale.
 
 ### Changed
 
