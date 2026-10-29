@@ -115,6 +115,12 @@ stderr.
 | `validate` | `valid: <level> <artifact>` | `invalid: <level> <artifact>`, then one `  <location>: <message>` line per finding |
 | `compare` | `policy: <name>/<version>`, `reference: <path>`, `candidate: <path>`, `equivalent: true` | The same header with `equivalent: false`, then `validation …`, `error …`, or `mismatch <path>: expected <x>, actual <y>` lines |
 
+A successful `capture` also prints one `warning: <scenario>: <message>` line to
+stderr for each test it dropped because an operation observed a value that
+cannot be recorded, such as a null in a non-nullable C# position. The message
+names the operation and position and asks whether the position should be
+declared nullable (`optional<T>` in the registry).
+
 Example `compare` mismatch output:
 
 ```text

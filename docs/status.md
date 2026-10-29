@@ -117,8 +117,10 @@ Rust candidate replay supports public free functions and setup-backed instance
 methods, including directly awaited async calls and explicit generic
 specializations. Operation and setup construction inputs support lossless
 primitives and recursively supported lists, sets, string-keyed maps, and optionals.
-Explicit property setups fold selected fields into flat inputs and reconstruct
-Rust values; omitted fields require `Default`. C# constructors may declare setups.
+Explicit property setups recursively fold nested opted-in records into flat
+semantic leaves, including setup-producer arguments, and reconstruct Rust values;
+omitted fields require `Default`. Duplicate leaf names and cyclic expansions are
+rejected. Records inside containers are not decomposed. C# constructors may declare setups.
 Structured results and declared errors, including collections of
 annotated records, use the existing CTSC projection and linked validators.
 Reachable named declarations, including nested observed outcomes, must match

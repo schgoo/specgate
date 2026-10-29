@@ -12,6 +12,13 @@ under `docs/decisions/`, or `docs/contributor/roadmap.md`. Generate with `just c
   fold a parameter object's selected fields into flat inputs and rebuild the
   Rust value with `Default` for omitted fields; C# constructors may declare
   `[SpecSetup]` (#102, #105).
+- Property setups decompose nested opted-in records recursively, including
+  setup-producer arguments, into flat semantic leaves; duplicate leaf names and
+  cyclic property-setup types are rejected, and records inside containers are
+  not decomposed (#110).
+- A null in a non-nullable C# position no longer fails the test; capture drops
+  the scenario with a `specgate.unrecordable_value` fault and prints a
+  `warning:` line suggesting a nullable declaration (#110).
 - One shared native golden bundle per component across all languages, including
   one canonical registry flat under `component/<id>/` and no per-language successful-component artifacts, selecting
   C# for paired fixtures and Rust for Rust-only fixtures, with independent strict
@@ -64,9 +71,10 @@ under `docs/decisions/`, or `docs/contributor/roadmap.md`. Generate with `just c
 
 ### Changed
 
+- Rust capture records `&mut` setup-producer parameters as inputs, matching the
+  inputs discovery already declared for them (#110).
 - **Breaking:** Rust discovery and replay require `spec_component!("...")` in each participating library, binary, and integration-test crate root, including explicitly qualified operations/setups; generated builds use original sources and preserve configured compiler wrappers (#104).
 - `discover`, `capture`, and `replay` reject overlapping commands against the same package immediately while retaining reusable generated-build caches and ordinary `cargo test` parallelism (#106).
-
 - Retired duplicate C# woven behavioral tests and unused fixtures; setup rejection
   tests now exercise woven boundaries outside the captured native test project (#47).
 - Bindings use `components.<id>.implementations.<label>` with `language`,

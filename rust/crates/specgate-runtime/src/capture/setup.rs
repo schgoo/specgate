@@ -160,13 +160,26 @@ where
     let module_path = provenance.module_path;
     let fn_name = provenance.fn_name;
     let fills = provenance.fills;
+    let declaration = registry::OPERATIONS.iter().find(|meta| {
+        meta.is_setup
+            && meta.component == component_id.as_str()
+            && meta.name == operation_name.as_str()
+            && meta.module_path == module_path.as_str()
+            && meta.fn_name == fn_name.as_str()
+            && meta.fills == fills.map(registry::FieldName::as_str)
+    });
     let mut recorded = BTreeMap::new();
     for (name, value) in inputs() {
-        let name = name.as_str();
-        assert!(
-            recorded.insert(name.to_string(), value).is_none(),
-            "generated setup invariant violated: setup '{fn_name}' for '{component_id}::{operation_name}' records input '{name}' twice"
-        );
+        let fields = match declaration {
+            Some(meta) => registry::TypeMeta::fold_input(meta, name.as_str(), value)?,
+            None => vec![(name.as_str().to_string(), value)],
+        };
+        for (name, value) in fields {
+            assert!(
+                recorded.insert(name.clone(), value).is_none(),
+                "generated setup invariant violated: setup '{fn_name}' for '{component_id}::{operation_name}' records input '{name}' twice"
+            );
+        }
     }
     let key = SetupKey {
         component_id,
@@ -375,18 +388,19 @@ pub(super) fn validate_declared_folding(operations: &[registry::OpMeta]) -> Resu
                 })
                 .expect("planned setup belongs to declaration set");
             for field in producer.params {
-                if !names.insert(field.name()) {
-                    return Err(CaptureError::setup_collision(
-                        operation.component,
-                        operation.name,
-                        format!("setup folding produces duplicate input name '{}'", field.name()),
-                    ));
+                for (field, _) in registry::TypeMeta::input_fields(producer, *field)? {
+                    if !names.insert(field.name()) {
+                        return Err(CaptureError::setup_collision(
+                            operation.component,
+                            operation.name,
+                            format!("setup folding produces duplicate input name '{}'", field.name()),
+                        ));
+                    }
                 }
             }
         }
         for parameter in operation.params.iter().filter(|field| !filled.contains(field.name())) {
-            let properties = registry::TypeMeta::property_fields(operation, parameter.name())?;
-            for field in properties.unwrap_or(std::slice::from_ref(parameter)) {
+            for (field, _) in registry::TypeMeta::input_fields(operation, *parameter)? {
                 if !names.insert(field.name()) {
                     return Err(CaptureError::setup_collision(
                         operation.component,

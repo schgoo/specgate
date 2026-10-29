@@ -23,6 +23,20 @@ public sealed class Subset
 [SpecEvent("Empty", Setup = true)]
 public sealed class Empty;
 
+[SpecEvent("Fields", Setup = true)]
+public sealed class Fields
+{
+    public Query query { get; set; } = new();
+    public Subset subset { get; set; } = new();
+    public Empty empty { get; set; } = new();
+}
+
+[SpecEvent("Request", Setup = true)]
+public sealed class Request
+{
+    public Fields fields { get; set; } = new();
+}
+
 public class ConstructorBase
 {
     protected ConstructorBase() { }
@@ -40,10 +54,44 @@ public sealed class Constructed : ConstructorBase
         if (filter == "throw") throw new ArgumentException("intentional constructor failure", nameof(filter));
         Filter = filter;
     }
+
+    [SpecSetup("nested_constructor", Fills = "query", Spec = "fixture.property_setup")]
+    public Constructed([SpecInput("options")] Request options)
+    {
+        Filter = $"{options.fields.query.filter}:{options.fields.subset.Selected}";
+    }
+}
+
+[SpecEvent("NestedCounter")]
+public sealed class NestedCounter
+{
+    [SpecEvent("count")]
+    public uint Count { get; set; }
+
+    [SpecSetup("nested_increment", Spec = "fixture.property_setup")]
+    public NestedCounter([SpecInput("options")] Request options)
+    {
+        Count = options.fields.subset.Selected;
+        options.fields.subset.Selected++;
+    }
+
+    [SpecOperation("nested_increment", Spec = "fixture.property_setup")]
+    public uint Increment() => ++Count;
 }
 
 public static class Operations
 {
+    [SpecOperation("nested_fields", Spec = "fixture.property_setup")]
+    public static string NestedFields([SpecInput("query")] Request query)
+    {
+        string result = $"{query.fields.query.filter}:{query.fields.subset.Selected}";
+        query.fields.subset.Selected++;
+        return result;
+    }
+
+    [SpecOperation("nested_constructor", Spec = "fixture.property_setup")]
+    public static string NestedConstructor([SpecInput("query")] Constructed query) => query.Filter;
+
     [SpecOperation("zero_inputs", Spec = "fixture.property_setup")]
     public static int ZeroInputs([SpecInput("_query")] Empty query) => 3;
 

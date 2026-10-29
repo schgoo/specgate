@@ -139,7 +139,9 @@ One OTLP JSON candidate trace. Scenario names match the reference.
 | `candidate setup resolution failed` | Setups do not resolve uniquely to a receiver or injected parameter. | Annotate one matching producer per role. |
 | `selected setup producers belong to different Cargo test targets` | No single target contains the environment. | Keep the required producers in one Cargo target. |
 | `unsupported async replay scheduling:` | Recorded sibling operations overlap. | Record directly awaited calls; overlapping scheduling is unsupported. |
-| `uses unsupported structured type` | An operation or setup input is neither a supported primitive/collection nor an explicitly opted-in property setup. | See [`../reference/limitations.md`](../reference/limitations.md). |
+| `uses unsupported structured type` | An operation or setup input, or a field of a property setup, is a record that is not an opted-in property setup, or a record inside a collection or optional. | See [`../reference/limitations.md`](../reference/limitations.md). |
+| `produces duplicate input name` | Flattened property-setup leaves collide; nested paths are not prefixed. | Rename one field with `#[spec_event(name = "...")]`. |
+| `recursive property setup type` | An opted-in property-setup type reaches itself. | Remove the setup opt-in from one record in the cycle. |
 | `already exists; pass --force to overwrite it` | The output file exists. | Pass `--force` or another `--out`. |
 
 ## Verify

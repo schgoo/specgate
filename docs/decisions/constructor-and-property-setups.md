@@ -36,6 +36,32 @@ Replay also accepts recursively supported lists, sets, string-keyed maps, and
 optionals as operation and construction inputs. Primitive range, floating-point,
 optional-tag, and collection semantics remain unchanged.
 
+### Recursive decomposition (2026-10-28)
+
+Property decomposition follows nested, explicitly opted-in record fields
+recursively, including property-setup arguments to explicit setup producers.
+Leaves appear in depth-first declaration order under their semantic field names.
+Names remain flat: collisions anywhere in the folded operation are errors.
+Resolve each nested field in its declaring type's native module, not the
+operation's module. Cyclic property-setup declarations are rejected rather than
+expanded indefinitely.
+
+Capture snapshots the same leaves at operation or producer entry. Rust replay
+reconstructs the nested record shape before invoking the operation or producer.
+Empty nested property setups and omitted-field defaults retain the rules above.
+An explicit producer still takes precedence over property decomposition of the
+operation parameter it fills.
+
+This recursive step does not descend into optional, list, set, or map elements.
+Containers of supported primitive values remain supported; records inside
+containers and undeclared record reconstruction remain outside this slice.
+A null in a non-nullable nested property-setup member is reported like a null
+in any non-nullable declared position: the test still runs, and capture drops
+the scenario with a warning (see
+[`null-values-are-capture-diagnostics.md`](null-values-are-capture-diagnostics.md)).
+A nullable member (`T?`)
+maps to `optional`, the same as Rust `Option<T>`, and is not decomposed.
+
 ## Boundaries
 
 This supersedes the prohibition on defaulting omitted fields in

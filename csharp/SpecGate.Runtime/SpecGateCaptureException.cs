@@ -9,7 +9,8 @@ namespace SpecGate.Runtime;
 /// These are stable classifications, not message text. A capture that cannot be
 /// represented fails loudly rather than recording an approximation, because a
 /// silently degraded reference capture would make every later comparison against
-/// it meaningless.
+/// it meaningless. <see cref="NullValue"/> is reported rather than thrown, but it
+/// still never records an approximation.
 /// </remarks>
 public enum CaptureRejection
 {
@@ -29,6 +30,12 @@ public enum CaptureRejection
     /// A null was observed where the declared type is not optional. Declare the
     /// parameter or member nullable to record absence.
     /// </summary>
+    /// <remarks>
+    /// This classification is reported, not thrown: the operation keeps running
+    /// as written, and its span records a <c>specgate.unrecordable_value</c>
+    /// fault carrying the diagnostic, which <c>specgate capture</c> reports as a
+    /// warning when it drops the scenario.
+    /// </remarks>
     NullValue,
 
     /// <summary>
@@ -75,7 +82,10 @@ public enum CaptureRejection
 /// <remarks>
 /// This propagates out of the instrumented call, so the test that drove the
 /// operation fails. That is deliberate: the alternative is a reference capture
-/// that is quietly missing or wrong at one boundary.
+/// that is quietly missing or wrong at one boundary. The one exception is
+/// <see cref="CaptureRejection.NullValue"/>, which is reported on the operation
+/// instead, because a null in a non-optional position may mean the declaration
+/// should be optional rather than that the test is wrong.
 /// </remarks>
 public sealed class SpecGateCaptureException : Exception
 {

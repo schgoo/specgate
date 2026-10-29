@@ -10,6 +10,20 @@ pub(super) fn source(plan: &Plan, module: Option<&str>) -> String {
         let component = component(component_id, link.explicit_component);
         let operation = link.operation_name.as_str();
         let body = invocation(link);
+        for setup in &link.setups {
+            if module != Some(setup.native_module.as_str()) {
+                continue;
+            }
+            let function = &setup.fn_name;
+            let fills = &setup.declared_fills;
+            let component = self::component(component_id, setup.explicit_component);
+            let body = constructor(link, setup);
+            arms.push(quote::quote! {
+                (construction, #package, #component, #operation, #function, #fills, $function:ident) => {
+                    Some::<__specgate::harness::Constructor>(|values| { #body })
+                };
+            });
+        }
         for parameter in &link.parameters {
             if let model::Parameter::Setup {
                 index,
@@ -78,6 +92,7 @@ pub(super) fn source(plan: &Plan, module: Option<&str>) -> String {
         macro_rules! __specgate_dispatch {
             #(#arms)*
             (input, $($unused:tt)*) => { None::<__specgate::harness::Projection> };
+            (construction, $($unused:tt)*) => { None::<__specgate::harness::Constructor> };
             ($($unused:tt)*) => { None::<__specgate::harness::Invocation> };
         }
         __specgate_selected!()
@@ -93,6 +108,53 @@ fn component(value: &str, explicit: bool) -> impl quote::ToTokens {
     }
 }
 
+fn constructor(link: &Link, setup: &model::Setup) -> impl quote::ToTokens {
+    let mut bindings = Vec::new();
+    let mut arguments = Vec::new();
+    for (position, parameter) in setup.parameters.iter().enumerate() {
+        let local = quote::format_ident!("__sg_argument_{position}");
+        let (native, borrow) = match parameter {
+            model::Parameter::Input(index) => {
+                let native = &link.inputs[*index].rust_type;
+                if native.replace(' ', "") == "&str" {
+                    ("String", "&")
+                } else {
+                    (native.as_str(), "")
+                }
+            }
+            model::Parameter::Properties { rust_type, borrow, .. } => (rust_type.as_str(), borrow.as_str()),
+            model::Parameter::Setup { .. } => unreachable!("producer parameters do not select explicit setups"),
+        };
+        let mut native: syn::Type = syn::parse_str(native).expect("validated producer parameter");
+        local_type(&mut native, &setup.native_module);
+        bindings.push(quote::quote! {
+            let mut #local: #native = __specgate::harness::argument(&mut values, "setup argument")?;
+        });
+        arguments.push(match borrow {
+            "&" => quote::quote!(&#local),
+            "&mut " => quote::quote!(&mut #local),
+            _ => quote::quote!(#local),
+        });
+    }
+    quote::quote! {
+        let mut values = values.into_iter();
+        #(#bindings)*
+        if values.next().is_some() {
+            return Err(__specgate::harness::error("unexpected extra setup inputs"));
+        }
+        Ok(::std::boxed::Box::new($function(#(#arguments),*)))
+    }
+}
+
+fn local_type(native: &mut syn::Type, module: &str) {
+    if let syn::Type::Path(path) = native {
+        let root = &mut path.path.segments.first_mut().expect("property setup has a native module").ident;
+        if module.split("::").next().is_some_and(|module| root == module) {
+            *root = syn::Ident::new("crate", root.span());
+        }
+    }
+}
+
 fn invocation(link: &Link) -> impl quote::ToTokens {
     let mut bindings = Vec::new();
     let mut arguments = Vec::new();
@@ -101,22 +163,13 @@ fn invocation(link: &Link) -> impl quote::ToTokens {
         match parameter {
             model::Parameter::Properties { rust_type, borrow, fields } => {
                 let mut native: syn::Type = syn::parse_str(rust_type).expect("validated property setup type");
-                if let syn::Type::Path(path) = &mut native {
-                    let root = &mut path.path.segments.first_mut().expect("property setup has a native module").ident;
-                    if link.native_module.split("::").next().is_some_and(|module| root == module) {
-                        *root = syn::Ident::new("crate", root.span());
-                    }
-                }
-                let values = fields.iter().map(|(name, index)| {
-                    quote::quote! {
-                        (#name.to_string(), inputs.get(#index)
-                            .ok_or_else(|| __specgate::harness::error("missing property setup input"))?.clone())
-                    }
+                local_type(&mut native, &link.native_module);
+                let value = super::property_map(fields, "__specgate", &|index| {
+                    format!("inputs.get({index}).ok_or_else(|| __specgate::harness::error(\"missing property setup input\"))?.clone()")
                 });
+                let value: syn::Expr = syn::parse_str(&value).expect("validated property reconstruction");
                 bindings.push(quote::quote! {
-                    let mut #local = <#native as __specgate::harness::Input>::decode(
-                        __specgate::Value::Map([#(#values),*].into_iter().collect())
-                    )?;
+                    let mut #local = <#native as __specgate::harness::Input>::decode(#value)?;
                 });
                 arguments.push(match borrow.as_str() {
                     "&" => quote::quote!(&#local),
@@ -211,7 +264,10 @@ mod tests {
             parameters: vec![model::Parameter::Properties {
                 rust_type: "library::Query".into(),
                 borrow: "&mut ".into(),
-                fields: vec![("filter".into(), 0)],
+                fields: vec![(
+                    "nested".into(),
+                    model::PropertyValue::Properties(vec![("filter".into(), model::PropertyValue::Input(0))]),
+                )],
             }],
         };
         let external = invocation(&link).into_token_stream().to_string();

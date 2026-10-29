@@ -146,10 +146,12 @@ The golden matrix replays this case on every `just check`.
 
 If the setup instead took a record, such as a polygon, opt the record in as a
 property setup so replay deconstructs it into its fields (see the Rust and C#
-instrumentation guides), or give it an explicit setup producer. Deconstruction
-is one level deep, and a producer's own inputs must also be primitives,
-collections, or optionals. A polygon whose `points` field is a list of `Point`
-records therefore cannot be replayed through either path. A record input that
+instrumentation guides), or give it an explicit setup producer. Nested
+opted-in records, including those passed to a producer, are deconstructed
+recursively, but records inside collections or optionals are not. A polygon
+whose `points` field is a list of `Point` records therefore cannot be replayed
+through either path, while one with opted-in `origin: Point` and `size: Size`
+fields can. A record input that
 cannot be rebuilt fails with `uses unsupported structured type` (the
 `structured-value` limitation). Report that limitation and ask before changing
 the boundary.
@@ -183,7 +185,7 @@ Every command exits 0.
 | `mismatch <path>: expected <x>, actual <y>` | The port behaves differently. | Fix the port. |
 | Replay `Error(...)` naming an operation or type | Names or types differ from the original's registry, or a replay limitation applies. | Match the names; see [`troubleshoot-capture.md`](troubleshoot-capture.md#replay). |
 | `replay currently supports only Rust candidates; implementation language is` | The port is C#. | Not supported yet. |
-| `uses unsupported structured type` | An operation or setup construction input is a record that is not an opted-in property setup, or a property-setup field is itself a record. | Opt the type in as a property setup if its fields are primitives, collections, or optionals. Otherwise report the limitation and ask before changing the boundary. Do not replace the input with a fixture name. |
+| `uses unsupported structured type` | An operation or setup construction input, or a property-setup field, is a record that is not an opted-in property setup, or a record sits inside a collection or optional. | Opt the record in as a property setup if its fields are primitives, collections, optionals, or opted-in records. Otherwise report the limitation and ask before changing the boundary. Do not replace the input with a fixture name. |
 | `uses unsupported structured replay type mapping` | The port's structured result or error type, or a type reachable from it, does not match the reference's CTSC declaration. Replay has no explicit type mappings. | Make the port's type declare the same semantic name, fields, and variants (rename fields with `#[spec_event(name = "…")]`). If the shapes must differ, report the limitation. |
 
 ## Verify

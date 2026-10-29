@@ -85,5 +85,12 @@ fn run_with<T: AsRef<std::ffi::OsStr>>(
     if write!(output, "{}", format_capture(&outcome)).is_err() {
         return super::output_error("failed to write capture report", errors);
     }
+    if let Ok(report) = &outcome {
+        for warning in report.warnings() {
+            if writeln!(errors, "warning: {warning}").is_err() {
+                return super::output_error("failed to write capture warning", errors);
+            }
+        }
+    }
     operation_status(outcome.is_ok())
 }

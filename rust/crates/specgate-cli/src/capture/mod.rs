@@ -143,7 +143,8 @@ use filter::validate_setups;
 mod execution;
 use execution::{
     ComponentSchemas, ExecutedTests, FailedTest, FailureReason, artifact_path, failure_summary, reject_failures, reject_persistence,
-    scratch_dir, sha256_digest, unfinalized_operation, unfinalized_summary, write_artifact,
+    scratch_dir, sha256_digest, unfinalized_operation, unfinalized_summary, unrecordable_operation, unrecordable_summary,
+    unrecordable_warnings, write_artifact,
 };
 mod csharp;
 mod rust;

@@ -133,8 +133,15 @@ For object-initializer parameters, use `[SpecEvent(Setup = true)]` on the type.
 Without member annotations, all public instance fields and readable properties
 declared on the type participate; otherwise only annotated members participate.
 Capture reads their final values at operation entry and folds their semantic
-names into flat inputs. Rename members to resolve collisions; names are never
-automatically prefixed. Explicit setup producers take precedence over property
+names into flat inputs. A member whose type is itself `Setup = true` is folded
+recursively, including in setup-producer arguments; records inside collections
+are not. Rename members with `[SpecEvent("...")]` to resolve collisions; names
+are never automatically prefixed. Duplicate names and types that reach
+themselves are rejected as `AmbiguousDeclaration`. A null in a non-nullable
+property-setup parameter or member, like any null in a non-nullable position,
+does not fail the test: capture drops that scenario and prints a warning asking
+whether the position should be nullable. A nullable member (`T?`) is
+an optional and is not decomposed. Explicit setup producers take precedence over property
 folding for the parameters they fill. Rust candidates opt in separately and
 promise that any omitted fields may safely use `Default`.
 

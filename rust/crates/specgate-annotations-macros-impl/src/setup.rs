@@ -58,8 +58,10 @@ pub fn expand_setup(attribute: TokenStream2, item: TokenStream2) -> syn::Result<
     if !is_async {
         let recorded = params
             .iter()
-            .filter(|(_ident, ty, _name)| !is_mut_ref(ty))
-            .map(|(ident, _ty, semantic_name)| quote!((#rt::FieldName::new(#semantic_name), #rt::ToNativeValue::to_native_value(&#ident))))
+            .map(|(ident, ty, semantic_name)| {
+                let value = if is_mut_ref(ty) { quote!(&*#ident) } else { quote!(&#ident) };
+                quote!((#rt::FieldName::new(#semantic_name), #rt::ToNativeValue::to_native_value(#value)))
+            })
             .collect::<Vec<_>>();
         let body = function.block.clone();
         let return_type = match &function.sig.output {
@@ -89,21 +91,50 @@ pub fn expand_setup(attribute: TokenStream2, item: TokenStream2) -> syn::Result<
         && !is_async
         && function.sig.generics.params.is_empty()
         && !super::has_receiver(&function)
-        && params.iter().all(|(_, ty, _)| primitive(ty).is_some())
         && owned_output(&function.sig.output)
     {
         let function_ident = &function.sig.ident;
-        let bindings = params.iter().map(|(ident, ty, name)| {
-            let (ty, _) = primitive(ty).expect("validated primitive setup input");
-            quote!(let #ident: #ty = #rt::harness::argument(&mut values, #name)?;)
-        });
-        let arguments = params.iter().map(|(ident, ty, _)| {
-            if primitive(ty).expect("validated primitive setup input").1 {
-                quote!(&#ident)
-            } else {
-                quote!(#ident)
+        let construct = if params.iter().all(|(_, ty, _)| primitive(ty).is_some()) {
+            let bindings = params.iter().map(|(ident, ty, name)| {
+                let (ty, _) = primitive(ty).expect("validated primitive setup input");
+                quote!(let #ident: #ty = #rt::harness::argument(&mut values, #name)?;)
+            });
+            let arguments = params.iter().map(|(ident, ty, _)| {
+                if primitive(ty).expect("validated primitive setup input").1 {
+                    quote!(&#ident)
+                } else {
+                    quote!(#ident)
+                }
+            });
+            quote! {
+                let mut values = values.into_iter();
+                #(#bindings)*
+                if values.next().is_some() {
+                    return ::core::result::Result::Err(#rt::harness::error("unexpected extra setup inputs"));
+                }
+                ::core::result::Result::Ok(::std::boxed::Box::new(#function_ident(#(#arguments),*)))
             }
-        });
+        } else if std::env::var_os("SPECGATE_TEST_DISPATCH").is_some() {
+            let declared_fills = fills.as_deref().unwrap_or_default();
+            let package = std::env::var("CARGO_PKG_NAME").map_err(|error| syn::Error::new_spanned(&function.sig, error))?;
+            quote! {
+                let constructor: ::core::option::Option<#rt::harness::Constructor> = {
+                    use #rt as __specgate;
+                    macro_rules! __specgate_selected {
+                        () => {
+                            __specgate_dispatch!(construction, #package, #component, #operation, #function_name, #declared_fills, #function_ident)
+                        };
+                    }
+                    include!(env!(concat!("SPECGATE_TEST_MODULE_", module_path!())))
+                };
+                constructor.ok_or_else(|| #rt::harness::error("setup requires a selected replay constructor"))?(values)
+            }
+        } else {
+            quote! {
+                let _ = values;
+                ::core::result::Result::Err(#rt::harness::error("setup requires a selected replay constructor"))
+            }
+        };
         let output = match &function.sig.output {
             ReturnType::Default => quote!(()),
             ReturnType::Type(_, ty) => quote!(#ty),
@@ -133,12 +164,7 @@ pub fn expand_setup(attribute: TokenStream2, item: TokenStream2) -> syn::Result<
         quote! {
             .replay_setup(#rt::harness::Setup::new(
                 |values| {
-                    let mut values = values.into_iter();
-                    #(#bindings)*
-                    if values.next().is_some() {
-                        return ::core::result::Result::Err(#rt::harness::error("unexpected extra setup inputs"));
-                    }
-                    ::core::result::Result::Ok(::std::boxed::Box::new(#function_ident(#(#arguments),*)))
+                    #construct
                 },
                 || ::core::any::type_name::<#output>(),
             ) #dispatch)

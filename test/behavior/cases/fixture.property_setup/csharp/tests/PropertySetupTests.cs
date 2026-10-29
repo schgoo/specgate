@@ -36,5 +36,25 @@ public sealed class PropertySetupTests
         Assert.Equal(9u, Operations.SubsetRenamed(subset, 2));
         Assert.Equal(10u, Operations.SubsetRenamed(subset, 2));
         Assert.Equal(9u, subset.Selected);
+        var nested = new Request
+        {
+            fields = new Fields
+            {
+                query = new Query
+                {
+                    filter = "nested",
+                    top = Option<uint>.Some(4),
+                    tags = ["tag"],
+                    allowed = ["b", "a"],
+                },
+                subset = new Subset { Selected = 11, Cache = "not reconstructed" },
+            },
+        };
+        Assert.Equal("nested:11", Operations.NestedFields(nested));
+        Assert.Equal("nested:12", Operations.NestedFields(nested));
+        var counter = new NestedCounter(nested);
+        Assert.Equal(14u, counter.Increment());
+        Assert.Equal(15u, counter.Increment());
+        Assert.Equal("nested:14", Operations.NestedConstructor(new Constructed(nested)));
     }
 }

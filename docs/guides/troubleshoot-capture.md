@@ -78,6 +78,8 @@ sources, so a search for it finds the code that raises it.
 | `native capture cannot instrument an async setup` | An `async` `#[spec_setup]`. | Make the setup synchronous. |
 | `ran twice in one capture with different inputs` | A setup ran twice with different inputs in one test. | Construct the receiver once per test. |
 | `cannot fold its #[spec_setup] declarations` | Overlapping setups for one operation. | Give each receiver or parameter one setup. |
+| `produces duplicate input name` | Two flattened property-setup leaves, producer inputs, or parameters of one operation share a semantic name; nested paths are not prefixed. | Rename one field with `#[spec_event(name = "...")]`. |
+| `recursive property setup type` | An opted-in property-setup type reaches itself through opted-in record fields. | Remove the setup opt-in from one record in the cycle; that field is then recorded whole and cannot be replayed. |
 
 ### C# capture
 
@@ -98,6 +100,10 @@ sources, so a search for it finds the code that raises it.
 | `no result was logged for` | The filter matched nothing or the host crashed. | Run the test alone. |
 | `the test host likely crashed before finishing` | The test process ended without a result. | Run the test alone; check its own output. |
 | `the test result records a failed outcome` | The test failed; it is skipped. | Fix the test. |
+| `produces duplicate input name` | Two flattened property-setup leaves, producer inputs, or parameters share a semantic name (`AmbiguousDeclaration`). | Rename one member with `[SpecEvent("...")]`. |
+| `recursive property setup type` | An opted-in property-setup type reaches itself through opted-in members (`AmbiguousDeclaration`). | Remove `Setup = true` from one type in the cycle. |
+| `requires a non-null` | A non-nullable property-setup argument or nested member is null. The test still runs; capture drops the scenario and prints a `warning:` line. | Declare the member nullable (`T?`) if absence is valid, otherwise pass a non-null value. |
+| `a null was observed where` | A non-nullable parameter, member, or return value is null. The test still runs; capture drops the scenario and prints a `warning:` line. | Same as above. |
 | `instead of Passed, so its recording was not published` | The test ended with another outcome, such as skipped; it is skipped. | Make the test run and pass. |
 
 ### C# weave
@@ -128,7 +134,7 @@ sources, so a search for it finds the code that raises it.
 | `candidate setup resolution failed` | Setups do not resolve uniquely. | Annotate one matching producer per receiver or injected parameter. |
 | `selected setup producers belong to different Cargo test targets` | Required producers do not share a target. | Keep the environment in one Cargo test target. |
 | `unsupported async replay scheduling:` | Recorded sibling operations overlap. | Record directly awaited calls; overlapping scheduling is unsupported. |
-| `uses unsupported structured type` | An operation or setup input is neither a supported primitive/collection nor an explicitly opted-in property setup. | See [`../reference/limitations.md`](../reference/limitations.md). |
+| `uses unsupported structured type` | An operation or setup input, or a field of a property setup, is a record that is not an opted-in property setup, or a record inside a collection or optional. | See [`../reference/limitations.md`](../reference/limitations.md). |
 
 <!-- diagnostics:end -->
 

@@ -92,6 +92,83 @@ fn property_setups_use_native_identity_and_flat_semantic_field_names() {
 }
 
 #[test]
+fn recursive_property_setups_fold_operation_and_producer_arguments() {
+    let document = serde_json::json!({
+        "operations": [{
+            "name": "run", "module_path": "fixture::operations", "fn_name": "run",
+            "return_type": "i32", "component": "demo",
+            "params": [["query", "crate::models::Outer"]]
+        }],
+        "types": [{
+            "name": "Outer", "native_name": "Outer", "module_path": "fixture::models",
+            "property_setup": true, "kind": "struct", "component": "demo",
+            "fields": [["inner", "self::Inner"], ["empty", "self::Empty"]]
+        }, {
+            "name": "Inner", "native_name": "Inner", "module_path": "fixture::models",
+            "property_setup": true, "kind": "struct", "component": "demo",
+            "fields": [["minimum", "u32"], ["tags", "Vec<String>"]]
+        }, {
+            "name": "Empty", "native_name": "Empty", "module_path": "fixture::models",
+            "property_setup": true, "kind": "struct", "component": "demo", "fields": []
+        }]
+    });
+    let mut raw = registry(document.to_string());
+    let expected = vec![
+        crate::setup::SetupInput {
+            name: "minimum".into(),
+            source_type: "u32".into(),
+        },
+        crate::setup::SetupInput {
+            name: "tags".into(),
+            source_type: "Vec<String>".into(),
+        },
+    ];
+    assert_eq!(raw_inputs(&raw.ops[0], &raw).unwrap(), expected);
+    raw.types[1].name = "CanonicalInner".into();
+    normalize_registry(&raw, crate::binding::Language::Rust, "demo").unwrap();
+    raw.types[1].name = "Inner".into();
+    for language in [crate::binding::Language::Rust, crate::binding::Language::CSharp] {
+        normalize_registry(&raw, language, "demo").unwrap();
+    }
+    raw.types[1].property_setup = false;
+    assert_eq!(raw_inputs(&raw.ops[0], &raw).unwrap()[0].name, "inner");
+    raw.types[1].property_setup = true;
+    for container in [
+        "Option<self::Inner>",
+        "Vec<self::Inner>",
+        "BTreeSet<self::Inner>",
+        "BTreeMap<String, self::Inner>",
+    ] {
+        raw.types[2].fields[0].ty = container.into();
+        let inputs = raw_inputs(&raw.ops[0], &raw).unwrap();
+        assert_eq!(inputs.len(), 1);
+        assert_eq!(inputs[0].name, "inner");
+        assert_eq!(inputs[0].source_type, container);
+    }
+    raw.types[2].fields[0].ty = "self::Inner".into();
+    let mut producer = raw.ops[0].clone();
+    producer.is_setup = true;
+    producer.fn_name = "make".into();
+    producer.fills = "query".into();
+    producer.return_type = "State".into();
+    raw.ops[0].params[0].ty = "State".into();
+    raw.ops.push(producer);
+    assert_eq!(raw_inputs(&raw.ops[0], &raw).unwrap(), expected);
+    raw.ops[0].params.push(crate::registry::Field {
+        name: "minimum".into(),
+        ty: "u32".into(),
+    });
+    assert!(
+        raw_inputs(&raw.ops[0], &raw)
+            .unwrap_err()
+            .contains("duplicate input name 'minimum'")
+    );
+    raw.ops[0].params.pop();
+    raw.types[1].fields[0].ty = "self::Outer".into();
+    assert!(raw_inputs(&raw.ops[0], &raw).unwrap_err().contains("recursive property setup"));
+}
+
+#[test]
 fn property_setup_collisions_are_rejected_and_explicit_producers_take_precedence() {
     let document = serde_json::json!({
         "operations": [{

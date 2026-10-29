@@ -213,6 +213,57 @@ public sealed class ValueProjectionTests
     }
 
     [Fact]
+    public void NestedPropertySetupsRecordOnlyFlatSemanticLeaves()
+    {
+        var request = new PropertyRequest
+        {
+            Group = new PropertyGroup { Leaf = new PropertyLeaf { Selected = 7 } },
+        };
+        OperationSpan span = Capture(nameof(Declarations.PropertyInputs), [request]);
+        Assert.Equal(["limit"], span.Inputs.Keys);
+        request.Group.Leaf.Selected = 9;
+        Assert.Equal(Value.Integer(7), Named(span, "limit"));
+    }
+
+    [Fact]
+    public void PropertySetupExpansionStopsAtContainers()
+    {
+        OperationSpan span = Capture(
+            nameof(Declarations.PropertyList),
+            [new List<PropertyLeaf> { new() { Selected = 7 } }]);
+        Assert.Equal(Value.List([Map(("limit", Value.Integer(7)))]), Named(span, "values"));
+    }
+
+    [Fact]
+    public void NestedPropertySetupCollisionsAndCyclesAreExplicitRejections()
+    {
+        SpecGateCaptureException collision = Reject(
+            nameof(Declarations.CollidingProperties), [new PropertyRequest(), 3]);
+        Assert.Equal(CaptureRejection.AmbiguousDeclaration, collision.Rejection);
+        Assert.Contains("limit", collision.Message, StringComparison.Ordinal);
+        SpecGateCaptureException cycle = Reject(
+            nameof(Declarations.CyclicProperties), [new RecursiveProperty()]);
+        Assert.Equal(CaptureRejection.AmbiguousDeclaration, cycle.Rejection);
+        Assert.Contains("recursive property setup", cycle.Message, StringComparison.Ordinal);
+        Assert.Equal(
+            CaptureRejection.TypeMismatch,
+            Reject(nameof(Declarations.PropertyInputs), [new object()]).Rejection);
+    }
+
+    [Fact]
+    public void ANullPropertySetupOrNestedMemberIsReportedNotThrown()
+    {
+        FaultCompletion top = Unrecordable(nameof(Declarations.PropertyInputs), [null]);
+        Assert.Contains("parameter 'value'", top.Message, StringComparison.Ordinal);
+        Assert.Contains("requires a non-null", top.Message, StringComparison.Ordinal);
+
+        FaultCompletion nested = Unrecordable(
+            nameof(Declarations.PropertyInputs), [new PropertyRequest { Group = null! }]);
+        Assert.Contains("parameter 'value'", nested.Message, StringComparison.Ordinal);
+        Assert.Contains("PropertyGroup", nested.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AVariantProjectsAsItsNameOverItsOwnMembers()
     {
         Assert.Equal(
@@ -266,12 +317,31 @@ public sealed class ValueProjectionTests
                 [new SortedDictionary<int, string> { [1] = "one" }]).Rejection);
     }
 
+    /// <summary>
+    /// A null where the declaration is not optional does not fail the test: the
+    /// operation runs as written and its span carries an unrecordable-value
+    /// fault naming the position, which capture reports when it drops the
+    /// scenario.
+    /// </summary>
     [Fact]
-    public void ANullInANonNullableDeclarationIsRejected()
+    public void ANullInANonNullableDeclarationIsReportedNotThrown()
     {
+        FaultCompletion fault = Unrecordable(nameof(Declarations.Nested), [null]);
+
+        Assert.Equal("target", fault.Observer);
         Assert.Equal(
-            CaptureRejection.NullValue,
-            Reject(nameof(Declarations.Nested), [null]).Rejection);
+            "parameter 'home' of 'fixture.projection::Nested': a null was observed where "
+            + "'SpecGate.Runtime.Tests.Address' is required. Declare the parameter, member, or return "
+            + "value nullable to record absence.",
+            fault.Message);
+    }
+
+    [Fact]
+    public void ANullReturnValueInANonNullableDeclarationIsReportedNotThrown()
+    {
+        FaultCompletion fault = Unrecordable(nameof(Declarations.Echo), ["text"], result: null);
+
+        Assert.StartsWith("return value of", fault.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -469,6 +539,15 @@ public sealed class ValueProjectionTests
             () => SpecGateRuntime.RecordInputs(scope, arguments));
     }
 
+    private static FaultCompletion Unrecordable(
+        string declaration, object?[] arguments, object? result = null)
+    {
+        OperationSpan span = Capture(declaration, arguments, result);
+        FaultCompletion fault = Assert.IsType<FaultCompletion>(span.OperationCompletion);
+        Assert.Equal("specgate.unrecordable_value", fault.FaultType);
+        return fault;
+    }
+
     /// <summary>Declarations standing in for the woven methods under capture.</summary>
     private static class Declarations
     {
@@ -522,6 +601,8 @@ public sealed class ValueProjectionTests
 
         internal static void Nested(Address home) => _ = home;
 
+        internal static string Echo(string text) => text;
+
         internal static void Variants(Shape shape) => _ = shape;
 
         internal static void Ranked(Level level) => _ = level;
@@ -531,6 +612,14 @@ public sealed class ValueProjectionTests
         internal static void AliasedRanked(Aliased value) => _ = value;
 
         internal static void Collided(Collided value) => _ = value;
+
+        internal static void PropertyInputs(PropertyRequest value) => _ = value;
+
+        internal static void PropertyList(List<PropertyLeaf> values) => _ = values;
+
+        internal static void CollidingProperties(PropertyRequest value, int limit) => _ = (value, limit);
+
+        internal static void CyclicProperties(RecursiveProperty value) => _ = value;
 
         internal static void Erased(object value) => _ = value;
 
@@ -563,6 +652,36 @@ internal sealed class Address
 
     [SpecEvent]
     public string WriteOnly { init => Note = value; }
+}
+
+[SpecEvent(Setup = true)]
+internal sealed class PropertyRequest
+{
+    public PropertyGroup Group { get; set; } = new();
+}
+
+[SpecEvent(Setup = true)]
+internal sealed class PropertyGroup
+{
+    public PropertyLeaf Leaf { get; set; } = new();
+    public EmptyProperty Empty { get; set; } = new();
+}
+
+[SpecEvent(Setup = true)]
+internal sealed class PropertyLeaf
+{
+    [SpecEvent("limit")]
+    public int Selected { get; set; }
+    public string Omitted { get; set; } = "";
+}
+
+[SpecEvent(Setup = true)]
+internal sealed class EmptyProperty;
+
+[SpecEvent(Setup = true)]
+internal sealed class RecursiveProperty
+{
+    public RecursiveProperty Child { get; set; } = null!;
 }
 
 [SpecEvent]

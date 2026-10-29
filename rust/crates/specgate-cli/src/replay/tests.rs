@@ -1157,6 +1157,7 @@ mod cases {
                 fills: String::new(),
                 declared_fills: String::new(),
                 inputs: vec![0],
+                parameters: vec![model::Parameter::Input(0)],
                 native_module: "specgate_ctsc_fixtures::state".to_string(),
                 replay_output: None,
                 test_target: None,

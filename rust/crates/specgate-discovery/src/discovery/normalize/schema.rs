@@ -111,7 +111,12 @@ pub(in crate::discovery) fn build_schema(registry: &Registry, comp: impl AsRef<s
                 .map(|field| {
                     Ok(Field {
                         name: field.name.clone(),
-                        ty: map_component(&field.ty, &type_names, &qualifier)?.into(),
+                        ty: map_component(
+                            crate::discovery::setup::property_field_type(t, &field.ty, registry)?,
+                            &type_names,
+                            &qualifier,
+                        )?
+                        .into(),
                     })
                 })
                 .collect::<Result<Vec<_>, Error>>()?;

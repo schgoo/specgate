@@ -342,8 +342,8 @@ pub(super) fn link_operation(reference: &specgate_ctsc::replay::model::RegistryO
             native_module: producer.module_path.to_string(),
             replay_output: producer.replay_output.clone(),
             test_target: producer.test_target.clone(),
-            inputs: producer
-                .params
+            inputs: specgate_discovery::setup::raw_parameters(producer, &candidate.metadata().raw_registry)
+                .map_err(|error| Error::wrap(super::ErrorKind::Linking, "candidate setup input resolution failed", error))?
                 .iter()
                 .map(|parameter| {
                     inputs
@@ -351,6 +351,11 @@ pub(super) fn link_operation(reference: &specgate_ctsc::replay::model::RegistryO
                         .position(|input| input.name == parameter.name.as_str())
                         .ok_or_else(|| Error::from(format!("setup input '{}' is absent from folded operation inputs", parameter.name)))
                 })
+                .collect::<Result<_, _>>()?,
+            parameters: producer
+                .params
+                .iter()
+                .map(|parameter| native_parameter(producer, parameter, &candidate.metadata().raw_registry, &inputs))
                 .collect::<Result<_, _>>()?,
         });
     }
@@ -381,44 +386,8 @@ pub(super) fn link_operation(reference: &specgate_ctsc::replay::model::RegistryO
                     borrow: borrow.to_string(),
                     projection,
                 })
-            } else if let Some(properties) =
-                specgate_discovery::setup::property_setup(raw, parameter.ty.as_str(), &candidate.metadata().raw_registry)
-                    .map_err(|error| Error::wrap(super::ErrorKind::Linking, "candidate property setup resolution failed", error))?
-            {
-                let native: syn::Type =
-                    syn::parse_str(parameter.ty.as_str()).map_err(|error| Error::from(format!("invalid property setup type: {error}")))?;
-                let borrow = match &native {
-                    syn::Type::Reference(reference) if reference.mutability.is_some() => "&mut ",
-                    syn::Type::Reference(_) => "&",
-                    _ => "",
-                };
-                let rust_type = format!("{}::{}", properties.module_path, properties.native_name);
-                Ok(super::model::Parameter::Properties {
-                    rust_type,
-                    borrow: borrow.to_string(),
-                    fields: properties
-                        .fields
-                        .iter()
-                        .map(|field| {
-                            inputs
-                                .iter()
-                                .position(|input| input.name == field.name.as_str())
-                                .map(|index| (field.name.to_string(), index))
-                                .ok_or_else(|| Error::from(format!("missing property setup field '{}'", field.name)))
-                        })
-                        .collect::<Result<_, _>>()?,
-                })
             } else {
-                inputs
-                    .iter()
-                    .position(|input| input.name == parameter.name.as_str())
-                    .map(super::model::Parameter::Input)
-                    .ok_or_else(|| {
-                        Error::from(format!(
-                            "native parameter '{}' is absent from folded operation inputs",
-                            parameter.name
-                        ))
-                    })
+                native_parameter(raw, parameter, &candidate.metadata().raw_registry, &inputs)
             }
         })
         .collect::<Result<_, _>>()?;
@@ -445,6 +414,55 @@ pub(super) fn link_operation(reference: &specgate_ctsc::replay::model::RegistryO
         setups,
         parameters,
     })
+}
+
+fn native_parameter(
+    operation: &specgate_discovery::registry::Operation,
+    parameter: &specgate_discovery::registry::Field,
+    registry: &specgate_discovery::registry::Registry,
+    inputs: &[Input],
+) -> Result<super::model::Parameter, Error> {
+    if let Some(properties) = specgate_discovery::setup::property_setup(operation, parameter.ty.as_str(), registry)
+        .map_err(|error| Error::wrap(super::ErrorKind::Linking, "candidate property setup resolution failed", error))?
+    {
+        let native: syn::Type =
+            syn::parse_str(parameter.ty.as_str()).map_err(|error| Error::from(format!("invalid property setup type: {error}")))?;
+        let borrow = match native {
+            syn::Type::Reference(reference) if reference.mutability.is_some() => "&mut ",
+            syn::Type::Reference(_) => "&",
+            _ => "",
+        };
+        let mut scoped = operation.clone();
+        scoped.module_path = properties.module_path.clone().into();
+        let fields = properties
+            .fields
+            .iter()
+            .map(|field| {
+                let value = match native_parameter(&scoped, field, registry, inputs)? {
+                    super::model::Parameter::Input(index) => super::model::PropertyValue::Input(index),
+                    super::model::Parameter::Properties { fields, .. } => super::model::PropertyValue::Properties(fields),
+                    super::model::Parameter::Setup { .. } => unreachable!("property fields do not select explicit producers"),
+                };
+                Ok((field.name.to_string(), value))
+            })
+            .collect::<Result<_, Error>>()?;
+        Ok(super::model::Parameter::Properties {
+            rust_type: format!("{}::{}", properties.module_path, properties.native_name),
+            borrow: borrow.to_string(),
+            fields,
+        })
+    } else {
+        inputs
+            .iter()
+            .position(|input| input.name == parameter.name.as_str())
+            .map(super::model::Parameter::Input)
+            .ok_or_else(|| {
+                Error::from(format!(
+                    "native parameter '{}' is absent from folded operation inputs",
+                    parameter.name
+                ))
+            })
+    }
 }
 
 pub(super) fn validate_inputs(reference: &specgate_ctsc::replay::model::RegistryOp, candidate: &Operation) -> Result<(), Error> {
