@@ -10,7 +10,9 @@ capture its tests as reference behavior.
 - The CLI ([`install.md`](install.md)).
 - `specgate` added to the crate: `cargo add specgate`.
 - Ordinary `#[test]` functions that call the operations you annotate. Capture
-  records only what tests actually run.
+  records only what tests actually run. Annotate the requested API and reuse
+  the tests that already call it; add tests only for uncovered behavior
+  ([choose the boundary](README.md#step-0-choose-the-boundary-before-instrumenting)).
 
 ## Steps
 

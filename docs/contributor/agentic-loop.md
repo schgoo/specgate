@@ -1,5 +1,9 @@
 # SpecGate development loop
 
+> **Audience: SpecGate developers, not SpecGate users.** This loop is for
+> changing the SpecGate repository itself. To use SpecGate on another codebase,
+> follow [`docs/guides/README.md`](../guides/README.md) instead.
+
 ## Purpose
 
 Use a controller to shorten research, implementation, and verification cycles

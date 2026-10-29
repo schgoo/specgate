@@ -44,7 +44,14 @@ public static class Arithmetic
 - `[SpecInput("name")]` sets an input name; without it the parameter name is
   used.
 
-### 2. Write ordinary tests
+### 2. Reuse the existing tests
+
+Capture runs the tests that already call your annotated API, unchanged. Start
+there. Add a test only for behavior those tests do not cover, and report which
+tests you added
+([choose the boundary](README.md#step-0-choose-the-boundary-before-instrumenting)).
+A test must call the requested API itself, not a new wrapper that selects
+hard-coded data by name.
 
 ```csharp
 using Xunit;

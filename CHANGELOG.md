@@ -7,6 +7,11 @@ under `docs/decisions/`, or `docs/contributor/roadmap.md`. Generate with `just c
 
 ### Added
 
+- Rust replay accepts recursive list, set, string-keyed map, and optional
+  inputs. Property setups (`#[spec_event(setup)]`, `[SpecEvent(Setup = true)]`)
+  fold a parameter object's selected fields into flat inputs and rebuild the
+  Rust value with `Default` for omitted fields; C# constructors may declare
+  `[SpecSetup]` (#102, #105).
 - One shared native golden bundle per component across all languages, including
   one canonical registry flat under `component/<id>/` and no per-language successful-component artifacts, selecting
   C# for paired fixtures and Rust for Rust-only fixtures, with independent strict
@@ -114,6 +119,13 @@ under `docs/decisions/`, or `docs/contributor/roadmap.md`. Generate with `just c
 
 ### Documentation
 
+- The agent quick path starts by choosing the boundary: annotate the requested
+  API, reuse its existing tests, record semantic inputs, get approval before
+  substituting an API or scenario wrapper, and report what the comparison
+  establishes. It also links three executable fixtures as examples to follow,
+  separated from aggregate-fixture plumbing. `port-a-component.md` drops the
+  stale "free synchronous functions only" replay claim and adds a setup-backed
+  worked example (#107).
 - Task guides in `docs/guides/` and reference pages in `docs/reference/` (CLI,
   binding, value mapping, bundle, limitations); `docs/status.md` and
   `docs/reference/limitations.md` replace `docs/specgate-ctsc-migration.md`,
