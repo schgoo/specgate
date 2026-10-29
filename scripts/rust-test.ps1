@@ -9,11 +9,12 @@ try {
     try {
         # Cargo's env table affects children, not its own workspace compilation.
         # Finish each test before another can rebuild its generated executables.
+        # just ctsc-goldens-harness-tests owns the golden harness cases.
         $cargoArguments = @(
             'test', '--workspace',
             '--config', "env.CARGO_BUILD_BUILD_DIR.value=$childBuildDir",
             '--config', 'env.CARGO_BUILD_BUILD_DIR.force=true',
-            '--', '--test-threads=1'
+            '--', '--test-threads=1', '--skip', 'goldens::tests::cases'
         )
         & cargo @cargoArguments
         if ($LASTEXITCODE -ne 0) {

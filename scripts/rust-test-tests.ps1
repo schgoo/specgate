@@ -20,7 +20,7 @@ function cargo {
         'test', '--workspace',
         '--config', "env.CARGO_BUILD_BUILD_DIR.value=$childBuildDir",
         '--config', 'env.CARGO_BUILD_BUILD_DIR.force=true',
-        '--', '--test-threads=1'
+        '--', '--test-threads=1', '--skip', 'goldens::tests::cases'
     )
     if ($args.Count -ne $expected.Count -or ($args -join "`n") -cne ($expected -join "`n")) {
         throw "Runner changed Cargo workspace, target, doctest, or serial execution selection: $($args -join ' | ')"

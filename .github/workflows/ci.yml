@@ -9,12 +9,15 @@ on:
     branches: [main]
 
 jobs:
+  # Each lane is a `just check-<lane>` recipe; `just check` is their union.
   check:
+    name: check ${{ matrix.lane }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
+        lane: [rust, static, ctsc]
     env:
       SPECGATE_CTSC_GOLDENS_BUILD_CACHE: artifacts/ctsc-goldens-build-cache/v2
     steps:
@@ -26,10 +29,12 @@ jobs:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
         with:
+          key: ${{ matrix.lane }}
           workspaces: |
             rust
             test
       - name: Cache golden build intermediates
+        if: matrix.lane == 'ctsc'
         uses: actions/cache@v4
         with:
           path: ${{ env.SPECGATE_CTSC_GOLDENS_BUILD_CACHE }}
@@ -39,13 +44,14 @@ jobs:
           dotnet-version: 10.0.x
       - uses: extractions/setup-just@v3
       - name: Install Rust gate tools
+        if: matrix.lane == 'static'
         run: |
           cargo install cargo-deny --version 0.19.0 --locked
           cargo install cargo-doc2readme --locked
-      - name: Run complete gate
-        run: just --timestamp --verbose check
+      - name: Run gate lane
+        run: just --timestamp --verbose check-${{ matrix.lane }}
       - name: Packaged-context smoke
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && matrix.lane == 'ctsc'
         run: just package-smoke
 
   docs-impact:
