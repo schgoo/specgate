@@ -150,12 +150,8 @@ check, and the retained C# build/tests/format/analyzers.
   whose first line is `# yaml-language-server: $schema=<relative path>/binding-schema.json`,
   against `binding-schema.json` and the binding loader
   (`rust/crates/specgate-discovery/tests/binding_examples.rs`);
-- the [documentation impact](#documentation-impact) map and claim anchors
+- the [documentation impact](#documentation-impact) map
   (`scripts/docs-impact.ps1`).
-
-Rust code blocks in the Rust-facing guides also compile as doctests of the
-`specgate` crate during `just test`. Mark an excerpt that cannot compile on its
-own as `rust ignore`.
 
 Each check runs its own regression tests, which prove it fails on bad input.
 
@@ -191,44 +187,23 @@ from commit subjects, so the subject is the entry a reader sees.
 ## Documentation impact
 
 Behavior changes must update every page that describes the behavior.
-[`scripts/docs-impact.ps1`](scripts/docs-impact.ps1) enforces two guards. The
-pull-request CI job runs both against the base branch; run
-`just docs-impact` locally before opening a pull request.
-
-**Impact map.** [`docs/contributor/docs-impact.json`](docs/contributor/docs-impact.json)
+[`docs/contributor/docs-impact.json`](docs/contributor/docs-impact.json)
 assigns every non-test product source to the pages that describe it. A rule
 with no pages gives a `reason`. `just docs-check` fails when a source is
-uncovered, a glob matches nothing, or a listed page is missing. On a pull
-request, a rule fails when its code changed but none of its pages did. If you
+uncovered, a glob matches nothing, or a listed page is missing.
+
+The pull-request CI job runs [`scripts/docs-impact.ps1`](scripts/docs-impact.ps1)
+against the base branch; run `just docs-impact` locally before opening a pull
+request. A rule fails when its code changed but none of its pages did. If you
 checked every listed page and none needs a change, add a commit trailer:
 
 ```text
 Docs-Impact: none <reason>
 ```
 
-**Claim anchors.** Wrap a statement that encodes a specific limit or rule,
-such as a depth, a supported-type list, or an exit code, in markers naming
-the code that makes it true:
-
-```markdown
-<!-- docs-claim property-setup-depth: rust/crates/specgate-discovery/src/discovery/setup.rs::fold_operation -->
-Deconstruction is one level deep.
-<!-- /docs-claim property-setup-depth -->
-```
-
-Each dependency is a file, or a file and a declared function or type joined by
-`::`. A symbol dependency counts as changed only when `git log -L` finds a
-change inside that item. Repeat the same id on every page that states the
-fact. Markers can sit inside a paragraph, list item, or table cell. On a pull
-request, a claim fails when a dependency changed but the claim text did not.
-Edit the claim, or confirm it is still true and add a trailer per claim id:
-
-```text
-Docs-Reviewed: property-setup-depth
-```
-
-Neither guard proves that prose is true. When behavior changes, also search
-the docs for the old rule's wording, and anchor any statement the sweep finds.
+The map only proves that a page was touched, not that its prose is true. When
+behavior changes, also search the docs for the old rule's wording; limits are
+often restated outside the mapped pages.
 
 ## Changelog
 

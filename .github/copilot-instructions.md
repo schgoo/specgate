@@ -127,9 +127,7 @@ Only declared case and rejection `expected/` directories are generated product o
 - Crate READMEs are generated from crate-level docs. Edit `lib.rs`, then run
   `just readme`.
 - Behavior changes update the pages `docs/contributor/docs-impact.json` maps to
-  the changed code. Edit or review each `docs-claim` anchor that
-  `just docs-impact` reports; trailers (`Docs-Impact: none <reason>`,
-  `Docs-Reviewed: <claim-id>`) are only for checked, unaffected docs. Guide
-  `rust` blocks compile as doctests; mark excerpts `rust ignore`.
+  the changed code and search the docs for the old rule's wording. Use a
+  `Docs-Impact: none <reason>` trailer only after checking every listed page.
 - Use `ohno` for new Rust error types.
 - Use LF except `.ps1`, `.cmd`, and `.bat`.

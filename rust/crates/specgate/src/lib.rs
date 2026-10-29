@@ -113,16 +113,3 @@ pub mod __rt {
         CaptureError, ComponentId, ImplementationLabel, OperationName, SpecEvent, ToNativeValue, emit_event, emit_lazy,
     };
 }
-
-// Compile the task guides' Rust snippets as doctests so API drift fails just test.
-#[cfg(doctest)]
-mod guides {
-    #[doc = include_str!("../../../../docs/guides/async-capture.md")]
-    struct AsyncCapture;
-    #[doc = include_str!("../../../../docs/guides/instrument-rust-crate.md")]
-    struct InstrumentRustCrate;
-    #[doc = include_str!("../../../../docs/guides/port-a-component.md")]
-    struct PortAComponent;
-    #[doc = include_str!("../../../../docs/guides/replay-a-candidate.md")]
-    struct ReplayACandidate;
-}

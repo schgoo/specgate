@@ -101,7 +101,7 @@ ctsc-validate:
 # Keep public docs in sync with the code: relative links and anchors, quoted
 # capture diagnostics, the CLI usage block in docs/reference/cli.md, and
 # binding examples against binding-schema.json and the binding loader, and the
-# docs impact map and claim anchors.
+# docs impact map.
 docs-check:
     pwsh -NoLogo -NoProfile -File scripts/docs-links-tests.ps1
     pwsh -NoLogo -NoProfile -File scripts/docs-links.ps1
@@ -112,7 +112,7 @@ docs-check:
     cd rust && cargo test -p specgate-cli --bin specgate usage
     cd rust && cargo test -p specgate-discovery --test binding_examples
 
-# Check this branch's commits against the docs impact map and claim anchors.
+# Check this branch's commits against the docs impact map.
 docs-impact base="origin/main":
     pwsh -NoLogo -NoProfile -File scripts/docs-impact.ps1 -Base {{base}}
 

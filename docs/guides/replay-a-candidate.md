@@ -89,7 +89,7 @@ rust:
 
 For example, share your existing runtime-building helper with this wrapper:
 
-```rust ignore
+```rust
 pub(crate) fn replay_executor<F, Fut>(task: F) -> Result<(), String>
 where
     F: FnOnce() -> Fut + Send,

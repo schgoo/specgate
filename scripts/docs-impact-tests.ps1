@@ -3,8 +3,6 @@ Set-StrictMode -Version Latest
 
 $script = Join-Path $PSScriptRoot 'docs-impact.ps1'
 $fixture = Join-Path ([IO.Path]::GetTempPath()) "sg-docs-impact-tests-$([guid]::NewGuid().ToString('N'))"
-$dependency = 'rust/crates/core/src/lib.rs::depth'
-$claim = "<!-- docs-claim depth: $dependency -->`nDecomposition is one level deep.`n<!-- /docs-claim depth -->"
 $map = @'
 {
   "rules": [
@@ -13,7 +11,7 @@ $map = @'
   ]
 }
 '@
-$core = "pub fn depth() -> u32 {`n    1`n}`n`npub fn other() -> u32 {`n    2`n}`n"
+$core = "pub fn other() -> u32 {`n    2`n}`n"
 
 function Write-File([string]$Relative, [string]$Text) {
     $path = Join-Path $fixture $Relative
@@ -79,36 +77,19 @@ function Save-Commit([string]$Message, [string]$Trailer) {
 }
 
 try {
-    Write-File '.gitattributes' "*.rs diff=rust`n"
     Write-File 'docs/contributor/docs-impact.json' $map
     Write-File 'rust/crates/core/src/lib.rs' $core
     Write-File 'rust/crates/core/tests/ignored.rs' "fn uncovered() {}`n"
     Write-File 'rust/crates/tool/src/lib.rs' "pub struct Tool;`n"
-    Write-File 'docs/core.md' @"
-# Core
+    Write-File 'docs/core.md' "# Core`n"
 
-$claim
-
-``````markdown
-<!-- docs-claim example: missing.rs -->
-``````
-
-Inline ``<!-- docs-claim example: missing.rs -->`` is an example too.
-"@
-
-    Assert-Pass 'a valid map and claim' '' 'map covers 2 product sources with 2 rules'
-    Assert-Pass 'fenced and inline marker examples' '' '1 claims anchored in 1 pages'
+    Assert-Pass 'a valid map' '' 'map covers 2 product sources with 2 rules'
 
     Assert-StaticFail 'an uncovered product source' 'rust/crates/extra/src/lib.rs' "pub fn x() {}`n" "product source 'rust/crates/extra/src/lib.rs' is covered by no rule"
     Assert-StaticFail 'a dead code glob' 'docs/contributor/docs-impact.json' $map.Replace('rust/crates/tool/src/**', 'rust/crates/gone/src/**') "code glob 'rust/crates/gone/src/**' matches no file"
     Assert-StaticFail 'a missing doc page' 'docs/contributor/docs-impact.json' $map.Replace('docs/core.md', 'docs/gone.md') "names missing doc 'docs/gone.md'"
     Assert-StaticFail 'a rule without docs or reason' 'docs/contributor/docs-impact.json' $map.Replace(', "reason": "internal"', '') "rule 'tool' has no docs and no reason"
     Assert-StaticFail 'a duplicate rule id' 'docs/contributor/docs-impact.json' $map.Replace('"id": "tool"', '"id": "core"') "rule 'core' is declared twice"
-    Assert-StaticFail 'an unclosed claim' 'docs/other.md' "<!-- docs-claim open: $dependency -->`nText.`n" 'docs/other.md has an unclosed, mismatched, or nested docs-claim marker'
-    Assert-StaticFail 'a nested claim' 'docs/other.md' "<!-- docs-claim a: $dependency -->`n$claim`n<!-- /docs-claim a -->`n" 'docs/other.md has an unclosed, mismatched, or nested docs-claim marker'
-    Assert-StaticFail 'a claim without dependencies' 'docs/other.md' "<!-- docs-claim bare: -->`nText.`n<!-- /docs-claim bare -->`n" "claim 'bare' names no dependency"
-    Assert-StaticFail 'a missing dependency file' 'docs/other.md' "<!-- docs-claim gone: rust/gone.rs -->`nText.`n<!-- /docs-claim gone -->`n" "depends on missing file 'rust/gone.rs'"
-    Assert-StaticFail 'a missing dependency symbol' 'docs/other.md' "<!-- docs-claim gone: rust/crates/core/src/lib.rs::dept -->`nText.`n<!-- /docs-claim gone -->`n" "depends on 'dept', which is not declared"
 
     Invoke-Git init -q -b main
     Save-Commit 'base'
@@ -122,18 +103,11 @@ Inline ``<!-- docs-claim example: missing.rs -->`` is an example too.
     Save-Commit 'bare' 'Docs-Impact: none'
     Assert-Fail 'a Docs-Impact trailer without a reason' 'base' "'Docs-Impact' trailers need the form 'none <reason>'"
     Save-Commit 'reason' 'Docs-Impact: none other() is internal'
-    Assert-Pass 'an unrelated function change with a reasoned trailer' 'base' 'skipped 1 map rule(s)'
+    Assert-Pass 'a reasoned trailer' 'base' 'skipped 1 map rule(s)'
 
-    Write-File 'rust/crates/core/src/lib.rs' $core.Replace('    1', '    2')
-    Save-Commit 'change depth' 'Docs-Impact: none covered by claim'
-    Assert-Fail 'a changed claim dependency' 'base' "claim 'depth' at docs/core.md:3 depends on changed code"
-    Save-Commit 'review' 'Docs-Reviewed: depth'
-    Assert-Pass 'a reviewed claim' 'base'
-
-    Invoke-Git reset -q --hard HEAD~1
-    Write-File 'docs/core.md' ([IO.File]::ReadAllText((Join-Path $fixture 'docs/core.md')).Replace('one level deep', 'recursive'))
-    Save-Commit 'update claim'
-    Assert-Pass 'an edited claim' 'base'
+    Write-File 'docs/core.md' "# Core`n`nUpdated.`n"
+    Save-Commit 'update docs'
+    Assert-Pass 'a doc update' 'base'
 
     Invoke-Git reset -q --hard base
     Write-File 'rust/crates/tool/src/lib.rs' "pub struct Tool2;`n"

@@ -108,7 +108,7 @@ Capture folds the setup input into the operation, so the reference records
 The Rust candidate (`rust/setup_with_params.rs`) declares the same setup,
 operation, and input names:
 
-```rust ignore
+```rust
 #[spec_setup("increment", spec = "fixture.setup_with_params")]
 pub fn make_counter(initial: i32) -> Counter {
     Counter { count: initial }
@@ -144,7 +144,6 @@ equivalent: true
 
 The golden matrix replays this case on every `just check`.
 
-<!-- docs-claim property-setup-depth: rust/crates/specgate-discovery/src/discovery/setup.rs::fold_operation rust/crates/specgate-cli/src/replay/link.rs::link_operation rust/crates/specgate-annotations-macros-impl/src/setup.rs::expand_setup csharp/SpecGate.Runtime/SetupStaging.cs -->
 If the setup instead took a record, such as a polygon, opt the record in as a
 property setup so replay deconstructs it into its fields (see the Rust and C#
 instrumentation guides), or give it an explicit setup producer. Deconstruction
@@ -154,7 +153,6 @@ records therefore cannot be replayed through either path. A record input that
 cannot be rebuilt fails with `uses unsupported structured type` (the
 `structured-value` limitation). Report that limitation and ask before changing
 the boundary.
-<!-- /docs-claim property-setup-depth -->
 
 ## Expected output
 

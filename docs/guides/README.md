@@ -60,7 +60,6 @@ values:
 - **Needs approval:** a scenario API that replaces the requested boundary, such
   as `string RunScenario(string fixtureName)`.
 
-<!-- docs-claim property-setup-depth: rust/crates/specgate-discovery/src/discovery/setup.rs::fold_operation rust/crates/specgate-cli/src/replay/link.rs::link_operation rust/crates/specgate-annotations-macros-impl/src/setup.rs::expand_setup csharp/SpecGate.Runtime/SetupStaging.cs -->
 Replay accepts primitives and recursively supported lists, sets, string-keyed
 maps, and optionals as inputs. A class or struct parameter can be deconstructed
 into its fields: opt the type in as a property setup (`#[spec_event(setup)]` or
@@ -70,7 +69,6 @@ primitive, collection, or optional. Otherwise, give the parameter an explicit
 setup producer. A record input with neither, or a record-typed field, fails
 with `structured-value`. Report that limitation; do not encode structured
 inputs as fixture names.
-<!-- /docs-claim property-setup-depth -->
 
 [Port a component](port-a-component.md#worked-example-setup-backed-method)
 shows the intended shape: an existing C# test calls the real setup and method,
