@@ -12,6 +12,10 @@ under `docs/decisions/`, or `docs/contributor/roadmap.md`. Generate with `just c
   fold a parameter object's selected fields into flat inputs and rebuild the
   Rust value with `Default` for omitted fields; C# constructors may declare
   `[SpecSetup]` (#102, #105).
+- Property setups decompose nested opted-in records recursively, including
+  setup-producer arguments, into flat semantic leaves; duplicate leaf names and
+  cyclic property-setup types are rejected, and records inside containers are
+  not decomposed (#110).
 - One shared native golden bundle per component across all languages, including
   one canonical registry flat under `component/<id>/` and no per-language successful-component artifacts, selecting
   C# for paired fixtures and Rust for Rust-only fixtures, with independent strict
@@ -63,6 +67,9 @@ under `docs/decisions/`, or `docs/contributor/roadmap.md`. Generate with `just c
   resolver shared by all CLI commands.
 
 ### Changed
+
+- Rust capture records `&mut` setup-producer parameters as inputs, matching the
+  inputs discovery already declared for them (#110).
 
 - **Breaking:** Rust discovery and replay require `spec_component!("...")` in each participating library, binary, and integration-test crate root, including explicitly qualified operations/setups; generated builds use original sources and preserve configured compiler wrappers (#104).
 - `discover`, `capture`, and `replay` reject overlapping commands against the same package immediately while retaining reusable generated-build caches and ordinary `cargo test` parallelism (#106).
