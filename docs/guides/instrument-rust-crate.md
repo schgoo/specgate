@@ -122,7 +122,12 @@ and become flat operation inputs. Replay decodes them into a struct literal,
 using `..Default::default()` for omitted fields. The opt-in promises that those
 defaults preserve the contract; use an explicit producer for construction
 invariants. Supported field inputs include recursive `Vec`, `Option`, sets, and
-string-keyed maps. Ordinary `SpecEvent` projection does not enable reconstruction.
+string-keyed maps. A field whose type is itself `#[spec_event(setup)]` is
+deconstructed recursively, including in setup-producer arguments; records inside
+containers are not. Leaf names are flat and never prefixed, so rename a
+colliding field with `#[spec_event(name = "...")]`. Duplicate names and types
+that reach themselves are rejected at discovery and capture. Ordinary
+`SpecEvent` projection does not enable reconstruction.
 
 ### 4. Return outcomes
 

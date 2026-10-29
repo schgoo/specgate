@@ -122,16 +122,21 @@ C# capture also rejects, with an error naming the value:
 Rust replay accepts lossless primitives and recursively supported lists, sets,
 string-keyed maps, and optionals as operation and setup construction inputs.
 Classes and structs opted in as property setups (`#[spec_event(setup)]`,
-`[SpecEvent(Setup = true)]`) are deconstructed one level into their selected
-fields, which become flat inputs; each field must be a primitive, collection,
-or optional. Replay rebuilds the Rust value with `Default` for omitted fields.
+`[SpecEvent(Setup = true)]`) are deconstructed into their selected fields,
+recursing through fields that are themselves opted-in records, including
+arguments to explicit setup producers. Leaves become flat inputs under their
+semantic names in depth-first declaration order; each leaf must be a primitive,
+collection, or optional. Duplicate leaf names and cyclic property-setup types
+are rejected. Replay rebuilds the nested Rust value with `Default` for omitted
+fields.
 Structured results and declared errors, including lists of annotated records,
 are supported. The candidate's reachable named CTSC declarations must match the
 reference, including declarations reached only by nested observed operations.
 Replay validates recorded candidate outcomes against the reference registry
 before publishing the trace.
 
-Other record inputs, including record-typed fields of a property setup, and
+Other record inputs, including property-setup fields holding records that are
+not opted in and records inside collections or optionals, and
 explicit reference-to-candidate shape mappings remain unsupported; record
 inputs fail with the `structured-value` replay category
 ([constructor and property setups](../decisions/constructor-and-property-setups.md)).

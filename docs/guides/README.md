@@ -64,10 +64,12 @@ Replay accepts primitives and recursively supported lists, sets, string-keyed
 maps, and optionals as inputs. A class or struct parameter can be deconstructed
 into its fields: opt the type in as a property setup (`#[spec_event(setup)]` or
 `[SpecEvent(Setup = true)]`), and each selected field becomes a flat semantic
-input. Deconstruction is one level deep, so each field must itself be a
-primitive, collection, or optional. Otherwise, give the parameter an explicit
-setup producer. A record input with neither, or a record-typed field, fails
-with `structured-value`. Report that limitation; do not encode structured
+input. A field whose type is itself an opted-in record is deconstructed
+recursively. Every other field must be a primitive, collection, or optional,
+and records inside collections or optionals are not deconstructed. Leaf names
+are flat, so rename colliding fields. Otherwise, give the parameter an explicit
+setup producer. A record input with neither, or a field holding a record that
+is not opted in, fails with `structured-value`. Report that limitation; do not encode structured
 inputs as fixture names.
 
 [Port a component](port-a-component.md#worked-example-setup-backed-method)
@@ -85,7 +87,7 @@ where coverage is missing.
 | --- | --- |
 | [`fixture.stateless_add`](../../test/behavior/cases/fixture.stateless_add/) | Annotate the implementation. Ordinary native tests call it, and capture records the actual arguments and result. |
 | [`fixture.setup`](../../test/behavior/cases/fixture.setup/) | Setup construction inputs become semantic operation inputs. Each language keeps its own object behind its setup producer. |
-| [`fixture.property_setup`](../../test/behavior/cases/fixture.property_setup/) | Parameter objects opted in as property setups: their fields, including collections and optionals, become flat semantic inputs, and replay rebuilds the Rust value. Also a C# constructor setup. |
+| [`fixture.property_setup`](../../test/behavior/cases/fixture.property_setup/) | Parameter objects opted in as property setups: their fields, including collections, optionals, and nested opted-in records (also as setup-producer arguments), become flat semantic inputs, and replay rebuilds the Rust value. Also a C# constructor setup. |
 | [`typed-integration.yaml`](../../rust/crates/specgate-cli/tests/fixtures/typed-integration.yaml) | Generic async client methods, typed results, and test-local setups that rebuild the environment from recorded inputs. |
 
 Files that show the pattern:

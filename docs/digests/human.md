@@ -45,8 +45,9 @@ divided into reviewable vertical slices.
   collection results. Private test setups run through generated Cargo test
   entry points selected by semantic resolution, not by rerunning ordinary tests.
 - Operation/setup construction inputs support primitives, recursive
-  collections and optionals, and explicitly opted-in property setups; general
-  record inputs remain unsupported. Async setups,
+  collections and optionals, and explicitly opted-in property setups, which
+  decompose nested opted-in records recursively; records inside containers and
+  general record inputs remain unsupported. Async setups,
   cross-target setup environments, arbitrary concurrent scheduling, explicit
   type mappings, and C# candidate replay remain unsupported.
 - Observation metadata is not discoverable, so observation-emitting components
