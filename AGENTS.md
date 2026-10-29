@@ -1,5 +1,10 @@
 # SpecGate agent guide
 
+> **Audience: SpecGate developers, not SpecGate users.** This guide is for
+> changing the SpecGate repository itself. To instrument, capture, replay, or
+> compare another codebase with SpecGate, follow
+> [`docs/guides/README.md`](docs/guides/README.md) instead.
+
 This is the repository entry point for coding agents. It organizes the
 authoritative project guidance; it does not replace the CTSC contracts or
 contributor rules.

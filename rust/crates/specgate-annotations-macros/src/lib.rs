@@ -16,8 +16,10 @@
 //! with distinct semantic names for additional type combinations; multiple type
 //! arguments use a comma-separated string. Generic parameters keep their authored
 //! bounds and require `'static` for specialization dispatch. Setup construction
-//! inputs remain primitive; synchronous annotated test-only producers can rebuild
-//! private replay environments through generated Cargo test entry points.
+//! inputs support primitives and recursive collections and optionals;
+//! `#[spec_event(setup)]` opts a `SpecEvent` type into property-setup folding.
+//! Synchronous annotated test-only producers can rebuild private replay
+//! environments through generated Cargo test entry points.
 
 use proc_macro::TokenStream;
 

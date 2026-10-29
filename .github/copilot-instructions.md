@@ -1,5 +1,9 @@
 # Copilot Instructions — SpecGate
 
+> **Audience: SpecGate developers, not SpecGate users.** These rules are for
+> changing the SpecGate repository itself. To use SpecGate on another codebase,
+> follow `docs/guides/README.md` instead.
+
 ## Start here
 
 Read `AGENTS.md`, `docs/README.md`, `docs/digests/llm.md`, and the relevant CTSC

@@ -50,7 +50,7 @@ specgate compare capture/reference.otlp.json candidate.otlp.json --registry capt
 | Discover | Yes | Yes |
 | Capture | Yes, including `async fn` | Yes, including `Task` and `ValueTask` |
 | Async abandonment | Recorded when nested in a completing operation | Cancellation recorded as abandonment |
-| Replay as candidate | Free synchronous functions | No |
+| Replay as candidate | Public free functions, setup-backed `&self`/`&mut self` methods, directly awaited async calls, explicit generic specializations; primitive, collection, optional, and opted-in property-setup inputs | No |
 | Validate, compare | Language-neutral | Language-neutral |
 
 Details: [`docs/status.md`](docs/status.md) and

@@ -56,7 +56,7 @@ async C#. MVP+1 is what serves them.
 | Async capture | A directly-awaited async operation captures: recording begins at first poll (M2 slice 1). A future resumed on another executor thread records under the operation that built it, and two instrumented operations interleaved on one thread both record correctly (M2 slice 2). An async operation dropped before it completes records `conformance.abandoned` (M2 slice 3). Still unsupported: async `#[spec_setup]`, operations first reached on a raw `std::thread::spawn`ed thread, and top-level abandonment - an abandoned async operation with no enclosing and no subsequent annotated operation, which `specgate capture` drops rather than records. Setup-input staging remains thread-affine | `annotations-macros/src/lib.rs` async arm, `PENDING_SETUP_INPUTS` |
 | Observations | Captured but never declared; a component emitting one cannot produce a linkable bundle | migration limitations |
 | Comparison | `compare <reference-trace> <candidate-trace>` exists; fixed `ctsc.strict/0.1.0`; scenarios paired by name | `comparison.rs:185-195` |
-| Replay | Synchronous public Rust free functions, lossless primitive inputs | migration limitations |
+| Replay | Rust candidates: public free functions, setup-backed `&self`/`&mut self` methods, directly awaited async calls, explicit generic specializations; primitive, collection, optional, and property-setup inputs | `reference/limitations.md` |
 
 The CLI surface for all five verbs already exists. The gaps are semantic, not
 structural.
@@ -338,7 +338,7 @@ Rust reference against C# candidate. Depends on V2.1 and on M6.
 
 | Item | Note |
 |---|---|
-| Setup-backed methods and structured values | Today: public free functions, lossless primitives only |
+| Setup-backed methods and structured values | Done: setup-backed methods, collection/optional inputs, and property setups; general record inputs remain unsupported |
 | Replay unit | Open question 2 - whether replay should stop asking for a component |
 | Artifact granularity | Open question 3 - one top-level component per bundle as an invariant |
 | C# replay | Not implemented |
