@@ -20,6 +20,8 @@ jobs:
         lane: [rust-replay, rust-other, static, ctsc-smoke, ctsc-goldens]
     env:
       SPECGATE_CTSC_GOLDENS_BUILD_CACHE: artifacts/ctsc-goldens-build-cache/v2
+      # The rust/target cache stays small; each Rust test run builds children from empty.
+      SPECGATE_RUST_TEST_BUILD_DIR: scratch
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable

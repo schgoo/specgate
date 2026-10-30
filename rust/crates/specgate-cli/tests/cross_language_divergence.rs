@@ -119,69 +119,75 @@ fn replay(component: &str, scratch: &Path) -> (Value, Value) {
     (reference, candidate)
 }
 
-#[test]
-fn strict_detects_cross_language_inputs_results_errors_nested_calls_and_event_order() {
-    let scratch = tempfile::tempdir().expect("candidate traces");
-    let (reference, candidate) = replay("fixture.stateless_add", scratch.path());
-    let mut changed = candidate.clone();
-    attribute_mut(operation(&mut changed, "add"), "conformance.operation.inputs")["kvlistValue"]["values"][0]["value"] =
-        json!({"intValue": "999"});
-    assert_mismatch(&reference, &changed, ".inputs.");
+/// These tests lease the golden-matrix fixture package, so local parallel
+/// checks run them after ctsc-smoke and ctsc-goldens. See scripts/rust-test.ps1.
+mod shared_fixture {
+    use super::*;
 
-    let mut changed = candidate;
-    *attribute_mut(
-        event(operation(&mut changed, "add"), "conformance.result"),
-        "conformance.result.value",
-    ) = json!({"intValue": "999"});
-    assert_mismatch(&reference, &changed, ".result");
+    #[test]
+    fn strict_detects_cross_language_inputs_results_errors_nested_calls_and_event_order() {
+        let scratch = tempfile::tempdir().expect("candidate traces");
+        let (reference, candidate) = replay("fixture.stateless_add", scratch.path());
+        let mut changed = candidate.clone();
+        attribute_mut(operation(&mut changed, "add"), "conformance.operation.inputs")["kvlistValue"]["values"][0]["value"] =
+            json!({"intValue": "999"});
+        assert_mismatch(&reference, &changed, ".inputs.");
 
-    let (reference, mut candidate) = replay("fixture.result_err", scratch.path());
-    *attribute_mut(
-        event(operation(&mut candidate, "try_divide"), "conformance.error"),
-        "conformance.error.value",
-    ) = json!({"stringValue": "changed error"});
-    assert_mismatch(&reference, &candidate, "::try_divide].events[0].value");
+        let mut changed = candidate;
+        *attribute_mut(
+            event(operation(&mut changed, "add"), "conformance.result"),
+            "conformance.result.value",
+        ) = json!({"intValue": "999"});
+        assert_mismatch(&reference, &changed, ".result");
 
-    let (mut reference, mut candidate) = replay("fixture.checkpoint_inline", scratch.path());
-    let mut changed = candidate.clone();
-    let parent = operation(&mut changed, "process")["spanId"].clone();
-    let nested = changed["resourceSpans"][0]["scopeSpans"][0]["spans"]
-        .as_array_mut()
-        .expect("native spans")
-        .iter_mut()
-        .find(|span| span["parentSpanId"] == parent)
-        .expect("nested operation under process");
-    assert_eq!(attribute(nested, "conformance.operation.name")["stringValue"], "after_upper");
-    *attribute_mut(nested, "conformance.operation.name") = json!({"stringValue": "changed_nested_operation"});
-    assert_mismatch(&reference, &changed, "::process].children[0].operation");
+        let (reference, mut candidate) = replay("fixture.result_err", scratch.path());
+        *attribute_mut(
+            event(operation(&mut candidate, "try_divide"), "conformance.error"),
+            "conformance.error.value",
+        ) = json!({"stringValue": "changed error"});
+        assert_mismatch(&reference, &candidate, "::try_divide].events[0].value");
 
-    // The retained native corpus has one completion event per operation. Inject
-    // identical Trace Core observations into both independent producer traces
-    // before changing only the candidate event order; no golden is modified.
-    for trace in [&mut reference, &mut candidate] {
-        let operation = operation(trace, "process");
-        let events = operation["events"].as_array_mut().expect("events");
-        let time = events[0]["timeUnixNano"].clone();
-        for (index, name) in ["first", "second"].into_iter().enumerate() {
-            events.insert(
-                index,
-                json!({
-                    "name": "conformance.observation",
-                    "timeUnixNano": time,
-                    "attributes": [
-                        {"key": "conformance.observation.name", "value": {"stringValue": name}},
-                        {"key": "conformance.observation.value", "value": {"stringValue": name}}
-                    ]
-                }),
-            );
+        let (mut reference, mut candidate) = replay("fixture.checkpoint_inline", scratch.path());
+        let mut changed = candidate.clone();
+        let parent = operation(&mut changed, "process")["spanId"].clone();
+        let nested = changed["resourceSpans"][0]["scopeSpans"][0]["spans"]
+            .as_array_mut()
+            .expect("native spans")
+            .iter_mut()
+            .find(|span| span["parentSpanId"] == parent)
+            .expect("nested operation under process");
+        assert_eq!(attribute(nested, "conformance.operation.name")["stringValue"], "after_upper");
+        *attribute_mut(nested, "conformance.operation.name") = json!({"stringValue": "changed_nested_operation"});
+        assert_mismatch(&reference, &changed, "::process].children[0].operation");
+
+        // The retained native corpus has one completion event per operation. Inject
+        // identical Trace Core observations into both independent producer traces
+        // before changing only the candidate event order; no golden is modified.
+        for trace in [&mut reference, &mut candidate] {
+            let operation = operation(trace, "process");
+            let events = operation["events"].as_array_mut().expect("events");
+            let time = events[0]["timeUnixNano"].clone();
+            for (index, name) in ["first", "second"].into_iter().enumerate() {
+                events.insert(
+                    index,
+                    json!({
+                        "name": "conformance.observation",
+                        "timeUnixNano": time,
+                        "attributes": [
+                            {"key": "conformance.observation.name", "value": {"stringValue": name}},
+                            {"key": "conformance.observation.value", "value": {"stringValue": name}}
+                        ]
+                    }),
+                );
+            }
         }
+        let report = compare(&reference, &candidate);
+        assert_valid(&report);
+        assert!(report.equivalent, "{report:#?}");
+        operation(&mut candidate, "process")["events"]
+            .as_array_mut()
+            .expect("events")
+            .swap(0, 1);
+        assert_mismatch(&reference, &candidate, ".observation");
     }
-    let report = compare(&reference, &candidate);
-    assert_valid(&report);
-    assert!(report.equivalent, "{report:#?}");
-    operation(&mut candidate, "process")["events"]
-        .as_array_mut()
-        .expect("events")
-        .swap(0, 1);
-    assert_mismatch(&reference, &candidate, ".observation");
 }
