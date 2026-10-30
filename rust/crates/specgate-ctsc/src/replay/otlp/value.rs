@@ -63,7 +63,7 @@ mod tests {
         let error = decode(reordered.clone(), &Type::set(Type::set(Type::primitive("i32"))))
             .unwrap_err()
             .to_string();
-        assert!(error.contains("duplicate set elements"), "{error}");
+        assert!(error.contains("duplicate unique collection elements"), "{error}");
         let Value::Set(lists) = decode(reordered, &Type::set(Type::list(Type::primitive("i32")))).unwrap() else {
             panic!("expected a set of lists");
         };
@@ -102,19 +102,23 @@ pub(super) fn decode_value(value: &AnyValue, value_type: &Type, location: impl A
         let AnyValue::Array(array) = value else {
             return Err(format!("{location} collection value must use arrayValue").into());
         };
-        let values = array
+        let mut values = array
             .values
             .iter()
             .enumerate()
             .map(|(index, item)| decode_value(item, item_type, format!("{location}[{index}]")))
             .collect::<Result<Vec<_>, _>>()?;
-        if value_type.kind_name() == "set" {
+        if value_type.unique() == Some(true) {
             let count = values.len();
-            let values = values.into_iter().collect::<std::collections::BTreeSet<_>>();
-            if values.len() != count {
-                return Err(format!("{location} has duplicate set elements").into());
+            let unique = values.iter().collect::<std::collections::BTreeSet<_>>();
+            if unique.len() != count {
+                return Err(format!("{location} has duplicate unique collection elements").into());
             }
-            return Ok(Value::Set(values));
+            if value_type.ordered() == Some(false) {
+                return Ok(Value::Set(values.into_iter().collect()));
+            }
+        } else if value_type.ordered() == Some(false) {
+            values.sort();
         }
         return Ok(Value::List(values));
     }
@@ -136,6 +140,9 @@ pub(super) fn decode_value(value: &AnyValue, value_type: &Type, location: impl A
         };
     }
     if let Some((keys, values)) = value_type.map_types() {
+        if value_type.ordered() == Some(true) {
+            return Err(format!("{location} ordered map inputs are not supported by replay").into());
+        }
         if keys.primitive_name() != Some("string") {
             return Err(format!("{location} replay map keys must be strings").into());
         }

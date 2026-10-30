@@ -2,7 +2,7 @@
 
 use super::{RawName, RawText};
 use base64::Engine as _;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 /// A parsed CTSC trace containing spans after OTLP mapping and before linked validation.
@@ -214,10 +214,10 @@ pub(crate) enum CanonicalValue {
     List(Box<[CanonicalValue]>),
     /// An ordered fixed-position product.
     Tuple(Box<[CanonicalValue]>),
-    /// An unordered collection of unique values.
-    Set(BTreeSet<CanonicalValue>),
     /// An unordered collection of canonical key-value pairs.
     Map(BTreeMap<CanonicalValue, CanonicalValue>),
+    /// An ordered collection of canonical key-value pairs.
+    OrderedMap(Box<[(CanonicalValue, CanonicalValue)]>),
     /// A named-field product keyed by field name.
     Record(BTreeMap<String, CanonicalValue>),
     /// A named alternative and its payload.
@@ -247,7 +247,6 @@ impl CanonicalValue {
                 base64::engine::general_purpose::STANDARD.encode_string(value, output);
             }
             Self::List(values) | Self::Tuple(values) => write_sequence(output, "[", values, ']'),
-            Self::Set(values) => write_sequence(output, "set[", values, ']'),
             Self::Map(values) => {
                 output.push_str("map{");
                 for (index, (key, value)) in values.iter().enumerate() {
@@ -259,6 +258,18 @@ impl CanonicalValue {
                     value.write_display(output);
                 }
                 output.push('}');
+            }
+            Self::OrderedMap(values) => {
+                output.push_str("ordered_map[");
+                for (index, (key, value)) in values.iter().enumerate() {
+                    if index > 0 {
+                        output.push(',');
+                    }
+                    key.write_display(output);
+                    output.push(':');
+                    value.write_display(output);
+                }
+                output.push(']');
             }
             Self::Record(values) => {
                 output.push('{');

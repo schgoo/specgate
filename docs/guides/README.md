@@ -159,7 +159,7 @@ When you finish, report:
 - which tests were reused and which you added;
 - what the comparison establishes: on the recorded scenarios' inputs, the
   candidate produced the same results, errors, and nested annotated operations
-  under `ctsc.strict/0.1.0`;
+  under `ctsc.strict/0.2.0`;
 - what it does not establish: behavior no test exercised, unannotated
   internals, and anything excluded by a limitation.
 

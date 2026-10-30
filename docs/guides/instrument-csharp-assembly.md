@@ -92,6 +92,15 @@ public sealed class Counter
 See [`../reference/value-mapping.md`](../reference/value-mapping.md) for every
 supported type and the values capture rejects.
 
+Generic collection contracts are recognized without wrapper APIs:
+`IEnumerable<T>` is a bag; list and ordered-enumerable contracts preserve
+position; set contracts require uniqueness. This includes concrete
+`FooEnumerable : IEnumerable<Foo>` implementations. `Task<IEnumerable<T>>`
+records its awaited result with the same bag semantics. Collection items still
+need supported types; a model owned by a test project cannot be referenced from
+the product project's generic specialization. See
+[collection mappings](../reference/value-mapping.md#c-collection-contracts).
+
 ### 4. Declare outcomes
 
 | Return or annotation | Recorded outcome |

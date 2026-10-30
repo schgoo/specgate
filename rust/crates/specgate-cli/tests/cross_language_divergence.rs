@@ -68,7 +68,7 @@ fn assert_valid(report: &ComparisonReport) {
     assert!(report.validation_failures.is_empty(), "{report:#?}");
     assert!(report.errors.is_empty(), "{report:#?}");
     assert_eq!(report.policy, "ctsc.strict");
-    assert_eq!(report.policy_version, "0.1.0");
+    assert_eq!(report.policy_version, "0.2.0");
 }
 
 fn assert_mismatch(reference: &Value, candidate: &Value, path: &str) {

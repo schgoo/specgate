@@ -80,6 +80,65 @@ public sealed class ExplodingAttribute : Attribute
 
 public class DiscoveryRunnerTests
 {
+    [Theory]
+    [InlineData(typeof(IEnumerable<int>), "Bag<i32>")]
+    [InlineData(typeof(ICollection<int>), "Bag<i32>")]
+    [InlineData(typeof(IReadOnlyCollection<int>), "Bag<i32>")]
+    [InlineData(typeof(System.Collections.Concurrent.ConcurrentBag<int>), "Bag<i32>")]
+    [InlineData(typeof(System.Collections.Concurrent.BlockingCollection<int>), "Bag<i32>")]
+    [InlineData(typeof(IOrderedEnumerable<int>), "List<i32>")]
+    [InlineData(typeof(IReadOnlyList<int>), "List<i32>")]
+    [InlineData(typeof(Queue<int>), "List<i32>")]
+    [InlineData(typeof(Stack<int>), "List<i32>")]
+    [InlineData(typeof(LinkedList<int>), "List<i32>")]
+    [InlineData(typeof(ArraySegment<int>), "List<i32>")]
+    [InlineData(typeof(System.Collections.Concurrent.ConcurrentQueue<int>), "List<i32>")]
+    [InlineData(typeof(System.Collections.Concurrent.ConcurrentStack<int>), "List<i32>")]
+    [InlineData(typeof(System.Collections.Immutable.ImmutableArray<int>), "List<i32>")]
+    [InlineData(typeof(System.Collections.Immutable.ImmutableList<int>), "List<i32>")]
+    [InlineData(typeof(System.Collections.Immutable.ImmutableQueue<int>), "List<i32>")]
+    [InlineData(typeof(System.Collections.Immutable.ImmutableStack<int>), "List<i32>")]
+    [InlineData(typeof(System.Collections.Frozen.FrozenSet<int>), "set<i32>")]
+    [InlineData(typeof(System.Collections.Immutable.ImmutableHashSet<int>), "set<i32>")]
+    [InlineData(typeof(SortedSet<int>), "set<i32>")]
+    [InlineData(typeof(IReadOnlyDictionary<string, int>), "map<string, i32>")]
+    [InlineData(typeof(System.Collections.Concurrent.ConcurrentDictionary<string, int>), "map<string, i32>")]
+    [InlineData(typeof(System.Collections.Frozen.FrozenDictionary<string, int>), "map<string, i32>")]
+    [InlineData(typeof(OrderedDictionary<string, int>), "OrderedMap<string, i32>")]
+    [InlineData(typeof(PriorityQueue<string, int>), "Bag<Tuple<string, i32>>")]
+    [InlineData(typeof(ConcreteEnumerable), "Bag<Reading>")]
+    [InlineData(typeof(IOrderedUnique), "OrderedSet<i32>")]
+    public void CollectionContractsPublishStructuralSemantics(Type type, string expected)
+    {
+        SemanticTypes types = new(new NullabilityInfoContext());
+        Assert.Equal(expected, types.Render(type, null));
+    }
+
+    private sealed class ConcreteEnumerable : IEnumerable<Fixtures.Reading>
+    {
+        IEnumerator<Fixtures.Reading> IEnumerable<Fixtures.Reading>.GetEnumerator() =>
+            Enumerable.Empty<Fixtures.Reading>().GetEnumerator();
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() =>
+            ((IEnumerable<Fixtures.Reading>)this).GetEnumerator();
+    }
+
+    private interface IOrderedUnique : IReadOnlyList<int>, IReadOnlySet<int>;
+
+    [Fact]
+    public void ConflictingEnumerableContractsAreRejected()
+    {
+        SemanticTypes types = new(new NullabilityInfoContext());
+        Assert.Throws<InvalidOperationException>(() => types.Render(typeof(AmbiguousEnumerable), null));
+    }
+
+    private sealed class AmbiguousEnumerable : IEnumerable<int>, IEnumerable<string>
+    {
+        IEnumerator<int> IEnumerable<int>.GetEnumerator() => Enumerable.Empty<int>().GetEnumerator();
+        IEnumerator<string> IEnumerable<string>.GetEnumerator() => Enumerable.Empty<string>().GetEnumerator();
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() =>
+            throw new InvalidOperationException();
+    }
+
     [Fact]
     public void GenericSpecializationsPublishConcreteSignatures()
     {

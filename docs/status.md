@@ -16,7 +16,7 @@ reference target
   -> statically link top-level stimuli to a candidate
   -> replay
   -> emit an independent candidate CTSC trace
-  -> validate and compare with ctsc.strict/0.1.0
+  -> validate and compare with ctsc.strict/0.2.0
 ```
 
 The former spec parser, behavioral matcher, generated runners, case
@@ -182,6 +182,20 @@ Repeated calls retain receiver state, and strict comparison checks the typed
 collection contents. See the
 [accepted replay decision](decisions/typed-async-client-replay.md) and
 [limitations](reference/limitations.md).
+
+## Collection dimensions
+
+CTSC `0.4.0` makes collection ordering and uniqueness explicit; maps declare
+ordering and inherently require unique keys. C# closed generic collection
+contracts work through inherited interfaces, including non-generic concrete
+enumerables and awaited `IEnumerable<T>` results. Generic enumerable results
+are bags; list contracts remain ordered. Ordered dictionaries and priority
+element/priority snapshots are captured without consuming the container.
+Strict `0.2.0` uses these dimensions recursively. Old bundles require recapture.
+This does not make C# bags automatically replay-compatible with Rust `Vec`
+lists or resolve specialization ownership and outcome-mapping differences.
+See [value mapping](reference/value-mapping.md) and the
+[collection decision](decisions/collection-dimensions.md).
 
 ## Provisional capture sidecars
 

@@ -1,4 +1,4 @@
-# CTSC Comparison 0.3
+# CTSC Comparison 0.4
 
 **Status:** Draft
 
@@ -45,7 +45,8 @@ Comparison policies operate on the following CTSC semantics:
 - abandonment, recorded when an operation stopped without reaching an outcome;
 - target and supervisor faults;
 - concrete OTLP `AnyValue` structures;
-- registry record, tagged-union, tuple, set, map, and numeric types;
+- registry record, tagged-union, tuple, collection, map, and numeric types,
+  including declared ordering and uniqueness;
 - timestamps, durations, resources, scopes, attributes, and extensions.
 
 Trace and span IDs identify and connect spans within one execution. Independent
@@ -68,7 +69,7 @@ A policy MUST define:
 | Event ordering | Must event-array order match? |
 | Presence | Are additional/missing scenarios, operations, observations, or results allowed? |
 | Values | Which values require exact equality, projection, coercion, or custom matching? |
-| Collections | Does the policy preserve or explicitly relax declared list, tuple, set, and map semantics? |
+| Collections | Does the policy preserve or explicitly relax declared ordering, uniqueness, multiplicity, and tuple/map relationships? |
 | Floating point | Exact, absolute tolerance, relative tolerance, or another policy? |
 | Faults | Which fault fields participate in equality? |
 | Abandonment | Does an operation abandoned in one run and not the other count as a difference? |
@@ -105,11 +106,11 @@ A semantic mismatch location SHOULD include:
 - event or child-span position;
 - expected and actual semantic values.
 
-Diagnostic wording and serialization format are not defined by CTSC 0.3.
+Diagnostic wording and serialization format are not defined by CTSC 0.4.
 
 ## 7. CTSC Strict reference policy
 
-`ctsc.strict/0.1.0` is an optional reference policy. Implementing CTSC does not
+`ctsc.strict/0.2.0` is an optional reference policy. Implementing CTSC does not
 require implementing this policy.
 
 ### 7.1 Run selection
@@ -158,7 +159,7 @@ termination states.
 Results and declared errors compare their values.
 
 Abandonment carries no attributes, so it compares by presence alone. Under a
-policy that pairs it strictly — including `ctsc.strict/0.1.0`, by §7.4 — an
+policy that pairs it strictly — including `ctsc.strict/0.2.0`, by §7.4 — an
 abandoned operation pairs only with an abandoned operation, and an operation
 abandoned in one run but completed in the other is a difference. A policy that
 tolerates nondeterministic abandonment, such as a race whose losing branch
@@ -177,10 +178,14 @@ Linked values additionally use registry semantics:
 
 - records require the same declared fields;
 - tagged unions require the same variant and equivalent payload;
-- lists compare by position;
+- collections with `ordered: true` compare by position;
 - tuples compare by position;
-- sets compare as unordered duplicate-free collections;
-- maps compare as unordered key/value collections;
+- collections with `ordered: false` compare by recursive element equality and
+  multiplicity, independent of wire order;
+- collections with `unique: true` reject duplicate semantic elements during
+  Linked validation, independently of ordering;
+- maps compare by unique key/value association, and additionally by entry
+  position when `ordered: true`;
 - integer widths and ranges must be valid.
 
 Custom policies MAY relax collection equality, such as treating a list as

@@ -1,6 +1,6 @@
 {
   "format": "ctsc.registry",
-  "formatVersion": "0.3.0",
+  "formatVersion": "0.4.0",
   "registryId": "urn:ctsc:registry:example.values:1",
   "version": "1.0.0",
   "components": [
@@ -98,7 +98,7 @@
             {
               "name": "list_value",
               "type": {
-                "kind": "list",
+                "kind": "collection", "ordered": true, "unique": false,
                 "items": {
                   "kind": "primitive",
                   "name": "i32"
@@ -108,7 +108,7 @@
             {
               "name": "set_value",
               "type": {
-                "kind": "set",
+                "kind": "collection", "ordered": false, "unique": true,
                 "items": {
                   "kind": "primitive",
                   "name": "string"
@@ -134,7 +134,7 @@
             {
               "name": "string_map_value",
               "type": {
-                "kind": "map",
+                "kind": "map", "ordered": false,
                 "keys": {
                   "kind": "primitive",
                   "name": "string"
@@ -148,7 +148,7 @@
             {
               "name": "integer_map_value",
               "type": {
-                "kind": "map",
+                "kind": "map", "ordered": false,
                 "keys": {
                   "kind": "primitive",
                   "name": "i32"

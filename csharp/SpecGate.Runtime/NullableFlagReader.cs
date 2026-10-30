@@ -55,6 +55,32 @@ internal sealed class NullableFlagReader
     /// <summary>Gets whether the next position is annotated nullable.</summary>
     internal bool NextIsNullable() => Next() == 2;
 
+    internal NullableFlagReader Fork() => new(_flags, _fallback) { _index = _index };
+
+    internal void Skip(Type type)
+    {
+        if (Nullable.GetUnderlyingType(type) is Type inner)
+        {
+            Skip(inner);
+            return;
+        }
+        if (!type.IsValueType || type.IsGenericType)
+        {
+            Next();
+        }
+        if (type.IsArray)
+        {
+            Skip(type.GetElementType()!);
+        }
+        else
+        {
+            foreach (Type argument in type.GetGenericArguments())
+            {
+                Skip(argument);
+            }
+        }
+    }
+
     /// <summary>Creates a reader for a parameter or a method's return value.</summary>
     internal static NullableFlagReader ForParameter(ParameterInfo parameter, MemberInfo method) =>
         Create(parameter.CustomAttributes, ContextOf(method));

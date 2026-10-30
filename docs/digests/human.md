@@ -52,7 +52,11 @@ divided into reviewable vertical slices.
   type mappings, and C# candidate replay remain unsupported.
 - Observation metadata is not discoverable, so observation-emitting components
   cannot yet produce linked bundles.
-- Only the fixed `ctsc.strict/0.1.0` comparison policy is implemented.
+- Only the fixed `ctsc.strict/0.2.0` comparison policy is implemented.
+- CTSC `0.4.0` separates collection shape from ordering and uniqueness. C#
+  generic enumerable results, including custom implementations, are bags;
+  lists remain ordered. Old bundles require recapture, and bags are not
+  automatically compatible with Rust `Vec` lists.
 
 ## Risks and ownership
 

@@ -505,11 +505,16 @@ pub(super) fn construct_generic(name: impl AsRef<str>, mut arguments: Vec<TypeRe
             expect_arity(name, &arguments, 1)?;
             Ok(TypeRef::set(arguments.remove(0)))
         }
-        "Map" | "map" => {
+        "Bag" | "bag" | "OrderedSet" | "ordered_set" => {
+            expect_arity(name, &arguments, 1)?;
+            let ordered = matches!(name, "OrderedSet" | "ordered_set");
+            Ok(TypeRef::collection(arguments.remove(0), ordered, ordered))
+        }
+        "Map" | "map" | "OrderedMap" | "ordered_map" => {
             expect_arity(name, &arguments, 2)?;
             let values = arguments.remove(1);
             let keys = arguments.remove(0);
-            Ok(TypeRef::map(keys, values))
+            Ok(TypeRef::map_with_order(keys, values, matches!(name, "OrderedMap" | "ordered_map")))
         }
         "Tuple" | "tuple" => {
             if arguments.is_empty() {

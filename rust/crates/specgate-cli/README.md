@@ -25,8 +25,8 @@ passing native scenarios, keeping nested calls into other annotated
 components verbatim. `replay` verifies a capture bundle,
 statically links its top-level semantic inputs to a Rust candidate, and
 emits an independent deterministic CTSC trace. `validate` provides native
-CTSC 0.3 Registry, Trace Core, Linked, and capture-bundle validation.
-`compare` applies deterministic `ctsc.strict/0.1.0` semantics. No command
+CTSC 0.4 Registry, Trace Core, Linked, and capture-bundle validation.
+`compare` applies deterministic `ctsc.strict/0.2.0` semantics. No command
 reads `.spec.yaml` or invokes Python. The library capture entry point accepts
 one owned [`CaptureRequest`][__link0], constructed with a validated builder, and
 returns `Result<CaptureReport, CaptureError>`.
@@ -64,6 +64,6 @@ println!("registry: {}", report.registry_path.display());
 
 Part of the [SpecGate](https://github.com/schgoo/specgate) project.
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQbJSusbBjLO7EbSlASCvKRTqwbmd2gsLYkxMobU3WiDiuhvKthYvRhcoQbmcDD44vczCQbj2gPsMcXSuIbE7b_AVKIiggbfKMWcXwOhUthZIGDbHNwZWNnYXRlLWNsaWUwLjYuMGxzcGVjZ2F0ZV9jbGk
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQbJSusbBjLO7EbSlASCvKRTqwbmd2gsLYkxMobU3WiDiuhvKthYvRhcoQb1VpmOg3f-3sbT-Cn99CzarobaIhgDWTQp_8b_hWQmMYYx_VhZIGDbHNwZWNnYXRlLWNsaWUwLjYuMGxzcGVjZ2F0ZV9jbGk
  [__link0]: https://docs.rs/specgate-cli/0.6.0/specgate_cli/?search=CaptureRequest
  [__link1]: https://github.com/schgoo/specgate/blob/main/docs/reference/cli.md

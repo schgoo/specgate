@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using SpecGate.Annotations;
+using SpecGate.Collections;
 
 namespace SpecGate.Runtime;
 
@@ -24,8 +25,12 @@ internal enum SemanticKind
     /// <summary>A declared <see cref="object"/>, whose family is decided per value.</summary>
     Dynamic,
     List,
+    Bag,
     Set,
+    OrderedSet,
     Map,
+    OrderedMap,
+    Tuple,
     Option,
     Result,
 
@@ -69,6 +74,9 @@ internal sealed class SemanticType : IEquatable<SemanticType>
 
     /// <summary>The annotated CLR type, for <see cref="SemanticKind.Named"/>.</summary>
     internal Type? Declared { get; }
+
+    internal Type[]? ClrArguments { get; private init; }
+    internal string? EnumerationProperty { get; private init; }
 
     private static SemanticType Scalar(SemanticKind kind) => new(kind, null, null, null);
 
@@ -192,19 +200,9 @@ internal sealed class SemanticType : IEquatable<SemanticType>
                 return Of(SemanticKind.Result, Map(arguments[0], flags), Map(arguments[1], flags));
             }
 
-            if (definition == typeof(List<>))
+            if (definition == typeof(ValueTuple<,>))
             {
-                return Of(SemanticKind.List, Map(arguments[0], flags));
-            }
-
-            if (definition == typeof(Dictionary<,>) || definition == typeof(SortedDictionary<,>))
-            {
-                return Of(SemanticKind.Map, Map(arguments[0], flags), Map(arguments[1], flags));
-            }
-
-            if (definition == typeof(HashSet<>) || definition == typeof(SortedSet<>))
-            {
-                return Of(SemanticKind.Set, Map(arguments[0], flags));
+                return Of(SemanticKind.Tuple, Map(arguments[0], flags), Map(arguments[1], flags));
             }
         }
 
@@ -213,11 +211,59 @@ internal sealed class SemanticType : IEquatable<SemanticType>
             return Named(type);
         }
 
+        CollectionShape? collection;
+        try
+        {
+            collection = CollectionShape.Resolve(type);
+        }
+        catch (InvalidOperationException error)
+        {
+            throw new SpecGateCaptureException(CaptureRejection.AmbiguousDeclaration, error.Message);
+        }
+        if (collection is not null)
+        {
+            Type[] arguments = type.GetGenericArguments();
+            NullableFlagReader[] readers = new NullableFlagReader[arguments.Length];
+            for (int index = 0; index < arguments.Length; index++)
+            {
+                readers[index] = flags.Fork();
+                flags.Skip(arguments[index]);
+            }
+            SemanticType[] mapped = collection.Bind(type,
+                index => Map(arguments[index], readers[index].Fork()),
+                argument => Map(argument, NullableFlagReader.Oblivious),
+                Construct);
+            return Construct(collection.Constructor, mapped, type);
+        }
+
         throw new SpecGateCaptureException(
             CaptureRejection.UnsupportedType,
             $"specgate: '{type.FullName}' has no CTSC representation. Use a supported scalar, "
-            + "List, Dictionary, SortedDictionary, HashSet, SortedSet, Option, Result, or a type "
+            + "generic enumerable, dictionary, Option, Result, or a type "
             + "annotated with [SpecEvent].");
+    }
+
+    private static SemanticType Construct(string constructor, SemanticType[] arguments, Type? declaration)
+    {
+        SemanticType result = Of(constructor switch
+        {
+            "List" => SemanticKind.List,
+            "Bag" => SemanticKind.Bag,
+            "set" => SemanticKind.Set,
+            "OrderedSet" => SemanticKind.OrderedSet,
+            "map" => SemanticKind.Map,
+            "OrderedMap" => SemanticKind.OrderedMap,
+            "Tuple" => SemanticKind.Tuple,
+            "Option" => SemanticKind.Option,
+            "Result" => SemanticKind.Result,
+            _ => throw new InvalidOperationException($"Unknown semantic constructor '{constructor}'."),
+        }, arguments[0], arguments.Length > 1 ? arguments[1] : null);
+        CollectionShape? collection = declaration is null ? null : CollectionShape.Resolve(declaration);
+        return collection is null ? result : new SemanticType(result.Kind, result.First, result.Second, null)
+        {
+            ClrArguments = collection.Arguments,
+            EnumerationProperty = collection.EnumerationProperty,
+        };
     }
 
     /// <summary>

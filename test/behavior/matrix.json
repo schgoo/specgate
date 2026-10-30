@@ -50,6 +50,32 @@
       "limitations": []
     },
     {
+      "id": "component/fixture.collection_shapes",
+      "artifactDirectory": "behavior/cases/fixture.collection_shapes/expected",
+      "classification": "implementation-component",
+      "sourceGroup": "conformance/collections",
+      "component": "fixture.collection_shapes",
+      "sources": [
+        "test/behavior/cases/fixture.collection_shapes/csharp/CollectionShapes.cs"
+      ],
+      "csharp": { "binding": "csharp", "phases": ["discover", "capture"], "expect": "success" },
+      "parity": {
+        "mode": "not-applicable",
+        "reason": "This C# producer fixture exercises generic collection contracts; Rust Vec remains ordered and there is no semantic override or automatic bag conversion."
+      },
+      "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
+      "checks": [
+        { "reference": "csharp", "candidate": "csharp", "mode": "unsupported",
+          "expectCategory": "unsupported-language",
+          "reason": "This fixture validates native C# discovery and capture; C# candidate replay is not implemented." }
+      ],
+      "linkage": { "mode": "linked" },
+      "limitations": [
+        { "code": "collection-semantic-mapping", "detail": "C# bag declarations are not silently compatible with Rust Vec declarations." },
+        { "code": "replay-input-shape", "detail": "Ordered-map and tuple inputs are not supported by Rust replay." }
+      ]
+    },
+    {
       "id": "replacement/woven-capture-mechanics",
       "classification": "replacement",
       "sourceGroup": "producer/il",
@@ -2833,7 +2859,7 @@
       "limitations": [],
       "replacement": {
         "feature": "spec matcher operators (contains, approximately, set and map matchers)",
-        "rationale": "Matcher operators were replaced by exact structured values compared under the fixed ctsc.strict/0.1.0 policy. Sets and maps compare without wire order, and every other value compares exactly, so no per-assertion operator vocabulary is needed.",
+        "rationale": "Matcher operators were replaced by exact structured values compared under the fixed ctsc.strict/0.2.0 policy. Sets and maps compare without wire order, and every other value compares exactly, so no per-assertion operator vocabulary is needed.",
         "references": [
           {
             "path": "test/behavior/cases/fixture.operators/rust/operators.rs",

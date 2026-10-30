@@ -136,7 +136,7 @@ specgate compare test/behavior/cases/fixture.setup_with_params/expected/referenc
 ```text
 Complete(component=fixture.setup_with_params, scenarios=1, operations=1, plans=1, output=candidate.otlp.json)
 valid: linked candidate.otlp.json
-policy: ctsc.strict/0.1.0
+policy: ctsc.strict/0.2.0
 reference: test/behavior/cases/fixture.setup_with_params/expected/reference.otlp.json
 candidate: candidate.otlp.json
 equivalent: true
@@ -164,7 +164,7 @@ the boundary.
 ```text
 Complete(component=fixture.stateless_add, scenarios=1, operations=2, plans=1, output=candidate.otlp.json)
 valid: linked candidate.otlp.json
-policy: ctsc.strict/0.1.0
+policy: ctsc.strict/0.2.0
 reference: test/behavior/cases/fixture.stateless_add/expected/reference.otlp.json
 candidate: candidate.otlp.json
 equivalent: true

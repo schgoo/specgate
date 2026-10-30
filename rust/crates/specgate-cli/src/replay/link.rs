@@ -670,7 +670,7 @@ fn outcome_type_name(value_type: &ReplayType, context: ValueContext<'_>) -> Resu
         });
     }
     if let Some(item) = value_type.element_type() {
-        let constructor = if value_type.kind_name() == "set" { "set" } else { "List" };
+        let constructor = collection_constructor(value_type);
         return Ok(format!("{constructor}<{}>", outcome_type_name(item, context)?));
     }
     if let Some(value) = value_type.optional_value() {
@@ -678,7 +678,8 @@ fn outcome_type_name(value_type: &ReplayType, context: ValueContext<'_>) -> Resu
     }
     if let Some((keys, values)) = value_type.map_types() {
         return Ok(format!(
-            "map<{}, {}>",
+            "{}<{}, {}>",
+            if value_type.ordered() == Some(true) { "OrderedMap" } else { "map" },
             outcome_type_name(keys, context)?,
             outcome_type_name(values, context)?
         ));
@@ -710,7 +711,7 @@ pub(super) fn semantic_name(value_type: &ReplayType, context: ValueContext<'_>) 
         name: value_name,
     } = context;
     if let Some(item) = value_type.element_type() {
-        let constructor = if value_type.kind_name() == "set" { "set" } else { "List" };
+        let constructor = collection_constructor(value_type);
         return Ok(format!("{constructor}<{}>", semantic_name(item, context)?));
     }
     if let Some(inner) = value_type.optional_value() {
@@ -722,7 +723,8 @@ pub(super) fn semantic_name(value_type: &ReplayType, context: ValueContext<'_>) 
                 "operation '{component}::{operation}' value '{value_name}' requires string map keys"
             ));
         }
-        return Ok(format!("map<string, {}>", semantic_name(values, context)?));
+        let constructor = if value_type.ordered() == Some(true) { "OrderedMap" } else { "map" };
+        return Ok(format!("{constructor}<string, {}>", semantic_name(values, context)?));
     }
     let Some(name) = value_type.primitive_name() else {
         return failure(format!(
@@ -754,7 +756,7 @@ pub(super) fn check_rust(semantic_type: &ReplayType, rust_type: impl AsRef<str>,
             ));
         }
         if let Some(item) = semantic_type.element_type() {
-            let supported = if semantic_type.kind_name() == "set" {
+            let supported = if semantic_type.unique() == Some(true) && semantic_type.ordered() == Some(false) {
                 matches!(constructor.as_str(), "BTreeSet" | "HashSet")
             } else {
                 constructor == "Vec"
@@ -792,6 +794,16 @@ pub(super) fn check_rust(semantic_type: &ReplayType, rust_type: impl AsRef<str>,
         failure(format!(
             "candidate operation '{component}::{operation}' input '{input}' uses unsupported Rust type '{rust_type}' for semantic type '{semantic}'"
         ))
+    }
+}
+
+fn collection_constructor(value_type: &ReplayType) -> &'static str {
+    match (value_type.ordered(), value_type.unique()) {
+        (Some(true), Some(false)) => "List",
+        (Some(false), Some(false)) => "Bag",
+        (Some(false), Some(true)) => "set",
+        (Some(true), Some(true)) => "OrderedSet",
+        _ => unreachable!("collection constructor requires a collection type"),
     }
 }
 

@@ -308,13 +308,157 @@ public sealed class ValueProjectionTests
     }
 
     [Fact]
-    public void ANonStringMapKeyIsRejected()
+    public void ANonStringMapKeyUsesEntryRecords()
     {
         Assert.Equal(
-            CaptureRejection.UnsupportedMapKey,
-            Reject(
+            Value.List([Map(("key", Value.Integer(1)), ("value", Value.String("one")))]),
+            Single(
                 nameof(Declarations.KeyedByNumber),
-                [new SortedDictionary<int, string> { [1] = "one" }]).Rejection);
+                [new SortedDictionary<int, string> { [1] = "one" }]));
+    }
+
+    [Fact]
+    public void EnumerableContractsCaptureDuplicatesAndCustomImplementations()
+    {
+        Value expected = Value.List([Value.Integer(2), Value.Integer(1), Value.Integer(2)]);
+        int[] values = [2, 1, 2];
+        Assert.Equal(expected, Single(nameof(Declarations.Enumerable), [values]));
+        Assert.Equal(expected, Single(nameof(Declarations.CustomEnumerable), [new Numbers()]));
+        Assert.Equal(
+            Value.List([Value.Tagged("None", Value.Unit), Value.Tagged("Some", Value.String("one"))]),
+            Single(nameof(Declarations.ReorderedEnumerable), [new Reordered<int, string?>()]));
+    }
+
+    [Fact]
+    public void OrderedMapsAndPriorityQueuesKeepTheirFullContents()
+    {
+        OrderedDictionary<string, int> map = new() { ["b"] = 2, ["a"] = 1 };
+        Assert.Equal(
+            Value.List([
+                Map(("key", Value.String("b")), ("value", Value.Integer(2))),
+                Map(("key", Value.String("a")), ("value", Value.Integer(1))),
+            ]),
+            Single(nameof(Declarations.OrderedMap), [map]));
+        Assert.Equal(["b", "a"], map.Keys);
+
+        PriorityQueue<string, int> queue = new();
+        queue.Enqueue("later", 7);
+        queue.Enqueue("first", 1);
+        Value projected = Single(nameof(Declarations.PriorityQueue), [queue]);
+        Assert.Equal(
+            queue.UnorderedItems.Select(item => Value.List([Value.String(item.Element), Value.Integer(item.Priority)])),
+            projected.AsList());
+        Assert.Equal(2, queue.Count);
+        Assert.Equal("first", queue.Peek());
+    }
+
+    [Fact]
+    public void ReadOnlyDictionaryContractsDoNotRequireNonGenericDictionary()
+    {
+        IReadOnlyDictionary<string, int> map = new ReadOnlyNumbers();
+        Assert.Equal(Map(("a", Value.Integer(1))), Single(nameof(Declarations.ReadOnlyMap), [map]));
+    }
+
+    [Fact]
+    public void NestedGenericContractsPreserveElementNullabilityAndProjectionMetadata()
+    {
+        Assert.Equal(
+            Value.List([Value.List([Value.Tagged("None", Value.Unit)])]),
+            Single(nameof(Declarations.NestedEnumerable), [new Nested<string?>([null])]));
+        PriorityQueue<string?, int> queue = new();
+        queue.Enqueue(null, 3);
+        Assert.Equal(
+            Value.List([Value.List([Value.List([Value.Tagged("None", Value.Unit), Value.Integer(3)])])]),
+            Single(nameof(Declarations.NestedPriority), [new NestedPriority<string?>(queue)]));
+        DerivedPriority<string> derived = new();
+        derived.Enqueue("item", 1);
+        Assert.Equal(
+            Value.List([Value.List([Value.String("item"), Value.Integer(1)])]),
+            Single(nameof(Declarations.DerivedPriority), [derived]));
+    }
+
+    [Fact]
+    public void ProjectionCollisionsInUniqueCollectionsAreRejectedRatherThanDropped()
+    {
+        HashSet<Address> values = [new() { City = "same" }, new() { City = "same" }];
+        Assert.Equal(
+            CaptureRejection.UnrepresentableValue,
+            Reject(nameof(Declarations.UniqueAddresses), [values]).Rejection);
+    }
+
+    [Fact]
+    public void UniquenessUsesRecursiveBagSemanticsForElementsAndKeys()
+    {
+        IEnumerable<int> first = [1, 2];
+        IEnumerable<int> second = [2, 1];
+        HashSet<IEnumerable<int>> values = [first, second];
+        Dictionary<IEnumerable<int>, string> keys = new() { [first] = "one", [second] = "two" };
+        Assert.Equal(CaptureRejection.UnrepresentableValue,
+            Reject(nameof(Declarations.UniqueBags), [values]).Rejection);
+        Assert.Equal(CaptureRejection.UnrepresentableValue,
+            Reject(nameof(Declarations.BagKeys), [keys]).Rejection);
+    }
+
+    private sealed class Numbers : IEnumerable<int>
+    {
+        IEnumerator<int> IEnumerable<int>.GetEnumerator()
+        {
+            yield return 2;
+            yield return 1;
+            yield return 2;
+        }
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() =>
+            throw new InvalidOperationException("Capture must use the declared generic enumeration contract.");
+    }
+
+    private sealed class Nested<T>(List<T> values) : IEnumerable<List<T>>
+    {
+        public IEnumerator<List<T>> GetEnumerator()
+        {
+            yield return values;
+        }
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    private sealed class NestedPriority<T>(PriorityQueue<T, int> queue) : IEnumerable<PriorityQueue<T, int>>
+    {
+        public IEnumerator<PriorityQueue<T, int>> GetEnumerator()
+        {
+            yield return queue;
+        }
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    private sealed class DerivedPriority<T> : PriorityQueue<T, int>;
+
+    private sealed class ReadOnlyNumbers : IReadOnlyDictionary<string, int>
+    {
+        public int this[string key] => key == "a" ? 1 : throw new KeyNotFoundException();
+        public IEnumerable<string> Keys => ["a"];
+        public IEnumerable<int> Values => [1];
+        public int Count => 1;
+        public bool ContainsKey(string key) => key == "a";
+        public bool TryGetValue(string key, out int value)
+        {
+            value = key == "a" ? 1 : 0;
+            return key == "a";
+        }
+        public IEnumerator<KeyValuePair<string, int>> GetEnumerator()
+        {
+            yield return new("a", 1);
+        }
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() =>
+            throw new InvalidOperationException("Capture must use the generic dictionary contract.");
+    }
+
+    private sealed class Reordered<TIgnored, TItem> : IEnumerable<TItem>
+    {
+        public IEnumerator<TItem> GetEnumerator()
+        {
+            yield return default!;
+            yield return (TItem)(object)"one";
+        }
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
     /// <summary>
@@ -626,6 +770,19 @@ public sealed class ValueProjectionTests
         internal static void Unrepresentable(byte value) => _ = value;
 
         internal static void KeyedByNumber(SortedDictionary<int, string> counts) => _ = counts;
+
+        internal static void Enumerable(IEnumerable<int> values) => _ = values;
+        internal static void CustomEnumerable(Numbers values) => _ = values;
+        internal static void ReorderedEnumerable(Reordered<int, string?> values) => _ = values;
+        internal static void OrderedMap(OrderedDictionary<string, int> values) => _ = values;
+        internal static void PriorityQueue(PriorityQueue<string, int> values) => _ = values;
+        internal static void ReadOnlyMap(IReadOnlyDictionary<string, int> values) => _ = values;
+        internal static void UniqueAddresses(HashSet<Address> values) => _ = values;
+        internal static void NestedEnumerable(Nested<string?> values) => _ = values;
+        internal static void NestedPriority(NestedPriority<string?> values) => _ = values;
+        internal static void DerivedPriority(DerivedPriority<string> values) => _ = values;
+        internal static void UniqueBags(HashSet<IEnumerable<int>> values) => _ = values;
+        internal static void BagKeys(Dictionary<IEnumerable<int>, string> values) => _ = values;
 
         internal static void EmptyNames([SpecInput("")] int count) => _ = count;
 

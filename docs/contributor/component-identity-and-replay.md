@@ -46,7 +46,7 @@ SpecGate gives operations stable, declared, language-neutral identity through
 name is whatever the test framework called the function: the libtest name, or
 `binary::test_name` for non-library targets.
 
-`ctsc.strict/0.1.0` pairs scenarios **by name**
+`ctsc.strict/0.2.0` pairs scenarios **by name**
 (`rust/crates/specgate-ctsc/src/comparison.rs:187-194`).
 
 Consequences:
