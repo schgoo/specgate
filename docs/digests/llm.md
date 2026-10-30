@@ -12,7 +12,7 @@ authoritative; update the source contract or implementation document first.
 SpecGate discovers implementation metadata as a CTSC registry, captures
 ordinary Rust or C# tests as a reference CTSC bundle, replays the reference stimuli
 against a Rust candidate, validates the artifacts, and compares reference and
-candidate traces with `ctsc.strict/0.1.0`.
+candidate traces with `ctsc.strict/0.2.0`.
 
 The active CLI surface is `discover`, `capture`, `replay`, `validate`, and
 `compare`. Rust and C# support discovery and capture; replay currently supports
@@ -196,6 +196,15 @@ The matrix is exact:
 
 The detailed list is the single table in `docs/reference/limitations.md`;
 architecture and status are in `docs/status.md`. Important current boundaries include:
+
+- CTSC `0.4.0` uses `collection` with required `ordered`/`unique` and `map`
+  with required `ordered`; old bundles require recapture. Strict `0.2.0`
+  preserves bag multiplicity and uses recursive uniqueness. C# generic
+  enumerable contracts default to bags, including concrete implementations.
+  Lists, ordered enumerables, sets, ordered dictionaries, and priority
+  element/priority bags are recognized through a shared discovery/capture
+  resolver. Rust `Vec` remains a list: no bag/list override or conversion is
+  implemented, and ordered-map replay inputs remain unsupported;
 
 - reference capture supports Rust libtest targets and C# native test projects;
 - replay supports public Rust free functions and setup-backed instance methods,

@@ -86,7 +86,7 @@ fn compare_reports_equivalence_and_stable_mismatch_paths() {
     std::fs::remove_file(changed).unwrap();
     assert_eq!(output.status.code(), Some(1));
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.contains("policy: ctsc.strict/0.1.0"), "{stdout}");
+    assert!(stdout.contains("policy: ctsc.strict/0.2.0"), "{stdout}");
     assert!(stdout.contains("mismatch scenario[\""), "{stdout}");
     assert!(stdout.contains("expected"), "{stdout}");
     assert!(stdout.contains("actual"), "{stdout}");

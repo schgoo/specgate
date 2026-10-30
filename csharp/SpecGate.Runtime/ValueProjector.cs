@@ -2,8 +2,10 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Reflection;
 using SpecGate.Annotations;
+using SpecGate.Collections;
 
 namespace SpecGate.Runtime;
 
@@ -61,9 +63,10 @@ internal static class ValueProjector
             SemanticKind.F64 => Value.Float(Require<double>(type, value)),
             SemanticKind.String => ProjectString(Require<string>(type, value)),
             SemanticKind.Dynamic => ProjectDynamic(value),
-            SemanticKind.List => Value.List(ProjectElements(type, type.First!, value)),
-            SemanticKind.Set => Value.Set(ProjectElements(type, type.First!, value)),
-            SemanticKind.Map => ProjectMap(type, value),
+            SemanticKind.List or SemanticKind.Bag => Value.List(ProjectElements(type, type.First!, value)),
+            SemanticKind.Set or SemanticKind.OrderedSet => ProjectUnique(type, value),
+            SemanticKind.Map or SemanticKind.OrderedMap => ProjectMap(type, value),
+            SemanticKind.Tuple => ProjectTuple(type, value),
             SemanticKind.Result => ProjectResult(type, value),
             SemanticKind.Named => ProjectNamed(type.Declared!, value),
             _ => throw Rejected(
@@ -222,13 +225,38 @@ internal static class ValueProjector
 
     private static List<Value> ProjectElements(SemanticType type, SemanticType element, object value)
     {
-        if (value is not IEnumerable sequence || value is string)
+        if (type.EnumerationProperty is string property)
+        {
+            value = value.GetType().GetProperty(property)!.GetValue(value)!;
+        }
+        if (value is Array array)
+        {
+            List<Value> elements = [];
+            foreach (object? item in array)
+            {
+                elements.Add(Project(element, item));
+            }
+            return elements;
+        }
+        if (value is not IEnumerable || value is string)
         {
             throw Mismatch(type, value.GetType());
         }
 
+        Type elementType = (type.ClrArguments ?? CollectionShape.Resolve(value.GetType())!.Arguments)[0];
+        MethodInfo method = typeof(ValueProjector).GetMethod(nameof(ProjectSequence),
+            BindingFlags.Static | BindingFlags.NonPublic)!.MakeGenericMethod(elementType);
+        return method.CreateDelegate<Func<SemanticType, SemanticType, object, List<Value>>>()(type, element, value);
+    }
+
+    private static List<Value> ProjectSequence<T>(SemanticType type, SemanticType element, object value)
+    {
+        if (value is not IEnumerable<T> sequence)
+        {
+            throw Mismatch(type, value.GetType());
+        }
         List<Value> projected = [];
-        foreach (object? item in sequence)
+        foreach (T item in sequence)
         {
             projected.Add(Project(element, item));
         }
@@ -236,38 +264,140 @@ internal static class ValueProjector
         return projected;
     }
 
-    private static Value ProjectMap(SemanticType type, object value)
+    private static Value ProjectUnique(SemanticType type, object value)
     {
-        if (type.First!.Kind != SemanticKind.String)
+        List<Value> elements = ProjectElements(type, type.First!, value);
+        if (elements.Select(element => Canonicalize(type.First!, element)).Distinct().Count() != elements.Count)
         {
             throw Rejected(
-                CaptureRejection.UnsupportedMapKey,
-                $"{Describe(type)} is keyed by {Describe(type.First)}. CTSC maps are "
-                + "keyed by strings.");
+                CaptureRejection.UnrepresentableValue,
+                "distinct native elements project to duplicate elements in a unique CTSC collection.");
         }
+        return type.Kind == SemanticKind.OrderedSet ? Value.List(elements) : Value.Set(elements);
+    }
 
-        if (value is not IDictionary dictionary)
+    private static Value ProjectTuple(SemanticType type, object value)
+    {
+        Type actual = value.GetType();
+        return Value.List([
+            Project(type.First!, actual.GetField("Item1")!.GetValue(value)),
+            Project(type.Second!, actual.GetField("Item2")!.GetValue(value)),
+        ]);
+    }
+
+    private static Value ProjectMap(SemanticType type, object value)
+    {
+        Type[] arguments = type.ClrArguments ?? CollectionShape.Resolve(value.GetType())!.Arguments;
+        MethodInfo method = typeof(ValueProjector).GetMethod(nameof(ProjectEntries),
+            BindingFlags.Static | BindingFlags.NonPublic)!.MakeGenericMethod(arguments);
+        return method.CreateDelegate<Func<SemanticType, object, Value>>()(type, value);
+    }
+
+    private static Value ProjectEntries<TKey, TValue>(SemanticType type, object value)
+    {
+        if (value is not IEnumerable<KeyValuePair<TKey, TValue>> dictionary)
         {
             throw Mismatch(type, value.GetType());
         }
 
         List<KeyValuePair<string, Value>> entries = [];
-        foreach (DictionaryEntry entry in dictionary)
+        List<Value> orderedEntries = [];
+        HashSet<Value> keys = [];
+        bool compact = type.Kind == SemanticKind.Map && type.First!.Kind == SemanticKind.String;
+        foreach (KeyValuePair<TKey, TValue> entry in dictionary)
         {
-            if (entry.Key is not string key)
+            Value key = Project(type.First!, entry.Key);
+            Value projected = Project(type.Second!, entry.Value);
+            if (!keys.Add(Canonicalize(type.First!, key)))
             {
                 throw Rejected(
-                    CaptureRejection.UnsupportedMapKey,
-                    $"a map key of type '{entry.Key.GetType().FullName}' was observed. CTSC maps "
-                    + "are keyed by strings.");
+                    CaptureRejection.UnrepresentableValue,
+                    "distinct native keys project to duplicate CTSC map keys.");
             }
-
-            entries.Add(new KeyValuePair<string, Value>(
-                RejectUnpairedSurrogates(key),
-                Project(type.Second!, entry.Value)));
+            if (compact)
+            {
+                entries.Add(new KeyValuePair<string, Value>(key.AsString(), projected));
+            }
+            else
+            {
+                orderedEntries.Add(Value.Map([
+                    new KeyValuePair<string, Value>("key", key),
+                    new KeyValuePair<string, Value>("value", projected),
+                ]));
+            }
         }
 
-        return Value.Map(entries);
+        return compact ? Value.Map(entries) : Value.List(orderedEntries);
+    }
+
+    private static Value Canonicalize(SemanticType type, Value value)
+    {
+        switch (type.Kind)
+        {
+            case SemanticKind.List:
+            case SemanticKind.Bag:
+            case SemanticKind.Set:
+            case SemanticKind.OrderedSet:
+                List<Value> elements = [.. (value.Kind == ValueKind.Set ? value.AsSet() : value.AsList())
+                    .Select(item => Canonicalize(type.First!, item))];
+                if (type.Kind is SemanticKind.Bag or SemanticKind.Set)
+                {
+                    elements.Sort(Value.Compare);
+                }
+                return Value.List(elements);
+            case SemanticKind.Tuple:
+                return Value.List([
+                    Canonicalize(type.First!, value.AsList()[0]),
+                    Canonicalize(type.Second!, value.AsList()[1]),
+                ]);
+            case SemanticKind.Option:
+            case SemanticKind.Result:
+                KeyValuePair<string, Value> variant = value.AsMap().Single();
+                if (type.Kind == SemanticKind.Option && variant.Key == NoneKey)
+                {
+                    return value;
+                }
+                return Value.Tagged(variant.Key,
+                    Canonicalize(variant.Key == ErrKey ? type.Second! : type.First!, variant.Value));
+            case SemanticKind.Map:
+            case SemanticKind.OrderedMap:
+                if (value.Kind == ValueKind.Map)
+                {
+                    return Value.Map(value.AsMap().Select(entry =>
+                        new KeyValuePair<string, Value>(entry.Key, Canonicalize(type.Second!, entry.Value))));
+                }
+                List<Value> entries = [.. value.AsList().Select(entry => Value.List([
+                    Canonicalize(type.First!, entry.AsMap()["key"]),
+                    Canonicalize(type.Second!, entry.AsMap()["value"]),
+                ]))];
+                if (type.Kind == SemanticKind.Map)
+                {
+                    entries.Sort(Value.Compare);
+                }
+                return Value.List(entries);
+            case SemanticKind.Named:
+                Type declared = type.Declared!;
+                if (declared.IsEnum)
+                {
+                    return value;
+                }
+                if (declared.IsAbstract)
+                {
+                    KeyValuePair<string, Value> tagged = value.AsMap().Single();
+                    Type variantType = declared.Assembly.GetTypes().Single(candidate =>
+                        !candidate.IsAbstract && declared.IsAssignableFrom(candidate)
+                        && SemanticType.HasSpecEvent(candidate) && SemanticType.EventName(candidate) == tagged.Key);
+                    return Value.Tagged(tagged.Key, Canonicalize(SemanticType.Named(variantType), tagged.Value));
+                }
+                IReadOnlyDictionary<string, Value> fields = value.AsMap();
+                return Value.Map(SemanticType.MembersOf(declared).Select(member =>
+                    new KeyValuePair<string, Value>(member.Name, Canonicalize(member.Type, fields[member.Name]))));
+            case SemanticKind.F32:
+            case SemanticKind.F64:
+                return double.IsNaN(value.AsFloat()) ? Value.Float(double.NaN) : value;
+            default:
+                return value;
+        }
     }
 
     /// <summary>

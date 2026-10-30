@@ -193,7 +193,7 @@ impl TypeOwner {
 pub struct Type(TypeKind);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum TypeKind {
     Primitive {
         name: String,
@@ -203,15 +203,15 @@ enum TypeKind {
         #[serde(flatten)]
         owner: TypeOwner,
     },
-    List {
+    Collection {
         items: Box<Type>,
-    },
-    Set {
-        items: Box<Type>,
+        ordered: bool,
+        unique: bool,
     },
     Map {
         keys: Box<Type>,
         values: Box<Type>,
+        ordered: bool,
     },
     Tuple {
         items: Vec<Type>,
@@ -238,19 +238,34 @@ impl Type {
     /// Construct an ordered list type.
     #[must_use]
     pub fn list(items: Type) -> Self {
-        Self(TypeKind::List { items: Box::new(items) })
+        Self::collection(items, true, false)
     }
     /// Construct an unordered set type.
     #[must_use]
     pub fn set(items: Type) -> Self {
-        Self(TypeKind::Set { items: Box::new(items) })
+        Self::collection(items, false, true)
+    }
+    /// Construct a homogeneous collection with explicit equality and uniqueness semantics.
+    #[must_use]
+    pub fn collection(items: Type, ordered: bool, unique: bool) -> Self {
+        Self(TypeKind::Collection {
+            items: Box::new(items),
+            ordered,
+            unique,
+        })
     }
     /// Construct a key-value map type.
     #[must_use]
     pub fn map(keys: Type, values: Type) -> Self {
+        Self::map_with_order(keys, values, false)
+    }
+    /// Construct a key-value map whose entry order optionally participates in equality.
+    #[must_use]
+    pub fn map_with_order(keys: Type, values: Type, ordered: bool) -> Self {
         Self(TypeKind::Map {
             keys: Box::new(keys),
             values: Box::new(values),
+            ordered,
         })
     }
     /// Construct a fixed-position tuple type.
@@ -274,8 +289,7 @@ impl Type {
         match &self.0 {
             TypeKind::Primitive { .. } => "primitive",
             TypeKind::Named { .. } => "named",
-            TypeKind::List { .. } => "list",
-            TypeKind::Set { .. } => "set",
+            TypeKind::Collection { .. } => "collection",
             TypeKind::Map { .. } => "map",
             TypeKind::Tuple { .. } => "tuple",
             TypeKind::Optional { .. } => "optional",
@@ -298,11 +312,27 @@ impl Type {
             _ => None,
         }
     }
-    /// Return the element type for a list or set.
+    /// Return the element type for a homogeneous collection.
     #[must_use]
     pub fn element_type(&self) -> Option<&Type> {
         match &self.0 {
-            TypeKind::List { items } | TypeKind::Set { items } => Some(items),
+            TypeKind::Collection { items, .. } => Some(items),
+            _ => None,
+        }
+    }
+    /// Return ordering semantics for collections and maps.
+    #[must_use]
+    pub fn ordered(&self) -> Option<bool> {
+        match &self.0 {
+            TypeKind::Collection { ordered, .. } | TypeKind::Map { ordered, .. } => Some(*ordered),
+            _ => None,
+        }
+    }
+    /// Return element uniqueness for homogeneous collections.
+    #[must_use]
+    pub fn unique(&self) -> Option<bool> {
+        match &self.0 {
+            TypeKind::Collection { unique, .. } => Some(*unique),
             _ => None,
         }
     }
@@ -310,7 +340,7 @@ impl Type {
     #[must_use]
     pub fn map_types(&self) -> Option<(&Type, &Type)> {
         match &self.0 {
-            TypeKind::Map { keys, values } => Some((keys, values)),
+            TypeKind::Map { keys, values, .. } => Some((keys, values)),
             _ => None,
         }
     }

@@ -58,15 +58,57 @@ the C# reference on Rust.
 
 | CTSC kind | Rust | C# |
 | --- | --- | --- |
-| `list` | `Vec<T>`, `&[T]` | `T[]`, `List<T>` |
-| `set` | `HashSet<T>`, `BTreeSet<T>` | `HashSet<T>`, `SortedSet<T>` |
-| `map` | `HashMap<K, V>`, `BTreeMap<K, V>` | `Dictionary<K, V>`, `SortedDictionary<K, V>` |
+| `collection`, ordered, nonunique (list) | `Vec<T>`, `&[T]` | `T[]`, list contracts, `IOrderedEnumerable<T>`, queue/stack/linked-list families |
+| `collection`, unordered, nonunique (bag) | No automatic native mapping | `IEnumerable<T>`, `ICollection<T>`, `IReadOnlyCollection<T>` unless a stronger contract applies |
+| `collection`, unordered, unique (set) | `HashSet<T>`, `BTreeSet<T>` | Set contracts, including immutable/frozen sets and `SortedSet<T>` |
+| `collection`, ordered, unique (ordered set) | No automatic native mapping | A type declaring both ordered and set contracts |
+| `map`, unordered | `HashMap<K, V>`, `BTreeMap<K, V>` | Generic dictionary/read-only dictionary contracts, including sorted, concurrent, immutable, and frozen dictionaries |
+| `map`, ordered | No automatic native mapping | Generic `OrderedDictionary<K, V>` |
+| `tuple` | Tuple variant payloads | `ValueTuple<T1, T2>`, including element/priority pairs |
 | `optional` | `Option<T>` (inputs, fields) | `SpecGate.Annotations.Option<T>`, `T?` (nullable value or reference type) |
 | `record` | `struct` with `#[derive(SpecEvent)]` | non-abstract class or struct with `[SpecEvent]`; members marked `[SpecEvent]` become fields |
 | `tagged_union` | `enum` with `#[derive(SpecEvent)]` | `enum` with `[SpecEvent]`; abstract class with `[SpecEvent]` (its concrete subclasses become variants) |
 
 Rust references (`&T`, `&mut T`) map to `T`. Only the final path segment of a
 Rust type is used, so `std::collections::BTreeMap` and `BTreeMap` are the same.
+
+### C# collection contracts
+
+Discovery and capture share one resolver, inspecting the declared type itself,
+its base families, and its closed generic interfaces. A non-generic
+`FooEnumerable : IEnumerable<Foo>` works, including inherited and explicitly
+implemented contracts; `Foo` must itself have a supported representation.
+Conflicting element or dictionary key/value contracts are rejected.
+Generic argument nullability follows the annotated operation/member declaration,
+including reordered arguments and nested collection expressions. Nullable
+annotations written only on an inherited interface/base declaration are not
+recovered; declare the nullable element on the exposed generic contract when
+needed. Observed nulls in a required element still reject capture rather than
+being silently dropped.
+
+List contracts include `IList<T>` and `IReadOnlyList<T>`, covering arrays,
+segments, object-model collections, and immutable lists/arrays. Queues, stacks,
+linked lists, their concurrent counterparts, and immutable queue/stack
+contracts preserve traversal order. `IOrderedQueryable<T>` and ordered parallel
+query families also declare order. Other generic enumerable contracts, including
+concurrent bags and ordinary `BlockingCollection<T>` enumeration, are bags.
+Capture never uses `GetConsumingEnumerable`.
+
+Dictionary contracts take precedence over their element/list views.
+Sorted sets/maps keep their existing unordered semantics, matching Rust
+`BTreeSet`/`BTreeMap`: `ordered` is equality by position, not sortedness.
+Priority queues project `UnorderedItems` as a bag of `(element, priority)`
+tuples without dequeuing. Ordered maps, and maps with non-string keys, use
+arrays of key/value entry records. Unordered string-keyed maps use OTLP
+key/value lists. Projection must not silently merge duplicate semantic elements
+or keys.
+
+Non-generic `ArrayList`/`Hashtable` lack declared element/key/value types;
+SpecGate does not infer a registry from observed contents. Existing enumerators,
+async streams, and buffers without generic enumerable contracts remain
+unsupported. Collection-semantic overrides and automatic bag-to-`Vec`
+conversion are not implemented. See the
+[collection decision](../decisions/collection-dimensions.md).
 
 Rust enum variants map to a `tagged_union` variant with no payload (unit
 variant), a `tuple` payload (tuple variant), or a `record` payload (struct
@@ -115,7 +157,8 @@ C# capture rejects, with an error naming the value:
 
 - An enum value that is not one of the enum's declared members (for example an
   undeclared numeric value or a `[Flags]` combination).
-- A map whose keys are not strings.
+- Distinct native elements or keys that project to duplicates where uniqueness
+  is required.
 - A string that contains an unpaired UTF-16 surrogate.
 - A value declared as `object` whose runtime type is not a primitive or a
   `[SpecEvent]`-annotated type. Collections are refused because a list and a
@@ -125,6 +168,9 @@ C# capture rejects, with an error naming the value:
 
 Rust replay accepts lossless primitives and recursively supported lists, sets,
 string-keyed maps, and optionals as operation and setup construction inputs.
+Ordered-map inputs remain unsupported. Bag and ordered-set registry dimensions
+are not silently erased during candidate signature matching: Rust `Vec<T>`
+continues to declare list semantics.
 Classes and structs opted in as property setups (`#[spec_event(setup)]`,
 `[SpecEvent(Setup = true)]`) are deconstructed into their selected fields,
 recursing through fields that are themselves opted-in records, including

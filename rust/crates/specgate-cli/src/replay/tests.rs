@@ -884,6 +884,33 @@ mod cases {
     }
 
     #[test]
+    fn planner_preserves_collection_dimensions_when_matching_outcomes() {
+        for (ordered, unique) in [(false, false), (false, true), (true, true)] {
+            let (mut bundle, candidate) = structured_metadata();
+            let operation = &bundle.registry.operations[0];
+            bundle.registry.operations[0] = replay_model::RegistryOp::builder(replay_model::OpDeps {
+                component_id: operation.component_id().clone(),
+                name: operation.name().clone(),
+                inputs: operation.inputs().to_vec(),
+            })
+            .output(ReplayType::collection(
+                ReplayType::named("Item", replay_model::TypeOwner::default()),
+                ordered,
+                unique,
+            ))
+            .build()
+            .unwrap();
+            let mut registry: serde_json::Value = serde_json::from_slice(&bundle.registry_document).unwrap();
+            let result = &mut registry["components"][0]["operations"][0]["outcomes"]["result"];
+            result["ordered"] = ordered.into();
+            result["unique"] = unique.into();
+            bundle.registry_document = serde_json::to_vec(&registry).unwrap();
+
+            build_plan(&bundle, &candidate).expect_err("a Rust Vec outcome must not match different collection dimensions");
+        }
+    }
+
+    #[test]
     fn planner_checks_transitive_structured_outcome_declarations() {
         let (bundle, mut candidate) = structured_metadata();
         build_plan(&bundle, &candidate).expect("matching typed collection declarations");

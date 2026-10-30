@@ -39,7 +39,7 @@ pub use report::{
 pub const POLICY_ID: &str = "ctsc.strict";
 /// CTSC Strict Comparison contract version.
 ///
-/// `0.1.0` identifies the current authoritative Strict policy revision consumed
+/// `0.2.0` identifies the current authoritative Strict policy revision consumed
 /// by serialized reports. Semantic comparison changes require coordinated CTSC
 /// contract review, consumer compatibility updates, and a version bump here.
-pub const POLICY_VERSION: &str = "0.1.0";
+pub const POLICY_VERSION: &str = "0.2.0";

@@ -22,6 +22,7 @@
     <ProjectReference Include="..\SpecGate.Annotations\SpecGate.Annotations.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="..\Shared\CollectionShape.cs" Link="CollectionShape.cs" />
     <InternalsVisibleTo Include="SpecGate.Runtime.Tests" />
   </ItemGroup>
 </Project>

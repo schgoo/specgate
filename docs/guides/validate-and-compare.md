@@ -45,7 +45,7 @@ root registry imports others.
 
 ### How compare decides
 
-`compare` uses the fixed `ctsc.strict/0.1.0` policy
+`compare` uses the fixed `ctsc.strict/0.2.0` policy
 ([`../ctsc/comparison.md`](../ctsc/comparison.md)):
 
 - Both traces are validated first. An invalid trace is reported as a
@@ -54,9 +54,10 @@ root registry imports others.
 - Operations and events compare in order, except direct children of a parallel
   region. Faults compare by type and message. Timestamps, ids, durations, and
   a fault's native type do not count.
-- With `--registry`, values compare with registry semantics: for example sets
-  and maps are unordered and integer ranges are checked. Without it, values
-  compare by exact structure.
+- With `--registry`, collection and map ordering follows their `ordered`
+  fields, unique collections reject duplicates, bags retain occurrence counts,
+  and integer ranges are checked. Without it, arrays compare positionally,
+  including arrays used to encode bags and ordered maps.
 
 Pass `--registry` whenever you have one.
 
@@ -69,7 +70,7 @@ codes.
 ```text
 valid: bundle <capture-dir>
 valid: linked candidate.otlp.json
-policy: ctsc.strict/0.1.0
+policy: ctsc.strict/0.2.0
 reference: <capture-dir>/reference.otlp.json
 candidate: candidate.otlp.json
 equivalent: true

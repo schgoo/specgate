@@ -69,6 +69,9 @@ components:
     implementations:
       rust: *rust_fixtures
       csharp: *csharp_fixtures
+  fixture.collection_shapes:
+    implementations:
+      csharp: *csharp_fixtures
   fixture.cross_dep:
     implementations:
       rust: *rust_fixtures

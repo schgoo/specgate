@@ -62,6 +62,11 @@ A CTSC registry: the operations, inputs, outcomes, and named types the
 component publishes. Format: [`../ctsc/registry.md`](../ctsc/registry.md). Type
 mapping from native code: [`value-mapping.md`](value-mapping.md).
 
+Produced registries and trace resources use CTSC `0.4.0`; the capture-manifest
+format remains `0.1.0`. Collection ordering/uniqueness and map ordering are
+explicit registry semantics. Old 0.3 bundles must be recaptured, not
+relabelled: changing registry bytes also changes linkage and manifest digests.
+
 ## `reference.otlp.json`
 
 A CTSC trace in OTLP JSON. Each test is one scenario span; each annotated call is

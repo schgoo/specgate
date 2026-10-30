@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using SpecGate.Collections;
 
 namespace SpecGate.Discovery;
 
@@ -106,19 +107,9 @@ internal sealed class SemanticTypes
                 return "Result<" + Render(arguments[0], At(0)) + ", " + Render(arguments[1], At(1)) + ">";
             }
 
-            if (definition == typeof(List<>))
+            if (definition == typeof(ValueTuple<,>))
             {
-                return "List<" + Render(arguments[0], At(0)) + ">";
-            }
-
-            if (definition == typeof(Dictionary<,>) || definition == typeof(SortedDictionary<,>))
-            {
-                return "map<" + Render(arguments[0], At(0)) + ", " + Render(arguments[1], At(1)) + ">";
-            }
-
-            if (definition == typeof(HashSet<>) || definition == typeof(SortedSet<>))
-            {
-                return "set<" + Render(arguments[0], At(0)) + ">";
+                return "Tuple<" + Render(arguments[0], At(0)) + ", " + Render(arguments[1], At(1)) + ">";
             }
         }
 
@@ -126,6 +117,17 @@ internal sealed class SemanticTypes
         {
             Collect(type);
             return NameOf(type);
+        }
+
+        CollectionShape? collection = CollectionShape.Resolve(type);
+        if (collection is not null)
+        {
+            string Construct(string name, string[] arguments) => name + "<" + string.Join(", ", arguments) + ">";
+            string[] arguments = collection.Bind(type,
+                index => Render(type.GetGenericArguments()[index],
+                    info?.GenericTypeArguments is { } generics && index < generics.Length ? generics[index] : null),
+                argument => Render(argument, null), (name, mapped, _) => Construct(name, mapped));
+            return Construct(collection.Constructor, arguments);
         }
 
         return type.Name;

@@ -55,7 +55,7 @@ async C#. MVP+1 is what serves them.
 | C# trace capture | CLI-injected weaving, native sidecars and validated bundles; one selected shared native reference per component and replay checks on Rust; both producers validated strictly | `decisions/csharp-capture-cli.md`, `decisions/csharp-golden-replay-parity.md` |
 | Async capture | A directly-awaited async operation captures: recording begins at first poll (M2 slice 1). A future resumed on another executor thread records under the operation that built it, and two instrumented operations interleaved on one thread both record correctly (M2 slice 2). An async operation dropped before it completes records `conformance.abandoned` (M2 slice 3). Still unsupported: async `#[spec_setup]`, operations first reached on a raw `std::thread::spawn`ed thread, and top-level abandonment - an abandoned async operation with no enclosing and no subsequent annotated operation, which `specgate capture` drops rather than records. Setup-input staging remains thread-affine | `annotations-macros/src/lib.rs` async arm, `PENDING_SETUP_INPUTS` |
 | Observations | Captured but never declared; a component emitting one cannot produce a linkable bundle | migration limitations |
-| Comparison | `compare <reference-trace> <candidate-trace>` exists; fixed `ctsc.strict/0.1.0`; scenarios paired by name | `comparison.rs:185-195` |
+| Comparison | `compare <reference-trace> <candidate-trace>` exists; fixed `ctsc.strict/0.2.0`; scenarios paired by name | `comparison.rs:185-195` |
 | Replay | Rust candidates: public free functions, setup-backed `&self`/`&mut self` methods, directly awaited async calls, explicit generic specializations; primitive, collection, optional, and property-setup inputs | `reference/limitations.md` |
 
 The CLI surface for all five verbs already exists. The gaps are semantic, not
@@ -317,7 +317,7 @@ extension remains unused.
 
 ### V2.2 Comparison policy beyond fixed strict
 
-`ctsc.strict/0.1.0` rejects multiple-run selection, overlapping sequential
+`ctsc.strict/0.2.0` rejects multiple-run selection, overlapping sequential
 children, and duplicate parallel branch identities as unsupported or ambiguous.
 
 Concurrency makes this sharper: once MVP emits genuinely parallel traces, event

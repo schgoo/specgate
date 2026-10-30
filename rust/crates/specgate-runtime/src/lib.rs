@@ -459,14 +459,23 @@ impl<T: ToNativeValue, S: std::hash::BuildHasher> ToNativeValue for HashMap<Stri
 
 impl<T: ToNativeValue + Ord> ToNativeValue for BTreeSet<T> {
     fn to_native_value(&self) -> Value {
-        Value::Set(self.iter().map(ToNativeValue::to_native_value).collect())
+        native_set(self.iter().map(ToNativeValue::to_native_value))
     }
 }
 
 impl<T: ToNativeValue + Eq + std::hash::Hash, S: std::hash::BuildHasher> ToNativeValue for HashSet<T, S> {
     fn to_native_value(&self) -> Value {
-        let mut values = self.iter().map(ToNativeValue::to_native_value).collect::<Vec<_>>();
-        values.sort();
+        native_set(self.iter().map(ToNativeValue::to_native_value))
+    }
+}
+
+fn native_set(values: impl Iterator<Item = Value>) -> Value {
+    let mut values = values.collect::<Vec<_>>();
+    values.sort();
+    if values.windows(2).any(|pair| pair[0] == pair[1]) {
+        // Preserve projection collisions so linked validation rejects them before publication.
+        Value::List(values)
+    } else {
         Value::Set(values.into_iter().collect())
     }
 }

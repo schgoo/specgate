@@ -512,7 +512,7 @@ fn parallel_interval_encloses_every_direct_branch() {
 fn registry_document(registry_id: &str, component_id: &str) -> Value {
     json!({
         "format":"ctsc.registry",
-        "formatVersion":"0.3.0",
+        "formatVersion":"0.4.0",
         "registryId":registry_id,
         "version":"1.0.0",
         "components":[{
@@ -750,7 +750,7 @@ fn registry_validation_rejects_unsorted_component_order() {
     let document = |ids: [&str; 2]| {
         json!({
             "format": "ctsc.registry",
-            "formatVersion": "0.3.0",
+            "formatVersion": "0.4.0",
             "registryId": "urn:ctsc:registry:zeta.app",
             "version": "0.1.0",
             "components": [component(ids[0]), component(ids[1])]
