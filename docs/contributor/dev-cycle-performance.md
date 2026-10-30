@@ -456,7 +456,7 @@ serially (~75 s on Windows), duplicating `ctsc-goldens-harness-tests`, which
 runs them in parallel. `rust-test` skips them; `just test` and `just check` run
 them once.
 
-`just check` is the union of three lane recipes:
+The gate has three lane recipes:
 
 | Lane | Recipes |
 |---|---|
@@ -476,11 +476,53 @@ CI runs five jobs on each OS, each with its own Cargo cache key:
 
 `rust-test replay` passes the libtest filter `replay::tests` and
 `rust-test other` passes `--skip replay::tests` over the same workspace
-selection, so the shards run complementary test sets. Locally, `check-rust`
-runs the default `all` shard in one Cargo invocation, so generated runners share
-one build directory. Only `ctsc-goldens` restores the golden build cache. A new
+selection, so the shards run complementary test sets. `check-rust` runs the
+default `all` shard in one Cargo invocation, so generated runners share one
+build directory. Only `ctsc-goldens` restores the golden build cache. A new
 gate recipe joins a lane, not `check` directly, so local and CI coverage stay
 identical.
+
+### Local lanes
+
+`just check` runs `check-prepare` and then four lanes in parallel:
+
+| Local lane | Runs |
+|---|---|
+| `check-prepare` (first, alone) | `build`, `discovery-tool`, `weaver-tool`, `dotnet-build` |
+| `check-rust-replay` | `rust-test replay` |
+| `check-local-rust-isolated` | `build`, `rust-test isolated`, `test-workspace` |
+| `check-static` | as above |
+| `check-local-fixture` | `check-ctsc-smoke`, `check-ctsc-goldens`, `rust-test shared-fixture`, in sequence |
+
+`check-prepare` runs first because the C# tool builds and `dotnet-build` share
+project `obj` directories. The `isolated` and `shared-fixture` shards split
+`other`. `shared-fixture` runs only tests in a `shared_fixture` module. These
+tests run a SpecGate command on a `test/behavior` fixture package. The CLI
+package lease does not wait: a second command on a leased package fails. The
+smoke, the golden matrix, and these tests lease the same fixture packages, so
+`check-local-fixture` runs them in sequence. In CI, each lane has its own
+runner, so the leases cannot collide.
+
+Locally, `rust-test` uses `-BuildDir persistent`. Each shard owns
+`rust/target/rust-test/<shard>/target` and `.../build`; `isolated` and
+`shared-fixture` share the `other` directories. Cargo puts `[env]` values in
+its fingerprints, so a stable directory per shard keeps warm builds valid. A
+separate target directory per shard also prevents one lane from relinking
+`specgate.exe` while another lane runs it. CI sets
+`SPECGATE_RUST_TEST_BUILD_DIR=scratch`, which keeps the fresh per-run child
+build directory.
+
+Measured on one Windows workstation with warm Cargo and golden caches:
+
+| `just check` | Wall time |
+|---|---:|
+| Lanes in sequence, scratch `rust-test` | 1,731 s |
+| Parallel lanes, persistent `rust-test` | 1,140 s |
+
+In the parallel run, `check-local-fixture` was the critical path: smoke 449 s,
+golden matrix 579 s, and `shared-fixture` 57 s. In sequence, smoke took 113 s
+and the golden matrix 513 s; the parallel lanes compete for CPU. The persistent
+directories used 9.1 GB (`replay`) and 6.4 GB (`other`).
 
 Three-lane runs
 [40951562582](https://github.com/schgoo/specgate/actions/runs/40951562582)
@@ -527,7 +569,8 @@ Persisting the `rust-test` child build directory across CI runs was measured
 and rejected. Locally it cut `rust-test` from 1,137 s cold to 586 s warm, but
 the directory reached 11.2 GB on Windows (debug 1.8 GB plus 19 harness and 22
 runner namespaces). It would exceed GitHub's 10 GB per-repository cache limit
-and evict the other caches.
+and evict the other caches. Local disks do not have this limit, so persistent
+directories are the local default.
 
 ## Reproduction
 
@@ -541,7 +584,8 @@ just --timestamp --verbose check
 CI uses the same logging flags, running each CI lane
 (`just check-rust-replay`, `just check-rust-other`, `just check-static`,
 `just check-ctsc-smoke`, `just check-ctsc-goldens`) as a separate job. No
-recipe is omitted; `just check` runs the three local lanes in sequence.
+recipe is omitted; `just check` runs the [local lanes](#local-lanes) in
+parallel.
 
 To compare the golden harness directly, start a fresh PowerShell process from
 the repository root. Run the following once with `$shared = $false`, then
@@ -605,7 +649,7 @@ experimental directory with concurrent processes.
 | Share final `CARGO_TARGET_DIR` across all generated runners | Not needed: sharing intermediates delivers the measured saving while retaining final-output isolation. |
 | Persist the golden build cache across invocations | Implemented after measuring the follow-up: exclusive cache slots preserve concurrency isolation; only successful completion permits reuse, while interrupted or failed slots stay quarantined. Disk reclamation is explicit. |
 | Reuse C# assemblies or `--artifacts-path` across invocations | Deferred: C# discovery is already batched; preserve real-project/source-generator compilation and isolated outputs. |
-| Parallelize full-gate stages | Implemented in CI as [lanes](#ci-lanes) on separate runners, which avoids CPU and build-lock contention; `just check` runs the lanes sequentially. |
+| Parallelize full-gate stages | Implemented in CI as [lanes](#ci-lanes) on separate runners and locally as [parallel lanes](#local-lanes) with persistent per-shard build directories. |
 | nextest/test partitioning | Not the golden bottleneck: golden capture already executes enumerated ordinary tests through its existing isolation mechanism. Workspace test acceleration is separate work. |
 | `check-fast` or skip replay/validation | Not introduced: the requested improvement is faster regeneration, not less evidence. |
 
