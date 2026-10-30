@@ -17,7 +17,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        lane: [rust, static, ctsc]
+        lane: [rust-replay, rust-other, static, ctsc-smoke, ctsc-goldens]
     env:
       SPECGATE_CTSC_GOLDENS_BUILD_CACHE: artifacts/ctsc-goldens-build-cache/v2
     steps:
@@ -34,7 +34,7 @@ jobs:
             rust
             test
       - name: Cache golden build intermediates
-        if: matrix.lane == 'ctsc'
+        if: matrix.lane == 'ctsc-goldens'
         uses: actions/cache@v4
         with:
           path: ${{ env.SPECGATE_CTSC_GOLDENS_BUILD_CACHE }}
@@ -51,7 +51,7 @@ jobs:
       - name: Run gate lane
         run: just --timestamp --verbose check-${{ matrix.lane }}
       - name: Packaged-context smoke
-        if: matrix.os == 'ubuntu-latest' && matrix.lane == 'ctsc'
+        if: matrix.os == 'ubuntu-latest' && matrix.lane == 'ctsc-smoke'
         run: just package-smoke
 
   docs-impact:

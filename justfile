@@ -34,8 +34,9 @@ rust-test-regressions:
     pwsh -NoLogo -NoProfile -File scripts/rust-test-tests.ps1
     pwsh -NoLogo -NoProfile -File scripts/rust-test-cargo-tests.ps1
 
-rust-test: discovery-tool weaver-tool rust-test-regressions
-    pwsh -NoLogo -NoProfile -File scripts/rust-test.ps1
+# shard: all, or one of the complementary CI shards replay and other.
+rust-test shard="all": discovery-tool weaver-tool rust-test-regressions
+    pwsh -NoLogo -NoProfile -File scripts/rust-test.ps1 -Shard {{shard}}
 
 test: rust-test ctsc-goldens-harness-tests test-workspace
 
@@ -157,11 +158,21 @@ format-cs:
 format-check-cs:
     dotnet format SpecGate.slnx --verify-no-changes
 
-# CI runs these independent lanes as parallel jobs; check is their union.
+# CI runs check-static and the four check-rust-*/check-ctsc-* lanes as parallel
+# jobs; check is their union. Locally check-rust runs both Rust test shards in
+# one Cargo invocation, so generated runners share one build directory.
 check-rust: build rust-test test-workspace
+
+check-rust-replay: (rust-test "replay")
+
+check-rust-other: build (rust-test "other") test-workspace
 
 check-static: clippy format-check deny readme-check docs-check dotnet-build dotnet-test format-check-cs
 
-check-ctsc: ctsc-validate ctsc-smoke ctsc-goldens-check
+check-ctsc: check-ctsc-smoke check-ctsc-goldens
+
+check-ctsc-smoke: ctsc-validate ctsc-smoke
+
+check-ctsc-goldens: ctsc-goldens-check
 
 check: check-rust check-static check-ctsc

@@ -1,3 +1,8 @@
+param(
+    [ValidateSet('all', 'replay', 'other')]
+    [string]$Shard = 'all'
+)
+
 $ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
@@ -9,13 +14,18 @@ try {
     try {
         # Cargo's env table affects children, not its own workspace compilation.
         # Finish each test before another can rebuild its generated executables.
-        # just ctsc-goldens-harness-tests owns the golden harness cases.
+        # just ctsc-goldens-harness-tests owns the golden harness cases. CI shards
+        # split on one libtest name filter, so replay and other are complements.
         $cargoArguments = @(
             'test', '--workspace',
             '--config', "env.CARGO_BUILD_BUILD_DIR.value=$childBuildDir",
             '--config', 'env.CARGO_BUILD_BUILD_DIR.force=true',
             '--', '--test-threads=1', '--skip', 'goldens::tests::cases'
         )
+        switch ($Shard) {
+            'replay' { $cargoArguments += 'replay::tests' }
+            'other' { $cargoArguments += '--skip', 'replay::tests' }
+        }
         & cargo @cargoArguments
         if ($LASTEXITCODE -ne 0) {
             throw 'Rust workspace tests failed.'

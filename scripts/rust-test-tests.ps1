@@ -10,7 +10,7 @@ $previousBuildDir = $env:CARGO_BUILD_BUILD_DIR
 $previousTargetDir = $env:CARGO_TARGET_DIR
 $previousThreads = $env:RUST_TEST_THREADS
 $callerLocation = (Get-Location).Path
-$state = @{ Scratch = $null; Calls = 0; Failure = ''; CallerBuildDir = $null }
+$state = @{ Scratch = $null; Calls = 0; Failure = ''; CallerBuildDir = $null; Shard = 'all' }
 
 function cargo {
     $state.Calls++
@@ -22,6 +22,11 @@ function cargo {
         '--config', 'env.CARGO_BUILD_BUILD_DIR.force=true',
         '--', '--test-threads=1', '--skip', 'goldens::tests::cases'
     )
+    $expected += @{
+        all = @()
+        replay = @('replay::tests')
+        other = @('--skip', 'replay::tests')
+    }[$state.Shard]
     if ($args.Count -ne $expected.Count -or ($args -join "`n") -cne ($expected -join "`n")) {
         throw "Runner changed Cargo workspace, target, doctest, or serial execution selection: $($args -join ' | ')"
     }
@@ -40,15 +45,17 @@ function cargo {
 }
 
 function Assert-Run {
-    param([string]$Failure = '', [string]$ExpectedError = '', $CallerBuildDir = 'caller-build-dir')
+    param([string]$Failure = '', [string]$ExpectedError = '', $CallerBuildDir = 'caller-build-dir', [string]$Shard = '')
 
     $state.Calls = 0
     $state.Failure = $Failure
     $state.CallerBuildDir = $CallerBuildDir
+    $state.Shard = if ($Shard -eq '') { 'all' } else { $Shard }
+    $shardArguments = if ($Shard -eq '') { @{} } else { @{ Shard = $Shard } }
     $env:CARGO_BUILD_BUILD_DIR = $CallerBuildDir
     $caught = $null
     try {
-        & $wrapper
+        & $wrapper @shardArguments
     }
     catch {
         $caught = $_.Exception.Message
@@ -74,6 +81,12 @@ try {
     if ($state.Scratch -ceq $firstScratch) {
         throw 'Separate test invocations reused mutable compilation intermediates.'
     }
+    Assert-Run -Shard all
+    Assert-Run -Shard replay
+    Assert-Run -Shard other
+    $rejected = $false
+    try { & $wrapper -Shard unknown } catch { $rejected = $true }
+    if (-not $rejected) { throw 'Runner accepted an unknown shard.' }
     Assert-Run -CallerBuildDir $null
     Assert-Run -CallerBuildDir ''
     Assert-Run -Failure exit -ExpectedError 'Rust workspace tests failed.'
