@@ -160,6 +160,35 @@ apply. Discovery never infers specializations from test calls. See
 [`../status.md`](../status.md#candidate-replay-and-explicit-generic-operations)
 for unsupported specialization shapes.
 
+### 8. `const fn` operations
+
+`#[spec_operation]` and `#[spec_setup]` reject `const fn`. Capture needs
+runtime state, and const evaluation cannot use it. Keep the `const fn` and
+annotate a non-const wrapper that calls it:
+
+```rust
+pub const fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+
+#[spec_operation("add")]
+pub fn checked_add(a: i32, b: i32) -> i32 {
+    add(a, b)
+}
+
+#[test]
+fn adds_two_numbers() {
+    assert_eq!(checked_add(2, 3), 5);
+}
+```
+
+[doctest] (the `spec_operation` macro doc tests compile the rejection and this
+wrapper)
+
+- Capture records only calls that go through the wrapper. Tests must call
+  `checked_add`, not `add`.
+- Const contexts (`const`, `static`, array lengths) keep calling `add`.
+
 ## Expected output
 
 `cargo test` passes unchanged: annotations record nothing unless `specgate
@@ -181,6 +210,7 @@ None from instrumentation. Capture writes a bundle; see
 | Message fragment | Cause | Fix |
 | --- | --- | --- |
 | `native capture cannot instrument an async setup` | An `async fn` is a `#[spec_setup]`. | Make the setup synchronous; the component is otherwise discovery-only. |
+| `capture needs runtime state that const evaluation` | A `const fn` has `#[spec_operation]` or `#[spec_setup]`. | Annotate a non-const wrapper and call it from tests ([step 8](#8-const-fn-operations)). |
 | `ran twice in one capture with different inputs` | One test built the same setup twice with different inputs before calling the operation. | Construct once per test, or use identical inputs. |
 | `cannot fold its #[spec_setup] declarations` | Several setups claim the same receiver or parameter. | Make each setup fill exactly one receiver or parameter. |
 | `no passing tests captured operations for component` | No passing test called an operation of the component. | Add a test that calls it; check the listed skipped tests. |

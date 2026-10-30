@@ -46,6 +46,22 @@ pub fn __specgate_test_harness(_input: TokenStream) -> TokenStream {
 /// #[specgate::spec_operation("add", spec = "example.math")]
 /// fn add(left: i32, right: i32) -> i32 { left + right }
 /// ```
+///
+/// A `const fn` is rejected because capture needs runtime state:
+///
+/// ```compile_fail
+/// #[specgate::spec_operation("add", spec = "example.math")]
+/// const fn add(left: i32, right: i32) -> i32 { left + right }
+/// ```
+///
+/// Annotate a non-const wrapper instead, and call the wrapper from tests:
+///
+/// ```
+/// const fn add(left: i32, right: i32) -> i32 { left + right }
+///
+/// #[specgate::spec_operation("add", spec = "example.math")]
+/// fn checked_add(left: i32, right: i32) -> i32 { add(left, right) }
+/// ```
 #[proc_macro_attribute]
 pub fn spec_operation(attribute: TokenStream, item: TokenStream) -> TokenStream {
     finish(specgate_annotations_macros_impl::operation::expand_operation(
@@ -57,7 +73,8 @@ pub fn spec_operation(attribute: TokenStream, item: TokenStream) -> TokenStream 
 /// Register a deterministic setup producer without modifying its behavior.
 ///
 /// The operation name is required; `fills = "parameter"` and `spec = "component"`
-/// select the filled input and owner. Unsupported declarations are compile-time errors.
+/// select the filled input and owner. Unsupported declarations, including `const fn`,
+/// are compile-time errors.
 ///
 /// # Examples
 ///
