@@ -109,8 +109,14 @@ docs-check:
     pwsh -NoLogo -NoProfile -File scripts/docs-impact.ps1
     pwsh -NoLogo -NoProfile -File scripts/docs-diagnostics-tests.ps1
     pwsh -NoLogo -NoProfile -File scripts/docs-diagnostics.ps1
+    pwsh -NoLogo -NoProfile -File scripts/agent-plugin-tests.ps1
+    pwsh -NoLogo -NoProfile -File scripts/agent-plugin.ps1 -Check
     cd rust && cargo test -p specgate-cli --bin specgate usage
     cd rust && cargo test -p specgate-discovery --test binding_examples
+
+# Regenerate the agent plugin in plugins/specgate from the user guides.
+agent-plugin:
+    pwsh -NoLogo -NoProfile -File scripts/agent-plugin.ps1
 
 # Check this branch's commits against the docs impact map.
 docs-impact base="origin/main":
