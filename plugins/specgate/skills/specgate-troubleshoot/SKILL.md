@@ -92,6 +92,7 @@ sources, so a search for it finds the code that raises it.
 | `native capture persistence failed in` | A test could not write its recording. | Read the I/O error that follows the path. |
 | `was still open when the capture ended` | An operation never completed, such as a dropped top-level future. | Await it or enclose it in an operation that completes ([`async-capture.md`](${PLUGIN_DIR}/docs/guides/async-capture.md)). |
 | `native capture cannot instrument an async setup` | An `async` `#[spec_setup]`. | Make the setup synchronous. |
+| `capture needs runtime state that const evaluation` | A `const fn` has `#[spec_operation]` or `#[spec_setup]`; the build fails. | Annotate a non-const wrapper and call it from tests ([Rust guide](${PLUGIN_DIR}/docs/guides/instrument-rust-crate.md#8-const-fn-operations)). |
 | `ran twice in one capture with different inputs` | A setup ran twice with different inputs in one test. | Construct the receiver once per test. |
 | `cannot fold its #[spec_setup] declarations` | Overlapping setups for one operation. | Give each receiver or parameter one setup. |
 | `produces duplicate input name` | Two flattened property-setup leaves, producer inputs, or parameters of one operation share a semantic name; nested paths are not prefixed. | Rename one field with `#[spec_event(name = "...")]`. |

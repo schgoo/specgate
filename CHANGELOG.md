@@ -74,6 +74,9 @@ under `docs/decisions/`, or `docs/contributor/roadmap.md`. Generate with `just c
 
 ### Changed
 
+- `#[spec_operation]` and `#[spec_setup]` on a `const fn` now fail with one
+  error on the `const` keyword that says to annotate a non-const wrapper,
+  instead of several unrelated E0015 errors.
 - Rust capture records `&mut` setup-producer parameters as inputs, matching the
   inputs discovery already declared for them (#110).
 - **Breaking:** Rust discovery and replay require `spec_component!("...")` in each participating library, binary, and integration-test crate root, including explicitly qualified operations/setups; generated builds use original sources and preserve configured compiler wrappers (#104).

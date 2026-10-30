@@ -133,6 +133,9 @@ are 0 success, 1 failure or negative verdict, 2 usage error.
   `conformance.abandoned`. Async setups, `async void`, `async` methods returning
   other awaitables, and async iterators are rejected by the weaver
   (`decisions/csharp-async-capture.md`).
+- Rust `#[spec_operation]` and `#[spec_setup]` reject `const fn` at compile
+  time; capture needs runtime state. Annotate a non-const wrapper and call it
+  from tests (`guides/instrument-rust-crate.md`).
 - Environment-driven capture atomically persists the cumulative provisional
   scenario after declared inputs and after every operation close. Outstanding
   operations are projected as target-observed `incomplete_capture` faults from
