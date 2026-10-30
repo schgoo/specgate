@@ -462,13 +462,27 @@ them once.
 |---|---|
 | `check-rust` | `build`, `rust-test`, `test-workspace` |
 | `check-static` | `clippy`, `format-check`, `deny`, `readme-check`, `docs-check`, `dotnet-build`, `dotnet-test`, `format-check-cs` |
-| `check-ctsc` | `ctsc-validate`, `ctsc-smoke`, `ctsc-goldens-check` |
+| `check-ctsc` | `check-ctsc-smoke` (`ctsc-validate`, `ctsc-smoke`), `check-ctsc-goldens` (`ctsc-goldens-check`) |
 
-CI runs each lane as a separate job on each OS with a per-lane Cargo cache key.
-Only the `ctsc` lane restores the golden build cache. A new gate recipe joins a
-lane, not `check` directly, so local and CI coverage stay identical.
+CI runs five jobs on each OS, each with its own Cargo cache key:
 
-Lane runs
+| CI lane | Recipe | Runs |
+|---|---|---|
+| `rust-replay` | `check-rust-replay` | `rust-test replay` |
+| `rust-other` | `check-rust-other` | `build`, `rust-test other`, `test-workspace` |
+| `static` | `check-static` | as above |
+| `ctsc-smoke` | `check-ctsc-smoke` | as above, plus `package-smoke` on Ubuntu |
+| `ctsc-goldens` | `check-ctsc-goldens` | as above |
+
+`rust-test replay` passes the libtest filter `replay::tests` and
+`rust-test other` passes `--skip replay::tests` over the same workspace
+selection, so the shards run complementary test sets. Locally, `check-rust`
+runs the default `all` shard in one Cargo invocation, so generated runners share
+one build directory. Only `ctsc-goldens` restores the golden build cache. A new
+gate recipe joins a lane, not `check` directly, so local and CI coverage stay
+identical.
+
+Three-lane runs
 [40951562582](https://github.com/schgoo/specgate/actions/runs/40951562582)
 (cold per-lane Cargo caches; the new keys had no entries) and
 [40954323714](https://github.com/schgoo/specgate/actions/runs/40954323714)
@@ -481,11 +495,31 @@ Lane runs
 | `ctsc` | 14.5 min | 12.8 min | 6.9 min | 9.4 min |
 | Critical path | 16.3 min | 18.7 min | 8.3 min | 9.4 min |
 
-The critical path is under 19 min on Windows (baseline 33) and under 10 min on
-Ubuntu (baseline 20.5). Hosted runner variance between runs is a few minutes
+With three lanes, the critical path was under 19 min on Windows (baseline 33)
+and under 10 min on Ubuntu (baseline 20.5). Hosted runner variance between runs is a few minutes
 per lane, larger than the cold/warm difference for `rust` and `ctsc`.
 Cold, the Windows `static` lane spent ~9.5 min compiling `cargo-deny` and
 `cargo-doc2readme` before its recipes; the Cargo cache retains them.
+Five-lane runs
+[40985078971](https://github.com/schgoo/specgate/actions/runs/40985078971)
+(cold per-lane Cargo caches) and
+[40986560850](https://github.com/schgoo/specgate/actions/runs/40986560850)
+(warm):
+
+| Lane | Windows cold | Windows warm | Ubuntu cold | Ubuntu warm |
+|---|---:|---:|---:|---:|
+| `rust-replay` | 8.7 min | 12.0 min | 6.4 min | 6.0 min |
+| `rust-other` | 13.0 min | 11.6 min | 5.5 min | 5.1 min |
+| `static` | 14.7 min | 4.7 min | 5.7 min | 2.3 min |
+| `ctsc-smoke` | 4.2 min | 3.8 min | 4.4 min | 4.7 min |
+| `ctsc-goldens` | 8.8 min | 6.8 min | 6.3 min | 5.7 min |
+| Critical path | 14.7 min | 12.0 min | 6.4 min | 6.0 min |
+
+With warm caches, the five-lane critical path is 12.0 min on Windows (three
+lanes 18.7, baseline 33) and 6.0 min on Ubuntu (three lanes 9.4, baseline
+20.5). Each Rust shard compiles the workspace tests, builds the C# tools, and
+builds its own generated runners; Windows `rust-other` also spends ~2 min in
+`build`.
 Lanes use more runner minutes; GitHub does not bill them for public
 repositories.
 
@@ -504,9 +538,10 @@ $env:RUSTUP_TOOLCHAIN = '1.96.0'
 just --timestamp --verbose check
 ```
 
-CI uses the same logging flags, running each lane (`just check-rust`,
-`just check-static`, `just check-ctsc`) as a separate job. No recipe is
-omitted; `just check` runs the lanes in sequence.
+CI uses the same logging flags, running each CI lane
+(`just check-rust-replay`, `just check-rust-other`, `just check-static`,
+`just check-ctsc-smoke`, `just check-ctsc-goldens`) as a separate job. No
+recipe is omitted; `just check` runs the three local lanes in sequence.
 
 To compare the golden harness directly, start a fresh PowerShell process from
 the repository root. Run the following once with `$shared = $false`, then

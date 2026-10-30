@@ -107,11 +107,13 @@ Run from the repository root:
 just check
 ```
 
-`just check` is the union of three independent lanes, which CI runs as parallel
-jobs on each OS: `just check-rust` (build and Rust tests), `just check-static`
-(clippy, formatting, licenses, READMEs, docs, and the C# build/tests/format),
-and `just check-ctsc` (CTSC validation, smoke, and the golden matrix). Add a new
-gate recipe to one lane, not directly to `check`.
+`just check` is the union of three lanes: `just check-rust` (build and Rust
+tests), `just check-static` (clippy, formatting, licenses, READMEs, docs, and
+the C# build/tests/format), and `just check-ctsc` (CTSC validation, smoke, and
+the golden matrix). CI runs five parallel jobs on each OS: `check-static` plus
+the halves of the other two lanes, `check-rust-replay`, `check-rust-other`,
+`check-ctsc-smoke`, and `check-ctsc-goldens`. Add a new gate recipe to one
+lane, not directly to `check`.
 
 Rust tests that drive C# need the prebuilt discovery and weaver tools. `just test`
 builds them and exports `SPECGATE_DISCOVERY_PATH` and `SPECGATE_WEAVER_PATH`; to run
@@ -131,7 +133,10 @@ dependency compilation across isolated candidate targets. The caller's
 environment is unchanged; cleanup restores the working directory and removes
 scratch. There is no persistent test cache or CI cache configuration.
 `just rust-test` skips the golden harness unit tests (`goldens::tests::cases`),
-which `just ctsc-goldens-harness-tests` runs in parallel; `just test` includes
+which `just ctsc-goldens-harness-tests` runs in parallel. `just rust-test
+replay` runs only tests whose names contain `replay::tests`, and
+`just rust-test other` runs the rest; CI uses these complementary shards, while
+the default `all` runs both in one Cargo invocation. `just test` includes
 that recipe and also runs the separate `test` workspace with its original Cargo
 command and parallelism.
 
