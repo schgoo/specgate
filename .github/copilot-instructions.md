@@ -19,6 +19,9 @@ rather than change it, follow `docs/guides/README.md`.
 Useful focused recipes:
 
 ```powershell
+just check-rust
+just check-static
+just check-ctsc
 just build
 just test
 just clippy

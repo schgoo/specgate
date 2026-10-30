@@ -37,7 +37,9 @@ rust-test-regressions:
 rust-test: discovery-tool weaver-tool rust-test-regressions
     pwsh -NoLogo -NoProfile -File scripts/rust-test.ps1
 
-test: rust-test
+test: rust-test ctsc-goldens-harness-tests test-workspace
+
+test-workspace:
     cd test && cargo test --workspace
 
 clippy:
@@ -155,4 +157,11 @@ format-cs:
 format-check-cs:
     dotnet format SpecGate.slnx --verify-no-changes
 
-check: build test clippy format-check deny readme-check docs-check ctsc-validate ctsc-smoke ctsc-goldens-check dotnet-build dotnet-test format-check-cs
+# CI runs these independent lanes as parallel jobs; check is their union.
+check-rust: build rust-test test-workspace
+
+check-static: clippy format-check deny readme-check docs-check dotnet-build dotnet-test format-check-cs
+
+check-ctsc: ctsc-validate ctsc-smoke ctsc-goldens-check
+
+check: check-rust check-static check-ctsc
