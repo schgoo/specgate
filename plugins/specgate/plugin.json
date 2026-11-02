@@ -1,0 +1,24 @@
+{
+  "name": "specgate",
+  "version": "0.6.0",
+  "description": "Use SpecGate to check that two implementations of a component behave the same: install the CLI, annotate Rust or C# APIs, capture reference behavior from existing tests, replay it against a Rust port, and compare the traces.",
+  "author": {
+    "name": "SpecGate",
+    "url": "https://github.com/schgoo/specgate"
+  },
+  "homepage": "https://github.com/schgoo/specgate",
+  "repository": "https://github.com/schgoo/specgate",
+  "license": "MIT OR Apache-2.0",
+  "keywords": [
+    "specgate",
+    "ctsc",
+    "conformance",
+    "behavioral-equivalence",
+    "porting",
+    "rust",
+    "csharp",
+    "capture",
+    "replay"
+  ],
+  "skills": "skills/"
+}

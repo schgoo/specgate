@@ -265,6 +265,30 @@ impl<T: Input> Input for Option<T> {
     }
 }
 
+macro_rules! tuple_input {
+    ($($item:ident),+) => {
+        impl<$($item: Input),+> Input for ($($item,)+) {
+            fn decode(value: Value) -> Result<Self, CaptureError> {
+                let Value::List(values) = value else {
+                    return Err(error("expected a tuple input"));
+                };
+                let mut values = values.into_iter();
+                let tuple = ($(
+                    $item::decode(values.next().ok_or_else(|| error("missing tuple input field"))?)?,
+                )+);
+                if values.next().is_some() {
+                    return Err(error("unexpected tuple input field"));
+                }
+                Ok(tuple)
+            }
+        }
+    };
+}
+
+tuple_input!(A, B);
+tuple_input!(A, B, C);
+tuple_input!(A, B, C, D);
+
 macro_rules! set_input {
     ($set:ident, [$($bounds:tt)+] $(, $hasher:ident)?) => {
         impl<T: Input + $($bounds)+ $(, $hasher: std::hash::BuildHasher + Default)?> Input for std::collections::$set<T $(, $hasher)?> {
@@ -399,6 +423,27 @@ mod tests {
         let invalid = Value::Map(BTreeMap::from([("entry".to_string(), Value::List(vec![Value::Integer(-1)]))]));
         let error = BTreeMap::<String, Vec<u32>>::decode(invalid).unwrap_err().to_string();
         assert!(error.contains("entry") && error.contains("[0]"), "{error}");
+    }
+
+    #[test]
+    fn tuple_inputs_decode_nested_pair_vectors_and_reject_wrong_arity() {
+        let pairs = Value::List(vec![
+            Value::List(vec![Value::Integer(2), Value::String("two".to_string())]),
+            Value::List(vec![Value::Integer(1), Value::String("one".to_string())]),
+        ]);
+        assert_eq!(
+            Vec::<(i32, String)>::decode(pairs).unwrap(),
+            [(2, "two".to_string()), (1, "one".to_string())]
+        );
+        let triple = Value::List(vec![Value::Integer(1), Value::Bool(true), Value::String("item".to_string())]);
+        assert_eq!(<(i32, bool, String)>::decode(triple).unwrap(), (1, true, "item".to_string()));
+        for values in [
+            vec![Value::Integer(1)],
+            vec![Value::Integer(1), Value::Integer(2), Value::Integer(3)],
+        ] {
+            <(i32, i32)>::decode(Value::List(values)).unwrap_err();
+        }
+        <(i32, i32)>::decode(Value::List(vec![Value::Integer(1), Value::Bool(true)])).unwrap_err();
     }
 
     #[test]

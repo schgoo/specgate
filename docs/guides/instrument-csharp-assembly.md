@@ -100,6 +100,10 @@ records its awaited result with the same bag semantics. Collection items still
 need supported types; a model owned by a test project cannot be referenced from
 the product project's generic specialization. See
 [collection mappings](../reference/value-mapping.md#c-collection-contracts).
+`ILookup<K,V>` records a map from keys to bags of values. `IGrouping<K,V>`
+records an inline record with fixed fields `key` and `items`. Optional keys
+retain their type, and projected duplicate lookup keys fail capture. Capture
+uses fresh, non-consuming enumeration; it does not advance caller-held cursors.
 
 ### 4. Declare outcomes
 

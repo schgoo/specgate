@@ -42,6 +42,13 @@ pub fn expand_setup(attribute: TokenStream2, item: TokenStream2) -> syn::Result<
         component: owner,
     } = syn::parse2(attribute)?;
     let mut function: ItemFn = syn::parse2(item)?;
+    if let Some(constness) = &function.sig.constness {
+        return Err(syn::Error::new_spanned(
+            constness,
+            "`#[spec_setup]` does not support `const fn`: capture needs runtime state that const evaluation \
+             cannot use; annotate a non-const wrapper that calls this function",
+        ));
+    }
     let stacked = function.attrs.iter().any(|attribute| attribute.path().is_ident("spec_setup"));
     let params = collect_parameters(&mut function, !stacked);
     let rt = runtime();
@@ -262,4 +269,22 @@ fn owned_output(output: &ReturnType) -> bool {
     let mut owned = Owned(true);
     syn::visit_mut::VisitMut::visit_return_type_mut(&mut owned, &mut output);
     owned.0
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn const_fn_setups_are_rejected() {
+        let error = super::expand_setup(
+            quote::quote!("read"),
+            quote::quote!(
+                pub const fn store(capacity: usize) -> usize {
+                    capacity
+                }
+            ),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("does not support `const fn`"), "{error}");
+        assert!(error.to_string().contains("non-const wrapper"), "{error}");
+    }
 }

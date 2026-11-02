@@ -597,16 +597,36 @@ pub(super) fn render_value(value: &ReplayValue, rust_type: impl AsRef<str>) -> S
         ReplayValue::List(values) => return render_collection(values, rust_type, &qualified),
         ReplayValue::Set(values) => return render_collection(values, rust_type, &qualified),
         ReplayValue::Map(values) => {
-            let (_, arguments) = link::native_arguments(rust_type).expect("validated map input");
+            let arguments = map_arguments(rust_type);
             let elements = values
                 .iter()
                 .map(|(key, value)| format!("(String::from({}), {})", string_literal(key), render_value(value, &arguments[1])))
                 .collect::<Vec<_>>()
                 .join(", ");
-            return format!("[{elements}].into_iter().collect::<{qualified}>()");
+            return render_owned_collection(&elements, &qualified);
+        }
+        ReplayValue::MapEntries(values) => {
+            let arguments = map_arguments(rust_type);
+            let elements = values
+                .iter()
+                .map(|(key, value)| format!("({}, {})", render_value(key, &arguments[0]), render_value(value, &arguments[1])))
+                .collect::<Vec<_>>()
+                .join(", ");
+            return render_owned_collection(&elements, &qualified);
+        }
+        ReplayValue::Tuple(values) => {
+            let parsed = syn::parse_str(rust_type).expect("validated tuple input");
+            let arguments = storage::tuple_arguments(&parsed).expect("validated tuple fields");
+            let fields = values
+                .iter()
+                .zip(arguments)
+                .map(|(value, argument)| render_value(value, argument))
+                .collect::<Vec<_>>()
+                .join(", ");
+            return format!("({fields},)");
         }
         ReplayValue::Optional(value) => {
-            let (_, arguments) = link::native_arguments(rust_type).expect("validated optional input");
+            let (_, arguments) = storage::native_arguments(rust_type).expect("validated optional input");
             return value.as_ref().map_or_else(
                 || format!("<{qualified}>::None"),
                 |value| format!("Some({})", render_value(value, &arguments[0])),
@@ -630,13 +650,29 @@ pub(super) fn render_value(value: &ReplayValue, rust_type: impl AsRef<str>) -> S
 }
 
 fn render_collection<'a>(values: impl IntoIterator<Item = &'a ReplayValue>, rust_type: &str, qualified: &str) -> String {
-    let (_, arguments) = link::native_arguments(rust_type).expect("validated collection input");
+    let (_, arguments) = storage::native_arguments(rust_type).expect("validated collection input");
     let elements = values
         .into_iter()
         .map(|value| render_value(value, &arguments[0]))
         .collect::<Vec<_>>()
         .join(", ");
-    format!("[{elements}].into_iter().collect::<{qualified}>()")
+    render_owned_collection(&elements, qualified)
+}
+
+fn map_arguments(rust_type: &str) -> Vec<String> {
+    let (constructor, arguments) = storage::native_arguments(rust_type).expect("validated map input");
+    if constructor == "Vec" {
+        let pair = syn::parse_str(&arguments[0]).expect("validated map pair");
+        storage::tuple_arguments(&pair).expect("validated map pair fields")
+    } else {
+        arguments
+    }
+}
+
+fn render_owned_collection(elements: &str, qualified: &str) -> String {
+    format!(
+        "{{ let values = [{elements}]; let count = values.len(); let value: {qualified} = values.into_iter().collect(); if value.len() != count {{ return Err(\"native collection construction lost distinct CTSC inputs\".to_string()); }} value }}"
+    )
 }
 
 pub(super) fn string_literal(value: impl AsRef<str>) -> String {

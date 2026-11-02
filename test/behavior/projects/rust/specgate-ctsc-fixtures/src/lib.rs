@@ -11,6 +11,9 @@ pub mod unsigned;
 #[path = "../../../../cases/fixture.rich/rust/rich.rs"]
 pub mod rich;
 
+#[path = "../../../../cases/fixture.collection_shapes/rust/collection_shapes.rs"]
+pub mod collection_shapes;
+
 #[path = "../../../../cases/fixture.setup/rust/setup.rs"]
 pub mod setup;
 

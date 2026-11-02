@@ -80,6 +80,8 @@ pub(crate) enum RustType {
     Ref(Box<RustType>),
     /// A dynamically sized slice type.
     Slice(Box<RustType>),
+    /// Positional tuple fields.
+    Tuple(Vec<RustType>),
 }
 
 /// Map a stringified Rust type to its semantic type reference.
@@ -107,6 +109,14 @@ fn map_rust(t: &RustType, type_names: &[&str]) -> SpecType {
     match t {
         RustType::Ref(inner) => map_rust(inner, type_names),
         RustType::Slice(inner) => SpecType::scalar(format!("List<{}>", map_rust(inner, type_names).ref_string())),
+        RustType::Tuple(items) => SpecType::scalar(format!(
+            "Tuple<{}>",
+            items
+                .iter()
+                .map(|item| map_rust(item, type_names).ref_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
         RustType::Named { name, args } => map_named(name, args, type_names),
     }
 }
@@ -242,6 +252,11 @@ pub(crate) fn collect_into(ty: impl AsRef<str>, references: &mut Vec<String>) {
 fn append_refs(t: &RustType, out: &mut Vec<String>) {
     match t {
         RustType::Ref(inner) | RustType::Slice(inner) => append_refs(inner, out),
+        RustType::Tuple(items) => {
+            for item in items {
+                append_refs(item, out);
+            }
+        }
         RustType::Named { name, args } => {
             if !builtin(name) {
                 out.push(name.clone());
@@ -314,15 +329,36 @@ fn parse_tokens(tokens: &[String], pos: &mut usize) -> Option<RustType> {
             Some(RustType::Slice(Box::new(inner)))
         }
         "(" => {
-            if tokens.get(*pos + 1).map(String::as_str) != Some(")") {
+            *pos += 1;
+            if tokens.get(*pos).map(String::as_str) == Some(")") {
+                *pos += 1;
+                return Some(RustType::Named {
+                    name: "()".to_string(),
+                    args: Vec::new(),
+                });
+            }
+            let first = parse_tokens(tokens, pos)?;
+            if tokens.get(*pos).map(String::as_str) == Some(")") {
+                *pos += 1;
+                return Some(first);
+            }
+            if tokens.get(*pos).map(String::as_str) != Some(",") {
                 return None;
             }
-            *pos += 2;
-            Some(RustType::Named {
-                name: "()".to_string(),
-                args: Vec::new(),
-            })
+            *pos += 1;
+            let mut items = vec![first];
+            while tokens.get(*pos).map(String::as_str) != Some(")") {
+                items.push(parse_tokens(tokens, pos)?);
+                match tokens.get(*pos).map(String::as_str) {
+                    Some(",") => *pos += 1,
+                    Some(")") => break,
+                    _ => return None,
+                }
+            }
+            *pos += 1;
+            Some(RustType::Tuple(items))
         }
+        ")" | ">" | "," | "]" => None,
         _ => {
             // Skip a leading path separator (`::Foo` / `::specgate_runtime::value::Value`).
             if tok == "::" {
@@ -432,5 +468,18 @@ mod tests {
             map("HashSet<Result<Order, Error>>", ["Order", "Error"]).unwrap().ref_string(),
             "set<Result<Order, Error>>"
         );
+    }
+
+    #[test]
+    fn tuples_recurse_through_collections_and_named_references() {
+        assert_eq!(
+            map("Vec<(String, Option<Order>)>", ["Order"]).unwrap().ref_string(),
+            "List<Tuple<string, Option<Order>>>"
+        );
+        assert_eq!(collect_refs("(Order, Vec<Child>,)"), ["Order", "Child"]);
+        assert_eq!(map("(i32)", []).unwrap().ref_string(), "i32");
+        for malformed in ["(i32,,)", "(i32", "(,i32)", "(i32 i64)"] {
+            assert!(parse(malformed).is_none(), "{malformed}");
+        }
     }
 }

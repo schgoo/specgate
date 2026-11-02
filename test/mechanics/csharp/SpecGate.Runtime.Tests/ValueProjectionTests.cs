@@ -399,6 +399,159 @@ public sealed class ValueProjectionTests
             Reject(nameof(Declarations.BagKeys), [keys]).Rejection);
     }
 
+    [Fact]
+    public void LookupsPreserveKeysAndMultiplicityIncludingEmptyGroups()
+    {
+        ILookup<string, int> lookup = new[] { ("b", 2), ("a", 1), ("b", 2) }
+            .ToLookup(item => item.Item1, item => item.Item2);
+        Assert.Equal(Map(
+            ("a", Value.List([Value.Integer(1)])),
+            ("b", Value.List([Value.Integer(2), Value.Integer(2)]))),
+            Single(nameof(Declarations.Lookup), [lookup]));
+        Assert.Equal(Value.Map([]),
+            Single(nameof(Declarations.Lookup), [Array.Empty<int>().ToLookup(_ => "empty")]));
+        ExplicitGrouping<int, int> group = new(7, []);
+        ExplicitLookup<int, int> custom = new(group);
+        Assert.Equal(Value.List([Map(("key", Value.Integer(7)), ("value", Value.List([])))]),
+            Single(nameof(Declarations.NumberLookup), [custom]));
+        Assert.Equal(1, group.KeyReads);
+        Assert.Equal(1, group.Enumerations);
+        Assert.Equal(1, custom.Enumerations);
+    }
+
+    [Fact]
+    public void KeyedResultsUseTheSameProjectionAsInputs()
+    {
+        ILookup<string, int> lookup = new[] { ("b", 2), ("a", 1), ("b", 2) }
+            .ToLookup(item => item.Item1, item => item.Item2);
+        Assert.Equal(Single(nameof(Declarations.Lookup), [lookup]),
+            Capture(nameof(Declarations.LookupResult), [], lookup).Result());
+        Assert.Equal(Single(nameof(Declarations.Lookup), [lookup]),
+            Capture(nameof(Declarations.ConcreteLookupResult), [], lookup).Result());
+        InheritedGrouping<string, int> group = new("key", [2, 1, 2]);
+        Assert.Equal(Single(nameof(Declarations.Grouping), [group]),
+            Capture(nameof(Declarations.GroupingResult), [], group).Result());
+    }
+
+    [Fact]
+    public void GroupingIsARecordAndUsesAFreshGenericEnumeratorOnce()
+    {
+        InheritedGrouping<string, int> group = new("b", [2, 1, 2]);
+        using IEnumerator<int> caller = ((IEnumerable<int>)group).GetEnumerator();
+        Assert.True(caller.MoveNext());
+        Value expected = Map(("key", Value.String("b")),
+            ("items", Value.List([Value.Integer(2), Value.Integer(1), Value.Integer(2)])));
+        Assert.Equal(expected, Single(nameof(Declarations.InheritedGrouping), [group]));
+        Assert.Equal(1, group.KeyReads);
+        Assert.Equal(2, group.Enumerations);
+        Assert.True(caller.MoveNext());
+        Assert.Equal(1, caller.Current);
+        Assert.Equal(expected, Single(nameof(Declarations.Grouping), [group]));
+        Assert.Equal(2, group.KeyReads);
+        Assert.Equal(3, group.Enumerations);
+    }
+
+    [Fact]
+    public void KeyedContractsPreserveOptionalKeysAndValuesWithoutInference()
+    {
+        ExplicitGrouping<string?, string?> absent = new(null, [null, "one", null]);
+        ExplicitGrouping<string?, string?> present = new("a", []);
+        ExplicitLookup<string?, string?> lookup = new(absent, present);
+        Value none = Value.Tagged("None", Value.Unit);
+        Value items = Value.List([none, Value.Tagged("Some", Value.String("one")), none]);
+        Assert.Equal(Value.List([
+            Map(("key", none), ("value", items)),
+            Map(("key", Value.Tagged("Some", Value.String("a"))), ("value", Value.List([]))),
+        ]), Single(nameof(Declarations.OptionalLookup), [lookup]));
+        Assert.Equal(Map(("key", none), ("items", items)),
+            Single(nameof(Declarations.OptionalGrouping), [absent]));
+        Assert.Equal(Value.List([
+            Map(("key", none), ("value", items)),
+            Map(("key", Value.Tagged("Some", Value.String("a"))), ("value", Value.List([]))),
+        ]), Single(nameof(Declarations.ExplicitOptionalLookup), [lookup]));
+        Assert.Equal(Value.List([Map(("key", none), ("items", Value.List([Value.Integer(3)])))]),
+            Single(nameof(Declarations.NestedGrouping),
+                [new NestedGrouping<string?> { new ExplicitGrouping<int, string?>(null, [3]) }]));
+        Assert.Equal(Value.List([Map(("key", none), ("value", Value.List([Value.Integer(3)])))]),
+            Single(nameof(Declarations.NullableNumberLookup),
+                [new ExplicitLookup<int, int?>(new ExplicitGrouping<int, int?>(null, [3]))]));
+    }
+
+    [Fact]
+    public void LookupCollisionsUseRecursiveCtscEqualityAndNeverMerge()
+    {
+        IEnumerable<int> first = [1, 2];
+        IEnumerable<int> second = [2, 1];
+        ExplicitLookup<int, IEnumerable<int>> lookup = new(
+            new ExplicitGrouping<int, IEnumerable<int>>(first, [3]),
+            new ExplicitGrouping<int, IEnumerable<int>>(second, [4]));
+        Assert.Equal(CaptureRejection.UnrepresentableValue,
+            Reject(nameof(Declarations.BagLookup), [lookup]).Rejection);
+
+        IGrouping<string, int> firstGroup = new ExplicitGrouping<int, string>("k", [1, 2]);
+        IGrouping<string, int> secondGroup = new ExplicitGrouping<int, string>("k", [2, 1]);
+        Assert.Equal(CaptureRejection.UnrepresentableValue,
+            Reject(nameof(Declarations.GroupingKeys), [new Dictionary<IGrouping<string, int>, int>
+            {
+                [firstGroup] = 3,
+                [secondGroup] = 4,
+            }]).Rejection);
+    }
+
+    [Theory]
+    [InlineData(typeof(IConflictingGrouping))]
+    [InlineData(typeof(IConflictingLookup))]
+    public void RuntimeRejectsConflictingKeyedContracts(Type type)
+    {
+        SpecGateCaptureException error = Assert.Throws<SpecGateCaptureException>(
+            () => SemanticType.Map(type, NullableFlagReader.Oblivious));
+        Assert.Equal(CaptureRejection.AmbiguousDeclaration, error.Rejection);
+    }
+
+    private interface IConflictingGrouping : IGrouping<int, int>, IGrouping<string, int>;
+    private interface IConflictingLookup : ILookup<int, int>, ILookup<string, int>;
+
+    private class ExplicitGrouping<TItem, TKey>(TKey key, TItem[] items) : IGrouping<TKey, TItem>
+    {
+        public int KeyReads { get; private set; }
+        public int Enumerations { get; private set; }
+        TKey IGrouping<TKey, TItem>.Key
+        {
+            get
+            {
+                KeyReads++;
+                return key;
+            }
+        }
+        IEnumerator<TItem> IEnumerable<TItem>.GetEnumerator()
+        {
+            Enumerations++;
+            return ((IEnumerable<TItem>)items).GetEnumerator();
+        }
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() =>
+            throw new InvalidOperationException("Use the generic grouping contract.");
+    }
+
+    private sealed class InheritedGrouping<TKey, TItem>(TKey key, TItem[] items)
+        : ExplicitGrouping<TItem, TKey>(key, items);
+
+    private sealed class NestedGrouping<T> : List<IGrouping<T, int>>;
+
+    private sealed class ExplicitLookup<TItem, TKey>(params IGrouping<TKey, TItem>[] groups) : ILookup<TKey, TItem>
+    {
+        public int Enumerations { get; private set; }
+        public int Count => throw new InvalidOperationException("Do not inspect Count.");
+        public IEnumerable<TItem> this[TKey key] => throw new InvalidOperationException("Do not index groups.");
+        public bool Contains(TKey key) => throw new InvalidOperationException("Do not probe keys.");
+        IEnumerator<IGrouping<TKey, TItem>> IEnumerable<IGrouping<TKey, TItem>>.GetEnumerator()
+        {
+            Enumerations++;
+            return ((IEnumerable<IGrouping<TKey, TItem>>)groups).GetEnumerator();
+        }
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() =>
+            throw new InvalidOperationException("Use the generic lookup contract.");
+    }
+
     private sealed class Numbers : IEnumerable<int>
     {
         IEnumerator<int> IEnumerable<int>.GetEnumerator()
@@ -783,6 +936,20 @@ public sealed class ValueProjectionTests
         internal static void DerivedPriority(DerivedPriority<string> values) => _ = values;
         internal static void UniqueBags(HashSet<IEnumerable<int>> values) => _ = values;
         internal static void BagKeys(Dictionary<IEnumerable<int>, string> values) => _ = values;
+        internal static void Lookup(ILookup<string, int> values) => _ = values;
+        internal static ILookup<string, int> LookupResult() => throw new NotSupportedException();
+        internal static Lookup<string, int> ConcreteLookupResult() => throw new NotSupportedException();
+        internal static IGrouping<string, int> GroupingResult() => throw new NotSupportedException();
+        internal static void NumberLookup(ILookup<int, int> values) => _ = values;
+        internal static void Grouping(IGrouping<string, int> values) => _ = values;
+        internal static void InheritedGrouping(InheritedGrouping<string, int> values) => _ = values;
+        internal static void OptionalLookup(ILookup<string?, string?> values) => _ = values;
+        internal static void OptionalGrouping(IGrouping<string?, string?> values) => _ = values;
+        internal static void ExplicitOptionalLookup(ExplicitLookup<string?, string?> values) => _ = values;
+        internal static void NestedGrouping(NestedGrouping<string?> values) => _ = values;
+        internal static void NullableNumberLookup(ILookup<int?, int> values) => _ = values;
+        internal static void BagLookup(ILookup<IEnumerable<int>, int> values) => _ = values;
+        internal static void GroupingKeys(Dictionary<IGrouping<string, int>, int> values) => _ = values;
 
         internal static void EmptyNames([SpecInput("")] int count) => _ = count;
 

@@ -107,6 +107,14 @@ Run from the repository root:
 just check
 ```
 
+`just check` is the union of three lanes: `just check-rust` (build and Rust
+tests), `just check-static` (clippy, formatting, licenses, READMEs, docs, and
+the C# build/tests/format), and `just check-ctsc` (CTSC validation, smoke, and
+the golden matrix). CI runs five parallel jobs on each OS: `check-static` plus
+the halves of the other two lanes, `check-rust-replay`, `check-rust-other`,
+`check-ctsc-smoke`, and `check-ctsc-goldens`. Add a new gate recipe to one
+lane, not directly to `check`.
+
 Rust tests that drive C# need the prebuilt discovery and weaver tools. `just test`
 builds them and exports `SPECGATE_DISCOVERY_PATH` and `SPECGATE_WEAVER_PATH`; to run
 `cargo test` directly, run `just discovery-tool weaver-tool` first and export the
@@ -123,9 +131,14 @@ threads explicitly created inside tests are unaffected. Wrapper regressions run
 first, including a real Cargo fixture proving warm executable reuse and shared
 dependency compilation across isolated candidate targets. The caller's
 environment is unchanged; cleanup restores the working directory and removes
-scratch. There is no persistent test cache or CI cache configuration. `just test`
-also runs the separate `test` workspace with its original Cargo command
-and parallelism.
+scratch. There is no persistent test cache or CI cache configuration.
+`just rust-test` skips the golden harness unit tests (`goldens::tests::cases`),
+which `just ctsc-goldens-harness-tests` runs in parallel. `just rust-test
+replay` runs only tests whose names contain `replay::tests`, and
+`just rust-test other` runs the rest; CI uses these complementary shards, while
+the default `all` runs both in one Cargo invocation. `just test` includes
+that recipe and also runs the separate `test` workspace with its original Cargo
+command and parallelism.
 
 The runner owns the `value` and `force` entries of Cargo's
 `env.CARGO_BUILD_BUILD_DIR` table for its child processes. If custom Cargo
@@ -204,6 +217,26 @@ Docs-Impact: none <reason>
 The map only proves that a page was touched, not that its prose is true. When
 behavior changes, also search the docs for the old rule's wording; limits are
 often restated outside the mapped pages.
+
+## Agent plugin
+
+`plugins/specgate/` is an agent plugin (Claude Code and Copilot CLI) that
+teaches an agent to install and use SpecGate in its own project, without the
+contributor rules in this repository. It is generated; do not edit it by hand.
+
+[`docs/contributor/agent-plugin.json`](docs/contributor/agent-plugin.json)
+lists the bundled guide and reference pages and maps each skill to the guides
+it contains. [`scripts/agent-plugin.ps1`](scripts/agent-plugin.ps1) copies the
+bundle under `plugins/specgate/docs/`, builds one `SKILL.md` per skill, and
+reads the plugin version from `rust/Cargo.toml`. It strips check tags and
+`Source of truth` sections and rewrites links to files outside the bundle to
+GitHub URLs pinned to `v<version>`, so those links resolve once that release
+is tagged.
+
+Run `just agent-plugin` after changing a bundled page, the manifest, or the
+workspace version. `just docs-check` fails when the committed plugin differs
+from a fresh build, when a link or anchor in it does not resolve, or when a
+`SKILL.md` reaches 500 lines.
 
 ## Changelog
 

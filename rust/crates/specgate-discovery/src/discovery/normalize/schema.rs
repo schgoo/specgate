@@ -347,5 +347,6 @@ fn render(ty: &RustType) -> String {
         RustType::Named { name, args } => format!("{name}<{}>", args.iter().map(render).collect::<Vec<_>>().join(", ")),
         RustType::Ref(inner) => format!("&{}", render(inner)),
         RustType::Slice(inner) => format!("[{}]", render(inner)),
+        RustType::Tuple(items) => format!("({},)", items.iter().map(render).collect::<Vec<_>>().join(", ")),
     }
 }

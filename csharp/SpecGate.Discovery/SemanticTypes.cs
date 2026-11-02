@@ -119,15 +119,21 @@ internal sealed class SemanticTypes
             return NameOf(type);
         }
 
-        CollectionShape? collection = CollectionShape.Resolve(type);
+        CollectionShape? collection = CollectionContractResolver.Resolve(type);
         if (collection is not null)
         {
-            string Construct(string name, string[] arguments) => name + "<" + string.Join(", ", arguments) + ">";
-            string[] arguments = collection.Bind(type,
+            string Construct(ShapeConstructor constructor, string[] arguments, Type? _) => constructor switch
+            {
+                ShapeConstructor.Record => "{ key: " + arguments[0] + ", items: " + arguments[1] + " }",
+                ShapeConstructor.Map => "map<" + string.Join(", ", arguments) + ">",
+                ShapeConstructor.Set => "set<" + string.Join(", ", arguments) + ">",
+                _ => constructor + "<" + string.Join(", ", arguments) + ">",
+            };
+            string[] arguments = GenericTypeBinding.Bind(collection, type,
                 index => Render(type.GetGenericArguments()[index],
                     info?.GenericTypeArguments is { } generics && index < generics.Length ? generics[index] : null),
-                argument => Render(argument, null), (name, mapped, _) => Construct(name, mapped));
-            return Construct(collection.Constructor, arguments);
+                argument => Render(argument, null), Construct);
+            return collection.Describe(arguments, type, Construct);
         }
 
         return type.Name;

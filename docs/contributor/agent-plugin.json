@@ -1,0 +1,85 @@
+{
+  "$comment": "Builds plugins/specgate from the user guides. See CONTRIBUTING.md#agent-plugin.",
+  "name": "specgate",
+  "description": "Use SpecGate to check that two implementations of a component behave the same: install the CLI, annotate Rust or C# APIs, capture reference behavior from existing tests, replay it against a Rust port, and compare the traces.",
+  "keywords": [
+    "specgate",
+    "ctsc",
+    "conformance",
+    "behavioral-equivalence",
+    "porting",
+    "rust",
+    "csharp",
+    "capture",
+    "replay"
+  ],
+  "bundle": [
+    "docs/guides/README.md",
+    "docs/guides/async-capture.md",
+    "docs/guides/capture-a-reference.md",
+    "docs/guides/install.md",
+    "docs/guides/instrument-csharp-assembly.md",
+    "docs/guides/instrument-rust-crate.md",
+    "docs/guides/port-a-component.md",
+    "docs/guides/replay-a-candidate.md",
+    "docs/guides/troubleshoot-capture.md",
+    "docs/guides/validate-and-compare.md",
+    "docs/guides/write-a-binding.md",
+    "docs/reference/binding.md",
+    "docs/reference/bundle.md",
+    "docs/reference/cli.md",
+    "docs/reference/limitations.md",
+    "docs/reference/value-mapping.md",
+    "binding-schema.json"
+  ],
+  "skills": [
+    {
+      "name": "specgate",
+      "title": "SpecGate quick path",
+      "description": "Plans and runs a SpecGate conformance check on the user's codebase: choose the API boundary, reuse existing tests, then discover, capture, validate, replay, and compare. Use when the user asks to add SpecGate, check that a Rust port matches a C# or Rust original, prove two implementations are equivalent, or asks which SpecGate step comes next.",
+      "guides": ["docs/guides/README.md"]
+    },
+    {
+      "name": "specgate-install",
+      "title": "Install SpecGate",
+      "description": "Installs the specgate CLI, the C# discovery and weaver tools, the Rust specgate crate, and the SpecGate.Annotations NuGet package. Use when specgate is not on PATH, when cargo install specgate-cli or dotnet add package SpecGate.Annotations is needed, or when SPECGATE_DISCOVERY_PATH or SPECGATE_WEAVER_PATH errors appear.",
+      "guides": ["docs/guides/install.md"]
+    },
+    {
+      "name": "specgate-instrument-rust",
+      "title": "Instrument Rust with SpecGate",
+      "description": "Annotates an existing Rust crate for SpecGate capture with spec_component!, #[spec_operation], #[spec_setup], and #[derive(SpecEvent)], including async fn operations. Use when adding SpecGate annotations to Rust code, writing a Rust port that must match a reference, or fixing Rust annotation compile errors.",
+      "guides": ["docs/guides/instrument-rust-crate.md", "docs/guides/async-capture.md"]
+    },
+    {
+      "name": "specgate-instrument-csharp",
+      "title": "Instrument C# with SpecGate",
+      "description": "Annotates an existing C# assembly for SpecGate capture with [SpecOperation], [SpecSetup], [SpecInput], [SpecEvent], and [SpecException], including Task and ValueTask operations. Use when adding SpecGate attributes to C# code, choosing which C# tests become scenarios, or fixing C# discovery or weave errors.",
+      "guides": ["docs/guides/instrument-csharp-assembly.md", "docs/guides/async-capture.md"]
+    },
+    {
+      "name": "specgate-capture",
+      "title": "Bind and capture with SpecGate",
+      "description": "Writes a specgate.yaml binding and runs specgate discover and specgate capture to record reference behavior from the user's existing Rust or C# tests into a CTSC bundle. Use when declaring components in specgate.yaml, recording a reference, or reading capture output.",
+      "guides": ["docs/guides/write-a-binding.md", "docs/guides/capture-a-reference.md"]
+    },
+    {
+      "name": "specgate-replay",
+      "title": "Replay and port with SpecGate",
+      "description": "Replays a captured SpecGate bundle against a Rust candidate implementation and walks through porting a component from C# or Rust to Rust. Use when running specgate replay, checking that a Rust port matches the original, or when replay reports an unsupported operation or input.",
+      "guides": ["docs/guides/replay-a-candidate.md", "docs/guides/port-a-component.md"]
+    },
+    {
+      "name": "specgate-validate-compare",
+      "title": "Validate and compare SpecGate traces",
+      "description": "Validates SpecGate registries, traces, and bundles, and compares a candidate trace with the reference trace under ctsc.strict. Use when running specgate validate or specgate compare, or when explaining why compare reports equivalent: false.",
+      "guides": ["docs/guides/validate-and-compare.md"]
+    },
+    {
+      "name": "specgate-troubleshoot",
+      "title": "Troubleshoot SpecGate",
+      "description": "Diagnoses failing specgate discover, capture, replay, validate, and compare commands from their error messages and exit codes. Use when a specgate command exits non-zero, reports a capture diagnostic or fault, or a C# weave or build step fails.",
+      "guides": ["docs/guides/troubleshoot-capture.md"]
+    }
+  ]
+}

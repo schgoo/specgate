@@ -625,6 +625,10 @@ pub enum Value {
     Set(BTreeSet<Value>),
     /// String-keyed recursively decoded inputs.
     Map(std::collections::BTreeMap<String, Value>),
+    /// Ordered entries, or canonically sorted entries for an unordered map.
+    MapEntries(Vec<(Value, Value)>),
+    /// Positional tuple fields.
+    Tuple(Vec<Value>),
     /// Explicit CTSC Some/None value.
     Optional(Option<Box<Value>>),
 }

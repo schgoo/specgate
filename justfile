@@ -34,10 +34,13 @@ rust-test-regressions:
     pwsh -NoLogo -NoProfile -File scripts/rust-test-tests.ps1
     pwsh -NoLogo -NoProfile -File scripts/rust-test-cargo-tests.ps1
 
-rust-test: discovery-tool weaver-tool rust-test-regressions
-    pwsh -NoLogo -NoProfile -File scripts/rust-test.ps1
+# shard: all, or one of the complementary CI shards replay and other.
+rust-test shard="all": discovery-tool weaver-tool rust-test-regressions
+    pwsh -NoLogo -NoProfile -File scripts/rust-test.ps1 -Shard {{shard}}
 
-test: rust-test
+test: rust-test ctsc-goldens-harness-tests test-workspace
+
+test-workspace:
     cd test && cargo test --workspace
 
 clippy:
@@ -109,8 +112,14 @@ docs-check:
     pwsh -NoLogo -NoProfile -File scripts/docs-impact.ps1
     pwsh -NoLogo -NoProfile -File scripts/docs-diagnostics-tests.ps1
     pwsh -NoLogo -NoProfile -File scripts/docs-diagnostics.ps1
+    pwsh -NoLogo -NoProfile -File scripts/agent-plugin-tests.ps1
+    pwsh -NoLogo -NoProfile -File scripts/agent-plugin.ps1 -Check
     cd rust && cargo test -p specgate-cli --bin specgate usage
     cd rust && cargo test -p specgate-discovery --test binding_examples
+
+# Regenerate the agent plugin in plugins/specgate from the user guides.
+agent-plugin:
+    pwsh -NoLogo -NoProfile -File scripts/agent-plugin.ps1
 
 # Check this branch's commits against the docs impact map.
 docs-impact base="origin/main":
@@ -149,4 +158,21 @@ format-cs:
 format-check-cs:
     dotnet format SpecGate.slnx --verify-no-changes
 
-check: build test clippy format-check deny readme-check docs-check ctsc-validate ctsc-smoke ctsc-goldens-check dotnet-build dotnet-test format-check-cs
+# CI runs check-static and the four check-rust-*/check-ctsc-* lanes as parallel
+# jobs; check is their union. Locally check-rust runs both Rust test shards in
+# one Cargo invocation, so generated runners share one build directory.
+check-rust: build rust-test test-workspace
+
+check-rust-replay: (rust-test "replay")
+
+check-rust-other: build (rust-test "other") test-workspace
+
+check-static: clippy format-check deny readme-check docs-check dotnet-build dotnet-test format-check-cs
+
+check-ctsc: check-ctsc-smoke check-ctsc-goldens
+
+check-ctsc-smoke: ctsc-validate ctsc-smoke
+
+check-ctsc-goldens: ctsc-goldens-check
+
+check: check-rust check-static check-ctsc

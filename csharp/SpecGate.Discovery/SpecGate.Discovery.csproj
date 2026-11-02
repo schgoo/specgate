@@ -10,7 +10,7 @@
     <Version>0.6.0</Version>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="..\Shared\CollectionShape.cs" Link="CollectionShape.cs" />
+    <Compile Include="..\Shared\*.cs" Link="Shared\%(Filename)%(Extension)" />
     <InternalsVisibleTo Include="SpecGate.Discovery.Tests" />
   </ItemGroup>
 </Project>

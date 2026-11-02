@@ -55,8 +55,10 @@ divided into reviewable vertical slices.
 - Only the fixed `ctsc.strict/0.2.0` comparison policy is implemented.
 - CTSC `0.4.0` separates collection shape from ordering and uniqueness. C#
   generic enumerable results, including custom implementations, are bags;
-  lists remain ordered. Old bundles require recapture, and bags are not
-  automatically compatible with Rust `Vec` lists.
+  lists remain ordered. Old bundles require recapture. Replay can use Rust
+  vectors for bags and unique collections, and pair vectors for ordered or
+  non-string maps, without changing independent discovery. Lookups/groupings
+  retain their keys. Bag input sorting and outcome channels do not change.
 
 ## Risks and ownership
 

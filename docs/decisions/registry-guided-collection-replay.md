@@ -1,8 +1,14 @@
 # Collection storage bindings in registry-driven replay
 
-> **Status:** proposed; not implemented
-> **Owner:** pending human approval
-> **Date:** 2026-10-30
+> **Status:** storage and grouping accepted; input-order proposal not approved
+> **Owner:** @schgoo (user-ratified)
+> **Date:** 2026-11-02
+
+| Decision | Approval |
+|---|---|
+| Checked Rust storage bindings, tuple/map inputs, recursive outcome conversion | Approved 2026-11-02 |
+| Key-preserving C# lookup/grouping projection and bounded inline-record matching | Approved 2026-11-02 |
+| Preserve recorded bag input order instead of current sorting | Not approved; keep current sorting |
 
 ## Context
 
@@ -11,22 +17,21 @@ candidate operations, and emits a candidate trace against the reference
 registry. This design extends that path. It does not introduce another
 registry, a second replay engine, or a new public mapping configuration.
 
-The current linker requires exact normalized semantic type matches. Rust
-`Vec<T>` declares a list, so it cannot currently satisfy a reference bag,
-although it can store every bag item. Tuple inputs, ordered-map inputs, and
-non-string map inputs also lack replay support. Inline tuple and record
-outcomes cannot currently link to candidate declarations.
+Before this change, the linker required exact normalized semantic type matches.
+Rust `Vec<T>` declared a list and could not satisfy a reference bag, although it
+could store every bag item. Tuple inputs, ordered-map inputs, non-string map
+inputs, and inline tuple/record outcome matching also lacked replay support.
 
-C# has two further projection gaps. `ILookup<K,V>` and `IGrouping<K,V>` expose
-keys that the ordinary enumerable fallback does not preserve.
+C# also had two projection gaps. `ILookup<K,V>` and `IGrouping<K,V>` expose
+keys that the ordinary enumerable fallback did not preserve.
 
 The existing CTSC 0.4.0 types are sufficient. This proposal changes producer
 mappings and replay compatibility, not the wire format or Strict comparison.
 The [collection-dimensions decision](collection-dimensions.md) remains the
-accepted baseline. Its current replay boundaries remain in force until the
-relevant changes below are approved and implemented.
+accepted baseline. This decision extends its replay boundaries only as stated
+below.
 
-## Proposed design
+## Accepted design
 
 ### Extend the existing linker
 
@@ -34,7 +39,7 @@ Keep the reference registry as the required semantic contract. Keep independent
 candidate discovery unchanged: `Vec<T>` still declares an ordered, nonunique
 collection, and native sets and maps keep their current defaults.
 
-Replace exact type-string checks only where this proposal defines a checked
+Replace exact type-string checks only where this decision defines a checked
 storage binding. Each binding relates a reference type to a candidate native
 type and specifies supported input construction and captured-value conversion.
 Use the existing planner and runner; do not add a separate binding service.
@@ -94,6 +99,10 @@ When construction inserts values into native sets or maps, detect any native
 equality collision that would remove a distinct CTSC value or association.
 Fail rather than silently overwrite or merge it. Check that the constructed
 value still represents the reference input under the declared CTSC rules.
+Duplicate candidate map keys must also fail for results and error payloads.
+A pair vector must not overwrite a duplicate key during conversion, even if
+the registry's compact string-map encoding would otherwise permit insertion.
+Entry-record maps retain every pair until linked validation checks the keys.
 
 Convert actual candidate capture values through the checked bindings before
 CTSC encoding. Apply the bindings to captured inputs, results, and declared
@@ -113,7 +122,8 @@ type, and candidate storage type when a binding is unsupported.
 ### Separate input-order proposal
 
 The current decoder sorts bags. Storage compatibility does not require that
-behavior to change.
+behavior to change. Ship vector-backed bag storage with that sorting unchanged;
+do not make it depend on approval of the input-order proposal.
 
 Separately, this design recommends preserving recorded array and map-entry
 order during decoding and vector construction, including unordered values.
@@ -134,6 +144,10 @@ CTSC still does not make the order of an unordered value significant.
 `Bag<V>` is shorthand for the existing collection kind with `ordered: false`
 and `unique: false`, not a new wire kind. The grouping record uses the existing
 record kind from [Registry section 5.6](../ctsc/registry.md#56-record).
+The portable field names are fixed: `key` and `items`. They are not native
+member-name conventions or configurable aliases. A user record with exactly
+those projected fields and types is structurally indistinguishable from a
+grouping in CTSC.
 
 Resolve these contracts before the generic enumerable fallback. Include
 concrete, inherited, and explicitly implemented interfaces. Discovery and
@@ -152,9 +166,12 @@ strings or infer their type from observed contents.
 ### Bound inline record outcome matching
 
 Permit an inline reference record outcome to bind to an annotated Rust struct
-with exactly the same projected field names. Check every field type through
+in the same component with exactly the same projected field names. Check every field type through
 the binding rules above. Do not ignore extra fields or relax named-to-named
 type identity. Apply the same check to nested inline record outcomes.
+The reverse mapping is not supported: a named reference record cannot bind
+to an inline candidate record. Named-to-named matching retains component and
+type identity.
 
 This permits a Rust grouping result with `key` and `items` fields without
 requiring a fabricated C# type name. It does not add general record-input
@@ -167,7 +184,7 @@ mechanism already supplies a compatible folded input surface.
    shared resolver, semantic mappers, and runtime projector.
 2. Extend existing replay linking and runner conversion for collection
    storage, including nested bindings and vector-backed unique collections.
-   Resolve the separate input-order proposal before changing decoder order.
+   Keep bag sorting unchanged; decoder order has a separate approval boundary.
 3. Add tuple and map-entry input construction and captured-value conversion.
    Cover non-string keys through supported pair vectors.
 4. Add inline-record outcome matching and a real C#-to-Rust grouping-result
@@ -193,6 +210,8 @@ existing harness; do not weaken parity, linkage, or coverage checks.
   bindings.
 - Ordered and non-string maps use the required entry-record encoding. Pair
   vectors retain associations; native insertion cannot silently collapse keys.
+  Duplicate candidate result keys reject before publication in both compact
+  and entry-record map encodings.
 - Nested collection fields use reference dimensions without weakening named
   identity or accepting unrelated field types.
 - Existing list, native set, and unordered string-keyed map cases still pass.

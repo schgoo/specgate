@@ -51,19 +51,18 @@ pub(super) fn write(
             plan.registry_digest.as_str(),
         ),
     );
-    let encoded = encode_otlp(captures.as_ref(), &metadata)?;
-    if plan.structured_outcomes {
-        let validation = specgate_ctsc::validation::bytes::validate_linked(
-            specgate_ctsc::validation::DocumentBytes::new(out, encoded.otlp_json.as_bytes()),
-            specgate_ctsc::validation::DocumentBytes::new(Path::new("registry.ctsc.json"), &plan.registry_document),
-            [],
-        );
-        if !validation.valid {
-            return Err(Error::new_message(
-                ErrorKind::Publication,
-                format!("candidate structured outcomes failed linked validation: {:?}", validation.issues),
-            ));
-        }
+    let captures = plan.value_bindings.convert(captures.as_ref())?;
+    let encoded = encode_otlp(&captures, &metadata)?;
+    let validation = specgate_ctsc::validation::bytes::validate_linked(
+        specgate_ctsc::validation::DocumentBytes::new(out, encoded.otlp_json.as_bytes()),
+        specgate_ctsc::validation::DocumentBytes::new(Path::new("registry.ctsc.json"), &plan.registry_document),
+        [],
+    );
+    if !validation.valid {
+        return Err(Error::new_message(
+            ErrorKind::Publication,
+            format!("candidate capture failed linked validation: {:?}", validation.issues),
+        ));
     }
     write_atomic(out, encoded.otlp_json.as_bytes(), system)?;
 

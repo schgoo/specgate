@@ -716,7 +716,12 @@ mod cases {
                 .iter()
                 .map(|row| (row.component.as_deref().unwrap(), row.parity.allowed_differences.len()))
                 .collect::<Vec<_>>(),
-            [("comp.app", 4), ("fixture.enum_event", 3), ("fixture.scalar_types", 6)]
+            [
+                ("fixture.collection_shapes", 42),
+                ("comp.app", 4),
+                ("fixture.enum_event", 3),
+                ("fixture.scalar_types", 6)
+            ]
         );
         // Actual native differences are checked against this exact set by the
         // full matrix gate; no second checked-in producer registry is needed.

@@ -31,6 +31,7 @@ internal enum SemanticKind
     Map,
     OrderedMap,
     Tuple,
+    Record,
     Option,
     Result,
 
@@ -77,6 +78,7 @@ internal sealed class SemanticType : IEquatable<SemanticType>
 
     internal Type[]? ClrArguments { get; private init; }
     internal string? EnumerationProperty { get; private init; }
+    internal CollectionProjection Projection { get; private init; }
 
     private static SemanticType Scalar(SemanticKind kind) => new(kind, null, null, null);
 
@@ -214,7 +216,7 @@ internal sealed class SemanticType : IEquatable<SemanticType>
         CollectionShape? collection;
         try
         {
-            collection = CollectionShape.Resolve(type);
+            collection = CollectionContractResolver.Resolve(type);
         }
         catch (InvalidOperationException error)
         {
@@ -229,11 +231,11 @@ internal sealed class SemanticType : IEquatable<SemanticType>
                 readers[index] = flags.Fork();
                 flags.Skip(arguments[index]);
             }
-            SemanticType[] mapped = collection.Bind(type,
+            SemanticType[] mapped = GenericTypeBinding.Bind(collection, type,
                 index => Map(arguments[index], readers[index].Fork()),
                 argument => Map(argument, NullableFlagReader.Oblivious),
                 Construct);
-            return Construct(collection.Constructor, mapped, type);
+            return collection.Describe(mapped, type, Construct);
         }
 
         throw new SpecGateCaptureException(
@@ -243,26 +245,28 @@ internal sealed class SemanticType : IEquatable<SemanticType>
             + "annotated with [SpecEvent].");
     }
 
-    private static SemanticType Construct(string constructor, SemanticType[] arguments, Type? declaration)
+    private static SemanticType Construct(ShapeConstructor constructor, SemanticType[] arguments, Type? declaration)
     {
         SemanticType result = Of(constructor switch
         {
-            "List" => SemanticKind.List,
-            "Bag" => SemanticKind.Bag,
-            "set" => SemanticKind.Set,
-            "OrderedSet" => SemanticKind.OrderedSet,
-            "map" => SemanticKind.Map,
-            "OrderedMap" => SemanticKind.OrderedMap,
-            "Tuple" => SemanticKind.Tuple,
-            "Option" => SemanticKind.Option,
-            "Result" => SemanticKind.Result,
+            ShapeConstructor.List => SemanticKind.List,
+            ShapeConstructor.Bag => SemanticKind.Bag,
+            ShapeConstructor.Set => SemanticKind.Set,
+            ShapeConstructor.OrderedSet => SemanticKind.OrderedSet,
+            ShapeConstructor.Map => SemanticKind.Map,
+            ShapeConstructor.OrderedMap => SemanticKind.OrderedMap,
+            ShapeConstructor.Tuple => SemanticKind.Tuple,
+            ShapeConstructor.Option => SemanticKind.Option,
+            ShapeConstructor.Result => SemanticKind.Result,
+            ShapeConstructor.Record => SemanticKind.Record,
             _ => throw new InvalidOperationException($"Unknown semantic constructor '{constructor}'."),
         }, arguments[0], arguments.Length > 1 ? arguments[1] : null);
-        CollectionShape? collection = declaration is null ? null : CollectionShape.Resolve(declaration);
+        CollectionShape? collection = declaration is null ? null : CollectionContractResolver.Resolve(declaration);
         return collection is null ? result : new SemanticType(result.Kind, result.First, result.Second, null)
         {
             ClrArguments = collection.Arguments,
             EnumerationProperty = collection.EnumerationProperty,
+            Projection = collection.Projection,
         };
     }
 

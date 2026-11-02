@@ -1,0 +1,234 @@
+# Value mapping reference
+
+How discovery maps native Rust and C# types onto CTSC registry types. The
+CTSC type system itself is normative and defined in
+[`../ctsc/registry.md`](https://github.com/schgoo/specgate/blob/v0.6.0/docs/ctsc/registry.md) §5; this page only describes what
+SpecGate's producers emit today.
+
+## Primitives
+
+CTSC primitives are `unit`, `string`, `bool`, `i32`, `i64`, `u32`, `u64`,
+`f32`, `f64`, and `bytes`.
+
+| CTSC | Rust | C# |
+| --- | --- | --- |
+| `unit` | `()` or no return type | `void`, `Task`, `ValueTask` |
+| `string` | `String`, `&str`, `ComponentId`, `OperationName`, `ImplementationLabel` | `string` |
+| `bool` | `bool` | `bool` |
+| `i32` | `i32` | `int` |
+| `i64` | `i64` | `long` |
+| `u32` | `u32` | `uint` (`System.UInt32`) |
+| `u64` | `u64` | `ulong` (`System.UInt64`) |
+| `f32` | `f32` | `float` |
+| `f64` | `f64` | `double` |
+
+Other native numeric types (Rust `i8`, `u8`, `i16`, `u16`, `i128`, `u128`,
+`isize`, `usize`, `char`; C# `short`, `sbyte`, `byte`, `ushort`, and others)
+are not CTSC primitives. Use one of the widths above at the annotated boundary.
+
+### Unsigned integers
+
+Discovery and capture use the declared boundary type, including types nested in
+collections, optionals, and annotated members. The normative wire
+representations are defined in [CTSC Trace](https://github.com/schgoo/specgate/blob/v0.6.0/docs/ctsc/trace.md).
+
+| Rust | C# | CTSC registry type | OTLP value |
+|---|---|---|---|
+| `u32` | `uint` (`System.UInt32`) | `u32` | `intValue`, from 0 through 4,294,967,295 |
+| `u64` | `ulong` (`System.UInt64`) | `u64` | `stringValue`, canonical decimal from `"0"` through `"18446744073709551615"` |
+
+The native runtime projects `u32`/`uint` as an integer and `u64`/`ulong` as an
+unsigned value. The latter is encoded as decimal text even when it fits in a
+signed integer; values above `long.MaxValue` are preserved without narrowing.
+Decimal text has no sign, separators, whitespace, or leading zeroes except `"0"`.
+
+These mappings apply to operation inputs and results and recurse through
+supported value shapes. C# nullable unsigned integers use the same optional
+projection as other nullable values: nested values carry `Some` or `None`, while
+an outer nullable return selects the result or empty outcome. A C# `object`
+holding a boxed `uint` or `ulong` uses the corresponding native value family.
+
+The [`fixture.unsigned`](https://github.com/schgoo/specgate/tree/v0.6.0/test/behavior/cases/fixture.unsigned) case captures
+zero, signed maxima, the first values above those maxima, and unsigned maxima
+through ordinary annotated operations in both languages. Its golden matrix row
+requires identical registries, linked native bundles, and successful replay of
+the C# reference on Rust.
+
+## Composite types
+
+| CTSC kind | Rust | C# |
+| --- | --- | --- |
+| `collection`, ordered, nonunique (list) | `Vec<T>`, `&[T]` | `T[]`, list contracts, `IOrderedEnumerable<T>`, queue/stack/linked-list families |
+| `collection`, unordered, nonunique (bag) | No automatic native mapping | `IEnumerable<T>`, `ICollection<T>`, `IReadOnlyCollection<T>` unless a stronger contract applies |
+| `collection`, unordered, unique (set) | `HashSet<T>`, `BTreeSet<T>` | Set contracts, including immutable/frozen sets and `SortedSet<T>` |
+| `collection`, ordered, unique (ordered set) | No automatic native mapping | A type declaring both ordered and set contracts |
+| `map`, unordered | `HashMap<K, V>`, `BTreeMap<K, V>` | Generic dictionary/read-only dictionary contracts, including sorted, concurrent, immutable, and frozen dictionaries |
+| `map`, ordered | No automatic native mapping | Generic `OrderedDictionary<K, V>` |
+| `tuple` | Native tuples of arity 2-4; tuple variant payloads | `ValueTuple<T1, T2>`, including element/priority pairs |
+| `optional` | `Option<T>` (inputs, fields) | `SpecGate.Annotations.Option<T>`, `T?` (nullable value or reference type) |
+| `record` | `struct` with `#[derive(SpecEvent)]` | non-abstract class or struct with `[SpecEvent]`; members marked `[SpecEvent]` become fields |
+| `tagged_union` | `enum` with `#[derive(SpecEvent)]` | `enum` with `[SpecEvent]`; abstract class with `[SpecEvent]` (its concrete subclasses become variants) |
+
+Rust references (`&T`, `&mut T`) map to `T`. Only the final path segment of a
+Rust type is used, so `std::collections::BTreeMap` and `BTreeMap` are the same.
+
+### C# collection contracts
+
+Discovery and capture share one resolver, inspecting the declared type itself,
+its base families, and its closed generic interfaces. A non-generic
+`FooEnumerable : IEnumerable<Foo>` works, including inherited and explicitly
+implemented contracts; `Foo` must itself have a supported representation.
+Conflicting element or dictionary key/value contracts are rejected.
+Generic argument nullability follows the annotated operation/member declaration,
+including reordered arguments and nested collection expressions. Nullable
+annotations written only on an inherited interface/base declaration are not
+recovered; declare the nullable element on the exposed generic contract when
+needed. Observed nulls in a required element still reject capture rather than
+being silently dropped.
+
+List contracts include `IList<T>` and `IReadOnlyList<T>`, covering arrays,
+segments, object-model collections, and immutable lists/arrays. Queues, stacks,
+linked lists, their concurrent counterparts, and immutable queue/stack
+contracts preserve traversal order. `IOrderedQueryable<T>` and ordered parallel
+query families also declare order. Other generic enumerable contracts, including
+concurrent bags and ordinary `BlockingCollection<T>` enumeration, are bags.
+Capture never uses `GetConsumingEnumerable`.
+
+Dictionary contracts take precedence over their element/list views.
+`ILookup<K,V>` takes precedence over enumerable fallback and projects an
+unordered map from `K` to `Bag<V>`. `IGrouping<K,V>` projects an inline record
+with fixed fields `key: K` and `items: Bag<V>`. These are portable field names;
+a user record with the same fields and types is structurally indistinguishable.
+Optional keys keep their declared optional type. Duplicate lookup keys under
+recursive CTSC equality fail capture instead of merging groups.
+Sorted sets/maps keep their existing unordered semantics, matching Rust
+`BTreeSet`/`BTreeMap`: `ordered` is equality by position, not sortedness.
+Priority queues project `UnorderedItems` as a bag of `(element, priority)`
+tuples without dequeuing. Ordered maps, and maps with non-string keys, use
+arrays of key/value entry records. Unordered string-keyed maps use OTLP
+key/value lists. Projection must not silently merge duplicate semantic elements
+or keys.
+
+Non-generic `ArrayList`/`Hashtable` lack declared element/key/value types;
+SpecGate does not infer a registry from observed contents. Existing enumerators,
+async streams, and buffers without generic enumerable contracts remain
+unsupported. Custom collection-semantic overrides are not implemented. See the
+[collection decision](https://github.com/schgoo/specgate/blob/v0.6.0/docs/decisions/collection-dimensions.md).
+
+Rust enum variants map to a `tagged_union` variant with no payload (unit
+variant), a `tuple` payload (tuple variant), or a `record` payload (struct
+variant). C# enum members map to variants without payloads, in declaration
+order.
+
+A named type must be annotated (`SpecEvent`) to appear in the registry. Other
+named types are emitted by name only and are not supported at an annotated
+boundary.
+
+## Operation outcomes
+
+The return type maps to the CTSC outcome channels
+([`../ctsc/registry.md`](https://github.com/schgoo/specgate/blob/v0.6.0/docs/ctsc/registry.md)):
+
+| Return type | Registry outcome |
+| --- | --- |
+| `()` / `void` / `Task` | No `result`. |
+| `T` | `result: T`. |
+| `Option<T>` (Rust or `SpecGate.Annotations.Option<T>`) | `result: T` and `empty: true`. `None` completes through the empty channel. |
+| `Option<()>` | `result: optional<unit>`; no empty channel. |
+| `Result<T, E>` (Rust or `SpecGate.Annotations.Result<T, E>`) | `result: T` (omitted when `T` is unit) and one error named `error` with type `E`. |
+| C# method with `[SpecException]` | As `Result<T, string>`: one error named `error` of type `string`. |
+| C# `Task<T>` / `ValueTask<T>` | As `T`; the operation is async. |
+
+## Recorded values
+
+Capture records each value at the operation boundary, while the call is on the
+stack. Rust and C# produce the same shapes, so their traces can be compared:
+
+| Value | Recorded as |
+| --- | --- |
+| Record | Map from field name to value. |
+| Tagged-union variant | Single-entry map from variant name to its payload; a payload-free variant (including a C# enum member) has the empty map as payload. |
+| Optional | `Some` with the value, or `None`. |
+| Nested `Result` | `Ok` or `Err` with the value. |
+| Outermost `Option` / `Result` of a return value | Unwrapped onto the `result`, `empty`, or `error` channel, as in the table above. |
+
+C# capture also reports, without failing the test, a `null` where the declared
+type is not nullable: the scenario is dropped and `specgate capture` prints a
+warning naming the position. Declare the parameter, member, or return value
+nullable to record absence
+([`../decisions/null-values-are-capture-diagnostics.md`](https://github.com/schgoo/specgate/blob/v0.6.0/docs/decisions/null-values-are-capture-diagnostics.md)).
+
+C# capture rejects, with an error naming the value:
+
+- An enum value that is not one of the enum's declared members (for example an
+  undeclared numeric value or a `[Flags]` combination).
+- Distinct native elements or keys that project to duplicates where uniqueness
+  is required.
+- A string that contains an unpaired UTF-16 surrogate.
+- A value declared as `object` whose runtime type is not a primitive or a
+  `[SpecEvent]`-annotated type. Collections are refused because a list and a
+  set cannot be told apart once the declared type is erased.
+
+## Candidate replay values
+
+Rust replay accepts lossless primitives, supported tuples, collections, maps,
+and optionals recursively as operation and setup construction inputs. The
+reference registry controls semantics; independent Rust discovery is unchanged.
+
+| Reference type | Rust replay storage |
+|---|---|
+| List, bag, set, ordered set | `Vec<T>` |
+| Unordered set | Also supported `HashSet<T>` / `BTreeSet<T>` |
+| Ordered or unordered map | `Vec<(K,V)>` for recursively supported keys and values |
+| Unordered string-keyed map | Also supported `HashMap<String,V>` / `BTreeMap<String,V>` |
+| Tuple | Matching Rust tuple of arity 2-4 |
+
+Bag inputs retain the existing canonical sorting and all duplicate items.
+Ordered map entry positions are preserved. Native set/map insertion must not
+collapse distinct reference values. A sorted native map is not storage for an
+arbitrarily ordered reference map.
+
+Classes and structs opted in as property setups (`#[spec_event(setup)]`,
+`[SpecEvent(Setup = true)]`) are deconstructed into their selected fields,
+recursing through fields that are themselves opted-in records, including
+arguments to explicit setup producers. Leaves become flat inputs under their
+semantic names in depth-first declaration order; each leaf must be a primitive,
+collection, tuple, or optional. Duplicate leaf names and cyclic property-setup types
+are rejected. Replay rebuilds the nested Rust value with `Default` for omitted
+fields.
+Structured results and declared errors, including lists of annotated records,
+are supported. Reachable named declarations retain component/type identity,
+including those reached only by nested observed operations. Nested fields use
+the same storage bindings. An inline reference record can bind to an annotated
+Rust record in the same component with exactly matching projected fields and
+supported field bindings. A named reference record cannot bind to an inline
+candidate record; unrelated named records cannot bind by shape alone.
+
+Replay converts actual captured inputs, results, and errors to the reference
+encoding, then validates the whole candidate trace before publication.
+Vector-backed unique collections and pair-vector maps reject duplicate semantic
+items or keys, including candidate results; nothing is deduplicated or
+overwritten. The reference registry bytes and digest do not change.
+
+Other record inputs, including property-setup fields holding records that are
+not opted in and records inside collections or optionals, and
+explicit reference-to-candidate shape mappings remain unsupported; record
+inputs fail with the `structured-value` replay category
+([constructor and property setups](https://github.com/schgoo/specgate/blob/v0.6.0/docs/decisions/constructor-and-property-setups.md)).
+A tuple payload and a record payload are different declarations; replay does
+not silently translate between them.
+
+Generic operations publish concrete signatures from explicit Rust `types` or
+C# `TypeArguments` annotations. See
+[`../status.md`](https://github.com/schgoo/specgate/blob/v0.6.0/docs/status.md#candidate-replay-and-explicit-generic-operations)
+for specialization syntax and completion-channel restrictions.
+
+## Names
+
+- Rust field names and C# member names become CTSC field names. Rust fields can
+  be renamed with `#[spec_event(name = "wire_name")]`; C# members with
+  `[SpecEvent("wire_name")]`.
+- C# parameter names can be set with `[SpecInput("name")]`. Variant and type
+  names can be set the same way with `[SpecEvent("name")]`.
+- To compare a Rust and a C# implementation, both must publish the same names
+  and kinds. Check with `specgate discover` on each side.

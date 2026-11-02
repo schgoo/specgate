@@ -113,6 +113,13 @@ fn async_completion(rt: &TokenStream2, kind: ReturnKind) -> TokenStream2 {
 pub fn expand_operation(attribute: TokenStream2, item: TokenStream2) -> syn::Result<TokenStream2> {
     let first: OperationArg = syn::parse2(attribute)?;
     let mut function: ItemFn = syn::parse2(item)?;
+    if let Some(constness) = &function.sig.constness {
+        return Err(syn::Error::new_spanned(
+            constness,
+            "`#[spec_operation]` does not support `const fn`: capture needs runtime state that const evaluation \
+             cannot use; annotate a non-const wrapper that calls this function, and call the wrapper from tests",
+        ));
+    }
     let mut declarations = vec![first];
     let mut remaining_attributes = Vec::new();
     for attribute in std::mem::take(&mut function.attrs) {
@@ -591,6 +598,21 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.to_string().contains("return outcome shape"), "{error}");
+    }
+
+    #[test]
+    fn const_fn_operations_are_rejected() {
+        let error = super::expand_operation(
+            quote::quote!("add"),
+            quote::quote!(
+                pub const fn add(left: i32, right: i32) -> i32 {
+                    left + right
+                }
+            ),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("does not support `const fn`"), "{error}");
+        assert!(error.to_string().contains("non-const wrapper"), "{error}");
     }
 
     #[test]

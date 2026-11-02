@@ -106,6 +106,12 @@ public class DiscoveryRunnerTests
     [InlineData(typeof(System.Collections.Frozen.FrozenDictionary<string, int>), "map<string, i32>")]
     [InlineData(typeof(OrderedDictionary<string, int>), "OrderedMap<string, i32>")]
     [InlineData(typeof(PriorityQueue<string, int>), "Bag<Tuple<string, i32>>")]
+    [InlineData(typeof(ILookup<string, int>), "map<string, Bag<i32>>")]
+    [InlineData(typeof(Lookup<int, string>), "map<i32, Bag<string>>")]
+    [InlineData(typeof(IGrouping<string, int>), "{ key: string, items: Bag<i32> }")]
+    [InlineData(typeof(ExplicitGrouping<int, string>), "{ key: string, items: Bag<i32> }")]
+    [InlineData(typeof(InheritedGrouping<string, int>), "{ key: string, items: Bag<i32> }")]
+    [InlineData(typeof(ExplicitLookup<int, string>), "map<string, Bag<i32>>")]
     [InlineData(typeof(ConcreteEnumerable), "Bag<Reading>")]
     [InlineData(typeof(IOrderedUnique), "OrderedSet<i32>")]
     public void CollectionContractsPublishStructuralSemantics(Type type, string expected)
@@ -123,6 +129,65 @@ public class DiscoveryRunnerTests
     }
 
     private interface IOrderedUnique : IReadOnlyList<int>, IReadOnlySet<int>;
+
+    private class ExplicitGrouping<TItem, TKey> : IGrouping<TKey, TItem>
+    {
+        TKey IGrouping<TKey, TItem>.Key => default!;
+        IEnumerator<TItem> IEnumerable<TItem>.GetEnumerator() => Enumerable.Empty<TItem>().GetEnumerator();
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() =>
+            throw new InvalidOperationException();
+    }
+
+    private sealed class InheritedGrouping<TKey, TItem> : ExplicitGrouping<TItem, TKey>;
+
+    private sealed class ExplicitLookup<TItem, TKey> : ILookup<TKey, TItem>
+    {
+        public int Count => 0;
+        public IEnumerable<TItem> this[TKey key] => [];
+        public bool Contains(TKey key) => false;
+        IEnumerator<IGrouping<TKey, TItem>> IEnumerable<IGrouping<TKey, TItem>>.GetEnumerator() =>
+            Enumerable.Empty<IGrouping<TKey, TItem>>().GetEnumerator();
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() =>
+            throw new InvalidOperationException();
+    }
+
+    [Theory]
+    [InlineData(nameof(KeyedDeclarations.Lookup), "map<Option<string>, Bag<Option<string>>>")]
+    [InlineData(nameof(KeyedDeclarations.Group), "{ key: Option<string>, items: Bag<Option<string>> }")]
+    [InlineData(nameof(KeyedDeclarations.Inherited), "{ key: Option<string>, items: Bag<i32> }")]
+    [InlineData(nameof(KeyedDeclarations.Explicit), "map<Option<string>, Bag<i32>>")]
+    [InlineData(nameof(KeyedDeclarations.Nested), "List<{ key: Option<string>, items: Bag<i32> }>")]
+    public void KeyedContractsKeepDeclaredNullablePositions(string name, string expected)
+    {
+        MethodInfo method = typeof(KeyedDeclarations).GetMethod(name)!;
+        SemanticTypes types = new(new NullabilityInfoContext());
+        Assert.Equal(expected, types.RenderParameter(method.GetParameters()[0]));
+    }
+
+    private sealed class NestedGrouping<T> : List<IGrouping<T, int>>;
+
+    private static class KeyedDeclarations
+    {
+        public static void Lookup(ILookup<string?, string?> value) => _ = value;
+        public static void Group(IGrouping<string?, string?> value) => _ = value;
+        public static void Inherited(InheritedGrouping<string?, int> value) => _ = value;
+        public static void Explicit(ExplicitLookup<int, string?> value) => _ = value;
+        public static void Nested(NestedGrouping<string?> value) => _ = value;
+    }
+
+    [Theory]
+    [InlineData(typeof(IConflictingGrouping))]
+    [InlineData(typeof(IConflictingLookup))]
+    [InlineData(typeof(IConflictingKeyedContract))]
+    public void ConflictingKeyedContractsAreRejected(Type declaration)
+    {
+        SemanticTypes types = new(new NullabilityInfoContext());
+        Assert.Throws<InvalidOperationException>(() => types.Render(declaration, null));
+    }
+
+    private interface IConflictingGrouping : IGrouping<string, int>, IGrouping<int, int>;
+    private interface IConflictingLookup : ILookup<string, int>, ILookup<int, int>;
+    private interface IConflictingKeyedContract : ILookup<int, int>, IDictionary<int, int>;
 
     [Fact]
     public void ConflictingEnumerableContractsAreRejected()

@@ -14,6 +14,12 @@
 `candidate-<impl>-<capture-dir name>.otlp.json`. Pass `--out` to write it
 elsewhere.
 
+Replay keeps the reference registry bytes and digest unchanged. Checked
+storage bindings convert actual candidate inputs, results, and error payloads
+to that registry's encoding; the whole candidate trace must pass linked
+validation before publication. See
+[candidate replay values](value-mapping.md#candidate-replay-values).
+
 ## `manifest.json`
 
 Example (from

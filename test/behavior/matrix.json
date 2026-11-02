@@ -56,24 +56,63 @@
       "sourceGroup": "conformance/collections",
       "component": "fixture.collection_shapes",
       "sources": [
+        "test/behavior/cases/fixture.collection_shapes/rust/collection_shapes.rs",
         "test/behavior/cases/fixture.collection_shapes/csharp/CollectionShapes.cs"
       ],
+      "rust": { "binding": "rust", "phases": ["discover", "capture"], "expect": "success" },
       "csharp": { "binding": "csharp", "phases": ["discover", "capture"], "expect": "success" },
       "parity": {
-        "mode": "not-applicable",
-        "reason": "This C# producer fixture exercises generic collection contracts; Rust Vec remains ordered and there is no semantic override or automatic bag conversion."
+        "mode": "exception",
+        "reason": "Native Rust vectors declare lists or pair lists and grouping structs declare named records. Checked replay storage bindings preserve the C# reference collection dimensions, map associations, and inline grouping fields.",
+        "allowedDifferences": [
+          {"path":"/components/0/operations/0/inputs/0/type/ordered","rust":{"kind":"value","value":true},"csharp":{"kind":"value","value":false}},
+          {"path":"/components/0/operations/1/outcomes/result/fields","rust":{"kind":"missing"},"csharp":{"kind":"value","value":[{"name":"key","type":{"kind":"primitive","name":"string"}},{"name":"items","type":{"kind":"collection","items":{"kind":"primitive","name":"i32"},"ordered":false,"unique":false}}]}},
+          {"path":"/components/0/operations/1/outcomes/result/kind","rust":{"kind":"value","value":"named"},"csharp":{"kind":"value","value":"record"}},
+          {"path":"/components/0/operations/1/outcomes/result/name","rust":{"kind":"value","value":"Grouping"},"csharp":{"kind":"missing"}},
+          {"path":"/components/0/operations/2/outcomes/result/ordered","rust":{"kind":"value","value":true},"csharp":{"kind":"value","value":false}},
+          {"path":"/components/0/operations/3/outcomes/result/values/ordered","rust":{"kind":"value","value":true},"csharp":{"kind":"value","value":false}},
+          {"path":"/components/0/operations/4/inputs/0/type/values/ordered","rust":{"kind":"value","value":true},"csharp":{"kind":"value","value":false}},
+          {"path":"/components/0/operations/5/outcomes/result/items","rust":{"kind":"value","value":{"kind":"tuple","items":[{"kind":"primitive","name":"i32"},{"kind":"collection","items":{"kind":"primitive","name":"string"},"ordered":true,"unique":false}]}},"csharp":{"kind":"missing"}},
+          {"path":"/components/0/operations/5/outcomes/result/keys","rust":{"kind":"missing"},"csharp":{"kind":"value","value":{"kind":"primitive","name":"i32"}}},
+          {"path":"/components/0/operations/5/outcomes/result/kind","rust":{"kind":"value","value":"collection"},"csharp":{"kind":"value","value":"map"}},
+          {"path":"/components/0/operations/5/outcomes/result/ordered","rust":{"kind":"value","value":true},"csharp":{"kind":"value","value":false}},
+          {"path":"/components/0/operations/5/outcomes/result/unique","rust":{"kind":"value","value":false},"csharp":{"kind":"missing"}},
+          {"path":"/components/0/operations/5/outcomes/result/values","rust":{"kind":"missing"},"csharp":{"kind":"value","value":{"kind":"collection","items":{"kind":"primitive","name":"string"},"ordered":false,"unique":false}}},
+          {"path":"/components/0/operations/6/inputs/0/type/items","rust":{"kind":"value","value":{"kind":"tuple","items":[{"kind":"primitive","name":"i32"},{"kind":"primitive","name":"string"}]}},"csharp":{"kind":"missing"}},
+          {"path":"/components/0/operations/6/inputs/0/type/keys","rust":{"kind":"missing"},"csharp":{"kind":"value","value":{"kind":"primitive","name":"i32"}}},
+          {"path":"/components/0/operations/6/inputs/0/type/kind","rust":{"kind":"value","value":"collection"},"csharp":{"kind":"value","value":"map"}},
+          {"path":"/components/0/operations/6/inputs/0/type/ordered","rust":{"kind":"value","value":true},"csharp":{"kind":"value","value":false}},
+          {"path":"/components/0/operations/6/inputs/0/type/unique","rust":{"kind":"value","value":false},"csharp":{"kind":"missing"}},
+          {"path":"/components/0/operations/6/inputs/0/type/values","rust":{"kind":"missing"},"csharp":{"kind":"value","value":{"kind":"primitive","name":"string"}}},
+          {"path":"/components/0/operations/7/outcomes/result/fields","rust":{"kind":"missing"},"csharp":{"kind":"value","value":[{"name":"key","type":{"kind":"optional","value":{"kind":"primitive","name":"string"}}},{"name":"items","type":{"kind":"collection","items":{"kind":"primitive","name":"i32"},"ordered":false,"unique":false}}]}},
+          {"path":"/components/0/operations/7/outcomes/result/kind","rust":{"kind":"value","value":"named"},"csharp":{"kind":"value","value":"record"}},
+          {"path":"/components/0/operations/7/outcomes/result/name","rust":{"kind":"value","value":"OptionalGrouping"},"csharp":{"kind":"missing"}},
+          {"path":"/components/0/operations/8/outcomes/result/items","rust":{"kind":"value","value":{"kind":"tuple","items":[{"kind":"optional","value":{"kind":"primitive","name":"string"}},{"kind":"collection","items":{"kind":"primitive","name":"i32"},"ordered":true,"unique":false}]}},"csharp":{"kind":"missing"}},
+          {"path":"/components/0/operations/8/outcomes/result/keys","rust":{"kind":"missing"},"csharp":{"kind":"value","value":{"kind":"optional","value":{"kind":"primitive","name":"string"}}}},
+          {"path":"/components/0/operations/8/outcomes/result/kind","rust":{"kind":"value","value":"collection"},"csharp":{"kind":"value","value":"map"}},
+          {"path":"/components/0/operations/8/outcomes/result/ordered","rust":{"kind":"value","value":true},"csharp":{"kind":"value","value":false}},
+          {"path":"/components/0/operations/8/outcomes/result/unique","rust":{"kind":"value","value":false},"csharp":{"kind":"missing"}},
+          {"path":"/components/0/operations/8/outcomes/result/values","rust":{"kind":"missing"},"csharp":{"kind":"value","value":{"kind":"collection","items":{"kind":"primitive","name":"i32"},"ordered":false,"unique":false}}},
+          {"path":"/components/0/operations/10/outcomes/result/items","rust":{"kind":"value","value":{"kind":"tuple","items":[{"kind":"primitive","name":"string"},{"kind":"primitive","name":"i32"}]}},"csharp":{"kind":"missing"}},
+          {"path":"/components/0/operations/10/outcomes/result/keys","rust":{"kind":"missing"},"csharp":{"kind":"value","value":{"kind":"primitive","name":"string"}}},
+          {"path":"/components/0/operations/10/outcomes/result/kind","rust":{"kind":"value","value":"collection"},"csharp":{"kind":"value","value":"map"}},
+          {"path":"/components/0/operations/10/outcomes/result/unique","rust":{"kind":"value","value":false},"csharp":{"kind":"missing"}},
+          {"path":"/components/0/operations/10/outcomes/result/values","rust":{"kind":"missing"},"csharp":{"kind":"value","value":{"kind":"primitive","name":"i32"}}},
+          {"path":"/components/0/operations/11/inputs/0/type/items","rust":{"kind":"value","value":{"kind":"tuple","items":[{"kind":"primitive","name":"string"},{"kind":"primitive","name":"i32"}]}},"csharp":{"kind":"missing"}},
+          {"path":"/components/0/operations/11/inputs/0/type/keys","rust":{"kind":"missing"},"csharp":{"kind":"value","value":{"kind":"primitive","name":"string"}}},
+          {"path":"/components/0/operations/11/inputs/0/type/kind","rust":{"kind":"value","value":"collection"},"csharp":{"kind":"value","value":"map"}},
+          {"path":"/components/0/operations/11/inputs/0/type/unique","rust":{"kind":"value","value":false},"csharp":{"kind":"missing"}},
+          {"path":"/components/0/operations/11/inputs/0/type/values","rust":{"kind":"missing"},"csharp":{"kind":"value","value":{"kind":"primitive","name":"i32"}}},
+          {"path":"/components/0/operations/12/outcomes/result/ordered","rust":{"kind":"value","value":true},"csharp":{"kind":"value","value":false}},
+          {"path":"/components/0/operations/13/inputs/0/type/ordered","rust":{"kind":"value","value":true},"csharp":{"kind":"value","value":false}},
+          {"path":"/components/0/operations/13/inputs/0/type/unique","rust":{"kind":"value","value":false},"csharp":{"kind":"value","value":true}},
+          {"path":"/components/0/types","rust":{"kind":"arrayLength","length":3},"csharp":{"kind":"arrayLength","length":1}}
+        ]
       },
       "reference": { "implementation": "csharp", "artifacts": ["manifest.json", "reference.otlp.json", "registry.ctsc.json"] },
-      "checks": [
-        { "reference": "csharp", "candidate": "csharp", "mode": "unsupported",
-          "expectCategory": "unsupported-language",
-          "reason": "This fixture validates native C# discovery and capture; C# candidate replay is not implemented." }
-      ],
+      "checks": [{ "reference": "csharp", "candidate": "rust", "mode": "verified" }],
       "linkage": { "mode": "linked" },
-      "limitations": [
-        { "code": "collection-semantic-mapping", "detail": "C# bag declarations are not silently compatible with Rust Vec declarations." },
-        { "code": "replay-input-shape", "detail": "Ordered-map and tuple inputs are not supported by Rust replay." }
-      ]
+      "limitations": []
     },
     {
       "id": "replacement/woven-capture-mechanics",

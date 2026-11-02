@@ -50,21 +50,21 @@ consuming API. No new lifecycle model is introduced.
 
 Non-generic erased collections, asynchronous streams, caller-held enumerators,
 buffers without enumerable contracts, configurable collection-semantic
-overrides, and automatic cross-language shape/outcome conversion are not added.
-In particular, Rust `Vec<T>` still declares an ordered, nonunique collection:
-it is not silently compatible with a C# bag. Ordered-map input replay remains
-unsupported rather than discarding entry order. Generic specialization ownership
+overrides, and general cross-language shape/outcome conversion are not added.
+Rust `Vec<T>` still declares an ordered, nonunique collection in independent
+discovery. Checked replay storage bindings can use it for reference bags, sets,
+and ordered sets; pair vectors can store ordered and non-string maps.
+Generic specialization ownership
 and C# null/exception versus Rust `Option`/`Result` mapping remain separate work.
 
 Existing bundles must be recaptured; checked-in generated bundles are
 regenerated through the golden harness.
 
-## Proposed extension
+## Accepted storage extension
 
 [Collection storage bindings in registry-driven replay](registry-guided-collection-replay.md)
-proposes checked Rust storage mappings and key-preserving C# lookup/grouping
-projections. Replay is already registry-driven; the proposal extends its
+defines checked Rust storage mappings and key-preserving C# lookup/grouping
+projections. Replay is already registry-driven; the decision extends its
 existing linker and value conversion. It does not change the CTSC 0.4.0 wire
-format. The replay input-order recommendation is a separate proposed change.
-These proposals are not implemented and do not yet replace the boundaries
-above.
+format. The replay input-order recommendation is a separate, unapproved change:
+bags retain the current sorted input construction.

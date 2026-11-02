@@ -48,16 +48,28 @@ The reference may be Rust or C#; the candidate must be Rust.
    candidate with recorded operation and setup construction inputs, scenario by
    scenario, under native capture. Async calls use the selected candidate engine
    or a custom candidate-owned wrapper.
-4. Writes the resulting trace with deterministic ids and timestamps.
+4. Converts actual captured inputs, results, and errors through the checked
+   storage bindings, validates the whole trace against the reference registry,
+   and writes it with deterministic ids and timestamps.
 
 Replay does not run your tests; it calls your operations directly.
 Annotated synchronous setups reconstruct receiver and injected environments.
 Private/test-only producers remain in their original Cargo target. Equal
 receiver producer/input identities share state within a scenario; scenario
-boundaries release receivers and setup guards. Structured outcomes must match
-the reference's reachable CTSC declarations. See
+boundaries release receivers and setup guards. Structured outcomes retain named
+identity and use the reference's nested collection dimensions. See
 [`../status.md`](../status.md#candidate-replay-and-explicit-generic-operations)
 for explicit generic specializations.
+
+Use `Vec<T>` for reference bags, sets, and ordered sets as well as lists.
+Use `Vec<(K,V)>` for ordered maps or supported non-string map keys. Bag inputs
+keep their existing sorted construction; ordered map positions are preserved.
+Tuples of arity 2-4 are supported recursively. Duplicate semantic keys or
+unique items fail before publication, including candidate results.
+An inline reference record, such as a C# grouping, can bind to an annotated
+Rust record in the same component with exact `key` and `items` fields and
+supported field types. Named reference types cannot bind to inline candidates.
+See [storage bindings](../reference/value-mapping.md#candidate-replay-values).
 
 Each Cargo target used for generated discovery/replay hooks must declare
 `specgate::spec_component!("…")` at its own crate root, including binary-unit
@@ -153,7 +165,7 @@ One OTLP JSON candidate trace. Scenario names match the reference.
 ## Source of truth
 
 - `rust/crates/specgate-cli/src/replay/` — `link.rs`, `runner.rs`,
-  `limitation.rs`.
+  `binding.rs`, `storage.rs`, `limitation.rs`.
 - [`../reference/limitations.md`](../reference/limitations.md)
 - [`../contributor/component-identity-and-replay.md`](../contributor/component-identity-and-replay.md)
   (design background; some code anchors are historical)

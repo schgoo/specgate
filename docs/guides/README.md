@@ -60,12 +60,16 @@ values:
 - **Needs approval:** a scenario API that replaces the requested boundary, such
   as `string RunScenario(string fixtureName)`.
 
-Replay accepts primitives and recursively supported lists, sets, string-keyed
-maps, and optionals as inputs. A class or struct parameter can be deconstructed
+Replay accepts primitives, tuples of arity 2-4, and recursively supported
+collections, maps, and optionals as inputs. Rust vectors can store reference
+bags and unique collections; pair vectors can store ordered/non-string maps.
+Bag input sorting remains unchanged. See
+[storage bindings](../reference/value-mapping.md#candidate-replay-values).
+A class or struct parameter can be deconstructed
 into its fields: opt the type in as a property setup (`#[spec_event(setup)]` or
 `[SpecEvent(Setup = true)]`), and each selected field becomes a flat semantic
 input. A field whose type is itself an opted-in record is deconstructed
-recursively. Every other field must be a primitive, collection, or optional,
+recursively. Every other field must be a primitive, collection, supported tuple, or optional,
 and records inside collections or optionals are not deconstructed. Leaf names
 are flat, so rename colliding fields. Otherwise, give the parameter an explicit
 setup producer. A record input with neither, or a field holding a record that
