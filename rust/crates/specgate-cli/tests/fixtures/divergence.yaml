@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=../../../../binding-schema.json
+# yaml-language-server: $schema=../../../../../binding-schema.json
 # cross_language_divergence owns this copy of the CTSC fixture package so that
 # it never leases the package that the golden harness builds at the same time.
 components:

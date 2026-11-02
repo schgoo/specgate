@@ -126,7 +126,9 @@ at once. Thus each lane uses only its own fixture packages. A Rust test that
 runs a SpecGate command uses only the bindings that
 `rust/crates/specgate-cli/tests/check_lanes.rs` assigns to its lane. That test
 fails when a fixture binding has no lane or when two lanes resolve to the same
-`sources` directory.
+`sources` directory. It does not check which binding a test loads, so the
+author of the test must keep the test and its bindings in one lane. The replay
+lane runs the tests whose names contain `replay::tests`.
 
 CI runs five parallel jobs on each OS: `check-rust-replay`, `check-rust-other`,
 `check-static`, `check-ctsc-smoke`, and `check-ctsc-goldens`. `check-rust` and
@@ -150,8 +152,10 @@ dependencies without overlapping rebuilds and execution of generated binaries.
   `all`, `replay`, or `other`. `just test` and `just check-rust` use `all`;
   `just check` uses `replay` and `other`. The wrapper keeps
   them, so later runs reuse warm builds. Parallel shards do not relink an
-  executable that another lane runs. Each shard directory can use 6–10 GB;
-  `cargo clean` in `rust` removes them.
+  executable that another lane runs. Each shard directory used 8.8–11.1 GB in
+  the measured runs. A contributor who runs both `just test` and `just check`
+  keeps `all`, `replay`, and `other`, which is about 30 GB. `cargo clean` in
+  `rust` removes them.
 - `scratch` (CI): workspace compilation uses the normal target directory and
   reuses artifacts from `just build`. Child intermediates go to a fresh
   `rust/target/rust-test-<guid>/build`, and the wrapper removes it. Parallel

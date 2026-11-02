@@ -514,7 +514,9 @@ Thus each lane builds only its own fixture packages:
 
 `rust/crates/specgate-cli/tests/check_lanes.rs` lists the bindings of each lane.
 It fails when a fixture binding has no lane or when two lanes resolve to the
-same `sources` directory. In CI, each lane has its own runner, so the leases
+same `sources` directory. It does not check which binding a test loads. The
+author of a test must use only the bindings of the lane that runs the test. In
+CI, each lane has its own runner, so the leases
 cannot collide.
 
 Locally, `rust-test` uses `-BuildDir persistent`. Each shard owns

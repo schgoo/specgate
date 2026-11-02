@@ -3,7 +3,12 @@
 //! A `specgate` command leases each package it builds. A second command that
 //! needs the same package fails at once. Each test binding therefore belongs
 //! to exactly one lane, and no two lanes may resolve to the same `sources`
-//! directory. A test may use only the bindings of its own lane.
+//! directory.
+//!
+//! These tests do not check which binding a test loads. The author of a test
+//! that runs a `specgate` command must use only the bindings of the lane that
+//! runs the test. The replay lane runs the tests whose names contain
+//! `replay::tests`. The other Rust lane runs the remaining tests.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
