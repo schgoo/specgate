@@ -49,13 +49,45 @@ enum Node {
 pub(super) fn build(bundle: &ReplayBundle, candidate: &Candidate, links: &[Link]) -> Result<Bindings, Error> {
     let reference: Json = serde_json::from_slice(&bundle.registry_document)
         .map_err(|error| format!("failed to inspect linked reference registry: {error}"))?;
-    let schema = serde_json::to_string(&candidate.schema).map_err(|error| format!("failed to encode candidate type schema: {error}"))?;
-    let encoded = specgate_ctsc::registry::encode(
-        "urn:ctsc:registry:replay-types",
-        "0.1.0",
-        specgate_ctsc::registry::Schema::new(&schema),
-    )
-    .map_err(|error| format!("failed to normalize candidate declarations: {error}"))?;
+    let operations = bundle
+        .registry
+        .operations
+        .iter()
+        .filter(|operation| {
+            links.iter().any(|link| {
+                link.component_id.as_str() == operation.component_id().as_str() && link.operation_name.as_str() == operation.name().as_str()
+            }) || bundle
+                .observed_operations
+                .iter()
+                .any(|observed| observed.component_id == *operation.component_id() && observed.operation_name == *operation.name())
+        })
+        .collect::<Vec<_>>();
+    let mut schemas = BTreeMap::from([(candidate.schema.component.to_string(), candidate.schema.clone())]);
+    for operation in &operations {
+        let component = operation.component_id().as_str();
+        if !schemas.contains_key(component) {
+            let schema = match candidate.metadata().schemas.get(component) {
+                Some(schema) => schema.clone(),
+                None => specgate_discovery::schema::normalize_registry(
+                    &candidate.metadata().raw_registry,
+                    candidate.metadata().language,
+                    component,
+                )
+                .map_err(|error| format!("failed to normalize candidate component '{component}': {error}"))?,
+            };
+            schemas.insert(component.to_string(), schema);
+        }
+    }
+    let documents = schemas
+        .values()
+        .map(|schema| {
+            serde_json::to_string(schema)
+                .map(specgate_ctsc::registry::Schema::new)
+                .map_err(|error| format!("failed to encode candidate type schema: {error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let encoded = specgate_ctsc::registry::encode_many("urn:ctsc:registry:replay-types", "0.1.0", documents)
+        .map_err(|error| format!("failed to normalize candidate declarations: {error}"))?;
     let actual: Json =
         serde_json::from_str(&encoded.registry_json).map_err(|error| format!("failed to inspect candidate declarations: {error}"))?;
     let mut builder = Builder {
@@ -64,23 +96,12 @@ pub(super) fn build(bundle: &ReplayBundle, candidate: &Candidate, links: &[Link]
         bindings: Bindings::default(),
         visited: BTreeMap::new(),
     };
-    for operation in &bundle.registry.operations {
+    for operation in operations {
         let component = operation.component_id().as_str();
         let name = operation.name().as_str();
-        if !links
-            .iter()
-            .any(|link| link.component_id.as_str() == component && link.operation_name.as_str() == name)
-            && !bundle
-                .observed_operations
-                .iter()
-                .any(|observed| observed.component_id.as_str() == component && observed.operation_name.as_str() == name)
-        {
-            continue;
-        }
         let found = component_member(&actual, component, "operations", name)
             .ok_or_else(|| format!("candidate is missing operation '{component}::{name}'"))?;
-        let normalized = candidate
-            .schema
+        let normalized = schemas[component]
             .operations
             .iter()
             .find(|operation| operation.name.as_str() == name)
@@ -324,18 +345,12 @@ impl Bindings {
         let mut captures = captures.to_vec();
         for capture in &mut captures {
             for operation in &mut capture.operations {
-                let binding = self
-                    .operations
-                    .iter()
-                    .find(|binding| {
-                        binding.component == operation.component_id.as_str() && binding.name == operation.operation_name.as_str()
-                    })
-                    .ok_or_else(|| {
-                        format!(
-                            "candidate capture has no checked binding for '{}::{}'",
-                            operation.component_id, operation.operation_name
-                        )
-                    })?;
+                let Some(binding) = self.operations.iter().find(|binding| {
+                    binding.component == operation.component_id.as_str() && binding.name == operation.operation_name.as_str()
+                }) else {
+                    // Candidate-only calls remain observable; linked validation still checks their values.
+                    continue;
+                };
                 for (name, value) in &mut operation.inputs {
                     if let Some(id) = binding.inputs.get(name) {
                         *value = self.at(*id, value, binding, &format!("input '{name}'"))?;

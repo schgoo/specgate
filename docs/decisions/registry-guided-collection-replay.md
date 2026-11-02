@@ -109,6 +109,17 @@ CTSC encoding. Apply the bindings to captured inputs, results, and declared
 error payloads, including nested observed operations. Continue to invoke only
 top-level reference operations.
 
+Resolve each observed operation in its owning component's candidate schema,
+including operations nested across component boundaries. Do not select an
+operation by name alone.
+
+Candidate-only operations have no binding from an observed reference call.
+Keep their native values and validate them against the reference registry.
+Valid extra calls remain in the published trace so comparison can report a
+behavioral mismatch. Undeclared operations and invalid values still fail
+before publication. Value-conversion failures are publication failures and
+retain their diagnostic cause.
+
 For example, map pairs become entry records, while ordered sets remain arrays.
 Use the existing trace encodings from [Trace section 8](../ctsc/trace.md#8-values).
 Keep the reference registry bytes and digest unchanged.

@@ -62,7 +62,10 @@ internal static class CollectionContractResolver
             "System.Collections.Generic.ISet`1",
             "System.Collections.Generic.IReadOnlySet`1",
             "System.Collections.Immutable.IImmutableSet`1").Length > 0;
-        bool ordered = Matches(contracts,
+        bool sortedSet = Family(type,
+            "System.Collections.Generic.SortedSet`1",
+            "System.Collections.Immutable.ImmutableSortedSet`1");
+        bool ordered = !sortedSet && (Matches(contracts,
             "System.Collections.Generic.IList`1",
             "System.Collections.Generic.IReadOnlyList`1",
             "System.Linq.IOrderedEnumerable`1",
@@ -75,7 +78,7 @@ internal static class CollectionContractResolver
                 "System.Collections.Generic.Stack`1",
                 "System.Collections.Concurrent.ConcurrentQueue`1",
                 "System.Collections.Concurrent.ConcurrentStack`1",
-                "System.Linq.OrderedParallelQuery`1");
+                "System.Linq.OrderedParallelQuery`1"));
         ShapeConstructor name = (ordered, unique) switch
         {
             (true, false) => ShapeConstructor.List,

@@ -151,6 +151,7 @@ fn map_named(name: &str, args: &[RustType], type_names: &[&str]) -> SpecType {
 pub fn builtin(name: impl AsRef<str>) -> bool {
     let name = name.as_ref();
     runtime_value(name)
+        || constructor(name)
         || matches!(
             name,
             "String"
@@ -175,29 +176,35 @@ pub fn builtin(name: impl AsRef<str>) -> bool {
                 | "usize"
                 | "f32"
                 | "f64"
-                | "Option"
-                | "optional"
-                | "Vec"
-                | "List"
-                | "list"
-                | "Bag"
-                | "Tuple"
-                | "tuple"
-                | "OrderedSet"
-                | "OrderedMap"
-                | "Result"
-                | "HashMap"
-                | "BTreeMap"
-                | "Map"
-                | "map"
-                | "HashSet"
-                | "BTreeSet"
-                | "Set"
-                | "set"
                 | "()"
                 | "unit"
                 | "value"
         )
+}
+
+pub(crate) fn constructor(name: &str) -> bool {
+    matches!(
+        name,
+        "Option"
+            | "optional"
+            | "Vec"
+            | "List"
+            | "list"
+            | "Bag"
+            | "Tuple"
+            | "tuple"
+            | "OrderedSet"
+            | "OrderedMap"
+            | "Result"
+            | "HashMap"
+            | "BTreeMap"
+            | "Map"
+            | "map"
+            | "HashSet"
+            | "BTreeSet"
+            | "Set"
+            | "set"
+    )
 }
 
 /// Test whether a name denotes the runtime semantic `Value` type.
@@ -258,7 +265,7 @@ fn append_refs(t: &RustType, out: &mut Vec<String>) {
             }
         }
         RustType::Named { name, args } => {
-            if !builtin(name) {
+            if !builtin(name) || (args.is_empty() && constructor(name)) {
                 out.push(name.clone());
             }
             for a in args {
@@ -454,6 +461,26 @@ mod tests {
     fn normalizes_references() {
         assert_eq!(map("&'a [crate::model::Order]", ["Order"]).unwrap().ref_string(), "List<Order>");
         assert_eq!(collect_refs("&'a Option<crate::model::Order>"), ["Order"]);
+    }
+
+    #[test]
+    fn bare_constructor_names_remain_named_references() {
+        for name in [
+            "Bag",
+            "Tuple",
+            "OrderedSet",
+            "OrderedMap",
+            "List",
+            "Vec",
+            "Option",
+            "Result",
+            "Map",
+            "Set",
+        ] {
+            assert_eq!(collect_refs(name), [name], "{name}");
+            assert_eq!(collect_refs(format!("Vec<{name}>")), [name], "{name}");
+            assert!(collect_refs(format!("{name}<i32>")).is_empty(), "{name}");
+        }
     }
 
     #[test]

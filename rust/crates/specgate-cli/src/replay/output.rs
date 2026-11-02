@@ -51,7 +51,10 @@ pub(super) fn write(
             plan.registry_digest.as_str(),
         ),
     );
-    let captures = plan.value_bindings.convert(captures.as_ref())?;
+    let captures = plan
+        .value_bindings
+        .convert(captures.as_ref())
+        .map_err(|error| Error::wrap(ErrorKind::Publication, "candidate capture conversion failed", error))?;
     let encoded = encode_otlp(&captures, &metadata)?;
     let validation = specgate_ctsc::validation::bytes::validate_linked(
         specgate_ctsc::validation::DocumentBytes::new(out, encoded.otlp_json.as_bytes()),

@@ -402,6 +402,31 @@ fn transitive_dependencies() {
 }
 
 #[test]
+fn bare_collection_names_keep_component_dependencies() {
+    for name in ["Bag", "Tuple", "OrderedSet", "OrderedMap", "List", "Option"] {
+        let document = format!(
+            r#"{{"operations":[{{
+                "name":"store","module_path":"fixture","fn_name":"store","is_setup":false,
+                "is_async":false,"is_method":false,"is_public":true,"return_type":"()",
+                "fills":"","params":[["value","Vec<{name}>"]],"component":"fixture.app"
+            }}],"types":[{{
+                "name":"{name}","module_path":"fixture","kind":"struct","component":"fixture.shared",
+                "fields":[["id","i32"]],"variants":[]
+            }}]}}"#
+        );
+        let registry = registry(&document);
+        let schema = normalize_registry(&registry, crate::binding::Language::Rust, "fixture.app").unwrap();
+        assert_eq!(schema.dependencies, ["fixture.shared"], "{name}");
+        assert_eq!(
+            schema.operations[0].inputs[0].ty.as_str(),
+            format!("List<fixture.shared::{name}>"),
+            "{name}"
+        );
+        assert_eq!(schema.dependency_types[0].types[0].name.as_str(), name);
+    }
+}
+
+#[test]
 fn invalid_dependencies() {
     let cycle = registry(
         r#"{"operations":[{

@@ -60,7 +60,7 @@ the C# reference on Rust.
 | --- | --- | --- |
 | `collection`, ordered, nonunique (list) | `Vec<T>`, `&[T]` | `T[]`, list contracts, `IOrderedEnumerable<T>`, queue/stack/linked-list families |
 | `collection`, unordered, nonunique (bag) | No automatic native mapping | `IEnumerable<T>`, `ICollection<T>`, `IReadOnlyCollection<T>` unless a stronger contract applies |
-| `collection`, unordered, unique (set) | `HashSet<T>`, `BTreeSet<T>` | Set contracts, including immutable/frozen sets and `SortedSet<T>` |
+| `collection`, unordered, unique (set) | `HashSet<T>`, `BTreeSet<T>` | Set contracts, including immutable/frozen sets, `SortedSet<T>`, and `ImmutableSortedSet<T>` |
 | `collection`, ordered, unique (ordered set) | No automatic native mapping | A type declaring both ordered and set contracts |
 | `map`, unordered | `HashMap<K, V>`, `BTreeMap<K, V>` | Generic dictionary/read-only dictionary contracts, including sorted, concurrent, immutable, and frozen dictionaries |
 | `map`, ordered | No automatic native mapping | Generic `OrderedDictionary<K, V>` |
@@ -79,6 +79,9 @@ its base families, and its closed generic interfaces. A non-generic
 `FooEnumerable : IEnumerable<Foo>` works, including inherited and explicitly
 implemented contracts; `Foo` must itself have a supported representation.
 Conflicting element or dictionary key/value contracts are rejected.
+Self-referential and mutually recursive enumerable declarations are rejected
+when their element expansion revisits a type without a named record boundary.
+For example, `Nodes : IEnumerable<Nodes>` has no finite inline collection type.
 Generic argument nullability follows the annotated operation/member declaration,
 including reordered arguments and nested collection expressions. Nullable
 annotations written only on an inherited interface/base declaration are not
@@ -103,6 +106,7 @@ Optional keys keep their declared optional type. Duplicate lookup keys under
 recursive CTSC equality fail capture instead of merging groups.
 Sorted sets/maps keep their existing unordered semantics, matching Rust
 `BTreeSet`/`BTreeMap`: `ordered` is equality by position, not sortedness.
+This includes `ImmutableSortedSet<T>`, despite its read-only list interface.
 Priority queues project `UnorderedItems` as a bag of `(element, priority)`
 tuples without dequeuing. Ordered maps, and maps with non-string keys, use
 arrays of key/value entry records. Unordered string-keyed maps use OTLP
@@ -206,6 +210,10 @@ candidate record; unrelated named records cannot bind by shape alone.
 
 Replay converts actual captured inputs, results, and errors to the reference
 encoding, then validates the whole candidate trace before publication.
+Bindings for observed nested operations use the operation's owning component,
+including calls to other components. Candidate-only calls keep their native
+values. If they satisfy the reference registry, they are published for
+comparison to report the extra behavior; undeclared or ill-typed calls reject.
 Vector-backed unique collections and pair-vector maps reject duplicate semantic
 items or keys, including candidate results; nothing is deduplicated or
 overwritten. The reference registry bytes and digest do not change.
@@ -230,6 +238,9 @@ for specialization syntax and completion-channel restrictions.
   `[SpecEvent("wire_name")]`.
 - C# parameter names can be set with `[SpecInput("name")]`. Variant and type
   names can be set the same way with `[SpecEvent("name")]`.
+- A bare annotated Rust type named `Bag`, `Tuple`, or another collection
+  constructor remains a named type, including across component dependencies.
+  Constructor applications such as `Bag<i32>` keep their collection meaning.
 - To compare a Rust and a C# implementation, both must publish the same names
   and kinds. Check with `specgate discover` on each side.
 

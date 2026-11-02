@@ -100,6 +100,7 @@ public class DiscoveryRunnerTests
     [InlineData(typeof(System.Collections.Immutable.ImmutableStack<int>), "List<i32>")]
     [InlineData(typeof(System.Collections.Frozen.FrozenSet<int>), "set<i32>")]
     [InlineData(typeof(System.Collections.Immutable.ImmutableHashSet<int>), "set<i32>")]
+    [InlineData(typeof(System.Collections.Immutable.ImmutableSortedSet<int>), "set<i32>")]
     [InlineData(typeof(SortedSet<int>), "set<i32>")]
     [InlineData(typeof(IReadOnlyDictionary<string, int>), "map<string, i32>")]
     [InlineData(typeof(System.Collections.Concurrent.ConcurrentDictionary<string, int>), "map<string, i32>")]
@@ -129,6 +130,22 @@ public class DiscoveryRunnerTests
     }
 
     private interface IOrderedUnique : IReadOnlyList<int>, IReadOnlySet<int>;
+
+    [Theory]
+    [InlineData(typeof(IRecursiveEnumerable))]
+    [InlineData(typeof(IMutuallyRecursiveEnumerable))]
+    public void RecursiveEnumerableDeclarationsAreRejectedAndDoNotPoisonLaterMapping(Type type)
+    {
+        SemanticTypes types = new(new NullabilityInfoContext());
+        InvalidOperationException error = Assert.Throws<InvalidOperationException>(() => types.Render(type, null));
+        Assert.Contains("recursive collection declaration", error.Message);
+        Assert.Equal("List<List<i32>>", types.Render(typeof(List<List<int>>), null));
+        Assert.Equal("Reading", types.Render(typeof(Fixtures.Reading), null));
+    }
+
+    private interface IRecursiveEnumerable : IEnumerable<IRecursiveEnumerable>;
+    private interface IMutuallyRecursiveEnumerable : IEnumerable<IRecursiveLink>;
+    private interface IRecursiveLink : IEnumerable<IMutuallyRecursiveEnumerable>;
 
     private class ExplicitGrouping<TItem, TKey> : IGrouping<TKey, TItem>
     {

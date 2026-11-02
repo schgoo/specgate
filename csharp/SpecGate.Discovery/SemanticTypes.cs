@@ -18,6 +18,7 @@ internal sealed class SemanticTypes
     private readonly NullabilityInfoContext nullability;
     private readonly List<Type> queue = [];
     private readonly HashSet<Type> seen = [];
+    private readonly HashSet<Type> rendering = [];
     private bool collecting = true;
 
     internal SemanticTypes(NullabilityInfoContext nullability) => this.nullability = nullability;
@@ -45,6 +46,23 @@ internal sealed class SemanticTypes
 
     /// <summary>Renders <paramref name="type"/> including its nullable annotation.</summary>
     internal string Render(Type type, NullabilityInfo? info)
+    {
+        if (!rendering.Add(type))
+        {
+            throw new InvalidOperationException(
+                $"specgate: recursive collection declaration '{type}' has no finite CTSC representation.");
+        }
+        try
+        {
+            return RenderType(type, info);
+        }
+        finally
+        {
+            rendering.Remove(type);
+        }
+    }
+
+    private string RenderType(Type type, NullabilityInfo? info)
     {
         Type? underlying = Nullable.GetUnderlyingType(type);
         if (underlying is not null)

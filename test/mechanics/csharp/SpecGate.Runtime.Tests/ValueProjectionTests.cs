@@ -508,6 +508,30 @@ public sealed class ValueProjectionTests
         Assert.Equal(CaptureRejection.AmbiguousDeclaration, error.Rejection);
     }
 
+    [Theory]
+    [InlineData(typeof(IRecursiveEnumerable))]
+    [InlineData(typeof(IMutuallyRecursiveEnumerable))]
+    public void RuntimeRejectsRecursiveEnumerableDeclarations(Type type)
+    {
+        SpecGateCaptureException error = Assert.Throws<SpecGateCaptureException>(
+            () => SemanticType.Map(type, NullableFlagReader.Oblivious));
+        Assert.Equal(CaptureRejection.UnsupportedType, error.Rejection);
+        Assert.Contains("recursive collection declaration", error.Message);
+        Assert.Equal(SemanticKind.List, SemanticType.Map(typeof(List<List<int>>), NullableFlagReader.Oblivious).Kind);
+    }
+
+    [Fact]
+    public void RuntimeKeepsImmutableSortedSetsUnorderedAndUnique()
+    {
+        SemanticType type = SemanticType.Map(
+            typeof(System.Collections.Immutable.ImmutableSortedSet<int>), NullableFlagReader.Oblivious);
+        Assert.Equal(SemanticKind.Set, type.Kind);
+    }
+
+    private interface IRecursiveEnumerable : IEnumerable<IRecursiveEnumerable>;
+    private interface IMutuallyRecursiveEnumerable : IEnumerable<IRecursiveLink>;
+    private interface IRecursiveLink : IEnumerable<IMutuallyRecursiveEnumerable>;
+
     private interface IConflictingGrouping : IGrouping<int, int>, IGrouping<string, int>;
     private interface IConflictingLookup : ILookup<int, int>, ILookup<string, int>;
 

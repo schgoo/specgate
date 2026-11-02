@@ -89,6 +89,12 @@ Rust record in the same component with exact `key` and `items` fields and
 supported field types. Named reference types cannot bind to inline candidates.
 See [storage bindings](${PLUGIN_DIR}/docs/reference/value-mapping.md#candidate-replay-values).
 
+Replay calls only top-level reference operations. It checks observed nested
+operations in their owning component, including calls to other components.
+Valid extra candidate calls remain in the output and produce comparison
+mismatches. Undeclared calls or values that violate the reference registry
+still fail before publication.
+
 Each Cargo target used for generated discovery/replay hooks must declare
 `specgate::spec_component!("…")` at its own crate root, including binary-unit
 and integration-test targets. Explicit operation component arguments do not

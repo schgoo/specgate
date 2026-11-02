@@ -100,25 +100,44 @@ internal sealed class SemanticType : IEquatable<SemanticType>
     /// a non-generic value type contributes none, and <c>T?</c> contributes only
     /// whatever <c>T</c> contributes.
     /// </remarks>
-    internal static SemanticType Map(Type type, NullableFlagReader flags)
+    internal static SemanticType Map(Type type, NullableFlagReader flags) => Map(type, flags, []);
+
+    private static SemanticType Map(Type type, NullableFlagReader flags, HashSet<Type> mapping)
+    {
+        if (!mapping.Add(type))
+        {
+            throw new SpecGateCaptureException(CaptureRejection.UnsupportedType,
+                $"specgate: recursive collection declaration '{type}' has no finite CTSC representation.");
+        }
+        try
+        {
+            return MapType(type, flags, mapping);
+        }
+        finally
+        {
+            mapping.Remove(type);
+        }
+    }
+
+    private static SemanticType MapType(Type type, NullableFlagReader flags, HashSet<Type> mapping)
     {
         Type? underlying = Nullable.GetUnderlyingType(type);
         if (underlying is not null)
         {
-            return Of(SemanticKind.Option, Map(underlying, flags));
+            return Of(SemanticKind.Option, Map(underlying, flags, mapping));
         }
 
         if (type.IsArray)
         {
             bool nullable = flags.NextIsNullable();
-            SemanticType list = Of(SemanticKind.List, Map(type.GetElementType()!, flags));
+            SemanticType list = Of(SemanticKind.List, Map(type.GetElementType()!, flags, mapping));
             return nullable ? Of(SemanticKind.Option, list) : list;
         }
 
         if (!type.IsValueType)
         {
             bool nullable = flags.NextIsNullable();
-            SemanticType core = MapCore(type, flags);
+            SemanticType core = MapCore(type, flags, mapping);
             return nullable ? Of(SemanticKind.Option, core) : core;
         }
 
@@ -127,10 +146,10 @@ internal sealed class SemanticType : IEquatable<SemanticType>
             flags.Next();
         }
 
-        return MapCore(type, flags);
+        return MapCore(type, flags, mapping);
     }
 
-    private static SemanticType MapCore(Type type, NullableFlagReader flags)
+    private static SemanticType MapCore(Type type, NullableFlagReader flags, HashSet<Type> mapping)
     {
         if (type == typeof(bool))
         {
@@ -194,17 +213,17 @@ internal sealed class SemanticType : IEquatable<SemanticType>
 
             if (definition == typeof(Option<>))
             {
-                return Of(SemanticKind.Option, Map(arguments[0], flags));
+                return Of(SemanticKind.Option, Map(arguments[0], flags, mapping));
             }
 
             if (definition == typeof(Result<,>))
             {
-                return Of(SemanticKind.Result, Map(arguments[0], flags), Map(arguments[1], flags));
+                return Of(SemanticKind.Result, Map(arguments[0], flags, mapping), Map(arguments[1], flags, mapping));
             }
 
             if (definition == typeof(ValueTuple<,>))
             {
-                return Of(SemanticKind.Tuple, Map(arguments[0], flags), Map(arguments[1], flags));
+                return Of(SemanticKind.Tuple, Map(arguments[0], flags, mapping), Map(arguments[1], flags, mapping));
             }
         }
 
@@ -232,8 +251,8 @@ internal sealed class SemanticType : IEquatable<SemanticType>
                 flags.Skip(arguments[index]);
             }
             SemanticType[] mapped = GenericTypeBinding.Bind(collection, type,
-                index => Map(arguments[index], readers[index].Fork()),
-                argument => Map(argument, NullableFlagReader.Oblivious),
+                index => Map(arguments[index], readers[index].Fork(), mapping),
+                argument => Map(argument, NullableFlagReader.Oblivious, mapping),
                 Construct);
             return collection.Describe(mapped, type, Construct);
         }
