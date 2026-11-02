@@ -10,7 +10,7 @@ $previousBuildDir = $env:CARGO_BUILD_BUILD_DIR
 $previousTargetDir = $env:CARGO_TARGET_DIR
 $previousThreads = $env:RUST_TEST_THREADS
 $callerLocation = (Get-Location).Path
-$state = @{ Scratch = $null; Calls = 0; Failure = ''; CallerBuildDir = $null; Shard = 'all'; BuildDir = 'scratch'; Owner = 'all' }
+$state = @{ Scratch = $null; Calls = 0; Failure = ''; CallerBuildDir = $null; Shard = 'all'; BuildDir = 'scratch' }
 
 function cargo {
     $state.Calls++
@@ -29,8 +29,6 @@ function cargo {
         all = @()
         replay = @('replay::tests')
         other = @('--skip', 'replay::tests')
-        isolated = @('--skip', 'replay::tests', '--skip', 'shared_fixture::')
-        'shared-fixture' = @('--skip', 'replay::tests', 'shared_fixture::')
     }[$state.Shard]
     if ($args.Count -ne $expected.Count -or ($args -join "`n") -cne ($expected -join "`n")) {
         throw "Runner changed Cargo workspace, target, doctest, or serial execution selection: $($args -join ' | ')"
@@ -60,7 +58,6 @@ function Assert-Run {
     $state.CallerBuildDir = $CallerBuildDir
     $state.Shard = if ($Shard -eq '') { 'all' } else { $Shard }
     $state.BuildDir = if ($BuildDir -eq '') { 'scratch' } else { $BuildDir }
-    $state.Owner = if ($state.Shard -in 'isolated', 'shared-fixture') { 'other' } else { $state.Shard }
     $wrapperArguments = @{}
     if ($Shard -ne '') { $wrapperArguments.Shard = $Shard }
     if ($BuildDir -ne '') { $wrapperArguments.BuildDir = $BuildDir }
@@ -87,7 +84,7 @@ function Assert-Run {
             throw 'Runner did not clean scratch.'
         }
     }
-    elseif ($state.Scratch -cne (Join-Path $fixture "rust/target/rust-test/$($state.Owner)") -or
+    elseif ($state.Scratch -cne (Join-Path $fixture "rust/target/rust-test/$($state.Shard)") -or
         -not (Test-Path -LiteralPath (Join-Path $state.Scratch 'build/intermediate'))) {
         throw 'Runner did not keep the shard-owned persistent build directory.'
     }
@@ -105,8 +102,6 @@ try {
     Assert-Run -Shard all
     Assert-Run -Shard replay
     Assert-Run -Shard other
-    Assert-Run -Shard isolated
-    Assert-Run -Shard shared-fixture
     $rejected = $false
     try { & $wrapper -Shard unknown } catch { $rejected = $true }
     if (-not $rejected) { throw 'Runner accepted an unknown shard.' }
@@ -120,13 +115,6 @@ try {
     Assert-Run -Shard other -BuildDir persistent
     if ($state.Scratch -ceq $replayPersistent) {
         throw 'Persistent shards shared one build directory.'
-    }
-    $otherPersistent = $state.Scratch
-    foreach ($split in 'isolated', 'shared-fixture') {
-        Assert-Run -Shard $split -BuildDir persistent
-        if ($state.Scratch -cne $otherPersistent) {
-            throw "The $split shard did not reuse the other shard build directory."
-        }
     }
     Assert-Run -BuildDir persistent
     Assert-Run -BuildDir persistent -Failure exit -ExpectedError 'Rust workspace tests failed.'

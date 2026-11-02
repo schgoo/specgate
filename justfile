@@ -163,9 +163,9 @@ format-check-cs:
     dotnet format SpecGate.slnx --verify-no-changes
 
 # CI runs check-static and the four check-rust-*/check-ctsc-* lanes as parallel
-# jobs. check runs the same coverage in four local lanes. check-rust runs both
-# Rust test shards in one Cargo invocation, so generated runners share one build
-# directory.
+# jobs. check runs check-static, check-ctsc, and the two Rust shards as four
+# parallel local lanes. check-rust runs both Rust test shards in one Cargo
+# invocation, so generated runners share one build directory.
 check-rust: build rust-test test-workspace
 
 check-rust-replay: (rust-test "replay")
@@ -185,14 +185,14 @@ check-ctsc-goldens: ctsc-goldens-check
 # lane runs them again.
 check-prepare: build discovery-tool weaver-tool dotnet-build
 
-# ctsc-smoke, ctsc-goldens, and the shared-fixture Rust tests lease the same
-# fixture package, and a busy lease fails immediately. On one machine they run
-# in sequence in one lane. The isolated shard and shared-fixture make other.
-check-local-rust-isolated: build (rust-test "isolated") test-workspace
+# Scratch Rust test runs share rust/target, so parallel local lanes require
+# persistent shard directories.
+check-mode:
+    @echo '{{ if rust_test_build_dir == "persistent" { "Rust test shards use persistent build directories." } else { error("just check runs lanes in parallel and requires SPECGATE_RUST_TEST_BUILD_DIR=persistent, not " + rust_test_build_dir) } }}'
 
-check-local-fixture: check-ctsc-smoke check-ctsc-goldens (rust-test "shared-fixture")
-
+# Each lane leases only its own fixture packages, because a busy package lease
+# fails at once. rust/crates/specgate-cli/tests/check_lanes.rs enforces this.
 [parallel]
-check-lanes: check-rust-replay check-local-rust-isolated check-static check-local-fixture
+check-lanes: check-rust-replay check-rust-other check-static check-ctsc
 
-check: check-prepare check-lanes
+check: check-mode check-prepare check-lanes

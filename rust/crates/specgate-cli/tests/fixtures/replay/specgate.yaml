@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../../../../binding-schema.json
+# The replay lane owns this copy of fixture.cli.replay so that it never leases
+# the packages that the other local check lanes build at the same time.
+components:
+  fixture.cli.replay:
+    implementations:
+      rust:
+        language: rust
+        sources: rust
+        tests:
+          projects: [rust/Cargo.toml]
+      csharp:
+        language: csharp
+        sources: csharp
+        tests:
+          projects: [csharp/SpecGate.CliFixtures.csproj]

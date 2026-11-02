@@ -15,8 +15,9 @@ rather than change it, follow `docs/guides/README.md`.
 ## Gate
 
 **Always run `just check` from the repository root before committing.** It
-runs the gate lanes in parallel. Put a Rust test that runs a SpecGate command on
-a `test/behavior` fixture package in a `shared_fixture` module.
+runs the gate lanes in parallel. A Rust test that runs a SpecGate command uses
+only the fixture bindings of its own lane, as listed in
+`rust/crates/specgate-cli/tests/check_lanes.rs`.
 
 Useful focused recipes:
 

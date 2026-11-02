@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=../../../../binding-schema.json
+# cross_language_divergence owns this copy of the CTSC fixture package so that
+# it never leases the package that the golden harness builds at the same time.
+components:
+  fixture.stateless_add:
+    implementations:
+      rust:
+        language: rust
+        sources: divergence
+        tests:
+          projects: [divergence/Cargo.toml]
+  fixture.result_err:
+    implementations:
+      rust:
+        language: rust
+        sources: divergence
+        tests:
+          projects: [divergence/Cargo.toml]
+  fixture.checkpoint_inline:
+    implementations:
+      rust:
+        language: rust
+        sources: divergence
+        tests:
+          projects: [divergence/Cargo.toml]

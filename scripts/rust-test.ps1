@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('all', 'replay', 'other', 'isolated', 'shared-fixture')]
+    [ValidateSet('all', 'replay', 'other')]
     [string]$Shard = 'all',
     [ValidateSet('scratch', 'persistent')]
     [string]$BuildDir = 'scratch'
@@ -11,11 +11,9 @@ $root = Split-Path -Parent $PSScriptRoot
 # Scratch builds every child from empty and shares the workspace target. Each
 # persistent shard owns its target and child build directories, so concurrent
 # shards never relink executables that another lane runs, and later runs reuse
-# warm child builds. The local isolated and shared-fixture shards split other,
-# so they reuse its directories.
+# warm child builds.
 $scratch = if ($BuildDir -eq 'persistent') {
-    $owner = if ($Shard -in 'isolated', 'shared-fixture') { 'other' } else { $Shard }
-    Join-Path $root "rust/target/rust-test/$owner"
+    Join-Path $root "rust/target/rust-test/$Shard"
 }
 else {
     Join-Path $root "rust/target/rust-test-$([guid]::NewGuid().ToString('N'))"
@@ -29,9 +27,6 @@ try {
         # Finish each test before another can rebuild its generated executables.
         # just ctsc-goldens-harness-tests owns the golden harness cases. CI shards
         # split on one libtest name filter, so replay and other are complements.
-        # Tests in a shared_fixture module lease a golden-matrix fixture package
-        # that ctsc-smoke and ctsc-goldens also lease. Local parallel checks run
-        # them after those lanes; isolated and shared-fixture split other.
         $cargoArguments = @('test', '--workspace')
         if ($BuildDir -eq 'persistent') {
             $cargoArguments += '--target-dir', (Join-Path $scratch 'target')
@@ -44,8 +39,6 @@ try {
         switch ($Shard) {
             'replay' { $cargoArguments += 'replay::tests' }
             'other' { $cargoArguments += '--skip', 'replay::tests' }
-            'isolated' { $cargoArguments += '--skip', 'replay::tests', '--skip', 'shared_fixture::' }
-            'shared-fixture' { $cargoArguments += '--skip', 'replay::tests', 'shared_fixture::' }
         }
         & cargo @cargoArguments
         if ($LASTEXITCODE -ne 0) {

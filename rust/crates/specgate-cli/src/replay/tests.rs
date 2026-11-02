@@ -112,6 +112,12 @@ mod cases {
             .join("specgate.yaml")
     }
 
+    /// The replay lane's own copy of `fixture.cli.replay`, so this lane never
+    /// leases a package that a parallel local check lane builds.
+    fn replay_binding() -> PathBuf {
+        fixture_binding().with_file_name("replay").join("specgate.yaml")
+    }
+
     fn output_dir(label: impl AsRef<str>) -> PathBuf {
         repo_root()
             .join("rust")
@@ -124,8 +130,34 @@ mod cases {
         display.strip_prefix(r"\\?\").unwrap_or(&display).replace('\\', "/")
     }
 
-    fn configured_candidate() -> (tempfile::TempDir, PathBuf) {
-        let cache = tempfile::Builder::new().prefix("candidate-cargo-config-").tempdir().unwrap();
+    /// A test package directory at a stable path.
+    ///
+    /// Generated runner namespaces hash the candidate manifest path. A stable
+    /// path keeps one namespace per test, so persistent build directories do
+    /// not grow on each run.
+    struct StableDir(PathBuf);
+
+    impl StableDir {
+        fn new(label: &str) -> Self {
+            let path = repo_root().join("rust").join("target").join("specgate-test-packages").join(label);
+            let _ = std::fs::remove_dir_all(&path);
+            std::fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for StableDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn configured_candidate(label: &str) -> (StableDir, PathBuf) {
+        let cache = StableDir::new(label);
         let candidate = cache.path().join("candidate");
         let proof = cache.path().join("specgate-config-proof");
         std::fs::create_dir_all(candidate.join(".cargo")).unwrap();
@@ -201,18 +233,16 @@ mod cases {
         std::fs::create_dir_all(second_output.parent().unwrap()).unwrap();
 
         let captured = capture(
-            CaptureRequest::builder(CapturePaths {
-                binding: fixture_binding(),
-            })
-            .component(ComponentId::from("fixture.cli.replay"))
-            .out(&capture_dir)
-            .implementation("rust")
-            .build()
-            .unwrap(),
+            CaptureRequest::builder(CapturePaths { binding: replay_binding() })
+                .component(ComponentId::from("fixture.cli.replay"))
+                .out(&capture_dir)
+                .implementation("rust")
+                .build()
+                .unwrap(),
         );
         assert!(captured.is_ok(), "capture failed: {captured:?}");
         let component = specgate_discovery::identity::ComponentId::from("fixture.cli.replay");
-        let candidates = Candidates::discover(fixture_binding(), Some(&"rust".into()), std::slice::from_ref(&component))
+        let candidates = Candidates::discover(replay_binding(), Some(&"rust".into()), std::slice::from_ref(&component))
             .expect("focused candidate discovery");
         let package_root = candidates.package_root.clone();
         let system = CommandEnvironment::real();
@@ -319,14 +349,14 @@ mod cases {
 
         let unsupported_output = output_dir("unsupported-language").with_extension("otlp.json");
         assert!(matches!(
-            replay(Request::builder(Paths::new(&capture_dir, fixture_binding())).out(&unsupported_output).implementation("csharp").build().unwrap()),
+            replay(Request::builder(Paths::new(&capture_dir, replay_binding())).out(&unsupported_output).implementation("csharp").build().unwrap()),
             Err(error) if error.to_string().contains("only Rust candidates") && error.to_string().contains("csharp")
         ));
         assert!(!unsupported_output.exists());
 
         let ambiguous_output = output_dir("ambiguous-implementation").with_extension("otlp.json");
         let ambiguous = replay(
-            Request::builder(Paths::new(&capture_dir, fixture_binding()))
+            Request::builder(Paths::new(&capture_dir, replay_binding()))
                 .out(&ambiguous_output)
                 .build()
                 .unwrap(),
@@ -550,7 +580,7 @@ mod cases {
 
     #[test]
     fn candidate_config() {
-        let (cache, binding) = configured_candidate();
+        let (cache, binding) = configured_candidate("candidate-config");
         let capture_dir = cache.path().join("capture");
         let replay_output = cache.path().join("candidate.otlp.json");
         let captured = capture(
@@ -633,7 +663,7 @@ mod cases {
 
     #[test]
     fn external_runner_preserves_dev_executor_features() {
-        let (cache, binding) = configured_candidate();
+        let (cache, binding) = configured_candidate("external-runner");
         let candidate = cache.path().join("candidate");
         let manifest_path = candidate.join("Cargo.toml");
         let manifest = format!(

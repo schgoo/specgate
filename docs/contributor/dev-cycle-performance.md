@@ -484,45 +484,64 @@ identical.
 
 ### Local lanes
 
-`just check` runs `check-prepare` and then four lanes in parallel:
+`just check` runs `check-mode`, then `check-prepare`, and then four lanes in
+parallel:
 
 | Local lane | Runs |
 |---|---|
-| `check-prepare` (first, alone) | `build`, `discovery-tool`, `weaver-tool`, `dotnet-build` |
+| `check-mode` (first, alone) | rejects `SPECGATE_RUST_TEST_BUILD_DIR=scratch` |
+| `check-prepare` (second, alone) | `build`, `discovery-tool`, `weaver-tool`, `dotnet-build` |
 | `check-rust-replay` | `rust-test replay` |
-| `check-local-rust-isolated` | `build`, `rust-test isolated`, `test-workspace` |
+| `check-rust-other` | `build`, `rust-test other`, `test-workspace` |
 | `check-static` | as above |
-| `check-local-fixture` | `check-ctsc-smoke`, `check-ctsc-goldens`, `rust-test shared-fixture`, in sequence |
+| `check-ctsc` | `check-ctsc-smoke`, then `check-ctsc-goldens` |
 
 `check-prepare` runs first because the C# tool builds and `dotnet-build` share
-project `obj` directories. The `isolated` and `shared-fixture` shards split
-`other`. `shared-fixture` runs only tests in a `shared_fixture` module. These
-tests run a SpecGate command on a `test/behavior` fixture package. The CLI
-package lease does not wait: a second command on a leased package fails. The
-smoke, the golden matrix, and these tests lease the same fixture packages, so
-`check-local-fixture` runs them in sequence. In CI, each lane has its own
-runner, so the leases cannot collide.
+project `obj` directories. A SpecGate command leases each package that it
+builds. The lease does not wait: a second command on a leased package fails.
+Thus each lane builds only its own fixture packages:
+
+- `check-rust-replay` uses `tests/fixtures/replay/specgate.yaml` and the
+  `*-replay`, `typed-async`, and `typed-integration` bindings of
+  `specgate-cli`. The replay copy points its Rust `[lib] path` and its C#
+  `Compile` item at the `tests/fixtures/rust` and `tests/fixtures/csharp`
+  sources, so the package names and the sources stay the same.
+- `check-rust-other` uses the remaining `specgate-cli` fixture bindings.
+  `cross_language_divergence` uses `tests/fixtures/divergence.yaml`, which
+  points at the `test/behavior` fixture library through a separate package.
+- `check-ctsc` uses `test/behavior/specgate.yaml`. Smoke and the golden matrix
+  lease the same packages, so they run in sequence.
+
+`rust/crates/specgate-cli/tests/check_lanes.rs` lists the bindings of each lane.
+It fails when a fixture binding has no lane or when two lanes resolve to the
+same `sources` directory. In CI, each lane has its own runner, so the leases
+cannot collide.
 
 Locally, `rust-test` uses `-BuildDir persistent`. Each shard owns
-`rust/target/rust-test/<shard>/target` and `.../build`; `isolated` and
-`shared-fixture` share the `other` directories. Cargo puts `[env]` values in
-its fingerprints, so a stable directory per shard keeps warm builds valid. A
-separate target directory per shard also prevents one lane from relinking
-`specgate.exe` while another lane runs it. CI sets
-`SPECGATE_RUST_TEST_BUILD_DIR=scratch`, which keeps the fresh per-run child
-build directory.
+`rust/target/rust-test/<shard>/target` and `.../build`, where `<shard>` is
+`all`, `replay`, or `other`. Cargo puts `[env]` values in its fingerprints, so
+a stable directory per shard keeps warm builds valid. A separate target
+directory per shard also prevents one lane from relinking `specgate.exe` while
+another lane runs it. Generated build namespaces hash the candidate manifest
+path, so tests that write a candidate package use a stable directory under
+`rust/target/specgate-test-packages` or the Cargo test temporary directory, not
+a new temporary path. CI sets `SPECGATE_RUST_TEST_BUILD_DIR=scratch`, which
+keeps the fresh per-run child build directory. Scratch shards share
+`rust/target`, so `just check` rejects scratch mode.
 
 Measured on one Windows workstation with warm Cargo and golden caches:
 
 | `just check` | Wall time |
 |---|---:|
 | Lanes in sequence, scratch `rust-test` | 1,731 s |
-| Parallel lanes, persistent `rust-test` | 1,140 s |
+| Parallel lanes, shared fixture packages (earlier layout) | 1,140 s |
+| Parallel lanes, per-lane fixture packages | 821 s |
 
-In the parallel run, `check-local-fixture` was the critical path: smoke 449 s,
-golden matrix 579 s, and `shared-fixture` 57 s. In sequence, smoke took 113 s
-and the golden matrix 513 s; the parallel lanes compete for CPU. The persistent
-directories used 9.1 GB (`replay`) and 6.4 GB (`other`).
+In the 821 s run, `check-ctsc` was the critical path: smoke 236 s, the golden
+harness unit tests 100 s, and the golden matrix 438 s. The Rust shards finished
+after about 370 s. In the earlier layout, one lane ran smoke, the golden
+matrix, and the shared-fixture tests in sequence. The persistent directories
+used 11.1 GB (`replay`) and 8.8 GB (`other`).
 
 Three-lane runs
 [40951562582](https://github.com/schgoo/specgate/actions/runs/40951562582)

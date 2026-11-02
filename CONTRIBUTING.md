@@ -107,19 +107,26 @@ Run from the repository root:
 just check
 ```
 
-`just check` runs the same recipes as CI. First, `check-prepare` builds the
+`just check` runs the same recipes as CI. First, `check-mode` makes sure that
+`SPECGATE_RUST_TEST_BUILD_DIR` is `persistent`. Then `check-prepare` builds the
 Rust workspaces, the C# tools, and the solution one time, because these builds
 share project `obj` directories. Then `check-lanes` runs four local lanes in
 parallel:
 
 - `check-rust-replay`: the `replay` Rust test shard.
-- `check-local-rust-isolated`: build, the `isolated` Rust test shard, and the
-  `test` workspace.
+- `check-rust-other`: build, the `other` Rust test shard, and the `test`
+  workspace.
 - `check-static`: clippy, formatting, licenses, READMEs, docs, and the C#
   build/tests/format.
-- `check-local-fixture`: `check-ctsc-smoke`, `check-ctsc-goldens`, and then the
-  `shared-fixture` Rust test shard. These recipes lease the same golden-matrix
-  fixture package, and a busy lease fails immediately, so they run in sequence.
+- `check-ctsc`: `check-ctsc-smoke` and then `check-ctsc-goldens`. Both lease the
+  golden-matrix fixture packages, so they run in sequence.
+
+A SpecGate command leases each package that it builds, and a busy lease fails
+at once. Thus each lane uses only its own fixture packages. A Rust test that
+runs a SpecGate command uses only the bindings that
+`rust/crates/specgate-cli/tests/check_lanes.rs` assigns to its lane. That test
+fails when a fixture binding has no lane or when two lanes resolve to the same
+`sources` directory.
 
 CI runs five parallel jobs on each OS: `check-rust-replay`, `check-rust-other`,
 `check-static`, `check-ctsc-smoke`, and `check-ctsc-goldens`. `check-rust` and
@@ -139,13 +146,16 @@ dependencies without overlapping rebuilds and execution of generated binaries.
 `SPECGATE_RUST_TEST_BUILD_DIR` selects where the directories are:
 
 - `persistent` (local default): each shard owns a target directory and a child
-  build directory under `rust/target/rust-test/<shard>`. The wrapper keeps
+  build directory under `rust/target/rust-test/<shard>`, where `<shard>` is
+  `all`, `replay`, or `other`. `just test` and `just check-rust` use `all`;
+  `just check` uses `replay` and `other`. The wrapper keeps
   them, so later runs reuse warm builds. Parallel shards do not relink an
   executable that another lane runs. Each shard directory can use 6–10 GB;
   `cargo clean` in `rust` removes them.
 - `scratch` (CI): workspace compilation uses the normal target directory and
   reuses artifacts from `just build`. Child intermediates go to a fresh
-  `rust/target/rust-test-<guid>/build`, and the wrapper removes it.
+  `rust/target/rust-test-<guid>/build`, and the wrapper removes it. Parallel
+  shards would share `rust/target`, so `just check` rejects this mode.
 
 Cargo still selects the full workspace's unit, binary, integration, and doctests;
 threads explicitly created inside tests are unaffected. Wrapper regressions run
@@ -157,10 +167,7 @@ scratch.
 which `just ctsc-goldens-harness-tests` runs in parallel. `just rust-test
 replay` runs only tests whose names contain `replay::tests`, and
 `just rust-test other` runs the rest; CI uses these complementary shards, while
-the default `all` runs both in one Cargo invocation. The local `isolated` and
-`shared-fixture` shards split `other`: `shared-fixture` runs only tests in a
-`shared_fixture` module. Put a Rust test in a `shared_fixture` module when it
-runs a SpecGate command on a `test/behavior` fixture package. `just test` includes
+the default `all` runs both in one Cargo invocation. `just test` includes
 that recipe and also runs the separate `test` workspace with its original Cargo
 command and parallelism.
 
