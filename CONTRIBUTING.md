@@ -152,14 +152,19 @@ dependencies without overlapping rebuilds and execution of generated binaries.
   `all`, `replay`, or `other`. `just test` and `just check-rust` use `all`;
   `just check` uses `replay` and `other`. The wrapper keeps
   them, so later runs reuse warm builds. Parallel shards do not relink an
-  executable that another lane runs. Each shard directory used 8.8–11.1 GB in
-  the measured runs. A contributor who runs both `just test` and `just check`
-  keeps `all`, `replay`, and `other`, which is about 30 GB. `cargo clean` in
-  `rust` removes them.
+  executable that another lane runs. The wrapper builds test binaries and child
+  builds with `line-tables-only` debug info, and child builds without
+  incremental state. After cold runs, the `replay` and `other` shard
+  directories used 4.80 GB and 3.71 GB. Each warm run adds new artifacts, and
+  Cargo does not remove old ones, so the directories grow over time. A
+  contributor who runs both `just test` and `just check` keeps `all`,
+  `replay`, and `other`. `cargo clean` in `rust` removes them.
 - `scratch` (CI): workspace compilation uses the normal target directory and
-  reuses artifacts from `just build`. Child intermediates go to a fresh
-  `rust/target/rust-test-<guid>/build`, and the wrapper removes it. Parallel
-  shards would share `rust/target`, so `just check` rejects this mode.
+  its profile, and reuses artifacts from `just build`. Child intermediates go
+  to a fresh `rust/target/rust-test-<guid>/build`, and the wrapper removes it.
+  Child builds use the same debug info and incremental settings as in
+  `persistent`. Parallel shards would share `rust/target`, so `just check`
+  rejects this mode.
 
 Cargo still selects the full workspace's unit, binary, integration, and doctests;
 threads explicitly created inside tests are unaffected. Wrapper regressions run
