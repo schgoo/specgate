@@ -211,9 +211,14 @@ candidate record; unrelated named records cannot bind by shape alone.
 Replay converts actual captured inputs, results, and errors to the reference
 encoding, then validates the whole candidate trace before publication.
 Bindings for observed nested operations use the operation's owning component,
-including calls to other components. Candidate-only calls keep their native
-values. If they satisfy the reference registry, they are published for
-comparison to report the extra behavior; undeclared or ill-typed calls reject.
+including calls to other components. Missing observed-only candidate operations
+do not block planning; comparison reports the missing calls. Every top-level
+operation selected for invocation must still have a compatible declaration.
+Candidate-only calls declared in the reference registry use the same checked
+storage conversions, including pair-vector maps. Incompatible unused declarations
+do not block planning, but capturing such an operation fails publication.
+Valid extra calls are published for comparison to report the extra behavior;
+undeclared or ill-typed calls reject.
 Vector-backed unique collections and pair-vector maps reject duplicate semantic
 items or keys, including candidate results; nothing is deduplicated or
 overwritten. The reference registry bytes and digest do not change.

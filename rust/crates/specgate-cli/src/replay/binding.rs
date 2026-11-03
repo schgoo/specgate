@@ -1,6 +1,6 @@
 //! Checked reference-to-storage bindings and conversion of actual capture values.
 
-use super::{BTreeMap, Candidate, Capture, Error, Link, ReplayBundle, failure};
+use super::{BTreeMap, Candidate, Capture, Error, Link, ReplayBundle, Schema, failure};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
 use specgate::__rt::{Completion, Value};
@@ -9,6 +9,14 @@ use specgate::__rt::{Completion, Value};
 pub(crate) struct Bindings {
     nodes: Vec<Node>,
     operations: Vec<Operation>,
+    rejections: Vec<Rejection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct Rejection {
+    component: String,
+    name: String,
+    diagnostic: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -49,59 +57,117 @@ enum Node {
 pub(super) fn build(bundle: &ReplayBundle, candidate: &Candidate, links: &[Link]) -> Result<Bindings, Error> {
     let reference: Json = serde_json::from_slice(&bundle.registry_document)
         .map_err(|error| format!("failed to inspect linked reference registry: {error}"))?;
-    let operations = bundle
-        .registry
-        .operations
-        .iter()
-        .filter(|operation| {
-            links.iter().any(|link| {
-                link.component_id.as_str() == operation.component_id().as_str() && link.operation_name.as_str() == operation.name().as_str()
-            }) || bundle
-                .observed_operations
-                .iter()
-                .any(|observed| observed.component_id == *operation.component_id() && observed.operation_name == *operation.name())
-        })
-        .collect::<Vec<_>>();
-    let mut schemas = BTreeMap::from([(candidate.schema.component.to_string(), candidate.schema.clone())]);
-    for operation in &operations {
-        let component = operation.component_id().as_str();
-        if !schemas.contains_key(component) {
-            let schema = match candidate.metadata().schemas.get(component) {
-                Some(schema) => schema.clone(),
-                None => specgate_discovery::schema::normalize_registry(
-                    &candidate.metadata().raw_registry,
-                    candidate.metadata().language,
-                    component,
-                )
-                .map_err(|error| format!("failed to normalize candidate component '{component}': {error}"))?,
-            };
-            schemas.insert(component.to_string(), schema);
-        }
-    }
-    let documents = schemas
-        .values()
-        .map(|schema| {
-            serde_json::to_string(schema)
-                .map(specgate_ctsc::registry::Schema::new)
-                .map_err(|error| format!("failed to encode candidate type schema: {error}"))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let encoded = specgate_ctsc::registry::encode_many("urn:ctsc:registry:replay-types", "0.1.0", documents)
-        .map_err(|error| format!("failed to normalize candidate declarations: {error}"))?;
-    let actual: Json =
-        serde_json::from_str(&encoded.registry_json).map_err(|error| format!("failed to inspect candidate declarations: {error}"))?;
-    let mut builder = Builder {
-        reference: &reference,
-        candidate: &actual,
-        bindings: Bindings::default(),
-        visited: BTreeMap::new(),
-    };
-    for operation in operations {
+    let mut components = BTreeMap::<_, Vec<_>>::new();
+    for operation in &bundle.registry.operations {
         let component = operation.component_id().as_str();
         let name = operation.name().as_str();
-        let found = component_member(&actual, component, "operations", name)
+        let linked = links
+            .iter()
+            .any(|link| link.component_id.as_str() == component && link.operation_name.as_str() == name);
+        if !declares(candidate, component, name) {
+            if linked {
+                return failure(format!("candidate is missing operation '{component}::{name}'"));
+            }
+            continue;
+        }
+        let observed = bundle
+            .observed_operations
+            .iter()
+            .any(|observed| observed.component_id == *operation.component_id() && observed.operation_name == *operation.name());
+        components.entry(component).or_default().push((operation, linked || observed));
+    }
+    let mut bindings = Bindings::default();
+    for (component, operations) in components {
+        let (schema, actual) = match candidate_registry(candidate, component) {
+            Ok(declarations) => declarations,
+            Err(error) => {
+                if operations.iter().any(|(_, required)| *required) {
+                    return Err(error);
+                }
+                for (operation, _) in operations {
+                    bindings.reject(component, operation.name().as_str(), &error);
+                }
+                continue;
+            }
+        };
+        for (operation, required) in operations {
+            let checkpoint = bindings.nodes.len();
+            let mut builder = Builder {
+                reference: &reference,
+                candidate: &actual,
+                bindings,
+                visited: BTreeMap::new(),
+            };
+            let result = builder.operation(operation, &schema);
+            bindings = builder.bindings;
+            if let Err(error) = result {
+                if required {
+                    return Err(error);
+                }
+                // Unused declarations do not block planning or leave partial conversion nodes.
+                bindings.nodes.truncate(checkpoint);
+                bindings.reject(component, operation.name().as_str(), &error);
+            }
+        }
+    }
+    Ok(bindings)
+}
+
+fn declares(candidate: &Candidate, component: &str, name: &str) -> bool {
+    let schema = if candidate.schema.component.as_str() == component {
+        Some(&candidate.schema)
+    } else {
+        candidate.metadata().schemas.get(component)
+    };
+    match schema {
+        Some(schema) => schema.operations.iter().any(|operation| operation.name.as_str() == name),
+        None => candidate
+            .metadata()
+            .raw_registry
+            .ops
+            .iter()
+            .any(|operation| !operation.is_setup && operation.component.as_str() == component && operation.name.as_str() == name),
+    }
+}
+
+fn candidate_registry(candidate: &Candidate, component: &str) -> Result<(Schema, Json), Error> {
+    let schema = if candidate.schema.component.as_str() == component {
+        candidate.schema.clone()
+    } else {
+        match candidate.metadata().schemas.get(component) {
+            Some(schema) => schema.clone(),
+            None => {
+                specgate_discovery::schema::normalize_registry(&candidate.metadata().raw_registry, candidate.metadata().language, component)
+                    .map_err(|error| format!("failed to normalize candidate component '{component}': {error}"))?
+            }
+        }
+    };
+    let document = serde_json::to_string(&schema).map_err(|error| format!("failed to encode candidate type schema: {error}"))?;
+    let encoded = specgate_ctsc::registry::encode(
+        "urn:ctsc:registry:replay-types",
+        "0.1.0",
+        specgate_ctsc::registry::Schema::new(document),
+    )
+    .map_err(|error| format!("failed to normalize candidate declarations: {error}"))?;
+    let actual =
+        serde_json::from_str(&encoded.registry_json).map_err(|error| format!("failed to inspect candidate declarations: {error}"))?;
+    Ok((schema, actual))
+}
+
+struct Builder<'a> {
+    reference: &'a Json,
+    candidate: &'a Json,
+    bindings: Bindings,
+    visited: BTreeMap<(String, String, String), usize>,
+}
+
+impl Builder<'_> {
+    fn operation(&mut self, operation: &specgate_ctsc::replay::model::RegistryOp, schema: &Schema) -> Result<(), Error> {
+        let component = operation.component_id().as_str();
+        let name = operation.name().as_str();
+        let found = component_member(self.candidate, component, "operations", name)
             .ok_or_else(|| format!("candidate is missing operation '{component}::{name}'"))?;
-        let normalized = schemas[component]
+        let normalized = schema
             .operations
             .iter()
             .find(|operation| operation.name.as_str() == name)
@@ -115,14 +181,14 @@ pub(super) fn build(bundle: &ReplayBundle, candidate: &Candidate, links: &[Link]
                 .and_then(|inputs| inputs.iter().find(|field| field["name"] == input.name))
                 .ok_or_else(|| format!("candidate operation '{component}::{name}' input names differ"))?;
             let expected = serde_json::to_value(&input.value_type).expect("replay types serialize");
-            let id = builder.bind(&expected, &native["type"], component, &format!("{name} input '{}'", input.name))?;
+            let id = self.bind(&expected, &native["type"], component, &format!("{name} input '{}'", input.name))?;
             inputs.insert(input.name.clone(), id);
         }
         let result = operation
             .output()
             .map(|ty| {
                 let expected = serde_json::to_value(ty).expect("replay types serialize");
-                builder.bind(&expected, &found["outcomes"]["result"], component, &format!("{name} output"))
+                self.bind(&expected, &found["outcomes"]["result"], component, &format!("{name} output"))
             })
             .transpose()?;
         let mut errors = BTreeMap::new();
@@ -136,30 +202,21 @@ pub(super) fn build(bundle: &ReplayBundle, candidate: &Candidate, links: &[Link]
                 .as_ref()
                 .map(|ty| {
                     let expected = serde_json::to_value(ty).expect("replay types serialize");
-                    builder.bind(&expected, &native["type"], component, &format!("{name} error '{}'", error.name))
+                    self.bind(&expected, &native["type"], component, &format!("{name} error '{}'", error.name))
                 })
                 .transpose()?;
             errors.insert(error.name.clone(), payload);
         }
-        builder.bindings.operations.push(Operation {
+        self.bindings.operations.push(Operation {
             component: component.to_string(),
             name: name.to_string(),
             inputs,
             result,
             errors,
         });
+        Ok(())
     }
-    Ok(builder.bindings)
-}
 
-struct Builder<'a> {
-    reference: &'a Json,
-    candidate: &'a Json,
-    bindings: Bindings,
-    visited: BTreeMap<(String, String, String), usize>,
-}
-
-impl Builder<'_> {
     fn bind(&mut self, expected: &Json, actual: &Json, component: &str, location: &str) -> Result<usize, Error> {
         let key = (component.to_string(), expected.to_string(), actual.to_string());
         if let Some(id) = self.visited.get(&key) {
@@ -341,14 +398,30 @@ fn mismatch<T>(expected: &Json, actual: &Json, component: &str, location: &str) 
 }
 
 impl Bindings {
+    fn reject(&mut self, component: &str, name: &str, error: &Error) {
+        self.rejections.push(Rejection {
+            component: component.to_string(),
+            name: name.to_string(),
+            diagnostic: error.to_string(),
+        });
+    }
+
     pub(super) fn convert(&self, captures: &[Capture]) -> Result<Vec<Capture>, Error> {
         let mut captures = captures.to_vec();
         for capture in &mut captures {
             for operation in &mut capture.operations {
+                if let Some(rejection) = self.rejections.iter().find(|rejection| {
+                    rejection.component == operation.component_id.as_str() && rejection.name == operation.operation_name.as_str()
+                }) {
+                    return failure(format!(
+                        "candidate operation '{}::{}' has no compatible storage binding: {}",
+                        rejection.component, rejection.name, rejection.diagnostic
+                    ));
+                }
                 let Some(binding) = self.operations.iter().find(|binding| {
                     binding.component == operation.component_id.as_str() && binding.name == operation.operation_name.as_str()
                 }) else {
-                    // Candidate-only calls remain observable; linked validation still checks their values.
+                    // Calls without a candidate declaration still undergo linked validation.
                     continue;
                 };
                 for (name, value) in &mut operation.inputs {

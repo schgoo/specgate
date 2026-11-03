@@ -8,6 +8,7 @@
 |---|---|
 | Checked Rust storage bindings, tuple/map inputs, recursive outcome conversion | Approved 2026-11-02 |
 | Key-preserving C# lookup/grouping projection and bounded inline-record matching | Approved 2026-11-02 |
+| Operation-owner lookup, missing observed-only calls, checked extra calls, and publication-stage conversion failures | Approved 2026-11-03 by @schgoo |
 | Preserve recorded bag input order instead of current sorting | Not approved; keep current sorting |
 
 ## Context
@@ -111,14 +112,21 @@ top-level reference operations.
 
 Resolve each observed operation in its owning component's candidate schema,
 including operations nested across component boundaries. Do not select an
-operation by name alone.
+operation by name alone. An absent observed-only candidate operation does not
+need a binding: comparison reports the missing nested call. Every top-level
+operation selected for invocation must still have a compatible declaration.
 
-Candidate-only operations have no binding from an observed reference call.
-Keep their native values and validate them against the reference registry.
+Build checked storage bindings for every candidate operation also declared in
+the reference registry, including operations absent from the reference trace.
+Extra calls use the same input, result, and error conversions as observed calls.
+An incompatible unused declaration must not block planning; retain its
+diagnostic and reject it only if the candidate captures that operation.
+Declared observed operations still require compatible bindings during planning.
+
 Valid extra calls remain in the published trace so comparison can report a
-behavioral mismatch. Undeclared operations and invalid values still fail
-before publication. Value-conversion failures are publication failures and
-retain their diagnostic cause.
+behavioral mismatch. Operations absent from the reference registry and invalid
+values still fail before publication. Value-conversion failures are publication
+failures and retain their diagnostic cause.
 
 For example, map pairs become entry records, while ordered sets remain arrays.
 Use the existing trace encodings from [Trace section 8](../ctsc/trace.md#8-values).

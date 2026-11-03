@@ -273,7 +273,7 @@ pub(crate) struct Plan {
     pub(crate) registry_digest: RegistryDigest,
     /// Exact linked registry document for validating structured candidate outcomes.
     pub(crate) registry_document: Vec<u8>,
-    /// Checked storage conversions for invoked and observed operations.
+    /// Checked storage conversions for candidate operations declared in the reference registry.
     pub(crate) value_bindings: binding::Bindings,
     /// Resolved candidate target.
     pub(crate) target: Target,

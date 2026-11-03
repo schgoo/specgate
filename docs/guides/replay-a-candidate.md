@@ -41,7 +41,7 @@ The reference may be Rust or C#; the candidate must be Rust.
 ### What replay does
 
 1. Validates the bundle and decodes its scenarios.
-2. Discovers the candidate and links each captured operation to exactly one
+2. Discovers the candidate and links each top-level reference operation to exactly one
    candidate operation by component, operation name, and input names, checking
    that types are compatible.
 3. Generates a runner or a selected Cargo test-target entry that calls the
@@ -72,10 +72,14 @@ supported field types. Named reference types cannot bind to inline candidates.
 See [storage bindings](../reference/value-mapping.md#candidate-replay-values).
 
 Replay calls only top-level reference operations. It checks observed nested
-operations in their owning component, including calls to other components.
-Valid extra candidate calls remain in the output and produce comparison
-mismatches. Undeclared calls or values that violate the reference registry
-still fail before publication.
+operations declared by the candidate in their owning component, including calls
+to other components. Missing observed-only calls do not block planning;
+comparison reports the missing behavior. Extra candidate calls declared in the
+reference registry use the same checked storage conversions, including
+pair-vector maps. Incompatible unused declarations do not block planning, but
+capturing such a call fails publication. Valid extra calls remain in the output
+and produce comparison mismatches. Undeclared calls or values that violate the
+reference registry still fail before publication.
 
 Each Cargo target used for generated discovery/replay hooks must declare
 `specgate::spec_component!("…")` at its own crate root, including binary-unit

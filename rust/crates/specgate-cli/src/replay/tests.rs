@@ -987,6 +987,126 @@ mod cases {
             error.to_string().contains("inner") && error.to_string().contains("type mismatch"),
             "{error}"
         );
+        Arc::make_mut(&mut candidate.inner).raw_registry.ops[1].return_type = "UnknownNativeType".into();
+        let error = build_plan(&bundle, &candidate).unwrap_err();
+        assert!(error.to_string().contains("failed to normalize candidate"), "{error}");
+    }
+
+    #[test]
+    fn missing_observed_nested_calls_publish_and_compare_as_mismatches() {
+        use specgate::__rt::Value;
+        for foreign in [false, true] {
+            let (bundle, mut candidate, component) = nested_metadata(true, foreign);
+            Arc::make_mut(&mut candidate.inner)
+                .raw_registry
+                .ops
+                .retain(|operation| operation.name.as_str() != "inner");
+            candidate.schema.operations.retain(|operation| operation.name.as_str() != "inner");
+            let plan = build_plan(&bundle, &candidate).unwrap();
+            assert_eq!(plan.links.len(), 1);
+            let reference = captured_nested(&component, Value::Integer(2));
+            let actual = captured_values(Value::Integer(2), Value::Integer(5));
+            let report = compare_captures(&plan, &reference, &actual);
+            assert!(report.validation_failures.is_empty() && report.errors.is_empty(), "{report:#?}");
+            assert!(!report.mismatches.is_empty(), "{report:#?}");
+
+            let error = build_plan(&bundle, &without_operation(&candidate)).unwrap_err();
+            assert!(error.to_string().contains("missing operation"), "{error}");
+        }
+    }
+
+    #[test]
+    fn extra_candidate_pair_map_calls_convert_inputs_and_results_before_comparison() {
+        use specgate::__rt::Value;
+        for foreign in [false, true] {
+            for (ordered, key_type, key) in [
+                (false, "i32", Value::Integer(2)),
+                (true, "i32", Value::Integer(2)),
+                (true, "string", Value::String("key".to_string())),
+            ] {
+                let (mut bundle, mut candidate, component) = nested_metadata(false, foreign);
+                let ty: ReplayType = serde_json::from_value(serde_json::json!({
+                    "kind":"map", "ordered":ordered,
+                    "keys":{"kind":"primitive","name":key_type}, "values":{"kind":"primitive","name":"i32"}
+                }))
+                .unwrap();
+                let declaration = &bundle.registry.operations[1];
+                let mut inputs = declaration.inputs().to_vec();
+                inputs[0].value_type = ty.clone();
+                bundle.registry.operations[1] = replay_model::RegistryOp::builder(replay_model::OpDeps {
+                    component_id: declaration.component_id().clone(),
+                    name: declaration.name().clone(),
+                    inputs,
+                })
+                .output(ty.clone())
+                .build()
+                .unwrap();
+                let mut document: serde_json::Value = serde_json::from_slice(&bundle.registry_document).unwrap();
+                let owner = document["components"]
+                    .as_array_mut()
+                    .unwrap()
+                    .iter_mut()
+                    .find(|entry| entry["id"] == component)
+                    .unwrap();
+                let inner = owner["operations"]
+                    .as_array_mut()
+                    .unwrap()
+                    .iter_mut()
+                    .find(|entry| entry["name"] == "inner")
+                    .unwrap();
+                inner["inputs"][0]["type"] = serde_json::to_value(&ty).unwrap();
+                inner["outcomes"]["result"] = serde_json::to_value(&ty).unwrap();
+                set_registry_document(&mut bundle, &document);
+
+                let rust_key = if key_type == "string" { "String" } else { "i32" };
+                let raw_type = format!("Vec<({rust_key}, i32)>");
+                let raw = &mut Arc::make_mut(&mut candidate.inner).raw_registry.ops[1];
+                raw.params[0].ty = raw_type.clone().into();
+                raw.return_type = raw_type.into();
+                if !foreign {
+                    let storage = format!("List<Tuple<{key_type}, i32>>");
+                    candidate.schema.operations[1].inputs[0].ty = storage.clone().into();
+                    candidate.schema.operations[1].output = Some(storage.into());
+                }
+                let plan = build_plan(&bundle, &candidate).unwrap();
+                assert_eq!(plan.links.len(), 1);
+                let reference = captured_values(Value::Integer(2), Value::Integer(5));
+                let pairs = Value::List(vec![Value::List(vec![key, Value::Integer(5)])]);
+                let actual = captured_nested_result(&component, pairs.clone(), pairs);
+                let report = compare_captures(&plan, &reference, &actual);
+                assert!(report.validation_failures.is_empty() && report.errors.is_empty(), "{report:#?}");
+                assert!(!report.mismatches.is_empty(), "{report:#?}");
+            }
+        }
+    }
+
+    #[test]
+    fn unused_incompatible_declarations_fail_only_if_captured() {
+        use specgate::__rt::{ToNativeValue as _, Value};
+        for (foreign, output) in [(false, "i64"), (true, "i64"), (true, "UnknownNativeType")] {
+            let (bundle, mut candidate, component) = nested_metadata(false, foreign);
+            Arc::make_mut(&mut candidate.inner).raw_registry.ops[1].return_type = output.into();
+            if !foreign {
+                candidate.schema.operations[1].output = Some(output.into());
+            }
+            let plan = build_plan(&bundle, &candidate).expect("unused incompatible declarations must not block planning");
+            let reference = captured_values(Value::Integer(2), Value::Integer(5));
+            let report = compare_captures(&plan, &reference, &reference);
+            assert!(report.equivalent, "{report:#?}");
+            let actual = captured_nested(&component, Value::Integer(2));
+            let system = CommandEnvironment::fake();
+            system.seed_file("existing.otlp.json", b"original");
+            for path in ["missing.otlp.json", "existing.otlp.json"] {
+                let error = write(&plan, std::slice::from_ref(&actual), path, &system).unwrap_err();
+                assert!(error.to_string().contains("inner"), "{error}");
+                let Value::Map(fields) = error.to_native_value() else {
+                    panic!("expected structured error")
+                };
+                assert_eq!(fields["kind"], ErrorKind::Publication.to_native_value());
+            }
+            assert!(!system.exists("missing.otlp.json"));
+            assert_eq!(system.read("existing.otlp.json").unwrap(), b"original");
+        }
     }
 
     #[test]
@@ -1062,6 +1182,10 @@ mod cases {
     }
 
     fn captured_nested(component: &str, input: specgate::__rt::Value) -> Capture {
+        captured_nested_result(component, input, specgate::__rt::Value::Integer(5))
+    }
+
+    fn captured_nested_result(component: &str, input: specgate::__rt::Value, result: specgate::__rt::Value) -> Capture {
         use specgate::__rt::{self as capture, Value};
         let config = capture::Config::builder(capture::ConfigDeps {
             scenario_name: "add".into(),
@@ -1078,7 +1202,7 @@ mod cases {
         let mut inner = capture::begin_operation(component.into(), "inner".into()).unwrap();
         inner.input("a", input).unwrap();
         inner.input("b", Value::Integer(3)).unwrap();
-        inner.result(Value::Integer(5)).unwrap();
+        inner.result(result).unwrap();
         outer.result(Value::Integer(5)).unwrap();
         capture::finish().unwrap()
     }
