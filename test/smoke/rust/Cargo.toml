@@ -1,0 +1,18 @@
+# The smoke lane owns this copy of the CTSC fixture package so that it never
+# leases the package that the golden lane builds at the same time.
+[package]
+name = "specgate-ctsc-fixtures"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+path = "../../behavior/projects/rust/specgate-ctsc-fixtures/src/lib.rs"
+
+[dependencies]
+specgate = { path = "../../../rust/crates/specgate" }
+serde_yaml = "0.9"
+smol = "2"
+tokio = { version = "1", features = ["rt", "time"] }
+
+[workspace]

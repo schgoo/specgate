@@ -138,13 +138,16 @@ ctsc-smoke: ctsc-smoke-regressions
 ctsc-goldens-harness-tests:
     cd rust && cargo test -p specgate-cli --lib goldens::tests::cases
 
-ctsc-goldens-regressions: discovery-tool weaver-tool ctsc-goldens-harness-tests
+ctsc-goldens-regressions: discovery-tool weaver-tool
     pwsh -NoLogo -NoProfile -File scripts/ctsc-goldens-tests.ps1
 
-ctsc-goldens-update: ctsc-goldens-regressions
+ctsc-goldens-update: ctsc-goldens-harness-tests ctsc-goldens-regressions
     pwsh -NoLogo -NoProfile -File scripts/ctsc-goldens.ps1 -Mode Update
 
-ctsc-goldens-check: ctsc-goldens-regressions
+ctsc-goldens-check: ctsc-goldens-harness-tests ctsc-goldens-matrix-check
+
+# The golden lane runs only the matrix. The smoke lane runs the harness tests.
+ctsc-goldens-matrix-check: ctsc-goldens-regressions
     pwsh -NoLogo -NoProfile -File scripts/ctsc-goldens.ps1 -Mode Check
 
 package-smoke:
@@ -163,9 +166,9 @@ format-check-cs:
     dotnet format SpecGate.slnx --verify-no-changes
 
 # CI runs check-static and the four check-rust-*/check-ctsc-* lanes as parallel
-# jobs. check runs check-static, check-ctsc, and the two Rust shards as four
-# parallel local lanes. check-rust runs both Rust test shards in one Cargo
-# invocation, so generated runners share one build directory.
+# jobs. check runs the same five lanes in parallel. check-rust runs both Rust
+# test shards in one Cargo invocation, so generated runners share one build
+# directory.
 check-rust: build rust-test test-workspace
 
 check-rust-replay: (rust-test "replay")
@@ -176,9 +179,11 @@ check-static: clippy format-check deny readme-check docs-check dotnet-build dotn
 
 check-ctsc: check-ctsc-smoke check-ctsc-goldens
 
-check-ctsc-smoke: ctsc-validate ctsc-smoke
+# The harness tests run last. cargo test locks rust/target while the tests run,
+# and the golden lane builds its harness in rust/target when it starts.
+check-ctsc-smoke: ctsc-validate ctsc-smoke ctsc-goldens-harness-tests
 
-check-ctsc-goldens: ctsc-goldens-check
+check-ctsc-goldens: ctsc-goldens-matrix-check
 
 # The .NET tool and solution builds share project obj directories, so they run
 # once before the lanes start. just runs a recipe once per invocation, so no
@@ -193,6 +198,6 @@ check-mode:
 # Each lane leases only its own fixture packages, because a busy package lease
 # fails at once. rust/crates/specgate-cli/tests/check_lanes.rs enforces this.
 [parallel]
-check-lanes: check-rust-replay check-rust-other check-static check-ctsc
+check-lanes: check-rust-replay check-rust-other check-static check-ctsc-smoke check-ctsc-goldens
 
 check: check-mode check-prepare check-lanes

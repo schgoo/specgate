@@ -8,7 +8,8 @@ $secondCapture = Join-Path $scratch 'b/capture'
 $firstReplay = Join-Path $scratch 'a/candidate.otlp.json'
 $secondReplay = Join-Path $scratch 'b/candidate.otlp.json'
 $changedReplay = Join-Path $scratch 'candidate-changed.otlp.json'
-$binding = Join-Path $root 'test/behavior/specgate.yaml'
+# The smoke lane owns this package copy, so it runs beside the golden lane.
+$binding = Join-Path $root 'test/smoke/specgate.yaml'
 $manifest = Join-Path $root 'rust/Cargo.toml'
 $previousBuildDir = $env:CARGO_BUILD_BUILD_DIR
 

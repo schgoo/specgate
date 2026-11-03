@@ -36,7 +36,8 @@ const LANES: &[(&str, &[&str])] = &[
             "rust/crates/specgate-cli/tests/fixtures/csharp-capture/specgate-nunit.yaml",
         ],
     ),
-    ("check-ctsc", &["test/behavior/specgate.yaml"]),
+    ("check-ctsc-smoke", &["test/smoke/specgate.yaml"]),
+    ("check-ctsc-goldens", &["test/behavior/specgate.yaml"]),
 ];
 
 fn repo_root() -> PathBuf {

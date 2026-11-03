@@ -110,7 +110,7 @@ just check
 `just check` runs the same recipes as CI. First, `check-mode` makes sure that
 `SPECGATE_RUST_TEST_BUILD_DIR` is `persistent`. Then `check-prepare` builds the
 Rust workspaces, the C# tools, and the solution one time, because these builds
-share project `obj` directories. Then `check-lanes` runs four local lanes in
+share project `obj` directories. Then `check-lanes` runs five local lanes in
 parallel:
 
 - `check-rust-replay`: the `replay` Rust test shard.
@@ -118,8 +118,10 @@ parallel:
   workspace.
 - `check-static`: clippy, formatting, licenses, READMEs, docs, and the C#
   build/tests/format.
-- `check-ctsc`: `check-ctsc-smoke` and then `check-ctsc-goldens`. Both lease the
-  golden-matrix fixture packages, so they run in sequence.
+- `check-ctsc-smoke`: CTSC validation, smoke over its own fixture package
+  (`test/smoke/specgate.yaml`), and then the golden harness unit tests.
+- `check-ctsc-goldens`: the golden matrix. `ctsc-goldens-check` alone also
+  runs the harness unit tests.
 
 A SpecGate command leases each package that it builds, and a busy lease fails
 at once. Thus each lane uses only its own fixture packages. A Rust test that

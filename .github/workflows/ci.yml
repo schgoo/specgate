@@ -27,6 +27,17 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@v5
+      # Windows runs the gate from a ReFS Dev Drive copy of the checkout;
+      # Cargo targets, child builds, and golden caches are I/O bound.
+      - uses: samypr100/setup-dev-drive@v4
+        if: runner.os == 'Windows'
+        with:
+          drive-size: 40GB
+          workspace-copy: true
+          trusted-dev-drive: true
+      - name: Select gate workspace
+        shell: bash
+        run: echo "GATE_WORKSPACE=${DEV_DRIVE_WORKSPACE:-$GITHUB_WORKSPACE}" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
         id: toolchain
         with:
@@ -36,27 +47,29 @@ jobs:
         with:
           key: ${{ matrix.lane }}
           workspaces: |
-            rust
-            test
+            ${{ env.GATE_WORKSPACE }}/rust
+            ${{ env.GATE_WORKSPACE }}/test
       - name: Cache golden build intermediates
         if: matrix.lane == 'ctsc-goldens'
         uses: actions/cache@v4
         with:
-          path: ${{ env.SPECGATE_CTSC_GOLDENS_BUILD_CACHE }}
+          path: ${{ env.GATE_WORKSPACE }}/${{ env.SPECGATE_CTSC_GOLDENS_BUILD_CACHE }}
           key: ctsc-goldens-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cachekey }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/rust-toolchain.toml', '**/.cargo/config.toml', '**/.cargo/config', '!**/target/**', '!artifacts/**') }}
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 10.0.x
       - uses: extractions/setup-just@v3
-      - name: Install Rust gate tools
+      # cargo-deny is prebuilt; cargo-doc2readme falls back to cargo-binstall.
+      - uses: taiki-e/install-action@v2
         if: matrix.lane == 'static'
-        run: |
-          cargo install cargo-deny --version 0.19.0 --locked
-          cargo install cargo-doc2readme --locked
+        with:
+          tool: cargo-deny@0.19.0,cargo-doc2readme@0.7.3
       - name: Run gate lane
+        working-directory: ${{ env.GATE_WORKSPACE }}
         run: just --timestamp --verbose check-${{ matrix.lane }}
       - name: Packaged-context smoke
         if: matrix.os == 'ubuntu-latest' && matrix.lane == 'ctsc-smoke'
+        working-directory: ${{ env.GATE_WORKSPACE }}
         run: just package-smoke
 
   docs-impact:

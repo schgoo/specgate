@@ -462,7 +462,7 @@ The gate has three lane recipes:
 |---|---|
 | `check-rust` | `build`, `rust-test`, `test-workspace` |
 | `check-static` | `clippy`, `format-check`, `deny`, `readme-check`, `docs-check`, `dotnet-build`, `dotnet-test`, `format-check-cs` |
-| `check-ctsc` | `check-ctsc-smoke` (`ctsc-validate`, `ctsc-smoke`), `check-ctsc-goldens` (`ctsc-goldens-check`) |
+| `check-ctsc` | `check-ctsc-smoke` (`ctsc-validate`, `ctsc-smoke`, `ctsc-goldens-harness-tests`), `check-ctsc-goldens` (`ctsc-goldens-matrix-check`) |
 
 CI runs five jobs on each OS, each with its own Cargo cache key:
 
@@ -484,7 +484,7 @@ identical.
 
 ### Local lanes
 
-`just check` runs `check-mode`, then `check-prepare`, and then four lanes in
+`just check` runs `check-mode`, then `check-prepare`, and then five lanes in
 parallel:
 
 | Local lane | Runs |
@@ -494,7 +494,8 @@ parallel:
 | `check-rust-replay` | `rust-test replay` |
 | `check-rust-other` | `build`, `rust-test other`, `test-workspace` |
 | `check-static` | as above |
-| `check-ctsc` | `check-ctsc-smoke`, then `check-ctsc-goldens` |
+| `check-ctsc-smoke` | `ctsc-validate`, `ctsc-smoke`, then `ctsc-goldens-harness-tests` |
+| `check-ctsc-goldens` | `ctsc-goldens-matrix-check` |
 
 `check-prepare` runs first because the C# tool builds and `dotnet-build` share
 project `obj` directories. A SpecGate command leases each package that it
@@ -509,8 +510,12 @@ Thus each lane builds only its own fixture packages:
 - `check-rust-other` uses the remaining `specgate-cli` fixture bindings.
   `cross_language_divergence` uses `tests/fixtures/divergence.yaml`, which
   points at the `test/behavior` fixture library through a separate package.
-- `check-ctsc` uses `test/behavior/specgate.yaml`. Smoke and the golden matrix
-  lease the same packages, so they run in sequence.
+- `check-ctsc-smoke` uses `test/smoke/specgate.yaml`. Its package copy points
+  its Rust `[lib] path` at the `test/behavior` fixture library. The golden
+  harness unit tests use temporary fixtures and a discovery-only C# fixture,
+  and run last, because `cargo test` locks `rust/target` while tests run.
+- `check-ctsc-goldens` uses `test/behavior/specgate.yaml` and the golden
+  matrix packages.
 
 `rust/crates/specgate-cli/tests/check_lanes.rs` lists the bindings of each lane.
 It fails when a fixture binding has no lane or when two lanes resolve to the
@@ -538,6 +543,7 @@ Measured on one Windows workstation with warm Cargo and golden caches:
 | Lanes in sequence, scratch `rust-test` | 1,731 s |
 | Parallel lanes, shared fixture packages (earlier layout) | 1,140 s |
 | Parallel lanes, per-lane fixture packages | 821 s |
+| Five lanes, smoke package and harness tests off the golden lane | 759 s |
 
 In the 821 s run, `check-ctsc` was the critical path: smoke 236 s, the golden
 harness unit tests 100 s, and the golden matrix 438 s. The Rust shards finished
@@ -545,6 +551,11 @@ after about 370 s. In the earlier layout, one lane ran smoke, the golden
 matrix, and the shared-fixture tests in sequence. The persistent directories
 used 11.1 GB (`replay`) and 8.8 GB (`other`); about 5.5 GB of that was stale
 child build namespaces from earlier runs.
+
+In the 759 s run, the golden matrix started 55 s after `just check` and was
+still the critical path. Alone it takes about 438 s; with all five lanes
+competing for 8 cores it took 701 s. More local lanes will not help until the
+lanes use less CPU.
 
 The wrapper builds persistent shard test binaries and every child build with
 `line-tables-only` debug info, and child builds with `CARGO_INCREMENTAL=0`.

@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=../../binding-schema.json
+# The smoke lane owns this copy of fixture.stateless_add so that it never
+# leases the package that the golden lane builds at the same time.
+components:
+  fixture.stateless_add:
+    implementations:
+      rust:
+        language: rust
+        sources: rust
+        tests:
+          projects: [rust/Cargo.toml]
