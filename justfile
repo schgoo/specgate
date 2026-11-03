@@ -35,8 +35,12 @@ rust-test-regressions:
     pwsh -NoLogo -NoProfile -File scripts/rust-test-cargo-tests.ps1
 
 # shard: all, or one of the complementary CI shards replay and other.
+# Local runs keep a warm build directory for each shard. CI sets
+# SPECGATE_RUST_TEST_BUILD_DIR=scratch to build children from empty.
+rust_test_build_dir := env("SPECGATE_RUST_TEST_BUILD_DIR", "persistent")
+
 rust-test shard="all": discovery-tool weaver-tool rust-test-regressions
-    pwsh -NoLogo -NoProfile -File scripts/rust-test.ps1 -Shard {{shard}}
+    pwsh -NoLogo -NoProfile -File scripts/rust-test.ps1 -Shard {{shard}} -BuildDir {{rust_test_build_dir}}
 
 test: rust-test ctsc-goldens-harness-tests test-workspace
 
@@ -159,8 +163,9 @@ format-check-cs:
     dotnet format SpecGate.slnx --verify-no-changes
 
 # CI runs check-static and the four check-rust-*/check-ctsc-* lanes as parallel
-# jobs; check is their union. Locally check-rust runs both Rust test shards in
-# one Cargo invocation, so generated runners share one build directory.
+# jobs. check runs check-static, check-ctsc, and the two Rust shards as four
+# parallel local lanes. check-rust runs both Rust test shards in one Cargo
+# invocation, so generated runners share one build directory.
 check-rust: build rust-test test-workspace
 
 check-rust-replay: (rust-test "replay")
@@ -175,4 +180,19 @@ check-ctsc-smoke: ctsc-validate ctsc-smoke
 
 check-ctsc-goldens: ctsc-goldens-check
 
-check: check-rust check-static check-ctsc
+# The .NET tool and solution builds share project obj directories, so they run
+# once before the lanes start. just runs a recipe once per invocation, so no
+# lane runs them again.
+check-prepare: build discovery-tool weaver-tool dotnet-build
+
+# Scratch Rust test runs share rust/target, so parallel local lanes require
+# persistent shard directories.
+check-mode:
+    @echo '{{ if rust_test_build_dir == "persistent" { "Rust test shards use persistent build directories." } else { error("just check runs lanes in parallel and requires SPECGATE_RUST_TEST_BUILD_DIR=persistent, not " + rust_test_build_dir) } }}'
+
+# Each lane leases only its own fixture packages, because a busy package lease
+# fails at once. rust/crates/specgate-cli/tests/check_lanes.rs enforces this.
+[parallel]
+check-lanes: check-rust-replay check-rust-other check-static check-ctsc
+
+check: check-mode check-prepare check-lanes

@@ -14,6 +14,42 @@ fn succeeded(output: Output) -> Output {
     output
 }
 
+/// A test package directory at a stable path.
+///
+/// Generated build namespaces hash the package manifest path. A stable path
+/// keeps one namespace per test, so persistent build directories do not grow
+/// on each run.
+struct StableDir(PathBuf);
+
+impl StableDir {
+    fn new(label: &str) -> Self {
+        let path = test_packages_root().join(label);
+        let _ = fs::remove_dir_all(&path);
+        fs::create_dir_all(&path).unwrap();
+        Self(path)
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for StableDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+/// `rust/target/specgate-test-packages`, outside every per-run temporary directory.
+fn test_packages_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .unwrap()
+        .join("target")
+        .join("specgate-test-packages")
+}
+
 struct ReadOnlySources(Vec<(PathBuf, fs::Permissions)>);
 
 impl ReadOnlySources {
@@ -46,7 +82,7 @@ fn component_hook_tracks_entries_and_dispatch_without_source_injection() {
 }
 
 fn check_component_hook(crate_types: &[&str]) {
-    let cache = tempfile::tempdir().unwrap();
+    let cache = StableDir::new(&format!("component-hook-{}", crate_types.join("-")));
     let package = cache.path().join("candidate");
     let scratch = cache.path().join("generated");
     let source = package.join("src");
@@ -264,7 +300,7 @@ fn check_component_hook(crate_types: &[&str]) {
 
 #[test]
 fn generated_test_targets_require_local_components_even_with_explicit_specs() {
-    let cache = tempfile::tempdir().unwrap();
+    let cache = StableDir::new("missing-component");
     let package = cache.path().join("candidate");
     fs::create_dir_all(package.join("src")).unwrap();
     fs::create_dir_all(package.join("tests")).unwrap();

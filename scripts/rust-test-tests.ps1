@@ -10,14 +10,17 @@ $previousBuildDir = $env:CARGO_BUILD_BUILD_DIR
 $previousTargetDir = $env:CARGO_TARGET_DIR
 $previousThreads = $env:RUST_TEST_THREADS
 $callerLocation = (Get-Location).Path
-$state = @{ Scratch = $null; Calls = 0; Failure = ''; CallerBuildDir = $null; Shard = 'all' }
+$state = @{ Scratch = $null; Calls = 0; Failure = ''; CallerBuildDir = $null; Shard = 'all'; BuildDir = 'scratch' }
 
 function cargo {
     $state.Calls++
     $state.Scratch = $scratch
     $childBuildDir = ConvertTo-Json -InputObject (Join-Path $scratch 'build') -Compress
-    $expected = @(
-        'test', '--workspace',
+    $expected = @('test', '--workspace')
+    if ($state.BuildDir -eq 'persistent') {
+        $expected += '--target-dir', (Join-Path $scratch 'target')
+    }
+    $expected += @(
         '--config', "env.CARGO_BUILD_BUILD_DIR.value=$childBuildDir",
         '--config', 'env.CARGO_BUILD_BUILD_DIR.force=true',
         '--', '--test-threads=1', '--skip', 'goldens::tests::cases'
@@ -38,24 +41,30 @@ function cargo {
         throw 'Runner changed parent workspace compilation or caller target/thread settings.'
     }
     $buildDir = Join-Path $scratch 'build'
-    New-Item -ItemType Directory -Path $buildDir | Out-Null
+    New-Item -ItemType Directory -Force -Path $buildDir | Out-Null
     [IO.File]::WriteAllText((Join-Path $buildDir 'intermediate'), 'test')
     if ($state.Failure -eq 'start') { throw 'Cargo could not start.' }
     $global:LASTEXITCODE = if ($state.Failure -eq 'exit') { 23 } else { 0 }
 }
 
 function Assert-Run {
-    param([string]$Failure = '', [string]$ExpectedError = '', $CallerBuildDir = 'caller-build-dir', [string]$Shard = '')
+    param(
+        [string]$Failure = '', [string]$ExpectedError = '', $CallerBuildDir = 'caller-build-dir',
+        [string]$Shard = '', [string]$BuildDir = ''
+    )
 
     $state.Calls = 0
     $state.Failure = $Failure
     $state.CallerBuildDir = $CallerBuildDir
     $state.Shard = if ($Shard -eq '') { 'all' } else { $Shard }
-    $shardArguments = if ($Shard -eq '') { @{} } else { @{ Shard = $Shard } }
+    $state.BuildDir = if ($BuildDir -eq '') { 'scratch' } else { $BuildDir }
+    $wrapperArguments = @{}
+    if ($Shard -ne '') { $wrapperArguments.Shard = $Shard }
+    if ($BuildDir -ne '') { $wrapperArguments.BuildDir = $BuildDir }
     $env:CARGO_BUILD_BUILD_DIR = $CallerBuildDir
     $caught = $null
     try {
-        & $wrapper @shardArguments
+        & $wrapper @wrapperArguments
     }
     catch {
         $caught = $_.Exception.Message
@@ -67,8 +76,17 @@ function Assert-Run {
         throw "Expected runner failure '$ExpectedError', got '$caught'."
     }
     if ($state.Calls -ne 1 -or $env:CARGO_BUILD_BUILD_DIR -cne $CallerBuildDir -or
-        (Get-Location).Path -cne $callerLocation -or (Test-Path -LiteralPath $state.Scratch)) {
-        throw 'Runner did not run once, restore the caller environment/location, or clean scratch.'
+        (Get-Location).Path -cne $callerLocation) {
+        throw 'Runner did not run once or restore the caller environment/location.'
+    }
+    if ($state.BuildDir -eq 'scratch') {
+        if (Test-Path -LiteralPath $state.Scratch) {
+            throw 'Runner did not clean scratch.'
+        }
+    }
+    elseif ($state.Scratch -cne (Join-Path $fixture "rust/target/rust-test/$($state.Shard)") -or
+        -not (Test-Path -LiteralPath (Join-Path $state.Scratch 'build/intermediate'))) {
+        throw 'Runner did not keep the shard-owned persistent build directory.'
     }
 }
 
@@ -87,6 +105,22 @@ try {
     $rejected = $false
     try { & $wrapper -Shard unknown } catch { $rejected = $true }
     if (-not $rejected) { throw 'Runner accepted an unknown shard.' }
+    Assert-Run -BuildDir scratch
+    Assert-Run -Shard replay -BuildDir persistent
+    $replayPersistent = $state.Scratch
+    Assert-Run -Shard replay -BuildDir persistent
+    if ($state.Scratch -cne $replayPersistent) {
+        throw 'Persistent runs of one shard did not reuse its build directory.'
+    }
+    Assert-Run -Shard other -BuildDir persistent
+    if ($state.Scratch -ceq $replayPersistent) {
+        throw 'Persistent shards shared one build directory.'
+    }
+    Assert-Run -BuildDir persistent
+    Assert-Run -BuildDir persistent -Failure exit -ExpectedError 'Rust workspace tests failed.'
+    $rejected = $false
+    try { & $wrapper -BuildDir unknown } catch { $rejected = $true }
+    if (-not $rejected) { throw 'Runner accepted an unknown build directory mode.' }
     Assert-Run -CallerBuildDir $null
     Assert-Run -CallerBuildDir ''
     Assert-Run -Failure exit -ExpectedError 'Rust workspace tests failed.'

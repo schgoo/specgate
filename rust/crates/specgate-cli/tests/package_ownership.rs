@@ -22,6 +22,32 @@ impl Drop for RunningCapture {
     }
 }
 
+/// A test package directory at a stable path.
+///
+/// Generated build namespaces hash the package manifest path. A stable path
+/// keeps one namespace per test, so persistent build directories do not grow
+/// on each run.
+struct StableDir(PathBuf);
+
+impl StableDir {
+    fn new(root: &Path, label: &str) -> Self {
+        let path = root.join("specgate-test-packages").join(label);
+        let _ = fs::remove_dir_all(&path);
+        fs::create_dir_all(&path).unwrap();
+        Self(path)
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for StableDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
 fn completed(mut child: Child) -> Output {
     let deadline = Instant::now() + Duration::from_secs(15);
     while child.try_wait().unwrap().is_none() {
@@ -50,7 +76,7 @@ fn command(action: &str, binding: &Path) -> Command {
 
 #[test]
 fn commands_reject_an_owned_package_through_test_execution_and_release_it_afterward() {
-    let cache = tempfile::tempdir().unwrap();
+    let cache = StableDir::new(Path::new(env!("CARGO_TARGET_TMPDIR")), "package-ownership");
     let package = cache.path().join("candidate");
     fs::create_dir_all(package.join("src")).unwrap();
     let facade = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("specgate");

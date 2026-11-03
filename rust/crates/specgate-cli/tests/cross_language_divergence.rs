@@ -89,7 +89,14 @@ fn replay(component: &str, scratch: &Path) -> (Value, Value) {
         .arg("replay")
         .arg(&bundle)
         .arg("--binding")
-        .arg(root.join("test").join("behavior").join("specgate.yaml"))
+        .arg(
+            root.join("rust")
+                .join("crates")
+                .join("specgate-cli")
+                .join("tests")
+                .join("fixtures")
+                .join("divergence.yaml"),
+        )
         .args(["--impl", "rust", "--out"])
         .arg(&candidate)
         .output()

@@ -1,0 +1,13 @@
+[package]
+name = "specgate-cli-fixtures"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+path = "../../rust/src/lib.rs"
+
+[dependencies]
+specgate = { path = "../../../../../specgate" }
+
+[workspace]
