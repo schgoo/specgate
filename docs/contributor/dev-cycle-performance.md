@@ -616,6 +616,29 @@ builds its own generated runners; Windows `rust-other` also spends ~2 min in
 Lanes use more runner minutes; GitHub does not bill them for public
 repositories.
 
+Run
+[41706573046](https://github.com/schgoo/specgate/actions/runs/41706573046)
+moved the smoke binding to its own package and the harness tests to the smoke
+lane, added a Windows Dev Drive, and installed `cargo-deny` from a prebuilt
+binary. Run
+[41708566319](https://github.com/schgoo/specgate/actions/runs/41708566319)
+installed `cargo-doc2readme` with `cargo install` again: it has no Windows
+binary, and `taiki-e/install-action` compiled it on every run (~3 min). Both
+runs were warm:
+
+| Lane | Windows 41706573046 | Windows 41708566319 | Ubuntu 41706573046 | Ubuntu 41708566319 |
+|---|---:|---:|---:|---:|
+| `rust-replay` | 11.1 min | 11.5 min | 5.8 min | 6.0 min |
+| `rust-other` | 10.3 min | 10.9 min | 5.6 min | 6.4 min |
+| `static` | 7.8 min | 4.4 min | 3.3 min | 2.6 min |
+| `ctsc-smoke` | 6.0 min | 5.7 min | 5.3 min | 4.0 min |
+| `ctsc-goldens` | 8.3 min | 5.6 min | 3.5 min | 3.1 min |
+| Critical path | 11.1 min | 11.5 min | 5.8 min | 6.4 min |
+
+The `ctsc-goldens` lane is shorter, but the critical path is still a Rust
+shard and did not change beyond runner variance. The Dev Drive gain is also
+within that variance.
+
 Persisting the `rust-test` child build directory across CI runs was measured
 and rejected. Locally it cut `rust-test` from 1,137 s cold to 586 s warm, but
 the directory reached 11.2 GB on Windows (debug 1.8 GB plus 19 harness and 22
