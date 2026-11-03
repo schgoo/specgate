@@ -1,4 +1,4 @@
-# CTSC Trace 0.3
+# CTSC Trace 0.4
 
 **Status:** Draft
 
@@ -56,6 +56,13 @@ MUST NOT introduce ordering, timing, or lifetime effects that the target would
 not otherwise exhibit. A value that cannot be recorded without such an effect
 MUST NOT be recorded.
 
+Obtaining and traversing a fresh enumerator through a collection's ordinary
+enumeration contract is permitted. This does not authorize advancing an
+already-held cursor, dequeuing elements, draining a consuming enumerable, or
+forcing an asynchronous stream. A producer cannot certify arbitrary user code
+executed by an enumeration implementation; it MUST NOT add its own consuming or
+mutating operation.
+
 ## 4. Resource attributes
 
 CTSC-defined attributes use the `conformance.*` namespace. Producer-specific
@@ -65,7 +72,7 @@ Every resource containing CTSC spans MUST include:
 
 | Attribute | Type | Meaning |
 |---|---|---|
-| `conformance.version` | string | CTSC trace version (`0.3.0`) |
+| `conformance.version` | string | CTSC trace version (`0.4.0`) |
 | `conformance.tool.name` | string | Producing tool |
 | `conformance.tool.version` | string | Producing tool version |
 | `conformance.target.name` | string | Target label within the run |
@@ -94,7 +101,7 @@ context crosses a textual carrier. CTSC does not mandate the carrier.
 
 Failure to propagate context produces malformed CTSC hierarchy.
 
-OTLP span links MAY be preserved as non-CTSC telemetry. CTSC 0.3 does not use
+OTLP span links MAY be preserved as non-CTSC telemetry. CTSC 0.4 does not use
 links to establish hierarchy, ordering, or conformance semantics.
 
 ## 6. Spans
@@ -399,33 +406,35 @@ Every CTSC `AnyValue` MUST select one concrete OTLP value variant. An unset
 | unsigned 64-bit integer | canonical decimal `stringValue` |
 | floating point | `doubleValue` |
 | bytes | `bytesValue` |
-| ordered list or tuple | `arrayValue` |
-| set | `arrayValue` |
-| string-keyed map or record | `kvlistValue` |
-| non-string-keyed map | `arrayValue` of entry records |
+| collection or tuple | `arrayValue` |
+| unordered string-keyed map or record | `kvlistValue` |
+| ordered map or non-string-keyed map | `arrayValue` of entry records |
 | unit | empty `kvlistValue` |
 | tagged union | single-key `kvlistValue` |
 | optional | single-key `kvlistValue` |
 
-### 8.1 Lists, sets, and tuples
+### 8.1 Collections and tuples
 
-Lists and tuples use `arrayValue`. Producers MUST preserve their logical item
-order. Reordering list or tuple items changes the value.
+Collections and tuples use `arrayValue`. Producers MUST preserve logical item
+order for tuples and collections whose registry `ordered` property is `true`.
+Reordering those items changes the value.
 
-Sets also use `arrayValue`, but item order is not semantic and duplicate values
-are invalid under Linked validation. Producers SHOULD emit sets in a stable
-order to improve Trace Core interoperability.
+For `ordered: false`, item order is not semantic under Linked comparison.
+For `unique: true`, duplicate values under recursive CTSC equality are invalid
+under Linked validation. For `unique: false`, every occurrence is retained:
+an unordered bag compares by element multiplicity, not just membership.
+Producers MUST NOT silently deduplicate projected values to satisfy uniqueness.
 
-A source collection with no meaningful order SHOULD be projected as a set. If
-it is projected as a list, the producer MUST define and preserve a deterministic
-logical order.
+Trace Core has no registry and treats every array positionally; it cannot infer
+collection semantics. Registry semantics do not relax operation or event order.
 
 ### 8.2 Maps
 
-A string-keyed map uses `kvlistValue`; keys MUST be unique and order is
-insignificant.
+An unordered string-keyed map uses `kvlistValue`; keys MUST be unique and order
+is insignificant.
 
-A non-string-keyed map uses `arrayValue`. Each entry MUST be a `kvlistValue`
+A map with `ordered: true`, including a string-keyed map, or any non-string-keyed
+map uses `arrayValue`. Each entry MUST be a `kvlistValue`
 containing exactly `key` and `value`:
 
 ```text
@@ -438,9 +447,10 @@ arrayValue [
 ```
 
 Under Linked validation, keys and values MUST conform to the registry map types
-and keys MUST be unique. Trace Core treats this encoding as an ordered array.
-Producers SHOULD emit non-string-keyed map entries in a stable order to improve
-Trace Core interoperability.
+and keys MUST be unique under recursive CTSC equality. Linked comparison
+preserves entry position exactly when the registry map has `ordered: true`.
+Trace Core treats every entry array positionally. Producers MUST NOT replace
+colliding projected keys or discard entries.
 
 ### 8.3 Integers
 

@@ -140,7 +140,7 @@ fn independent_ids_timing_and_scenario_indexes_are_ignored() {
     let report = compare_values(&reference, &candidate, None);
     assert!(report.equivalent, "{report:#?}");
     assert_eq!(report.policy, "ctsc.strict");
-    assert_eq!(report.policy_version, "0.1.0");
+    assert_eq!(report.policy_version, "0.2.0");
 }
 
 #[test]
@@ -455,6 +455,121 @@ fn linked_sets_and_maps_compare_without_wire_order() {
     assert!(report.equivalent, "{report:#?}");
 }
 
+fn compare_collection_values(
+    value_type: serde_json::Value,
+    reference_value: serde_json::Value,
+    candidate_value: serde_json::Value,
+) -> specgate_ctsc::comparison::ComparisonReport {
+    let registry_path = corpus().join("registry").join("valid").join("values.registry.json");
+    let mut registry = read_json(&registry_path);
+    registry["components"][0]["operations"][0]["observations"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|observation| observation["name"] == "list_value")
+        .unwrap()["type"] = value_type;
+    let registry = serde_json::to_vec(&registry).unwrap();
+    let mut reference = read_json(&corpus().join("trace").join("valid").join("values.otlp.json"));
+    *attribute_mut(&mut reference["resourceSpans"][0]["resource"], "conformance.registry.digest") =
+        serde_json::json!({"stringValue": format!("sha256:{:x}", Sha256::digest(&registry))});
+    let observation = |trace: &mut serde_json::Value, value| {
+        let event = first_span_mut(trace, "conformance.operation")["events"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|event| {
+                event["attributes"].as_array().unwrap().iter().any(|attribute| {
+                    attribute["key"] == "conformance.observation.name" && attribute["value"]["stringValue"] == "list_value"
+                })
+            })
+            .unwrap();
+        *attribute_mut(event, "conformance.observation.value") = value;
+    };
+    let mut candidate = reference.clone();
+    observation(&mut reference, reference_value);
+    observation(&mut candidate, candidate_value);
+    let reference = serde_json::to_vec(&reference).unwrap();
+    let candidate = serde_json::to_vec(&candidate).unwrap();
+    compare_documents(
+        DocumentBytes::new(Path::new("reference.json"), &reference),
+        DocumentBytes::new(Path::new("candidate.json"), &candidate),
+        Some(DocumentBytes::new(&registry_path, &registry)),
+        [],
+    )
+}
+
+fn integer_collection(values: &[i32]) -> serde_json::Value {
+    serde_json::json!({"arrayValue": {"values": values.iter()
+        .map(|value| serde_json::json!({"intValue": value.to_string()})).collect::<Vec<_>>()}})
+}
+
+#[test]
+fn collection_dimensions_control_order_and_multiplicity_independently() {
+    for ordered in [false, true] {
+        for unique in [false, true] {
+            let ty = serde_json::json!({
+                "kind": "collection", "items": {"kind":"primitive","name":"i32"}, "ordered": ordered, "unique": unique,
+            });
+            let report = compare_collection_values(ty.clone(), integer_collection(&[1, 2]), integer_collection(&[2, 1]));
+            assert!(report.validation_failures.is_empty(), "{report:#?}");
+            assert_eq!(report.equivalent, !ordered, "{report:#?}");
+            let report = compare_collection_values(ty, integer_collection(&[1, 1, 2]), integer_collection(&[2, 1, 1]));
+            assert_eq!(!report.validation_failures.is_empty(), unique, "{report:#?}");
+            if !unique {
+                assert_eq!(report.equivalent, !ordered, "{report:#?}");
+            }
+        }
+    }
+    let bag = serde_json::json!({
+        "kind":"collection", "items":{"kind":"primitive","name":"i32"}, "ordered":false, "unique":false,
+    });
+    let report = compare_collection_values(bag, integer_collection(&[1, 1, 2]), integer_collection(&[1, 2, 2]));
+    assert!(report.validation_failures.is_empty(), "{report:#?}");
+    assert!(!report.equivalent, "{report:#?}");
+}
+
+#[test]
+fn ordered_maps_preserve_entry_order_including_string_keys() {
+    for key_type in ["string", "i32"] {
+        let key = |number: i32| {
+            if key_type == "string" {
+                serde_json::json!({"stringValue": number.to_string()})
+            } else {
+                serde_json::json!({"intValue": number.to_string()})
+            }
+        };
+        let entries = [1, 2].map(|number| {
+            serde_json::json!({
+                "kvlistValue":{"values":[
+                    {"key":"key","value":key(number)},
+                    {"key":"value","value":{"stringValue":number.to_string()}}
+                ]}
+            })
+        });
+        let left = serde_json::json!({"arrayValue":{"values":entries}});
+        let right = serde_json::json!({"arrayValue":{"values":[entries[1], entries[0]]}});
+        let ty = serde_json::json!({
+            "kind":"map", "ordered":true,
+            "keys":{"kind":"primitive","name":key_type}, "values":{"kind":"primitive","name":"string"},
+        });
+        let report = compare_collection_values(ty, left, right);
+        assert!(report.validation_failures.is_empty(), "{report:#?}");
+        assert!(!report.equivalent, "{report:#?}");
+    }
+}
+
+#[test]
+fn uniqueness_uses_nested_collection_semantics() {
+    let bag = serde_json::json!({
+        "kind":"collection", "items":{"kind":"primitive","name":"i32"}, "ordered":false, "unique":false,
+    });
+    let ty = serde_json::json!({"kind":"collection", "items":bag, "ordered":true, "unique":true});
+    let value = serde_json::json!({"arrayValue":{"values":[integer_collection(&[1, 2]), integer_collection(&[2, 1])]}});
+    let report = compare_collection_values(ty, value.clone(), value);
+    assert!(!report.validation_failures.is_empty(), "{report:#?}");
+    assert!(!report.equivalent, "{report:#?}");
+}
+
 #[test]
 fn equal_sequential_intervals_are_ambiguous_without_id_tiebreaking() {
     let mut reference = read_json(&corpus().join("trace").join("valid").join("sequential.otlp.json"));
@@ -476,7 +591,7 @@ fn identity_mismatches_do_not_reuse_reference_types_for_candidate_payloads() {
     let registry_id = "urn:registry:comparison-identities";
     let registry = serde_json::json!({
         "format":"ctsc.registry",
-        "formatVersion":"0.3.0",
+        "formatVersion":"0.4.0",
         "registryId":registry_id,
         "version":"1.0.0",
         "components":[{
@@ -639,7 +754,7 @@ fn linked_trace(
     serde_json::json!({
         "resourceSpans":[{
             "resource":{"attributes":[
-                {"key":"conformance.version","value":{"stringValue":"0.3.0"}},
+                {"key":"conformance.version","value":{"stringValue":"0.4.0"}},
                 {"key":"conformance.tool.name","value":{"stringValue":"test"}},
                 {"key":"conformance.tool.version","value":{"stringValue":"1.0.0"}},
                 {"key":"conformance.target.name","value":{"stringValue":"test"}},

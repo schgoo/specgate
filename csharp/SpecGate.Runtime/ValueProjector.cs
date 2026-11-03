@@ -1,5 +1,4 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Reflection;
@@ -61,9 +60,11 @@ internal static class ValueProjector
             SemanticKind.F64 => Value.Float(Require<double>(type, value)),
             SemanticKind.String => ProjectString(Require<string>(type, value)),
             SemanticKind.Dynamic => ProjectDynamic(value),
-            SemanticKind.List => Value.List(ProjectElements(type, type.First!, value)),
-            SemanticKind.Set => Value.Set(ProjectElements(type, type.First!, value)),
-            SemanticKind.Map => ProjectMap(type, value),
+            SemanticKind.List or SemanticKind.Bag => Value.List(CollectionProjector.Elements(type, type.First!, value)),
+            SemanticKind.Set or SemanticKind.OrderedSet => CollectionProjector.Unique(type, value),
+            SemanticKind.Map or SemanticKind.OrderedMap => CollectionProjector.Map(type, value),
+            SemanticKind.Tuple => CollectionProjector.Tuple(type, value),
+            SemanticKind.Record => CollectionProjector.Group(type, value),
             SemanticKind.Result => ProjectResult(type, value),
             SemanticKind.Named => ProjectNamed(type.Declared!, value),
             _ => throw Rejected(
@@ -220,56 +221,6 @@ internal static class ValueProjector
         return Value.Map(entries);
     }
 
-    private static List<Value> ProjectElements(SemanticType type, SemanticType element, object value)
-    {
-        if (value is not IEnumerable sequence || value is string)
-        {
-            throw Mismatch(type, value.GetType());
-        }
-
-        List<Value> projected = [];
-        foreach (object? item in sequence)
-        {
-            projected.Add(Project(element, item));
-        }
-
-        return projected;
-    }
-
-    private static Value ProjectMap(SemanticType type, object value)
-    {
-        if (type.First!.Kind != SemanticKind.String)
-        {
-            throw Rejected(
-                CaptureRejection.UnsupportedMapKey,
-                $"{Describe(type)} is keyed by {Describe(type.First)}. CTSC maps are "
-                + "keyed by strings.");
-        }
-
-        if (value is not IDictionary dictionary)
-        {
-            throw Mismatch(type, value.GetType());
-        }
-
-        List<KeyValuePair<string, Value>> entries = [];
-        foreach (DictionaryEntry entry in dictionary)
-        {
-            if (entry.Key is not string key)
-            {
-                throw Rejected(
-                    CaptureRejection.UnsupportedMapKey,
-                    $"a map key of type '{entry.Key.GetType().FullName}' was observed. CTSC maps "
-                    + "are keyed by strings.");
-            }
-
-            entries.Add(new KeyValuePair<string, Value>(
-                RejectUnpairedSurrogates(key),
-                Project(type.Second!, entry.Value)));
-        }
-
-        return Value.Map(entries);
-    }
-
     /// <summary>
     /// Projects a value whose declared type is <see cref="object"/>.
     /// </summary>
@@ -364,12 +315,12 @@ internal static class ValueProjector
         throw Mismatch(type, value.GetType());
     }
 
-    private static SpecGateCaptureException Mismatch(SemanticType type, Type actual) =>
+    internal static SpecGateCaptureException Mismatch(SemanticType type, Type actual) =>
         Rejected(
             CaptureRejection.TypeMismatch,
             $"a '{actual.FullName}' was observed where {Describe(type)} is declared.");
 
-    private static SpecGateCaptureException Rejected(CaptureRejection rejection, string detail) =>
+    internal static SpecGateCaptureException Rejected(CaptureRejection rejection, string detail) =>
         new(rejection, "specgate: " + detail);
 
     private static string Describe(SemanticType type) => type.Kind switch

@@ -13,9 +13,10 @@
 //! Both stages enforce candidate identity and type compatibility before any
 //! invocation plan can reach execution.
 use super::model::RegistryDigest;
+use super::storage::{ValueContext, check_rust};
 use super::{
     BTreeSet, Candidate, Candidates, CommandEnvironment, Discovery, DiscoveryContext, DiscoveryInput, Input, Link, Operation, Path, Plan,
-    PlannedOp, RawOperation, ReplayBundle, ReplayType, Scenario, Target,
+    PlannedOp, RawOperation, ReplayBundle, Scenario, Target,
 };
 use super::{Error, failure};
 
@@ -87,7 +88,7 @@ pub(super) fn build_plan(bundle: &ReplayBundle, candidate: &Candidate) -> Result
         });
     }
     links.shrink_to_fit();
-    validate_structured_types(bundle, candidate, &links)?;
+    let value_bindings = super::binding::build(bundle, candidate, &links)?;
     let mut test_target = None;
     for target in links
         .iter()
@@ -134,13 +135,7 @@ pub(super) fn build_plan(bundle: &ReplayBundle, candidate: &Candidate) -> Result
         registry_version: bundle.registry.identity.version.as_str().to_string().into(),
         registry_digest: RegistryDigest::try_from(bundle.registry.identity.digest.as_str().to_string())?,
         registry_document: bundle.registry_document.clone(),
-        structured_outcomes: bundle.registry.operations.iter().any(|operation| {
-            operation.output().is_some_and(|ty| ty.primitive_name().is_none())
-                || operation
-                    .errors()
-                    .iter()
-                    .any(|error| error.value_type.as_ref().is_some_and(|ty| ty.primitive_name().is_none()))
-        }),
+        value_bindings,
         target: Target {
             crate_name: candidate.metadata().crate_name.clone(),
             language: candidate.metadata().language.into(),
@@ -482,50 +477,15 @@ pub(super) fn validate_inputs(reference: &specgate_ctsc::replay::model::Registry
             reference.name()
         ));
     }
-    for (reference_input, candidate_input) in reference.inputs().iter().zip(&candidate.inputs) {
-        let expected_type = semantic_name(
-            &reference_input.value_type,
-            ValueContext::new(reference.component_id().as_str(), reference.name().as_str(), &reference_input.name),
-        )?;
-        if candidate_input.ty.as_str() != expected_type {
-            return failure(format!(
-                "candidate operation '{}::{}' input '{}' type mismatch: expected '{}', found '{}'",
-                reference.component_id(),
-                reference.name(),
-                reference_input.name,
-                expected_type,
-                candidate_input.ty
-            ));
-        }
-    }
     Ok(())
 }
 
 pub(super) fn validate_output(reference: &specgate_ctsc::replay::model::RegistryOp, candidate: &Operation) -> Result<(), Error> {
-    let expected = reference
-        .output()
-        .map(|value_type| {
-            outcome_type_name(
-                value_type,
-                ValueContext::new(reference.component_id().as_str(), reference.name().as_str(), "$result"),
-            )
-        })
-        .transpose()?;
-    if candidate.output.as_ref().map(specgate_discovery::identity::TypeExpression::as_str) != expected.as_deref() {
-        let detail = if reference.output().is_some_and(|ty| ty.primitive_name().is_none()) {
-            "uses unsupported structured replay type mapping"
-        } else {
-            "output type mismatch"
-        };
+    if candidate.output.is_some() != reference.output().is_some() {
         return failure(format!(
-            "candidate operation '{}::{}' {detail}: expected '{}', found '{}'",
+            "candidate operation '{}::{}' output type mismatch: result channels differ",
             reference.component_id(),
             reference.name(),
-            expected.as_deref().unwrap_or("unit"),
-            candidate
-                .output
-                .as_ref()
-                .map_or("unit", specgate_discovery::identity::TypeExpression::as_str)
         ));
     }
     if candidate.empty != reference.empty() {
@@ -540,28 +500,12 @@ pub(super) fn validate_output(reference: &specgate_ctsc::replay::model::Registry
     let expected_errors = reference
         .errors()
         .iter()
-        .map(|error| {
-            let ty = error.value_type.as_ref().map_or_else(
-                || Ok(String::new()),
-                |value_type| {
-                    outcome_type_name(
-                        value_type,
-                        ValueContext::new(reference.component_id().as_str(), reference.name().as_str(), "$error"),
-                    )
-                },
-            )?;
-            Ok((error.name.clone(), ty))
-        })
-        .collect::<Result<Vec<_>, Error>>()?;
+        .map(|error| (error.name.clone(), error.value_type.is_some()))
+        .collect::<Vec<_>>();
     let candidate_errors = candidate
         .errors
         .iter()
-        .map(|error| {
-            (
-                error.name.to_string(),
-                error.ty.as_ref().map_or_else(String::new, ToString::to_string),
-            )
-        })
+        .map(|error| (error.name.to_string(), error.ty.is_some()))
         .collect::<Vec<_>>();
     if candidate_errors != expected_errors {
         return failure(format!(
@@ -571,249 +515,6 @@ pub(super) fn validate_output(reference: &specgate_ctsc::replay::model::Registry
         ));
     }
     Ok(())
-}
-
-fn validate_structured_types(bundle: &ReplayBundle, candidate: &Candidate, links: &[Link]) -> Result<(), Error> {
-    let mut pending = Vec::new();
-    for operation in &bundle.registry.operations {
-        if links.iter().any(|link| {
-            link.component_id.as_str() == operation.component_id().as_str() && link.operation_name.as_str() == operation.name().as_str()
-        }) || bundle
-            .observed_operations
-            .iter()
-            .any(|observed| &observed.component_id == operation.component_id() && &observed.operation_name == operation.name())
-        {
-            for ty in operation
-                .output()
-                .into_iter()
-                .chain(operation.errors().iter().filter_map(|error| error.value_type.as_ref()))
-            {
-                let value = serde_json::to_value(ty).map_err(|error| format!("failed to inspect replay outcome type: {error}"))?;
-                named_references(&value, operation.component_id().as_str(), &mut pending)?;
-            }
-        }
-    }
-    if pending.is_empty() {
-        return Ok(());
-    }
-    let reference: serde_json::Value = serde_json::from_slice(&bundle.registry_document)
-        .map_err(|error| format!("failed to inspect linked reference registry: {error}"))?;
-    let schema = serde_json::to_string(&candidate.schema).map_err(|error| format!("failed to encode candidate type schema: {error}"))?;
-    let encoded = specgate_ctsc::registry::encode(
-        "urn:ctsc:registry:replay-types",
-        "0.1.0",
-        specgate_ctsc::registry::Schema::new(&schema),
-    )
-    .map_err(|error| format!("failed to normalize candidate outcome declarations: {error}"))?;
-    let actual: serde_json::Value = serde_json::from_str(&encoded.registry_json)
-        .map_err(|error| format!("failed to inspect candidate outcome declarations: {error}"))?;
-    let mut visited = BTreeSet::new();
-    while let Some((component, name)) = pending.pop() {
-        if !visited.insert((component.clone(), name.clone())) {
-            continue;
-        }
-        let expected = type_declaration(&reference, &component, &name)
-            .ok_or_else(|| format!("reference outcome type '{component}::{name}' has no linked declaration"))?;
-        let found = type_declaration(&actual, &component, &name);
-        if found != Some(expected) {
-            return failure(format!(
-                "candidate uses unsupported structured replay type mapping for '{component}::{name}': native declarations differ; explicit type mappings are not implemented"
-            ));
-        }
-        named_references(expected, &component, &mut pending)?;
-    }
-    Ok(())
-}
-
-fn type_declaration<'a>(registry: &'a serde_json::Value, component: &str, name: &str) -> Option<&'a serde_json::Value> {
-    registry["components"].as_array()?.iter().find(|entry| entry["id"] == component)?["types"]
-        .as_array()?
-        .iter()
-        .find(|entry| entry["name"] == name)
-}
-
-fn named_references(value: &serde_json::Value, component: &str, pending: &mut Vec<(String, String)>) -> Result<(), Error> {
-    match value {
-        serde_json::Value::Object(fields) => {
-            if value["kind"] == "named" {
-                if value.get("registryId").is_some() {
-                    return failure("candidate uses unsupported structured replay type mapping from an imported registry");
-                }
-                let name = value["name"]
-                    .as_str()
-                    .ok_or_else(|| "named replay outcome type has no name".to_string())?;
-                let owner = value["componentId"].as_str().unwrap_or(component);
-                pending.push((owner.to_string(), name.to_string()));
-            }
-            for child in fields.values() {
-                named_references(child, component, pending)?;
-            }
-        }
-        serde_json::Value::Array(values) => {
-            for child in values {
-                named_references(child, component, pending)?;
-            }
-        }
-        _ => {}
-    }
-    Ok(())
-}
-
-fn outcome_type_name(value_type: &ReplayType, context: ValueContext<'_>) -> Result<String, Error> {
-    if value_type.primitive_name().is_some() {
-        return semantic_name(value_type, context);
-    }
-    if let Some((name, owner)) = value_type.named_parts() {
-        return Ok(match owner.component_id() {
-            Some(owner) if owner != context.component => format!("{owner}::{name}"),
-            _ => name.to_string(),
-        });
-    }
-    if let Some(item) = value_type.element_type() {
-        let constructor = if value_type.kind_name() == "set" { "set" } else { "List" };
-        return Ok(format!("{constructor}<{}>", outcome_type_name(item, context)?));
-    }
-    if let Some(value) = value_type.optional_value() {
-        return Ok(format!("Option<{}>", outcome_type_name(value, context)?));
-    }
-    if let Some((keys, values)) = value_type.map_types() {
-        return Ok(format!(
-            "map<{}, {}>",
-            outcome_type_name(keys, context)?,
-            outcome_type_name(values, context)?
-        ));
-    }
-    failure("inline record and tuple outcome type mappings are not supported by candidate discovery")
-}
-
-#[derive(Clone, Copy)]
-pub(super) struct ValueContext<'a> {
-    component: &'a str,
-    operation: &'a str,
-    name: &'a str,
-}
-
-impl<'a> ValueContext<'a> {
-    fn new(component: &'a str, operation: &'a str, name: &'a str) -> Self {
-        Self {
-            component,
-            operation,
-            name,
-        }
-    }
-}
-
-pub(super) fn semantic_name(value_type: &ReplayType, context: ValueContext<'_>) -> Result<String, Error> {
-    let ValueContext {
-        component,
-        operation,
-        name: value_name,
-    } = context;
-    if let Some(item) = value_type.element_type() {
-        let constructor = if value_type.kind_name() == "set" { "set" } else { "List" };
-        return Ok(format!("{constructor}<{}>", semantic_name(item, context)?));
-    }
-    if let Some(inner) = value_type.optional_value() {
-        return Ok(format!("Option<{}>", semantic_name(inner, context)?));
-    }
-    if let Some((keys, values)) = value_type.map_types() {
-        if keys.primitive_name() != Some("string") {
-            return failure(format!(
-                "operation '{component}::{operation}' value '{value_name}' requires string map keys"
-            ));
-        }
-        return Ok(format!("map<string, {}>", semantic_name(values, context)?));
-    }
-    let Some(name) = value_type.primitive_name() else {
-        return failure(format!(
-            "operation '{component}::{operation}' value '{value_name}' uses unsupported structured type"
-        ));
-    };
-    match name {
-        "unit" | "string" | "bool" | "i32" | "i64" | "u32" | "u64" | "f32" | "f64" => Ok(name.to_string()),
-        other => failure(format!(
-            "operation '{component}::{operation}' value '{value_name}' uses unsupported primitive '{other}'"
-        )),
-    }
-}
-
-pub(super) fn check_rust(semantic_type: &ReplayType, rust_type: impl AsRef<str>, context: ValueContext<'_>) -> Result<(), Error> {
-    let rust_type = rust_type.as_ref();
-    let ValueContext {
-        component,
-        operation,
-        name: input,
-    } = context;
-    let semantic = semantic_name(semantic_type, context)?;
-    let native = rust_type.chars().filter(|character| !character.is_whitespace()).collect::<String>();
-    if semantic_type.primitive_name().is_none() {
-        let (constructor, arguments) = native_arguments(rust_type)?;
-        if arguments.iter().any(|argument| argument.contains('&')) {
-            return failure(format!(
-                "candidate operation '{component}::{operation}' input '{input}' uses borrowed collection elements; replay requires owned elements"
-            ));
-        }
-        if let Some(item) = semantic_type.element_type() {
-            let supported = if semantic_type.kind_name() == "set" {
-                matches!(constructor.as_str(), "BTreeSet" | "HashSet")
-            } else {
-                constructor == "Vec"
-            };
-            if supported && arguments.len() == 1 {
-                return check_rust(item, &arguments[0], context);
-            }
-        } else if let Some(inner) = semantic_type.optional_value() {
-            if constructor == "Option" && arguments.len() == 1 {
-                return check_rust(inner, &arguments[0], context);
-            }
-        } else if let Some((keys, values)) = semantic_type.map_types()
-            && matches!(constructor.as_str(), "BTreeMap" | "HashMap")
-            && arguments.len() == 2
-        {
-            check_rust(keys, &arguments[0], context)?;
-            return check_rust(values, &arguments[1], context);
-        }
-    }
-    let supported = match semantic.as_str() {
-        "unit" => native == "()",
-        "string" => native == "String" || native == "&str",
-        "bool" => native == "bool",
-        "i32" => native == "i32",
-        "i64" => native == "i64",
-        "u32" => native == "u32",
-        "u64" => native == "u64",
-        "f32" => native == "f32",
-        "f64" => native == "f64",
-        _ => false,
-    };
-    if supported {
-        Ok(())
-    } else {
-        failure(format!(
-            "candidate operation '{component}::{operation}' input '{input}' uses unsupported Rust type '{rust_type}' for semantic type '{semantic}'"
-        ))
-    }
-}
-
-pub(super) fn native_arguments(rust_type: &str) -> Result<(String, Vec<String>), Error> {
-    let parsed: syn::Type =
-        syn::parse_str(rust_type).map_err(|error| Error::from(format!("invalid Rust replay input type '{rust_type}': {error}")))?;
-    let syn::Type::Path(path) = parsed else {
-        return failure(format!("unsupported Rust collection input type '{rust_type}'"));
-    };
-    let segment = path.path.segments.last().ok_or_else(|| Error::from("missing collection type"))?;
-    let syn::PathArguments::AngleBracketed(arguments) = &segment.arguments else {
-        return failure(format!("missing Rust collection type arguments for '{rust_type}'"));
-    };
-    let arguments = arguments
-        .args
-        .iter()
-        .map(|argument| match argument {
-            syn::GenericArgument::Type(ty) => Ok(quote::quote!(#ty).to_string()),
-            _ => failure(format!("unsupported Rust collection type argument in '{rust_type}'")),
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok((segment.ident.to_string(), arguments))
 }
 
 pub(super) fn module_path(raw: &RawOperation, package_name: impl AsRef<str>) -> Result<Vec<String>, Error> {

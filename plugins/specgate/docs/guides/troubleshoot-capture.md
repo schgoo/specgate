@@ -103,6 +103,7 @@ sources, so a search for it finds the code that raises it.
 | `the test result records a failed outcome` | The test failed; it is skipped. | Fix the test. |
 | `produces duplicate input name` | Two flattened property-setup leaves, producer inputs, or parameters share a semantic name (`AmbiguousDeclaration`). | Rename one member with `[SpecEvent("...")]`. |
 | `recursive property setup type` | An opted-in property-setup type reaches itself through opted-in members (`AmbiguousDeclaration`). | Remove `Setup = true` from one type in the cycle. |
+| `recursive collection declaration` | An enumerable element expansion reaches the same type again without a named record boundary. | Expose a finite supported collection contract or an annotated record boundary; do not replace the operation with a fixture name. |
 | `requires a non-null` | A non-nullable property-setup argument or nested member is null. The test still runs; capture drops the scenario and prints a `warning:` line. | Declare the member nullable (`T?`) if absence is valid, otherwise pass a non-null value. |
 | `a null was observed where` | A non-nullable parameter, member, or return value is null. The test still runs; capture drops the scenario and prints a `warning:` line. | Same as above. |
 | `instead of Passed, so its recording was not published` | The test ended with another outcome, such as skipped; it is skipped. | Make the test run and pass. |
@@ -136,6 +137,8 @@ sources, so a search for it finds the code that raises it.
 | `selected setup producers belong to different Cargo test targets` | Required producers do not share a target. | Keep the environment in one Cargo test target. |
 | `unsupported async replay scheduling:` | Recorded sibling operations overlap. | Record directly awaited calls; overlapping scheduling is unsupported. |
 | `uses unsupported structured type` | An operation or setup input, or a field of a property setup, is a record that is not an opted-in property setup, or a record inside a collection or optional. | See [`../reference/limitations.md`](../reference/limitations.md). |
+| `candidate capture failed linked validation` | Converted candidate values violate the reference registry, such as duplicate unique items or map keys. | Fix the candidate's actual values; do not deduplicate, overwrite keys, or change the reference contract to hide the failure. |
+| `candidate capture conversion failed` | Actual candidate values cannot be converted through the checked binding, such as pair-vector results with duplicate map keys. The cause follows in the diagnostic chain. | Fix the candidate's values; conversion failures do not publish or overwrite output. |
 
 <!-- diagnostics:end -->
 

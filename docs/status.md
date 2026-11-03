@@ -16,7 +16,7 @@ reference target
   -> statically link top-level stimuli to a candidate
   -> replay
   -> emit an independent candidate CTSC trace
-  -> validate and compare with ctsc.strict/0.1.0
+  -> validate and compare with ctsc.strict/0.2.0
 ```
 
 The former spec parser, behavioral matcher, generated runners, case
@@ -116,15 +116,17 @@ requested.
 Rust candidate replay supports public free functions and setup-backed instance
 methods, including directly awaited async calls and explicit generic
 specializations. Operation and setup construction inputs support lossless
-primitives and recursively supported lists, sets, string-keyed maps, and optionals.
+primitives, tuples of arity 2-4, and recursively supported collections, maps, and optionals.
 Explicit property setups recursively fold nested opted-in records into flat
 semantic leaves, including setup-producer arguments, and reconstruct Rust values;
 omitted fields require `Default`. Duplicate leaf names and cyclic expansions are
 rejected. Records inside containers are not decomposed. C# constructors may declare setups.
 Structured results and declared errors, including collections of
 annotated records, use the existing CTSC projection and linked validators.
-Reachable named declarations, including nested observed outcomes, must match
-the reference. Replay invokes only top-level reference operations; nested
+Reachable named declarations, including nested observed outcomes, retain type
+identity and use checked nested storage bindings. Inline reference records can
+bind to same-component annotated Rust records with exact projected fields;
+named reference records cannot bind to inline candidates. Replay invokes only top-level reference operations; nested
 operations remain observed behavior.
 
 Discovery enumerates actual Cargo libtest targets, including private
@@ -182,6 +184,24 @@ Repeated calls retain receiver state, and strict comparison checks the typed
 collection contents. See the
 [accepted replay decision](decisions/typed-async-client-replay.md) and
 [limitations](reference/limitations.md).
+
+## Collection dimensions
+
+CTSC `0.4.0` makes collection ordering and uniqueness explicit; maps declare
+ordering and inherently require unique keys. C# closed generic collection
+contracts work through inherited interfaces, including non-generic concrete
+enumerables and awaited `IEnumerable<T>` results. Generic enumerable results
+are bags; list contracts remain ordered. Ordered dictionaries and priority
+element/priority snapshots are captured without consuming the container.
+Strict `0.2.0` uses these dimensions recursively. Old bundles require recapture.
+C# lookups retain keys as maps of bags; groupings use fixed `key` and `items`
+record fields. Replay binds `Vec` to reference lists, bags, sets, and ordered
+sets, and pair vectors to ordered or non-string maps. It converts actual
+candidate values and validates the whole trace before publication. Duplicate
+semantic keys and unique items reject; bag input sorting stays unchanged.
+Specialization ownership and outcome-mapping differences remain separate.
+See [value mapping](reference/value-mapping.md) and the
+[collection decision](decisions/collection-dimensions.md).
 
 ## Provisional capture sidecars
 

@@ -58,15 +58,66 @@ the C# reference on Rust.
 
 | CTSC kind | Rust | C# |
 | --- | --- | --- |
-| `list` | `Vec<T>`, `&[T]` | `T[]`, `List<T>` |
-| `set` | `HashSet<T>`, `BTreeSet<T>` | `HashSet<T>`, `SortedSet<T>` |
-| `map` | `HashMap<K, V>`, `BTreeMap<K, V>` | `Dictionary<K, V>`, `SortedDictionary<K, V>` |
+| `collection`, ordered, nonunique (list) | `Vec<T>`, `&[T]` | `T[]`, list contracts, `IOrderedEnumerable<T>`, queue/stack/linked-list families |
+| `collection`, unordered, nonunique (bag) | No automatic native mapping | `IEnumerable<T>`, `ICollection<T>`, `IReadOnlyCollection<T>` unless a stronger contract applies |
+| `collection`, unordered, unique (set) | `HashSet<T>`, `BTreeSet<T>` | Set contracts, including immutable/frozen sets, `SortedSet<T>`, and `ImmutableSortedSet<T>` |
+| `collection`, ordered, unique (ordered set) | No automatic native mapping | A type declaring both ordered and set contracts |
+| `map`, unordered | `HashMap<K, V>`, `BTreeMap<K, V>` | Generic dictionary/read-only dictionary contracts, including sorted, concurrent, immutable, and frozen dictionaries |
+| `map`, ordered | No automatic native mapping | Generic `OrderedDictionary<K, V>` |
+| `tuple` | Native tuples of arity 2-4; tuple variant payloads | `ValueTuple<T1, T2>`, including element/priority pairs |
 | `optional` | `Option<T>` (inputs, fields) | `SpecGate.Annotations.Option<T>`, `T?` (nullable value or reference type) |
 | `record` | `struct` with `#[derive(SpecEvent)]` | non-abstract class or struct with `[SpecEvent]`; members marked `[SpecEvent]` become fields |
 | `tagged_union` | `enum` with `#[derive(SpecEvent)]` | `enum` with `[SpecEvent]`; abstract class with `[SpecEvent]` (its concrete subclasses become variants) |
 
 Rust references (`&T`, `&mut T`) map to `T`. Only the final path segment of a
 Rust type is used, so `std::collections::BTreeMap` and `BTreeMap` are the same.
+
+### C# collection contracts
+
+Discovery and capture share one resolver, inspecting the declared type itself,
+its base families, and its closed generic interfaces. A non-generic
+`FooEnumerable : IEnumerable<Foo>` works, including inherited and explicitly
+implemented contracts; `Foo` must itself have a supported representation.
+Conflicting element or dictionary key/value contracts are rejected.
+Self-referential and mutually recursive enumerable declarations are rejected
+when their element expansion revisits a type without a named record boundary.
+For example, `Nodes : IEnumerable<Nodes>` has no finite inline collection type.
+Generic argument nullability follows the annotated operation/member declaration,
+including reordered arguments and nested collection expressions. Nullable
+annotations written only on an inherited interface/base declaration are not
+recovered; declare the nullable element on the exposed generic contract when
+needed. Observed nulls in a required element still reject capture rather than
+being silently dropped.
+
+List contracts include `IList<T>` and `IReadOnlyList<T>`, covering arrays,
+segments, object-model collections, and immutable lists/arrays. Queues, stacks,
+linked lists, their concurrent counterparts, and immutable queue/stack
+contracts preserve traversal order. `IOrderedQueryable<T>` and ordered parallel
+query families also declare order. Other generic enumerable contracts, including
+concurrent bags and ordinary `BlockingCollection<T>` enumeration, are bags.
+Capture never uses `GetConsumingEnumerable`.
+
+Dictionary contracts take precedence over their element/list views.
+`ILookup<K,V>` takes precedence over enumerable fallback and projects an
+unordered map from `K` to `Bag<V>`. `IGrouping<K,V>` projects an inline record
+with fixed fields `key: K` and `items: Bag<V>`. These are portable field names;
+a user record with the same fields and types is structurally indistinguishable.
+Optional keys keep their declared optional type. Duplicate lookup keys under
+recursive CTSC equality fail capture instead of merging groups.
+Sorted sets/maps keep their existing unordered semantics, matching Rust
+`BTreeSet`/`BTreeMap`: `ordered` is equality by position, not sortedness.
+This includes `ImmutableSortedSet<T>`, despite its read-only list interface.
+Priority queues project `UnorderedItems` as a bag of `(element, priority)`
+tuples without dequeuing. Ordered maps, and maps with non-string keys, use
+arrays of key/value entry records. Unordered string-keyed maps use OTLP
+key/value lists. Projection must not silently merge duplicate semantic elements
+or keys.
+
+Non-generic `ArrayList`/`Hashtable` lack declared element/key/value types;
+SpecGate does not infer a registry from observed contents. Existing enumerators,
+async streams, and buffers without generic enumerable contracts remain
+unsupported. Custom collection-semantic overrides are not implemented. See the
+[collection decision](https://github.com/schgoo/specgate/blob/v0.6.0/docs/decisions/collection-dimensions.md).
 
 Rust enum variants map to a `tagged_union` variant with no payload (unit
 variant), a `tuple` payload (tuple variant), or a `record` payload (struct
@@ -115,7 +166,8 @@ C# capture rejects, with an error naming the value:
 
 - An enum value that is not one of the enum's declared members (for example an
   undeclared numeric value or a `[Flags]` combination).
-- A map whose keys are not strings.
+- Distinct native elements or keys that project to duplicates where uniqueness
+  is required.
 - A string that contains an unpaired UTF-16 surrogate.
 - A value declared as `object` whose runtime type is not a primitive or a
   `[SpecEvent]`-annotated type. Collections are refused because a list and a
@@ -123,21 +175,53 @@ C# capture rejects, with an error naming the value:
 
 ## Candidate replay values
 
-Rust replay accepts lossless primitives and recursively supported lists, sets,
-string-keyed maps, and optionals as operation and setup construction inputs.
+Rust replay accepts lossless primitives, supported tuples, collections, maps,
+and optionals recursively as operation and setup construction inputs. The
+reference registry controls semantics; independent Rust discovery is unchanged.
+
+| Reference type | Rust replay storage |
+|---|---|
+| List, bag, set, ordered set | `Vec<T>` |
+| Unordered set | Also supported `HashSet<T>` / `BTreeSet<T>` |
+| Ordered or unordered map | `Vec<(K,V)>` for recursively supported keys and values |
+| Unordered string-keyed map | Also supported `HashMap<String,V>` / `BTreeMap<String,V>` |
+| Tuple | Matching Rust tuple of arity 2-4 |
+
+Bag inputs retain the existing canonical sorting and all duplicate items.
+Ordered map entry positions are preserved. Native set/map insertion must not
+collapse distinct reference values. A sorted native map is not storage for an
+arbitrarily ordered reference map.
+
 Classes and structs opted in as property setups (`#[spec_event(setup)]`,
 `[SpecEvent(Setup = true)]`) are deconstructed into their selected fields,
 recursing through fields that are themselves opted-in records, including
 arguments to explicit setup producers. Leaves become flat inputs under their
 semantic names in depth-first declaration order; each leaf must be a primitive,
-collection, or optional. Duplicate leaf names and cyclic property-setup types
+collection, tuple, or optional. Duplicate leaf names and cyclic property-setup types
 are rejected. Replay rebuilds the nested Rust value with `Default` for omitted
 fields.
 Structured results and declared errors, including lists of annotated records,
-are supported. The candidate's reachable named CTSC declarations must match the
-reference, including declarations reached only by nested observed operations.
-Replay validates recorded candidate outcomes against the reference registry
-before publishing the trace.
+are supported. Reachable named declarations retain component/type identity,
+including those reached only by nested observed operations. Nested fields use
+the same storage bindings. An inline reference record can bind to an annotated
+Rust record in the same component with exactly matching projected fields and
+supported field bindings. A named reference record cannot bind to an inline
+candidate record; unrelated named records cannot bind by shape alone.
+
+Replay converts actual captured inputs, results, and errors to the reference
+encoding, then validates the whole candidate trace before publication.
+Bindings for observed nested operations use the operation's owning component,
+including calls to other components. Missing observed-only candidate operations
+do not block planning; comparison reports the missing calls. Every top-level
+operation selected for invocation must still have a compatible declaration.
+Candidate-only calls declared in the reference registry use the same checked
+storage conversions, including pair-vector maps. Incompatible unused declarations
+do not block planning, but capturing such an operation fails publication.
+Valid extra calls are published for comparison to report the extra behavior;
+undeclared or ill-typed calls reject.
+Vector-backed unique collections and pair-vector maps reject duplicate semantic
+items or keys, including candidate results; nothing is deduplicated or
+overwritten. The reference registry bytes and digest do not change.
 
 Other record inputs, including property-setup fields holding records that are
 not opted in and records inside collections or optionals, and
@@ -159,5 +243,8 @@ for specialization syntax and completion-channel restrictions.
   `[SpecEvent("wire_name")]`.
 - C# parameter names can be set with `[SpecInput("name")]`. Variant and type
   names can be set the same way with `[SpecEvent("name")]`.
+- A bare annotated Rust type named `Bag`, `Tuple`, or another collection
+  constructor remains a named type, including across component dependencies.
+  Constructor applications such as `Bag<i32>` keep their collection meaning.
 - To compare a Rust and a C# implementation, both must publish the same names
   and kinds. Check with `specgate discover` on each side.

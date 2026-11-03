@@ -32,8 +32,10 @@ type to implement `Default`; failure is a compile-time error. Zero-input
 property setups may reconstruct an entirely default value. Types with
 construction invariants must use an explicit producer instead.
 
-Replay also accepts recursively supported lists, sets, string-keyed maps, and
-optionals as operation and construction inputs. Primitive range, floating-point,
+Replay also accepts tuples of arity 2-4 and recursively supported collections,
+maps, and optionals as operation and construction inputs through the
+[checked storage bindings](registry-guided-collection-replay.md).
+Primitive range, floating-point,
 optional-tag, and collection semantics remain unchanged.
 
 ### Recursive decomposition (2026-10-28)

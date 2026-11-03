@@ -83,7 +83,7 @@ Validates one artifact at one level:
 ### `compare`
 
 Compares a reference trace with a candidate trace using the fixed
-`ctsc.strict/0.1.0` policy ([`../ctsc/comparison.md`](../ctsc/comparison.md)).
+`ctsc.strict/0.2.0` policy ([`../ctsc/comparison.md`](../ctsc/comparison.md)).
 `--registry` may appear at most once; `--import` requires `--registry`.
 Scenarios pair by name.
 
@@ -124,7 +124,7 @@ declared nullable (`optional<T>` in the registry).
 Example `compare` mismatch output:
 
 ```text
-policy: ctsc.strict/0.1.0
+policy: ctsc.strict/0.2.0
 reference: rust/reference.otlp.json
 candidate: csharp/reference.otlp.json
 equivalent: false

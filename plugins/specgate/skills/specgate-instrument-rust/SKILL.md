@@ -98,6 +98,11 @@ pub fn make_widget() -> Widget {
 - See [`../reference/value-mapping.md`](${PLUGIN_DIR}/docs/reference/value-mapping.md) for
   supported types.
 
+Native tuples of arity 2-4 are supported recursively. Independent discovery
+still declares `Vec<T>` as a list, but replay can bind it to reference bags,
+sets, or ordered sets. Pair vectors can store ordered/non-string maps.
+See [replay storage](${PLUGIN_DIR}/docs/reference/value-mapping.md#candidate-replay-values).
+
 #### 3. Annotate setups for stateful operations
 
 A method operation needs a setup that constructs its receiver:
@@ -325,6 +330,12 @@ candidate. Nested abandonment can replay through a completing enclosing
 operation; top-level abandonment remains unsupported. Generic async operations
 require explicit concrete specializations, and setup producers must remain
 synchronous. See [`replay-a-candidate.md`](${PLUGIN_DIR}/docs/guides/replay-a-candidate.md).
+
+Awaited C# collections use the same declared mappings as synchronous results:
+`Task<IEnumerable<T>>` is a bag, lookups retain keyed bags, and groupings retain
+their `key` and `items` fields. Rust replay applies the same checked storage
+bindings after awaiting; it does not translate empty/error completion channels.
+See [value mapping](${PLUGIN_DIR}/docs/reference/value-mapping.md#candidate-replay-values).
 
 ### Failure modes
 

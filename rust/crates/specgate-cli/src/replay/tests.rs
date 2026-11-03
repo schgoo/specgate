@@ -914,6 +914,33 @@ mod cases {
     }
 
     #[test]
+    fn planner_binds_vec_outcomes_to_reference_collection_dimensions() {
+        for (ordered, unique) in [(false, false), (false, true), (true, true)] {
+            let (mut bundle, candidate) = structured_metadata();
+            let operation = &bundle.registry.operations[0];
+            bundle.registry.operations[0] = replay_model::RegistryOp::builder(replay_model::OpDeps {
+                component_id: operation.component_id().clone(),
+                name: operation.name().clone(),
+                inputs: operation.inputs().to_vec(),
+            })
+            .output(ReplayType::collection(
+                ReplayType::named("Item", replay_model::TypeOwner::default()),
+                ordered,
+                unique,
+            ))
+            .build()
+            .unwrap();
+            let mut registry: serde_json::Value = serde_json::from_slice(&bundle.registry_document).unwrap();
+            let result = &mut registry["components"][0]["operations"][0]["outcomes"]["result"];
+            result["ordered"] = ordered.into();
+            result["unique"] = unique.into();
+            bundle.registry_document = serde_json::to_vec(&registry).unwrap();
+
+            build_plan(&bundle, &candidate).expect("a Rust Vec stores every supported collection dimension");
+        }
+    }
+
+    #[test]
     fn planner_checks_transitive_structured_outcome_declarations() {
         let (bundle, mut candidate) = structured_metadata();
         build_plan(&bundle, &candidate).expect("matching typed collection declarations");
@@ -952,12 +979,472 @@ mod cases {
         .unwrap()
         .registry_json
         .into_bytes();
+        bundle.registry.identity.digest = document_digest(&bundle.registry_document);
         let plan = build_plan(&bundle, &candidate).unwrap();
         assert_eq!(plan.links.len(), 1);
         assert_eq!(plan.links[0].operation_name.as_str(), "add");
+        candidate.schema.operations[1].inputs.reverse();
+        let error = build_plan(&bundle, &candidate).unwrap_err();
+        assert!(
+            error.to_string().contains("inner") && error.to_string().contains("input order differs"),
+            "{error}"
+        );
+        candidate.schema.operations[1].inputs.reverse();
+        let output = candidate.schema.operations[1].output.take();
+        let error = build_plan(&bundle, &candidate).unwrap_err();
+        assert!(
+            error.to_string().contains("inner") && error.to_string().contains("result channels differ"),
+            "{error}"
+        );
+        candidate.schema.operations[1].output = output;
         candidate.schema.types[0].fields[0].ty = "i64".into();
         let error = build_plan(&bundle, &candidate).unwrap_err();
         assert!(error.to_string().contains("Child"), "{error}");
+    }
+
+    #[test]
+    fn observed_nested_dependency_operations_plan_publish_and_compare() {
+        let (bundle, mut candidate, component) = nested_metadata(true, true);
+        let plan = build_plan(&bundle, &candidate).unwrap();
+        assert_eq!(plan.links.len(), 1, "nested operations are not scheduled");
+        let capture = captured_nested(&component, specgate::__rt::Value::Integer(2));
+        let report = compare_captures(&plan, &capture, &capture);
+        assert!(report.equivalent, "{report:#?}");
+
+        Arc::make_mut(&mut candidate.inner).raw_registry.ops[1].return_type = "i64".into();
+        let error = build_plan(&bundle, &candidate).unwrap_err();
+        assert!(
+            error.to_string().contains("inner") && error.to_string().contains("type mismatch"),
+            "{error}"
+        );
+        Arc::make_mut(&mut candidate.inner).raw_registry.ops[1].return_type = "UnknownNativeType".into();
+        let error = build_plan(&bundle, &candidate).unwrap_err();
+        assert!(error.to_string().contains("failed to normalize candidate"), "{error}");
+    }
+
+    #[test]
+    fn missing_observed_nested_calls_publish_and_compare_as_mismatches() {
+        use specgate::__rt::Value;
+        for foreign in [false, true] {
+            let (bundle, mut candidate, component) = nested_metadata(true, foreign);
+            Arc::make_mut(&mut candidate.inner)
+                .raw_registry
+                .ops
+                .retain(|operation| operation.name.as_str() != "inner");
+            candidate.schema.operations.retain(|operation| operation.name.as_str() != "inner");
+            let plan = build_plan(&bundle, &candidate).unwrap();
+            assert_eq!(plan.links.len(), 1);
+            let reference = captured_nested(&component, Value::Integer(2));
+            let actual = captured_values(Value::Integer(2), Value::Integer(5));
+            let report = compare_captures(&plan, &reference, &actual);
+            assert!(report.validation_failures.is_empty() && report.errors.is_empty(), "{report:#?}");
+            assert!(!report.mismatches.is_empty(), "{report:#?}");
+
+            let error = build_plan(&bundle, &without_operation(&candidate)).unwrap_err();
+            assert!(error.to_string().contains("missing operation"), "{error}");
+        }
+    }
+
+    #[test]
+    fn extra_candidate_pair_map_calls_convert_inputs_and_results_before_comparison() {
+        use specgate::__rt::Value;
+        for foreign in [false, true] {
+            for (ordered, key_type, key) in [
+                (false, "i32", Value::Integer(2)),
+                (true, "i32", Value::Integer(2)),
+                (true, "string", Value::String("key".to_string())),
+            ] {
+                let (mut bundle, mut candidate, component) = nested_metadata(false, foreign);
+                let ty: ReplayType = serde_json::from_value(serde_json::json!({
+                    "kind":"map", "ordered":ordered,
+                    "keys":{"kind":"primitive","name":key_type}, "values":{"kind":"primitive","name":"i32"}
+                }))
+                .unwrap();
+                let declaration = &bundle.registry.operations[1];
+                let mut inputs = declaration.inputs().to_vec();
+                inputs[0].value_type = ty.clone();
+                bundle.registry.operations[1] = replay_model::RegistryOp::builder(replay_model::OpDeps {
+                    component_id: declaration.component_id().clone(),
+                    name: declaration.name().clone(),
+                    inputs,
+                })
+                .output(ty.clone())
+                .build()
+                .unwrap();
+                let mut document: serde_json::Value = serde_json::from_slice(&bundle.registry_document).unwrap();
+                let owner = document["components"]
+                    .as_array_mut()
+                    .unwrap()
+                    .iter_mut()
+                    .find(|entry| entry["id"] == component)
+                    .unwrap();
+                let inner = owner["operations"]
+                    .as_array_mut()
+                    .unwrap()
+                    .iter_mut()
+                    .find(|entry| entry["name"] == "inner")
+                    .unwrap();
+                inner["inputs"][0]["type"] = serde_json::to_value(&ty).unwrap();
+                inner["outcomes"]["result"] = serde_json::to_value(&ty).unwrap();
+                set_registry_document(&mut bundle, &document);
+
+                let rust_key = if key_type == "string" { "String" } else { "i32" };
+                let raw_type = format!("Vec<({rust_key}, i32)>");
+                let raw = &mut Arc::make_mut(&mut candidate.inner).raw_registry.ops[1];
+                raw.params[0].ty = raw_type.clone().into();
+                raw.return_type = raw_type.into();
+                if !foreign {
+                    let storage = format!("List<Tuple<{key_type}, i32>>");
+                    candidate.schema.operations[1].inputs[0].ty = storage.clone().into();
+                    candidate.schema.operations[1].output = Some(storage.into());
+                }
+                let plan = build_plan(&bundle, &candidate).unwrap();
+                assert_eq!(plan.links.len(), 1);
+                let reference = captured_values(Value::Integer(2), Value::Integer(5));
+                let pairs = Value::List(vec![Value::List(vec![key, Value::Integer(5)])]);
+                let actual = captured_nested_result(&component, pairs.clone(), pairs);
+                let report = compare_captures(&plan, &reference, &actual);
+                assert!(report.validation_failures.is_empty() && report.errors.is_empty(), "{report:#?}");
+                assert!(!report.mismatches.is_empty(), "{report:#?}");
+            }
+        }
+    }
+
+    #[test]
+    fn unused_incompatible_declarations_fail_only_if_captured() {
+        use specgate::__rt::{ToNativeValue as _, Value};
+        for (foreign, output) in [(false, "i64"), (true, "i64"), (true, "UnknownNativeType")] {
+            let (bundle, mut candidate, component) = nested_metadata(false, foreign);
+            Arc::make_mut(&mut candidate.inner).raw_registry.ops[1].return_type = output.into();
+            if !foreign {
+                candidate.schema.operations[1].output = Some(output.into());
+            }
+            let plan = build_plan(&bundle, &candidate).expect("unused incompatible declarations must not block planning");
+            let reference = captured_values(Value::Integer(2), Value::Integer(5));
+            let report = compare_captures(&plan, &reference, &reference);
+            assert!(report.equivalent, "{report:#?}");
+            let actual = captured_nested(&component, Value::Integer(2));
+            let system = CommandEnvironment::fake();
+            system.seed_file("existing.otlp.json", b"original");
+            for path in ["missing.otlp.json", "existing.otlp.json"] {
+                let error = write(&plan, std::slice::from_ref(&actual), path, &system).unwrap_err();
+                assert!(error.to_string().contains("inner"), "{error}");
+                let Value::Map(fields) = error.to_native_value() else {
+                    panic!("expected structured error")
+                };
+                assert_eq!(fields["kind"], ErrorKind::Publication.to_native_value());
+            }
+            assert!(!system.exists("missing.otlp.json"));
+            assert_eq!(system.read("existing.otlp.json").unwrap(), b"original");
+        }
+    }
+
+    #[test]
+    fn extra_candidate_calls_publish_and_compare_as_mismatches() {
+        use specgate::__rt::Value;
+        for foreign in [false, true] {
+            let (bundle, candidate, component) = nested_metadata(false, foreign);
+            let plan = build_plan(&bundle, &candidate).unwrap();
+            let reference = captured_values(Value::Integer(2), Value::Integer(5));
+            let actual = captured_nested(&component, Value::Integer(2));
+            let report = compare_captures(&plan, &reference, &actual);
+            assert!(report.validation_failures.is_empty() && report.errors.is_empty(), "{report:#?}");
+            assert!(!report.mismatches.is_empty(), "{report:#?}");
+
+            let system = CommandEnvironment::fake();
+            system.seed_file("existing.otlp.json", b"original");
+            for invalid in [
+                captured_nested(&component, Value::String("invalid input".to_string())),
+                captured_nested("fixture.undeclared", Value::Integer(2)),
+            ] {
+                for path in ["missing.otlp.json", "existing.otlp.json"] {
+                    let error = write(&plan, std::slice::from_ref(&invalid), path, &system).unwrap_err();
+                    assert!(error.to_string().contains("failed linked validation"), "{error}");
+                }
+                assert!(!system.exists("missing.otlp.json"));
+                assert_eq!(system.read("existing.otlp.json").unwrap(), b"original");
+            }
+        }
+    }
+
+    fn nested_metadata(observed: bool, foreign: bool) -> (ReplayBundle, Candidate, String) {
+        let mut bundle = reference_bundle();
+        let mut candidate = candidate_metadata(raw_operation("add"), normalized_operation("add"));
+        let component = if foreign { "fixture.dependency" } else { "fixture.stateless_add" };
+        let mut raw = raw_operation("inner");
+        raw.component = component.into();
+        Arc::make_mut(&mut candidate.inner).raw_registry.ops.push(raw);
+        if !foreign {
+            candidate.schema.operations.push(normalized_operation("inner"));
+        }
+        let declaration = &bundle.registry.operations[0];
+        bundle.registry.operations.push(
+            replay_model::RegistryOp::builder(replay_model::OpDeps {
+                component_id: replay_model::ComponentId::try_new(component).unwrap(),
+                name: replay_model::OperationName::try_new("inner").unwrap(),
+                inputs: declaration.inputs().to_vec(),
+            })
+            .output(ReplayType::primitive("i32"))
+            .build()
+            .unwrap(),
+        );
+        if observed {
+            let mut operation = bundle.scenarios[0].operations[0].clone();
+            operation.component_id = replay_model::ComponentId::try_new(component).unwrap();
+            operation.operation_name = replay_model::OperationName::try_new("inner").unwrap();
+            bundle.observed_operations.push(operation);
+        }
+        let mut document: serde_json::Value = serde_json::from_slice(&bundle.registry_document).unwrap();
+        let mut operation = document["components"][0]["operations"][0].clone();
+        operation["name"] = "inner".into();
+        if foreign {
+            let mut dependency = document["components"][0].clone();
+            dependency["id"] = component.into();
+            dependency["operations"] = serde_json::json!([operation]);
+            let components = document["components"].as_array_mut().unwrap();
+            components.push(dependency);
+            components.sort_by(|left, right| left["id"].as_str().cmp(&right["id"].as_str()));
+        } else {
+            document["components"][0]["operations"].as_array_mut().unwrap().push(operation);
+        }
+        set_registry_document(&mut bundle, &document);
+        (bundle, candidate, component.to_string())
+    }
+
+    fn captured_nested(component: &str, input: specgate::__rt::Value) -> Capture {
+        captured_nested_result(component, input, specgate::__rt::Value::Integer(5))
+    }
+
+    fn captured_nested_result(component: &str, input: specgate::__rt::Value, result: specgate::__rt::Value) -> Capture {
+        use specgate::__rt::{self as capture, Value};
+        let config = capture::Config::builder(capture::ConfigDeps {
+            scenario_name: "add".into(),
+            trace_id: "33333333333333333333333333333333".try_into().unwrap(),
+            run_id: "3333333333333301".try_into().unwrap(),
+            scenario_id: "3333333333333302".try_into().unwrap(),
+        })
+        .build()
+        .unwrap();
+        capture::start(config).unwrap();
+        let mut outer = capture::begin_operation("fixture.stateless_add".into(), "add".into()).unwrap();
+        outer.input("a", Value::Integer(2)).unwrap();
+        outer.input("b", Value::Integer(3)).unwrap();
+        let mut inner = capture::begin_operation(component.into(), "inner".into()).unwrap();
+        inner.input("a", input).unwrap();
+        inner.input("b", Value::Integer(3)).unwrap();
+        inner.result(result).unwrap();
+        outer.result(Value::Integer(5)).unwrap();
+        capture::finish().unwrap()
+    }
+
+    fn compare_captures(plan: &Plan, reference: &Capture, actual: &Capture) -> specgate_ctsc::comparison::ComparisonReport {
+        let system = CommandEnvironment::fake();
+        write(plan, std::slice::from_ref(reference), "reference.otlp.json", &system).unwrap();
+        write(plan, std::slice::from_ref(actual), "candidate.otlp.json", &system).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let registry = directory.path().join(registry_file());
+        std::fs::write(&registry, &plan.registry_document).unwrap();
+        for name in ["reference.otlp.json", "candidate.otlp.json"] {
+            std::fs::write(directory.path().join(name), system.read(name).unwrap()).unwrap();
+        }
+        specgate_ctsc::comparison::compare_with(
+            directory.path().join("reference.otlp.json"),
+            directory.path().join("candidate.otlp.json"),
+            Some(registry),
+            [],
+            &specgate_ctsc::comparison::SystemReader::system(),
+        )
+    }
+
+    #[test]
+    fn unsupported_tuple_arity_and_grouping_inputs_fail_during_planning() {
+        use serde_json::json;
+        use specgate_discovery::schema::{Field, TypeDef, TypeKind};
+        let tuple = ReplayType::tuple(vec![ReplayType::primitive("i32"); 5]);
+        let grouping: ReplayType = serde_json::from_value(json!({"kind":"record","fields":[
+            {"name":"key","type":{"kind":"primitive","name":"string"}},
+            {"name":"items","type":{"kind":"collection","ordered":false,"unique":false,"items":{"kind":"primitive","name":"i32"}}}
+        ]}))
+        .unwrap();
+        for (reference, rust, semantic, value) in [
+            (
+                tuple.clone(),
+                "(i32, i32, i32, i32, i32)",
+                "Tuple<i32, i32, i32, i32, i32>",
+                ReplayValue::Tuple(vec![ReplayValue::I32(1); 5]),
+            ),
+            (
+                grouping,
+                "Grouping",
+                "Grouping",
+                ReplayValue::Map(BTreeMap::from([
+                    ("key".to_string(), ReplayValue::String("group".to_string())),
+                    ("items".to_string(), ReplayValue::List(vec![ReplayValue::I32(1)])),
+                ])),
+            ),
+        ] {
+            let mut bundle = reference_bundle();
+            let declaration = &bundle.registry.operations[0];
+            let mut inputs = declaration.inputs().to_vec();
+            inputs[0].value_type = reference.clone();
+            bundle.registry.operations[0] = replay_model::RegistryOp::builder(replay_model::OpDeps {
+                component_id: declaration.component_id().clone(),
+                name: declaration.name().clone(),
+                inputs,
+            })
+            .output(ReplayType::primitive("i32"))
+            .build()
+            .unwrap();
+            bundle.scenarios[0].operations[0].inputs[0].value_type = reference.clone();
+            bundle.scenarios[0].operations[0].inputs[0].value = value;
+            let mut document: serde_json::Value = serde_json::from_slice(&bundle.registry_document).unwrap();
+            document["components"][0]["operations"][0]["inputs"][0]["type"] = serde_json::to_value(reference).unwrap();
+            set_registry_document(&mut bundle, &document);
+            let mut raw = raw_operation("add");
+            raw.params[0].ty = rust.into();
+            let mut normalized = normalized_operation("add");
+            normalized.inputs[0].ty = semantic.into();
+            let mut candidate = candidate_metadata(raw, normalized);
+            candidate.schema.types.push(TypeDef {
+                name: "Grouping".into(),
+                kind: TypeKind::Struct,
+                fields: vec![
+                    Field {
+                        name: "key".into(),
+                        ty: "string".into(),
+                    },
+                    Field {
+                        name: "items".into(),
+                        ty: "List<i32>".into(),
+                    },
+                ],
+                variants: Vec::new(),
+            });
+            let error = build_plan(&bundle, &candidate).unwrap_err();
+            assert!(error.to_string().contains("unsupported"), "{error}");
+            assert!(
+                error.to_string().contains("input 'a'") || error.to_string().contains("value 'a'"),
+                "{error}"
+            );
+        }
+        let mut bundle = reference_bundle();
+        let declaration = &bundle.registry.operations[0];
+        bundle.registry.operations[0] = replay_model::RegistryOp::builder(replay_model::OpDeps {
+            component_id: declaration.component_id().clone(),
+            name: declaration.name().clone(),
+            inputs: declaration.inputs().to_vec(),
+        })
+        .output(tuple.clone())
+        .build()
+        .unwrap();
+        let mut document: serde_json::Value = serde_json::from_slice(&bundle.registry_document).unwrap();
+        document["components"][0]["operations"][0]["outcomes"]["result"] = serde_json::to_value(tuple).unwrap();
+        set_registry_document(&mut bundle, &document);
+        let mut normalized = normalized_operation("add");
+        normalized.output = Some("Tuple<i32, i32, i32, i32, i32>".into());
+        let error = build_plan(&bundle, &candidate_metadata(raw_operation("add"), normalized)).unwrap_err();
+        assert_eq!(classify(&error), Some(ReplayLimitation::StructuredValue), "{error}");
+        assert!(error.to_string().contains("output"), "{error}");
+    }
+
+    #[test]
+    fn lookup_grouping_and_priority_pairs_compare_keys_and_priorities() {
+        use serde_json::json;
+        use specgate::__rt::Value;
+        use specgate_discovery::schema::{Field, TypeDef, TypeKind};
+        let items = || Value::List(vec![Value::Integer(2), Value::Integer(1), Value::Integer(2)]);
+        let lookup = |key: &str| Value::Map(BTreeMap::from([(key.to_string(), items())]));
+        let grouping = |key: &str| {
+            Value::Map(BTreeMap::from([
+                ("key".to_string(), Value::String(key.to_string())),
+                ("items".to_string(), items()),
+            ]))
+        };
+        let priorities = |first: &str, priority: i64| {
+            Value::List(vec![
+                Value::List(vec![Value::String(first.to_string()), Value::Integer(priority)]),
+                Value::List(vec![Value::String("later".to_string()), Value::Integer(7)]),
+            ])
+        };
+        let bag = ReplayType::collection(ReplayType::primitive("i32"), false, false);
+        for (reference, native, expected, changed) in [
+            (
+                ReplayType::map(ReplayType::primitive("string"), bag),
+                "map<string, List<i32>>",
+                lookup("original"),
+                vec![lookup("changed")],
+            ),
+            (
+                serde_json::from_value(json!({"kind":"record","fields":[
+                    {"name":"key","type":{"kind":"primitive","name":"string"}},
+                    {"name":"items","type":{"kind":"collection","ordered":false,"unique":false,"items":{"kind":"primitive","name":"i32"}}}
+                ]}))
+                .unwrap(),
+                "Grouping",
+                grouping("original"),
+                vec![grouping("changed")],
+            ),
+            (
+                ReplayType::collection(
+                    ReplayType::tuple(vec![ReplayType::primitive("string"), ReplayType::primitive("i32")]),
+                    false,
+                    false,
+                ),
+                "List<Tuple<string, i32>>",
+                priorities("first", 1),
+                vec![priorities("changed", 1), priorities("first", 9)],
+            ),
+        ] {
+            let mut bundle = reference_bundle();
+            let declaration = &bundle.registry.operations[0];
+            bundle.registry.operations[0] = replay_model::RegistryOp::builder(replay_model::OpDeps {
+                component_id: declaration.component_id().clone(),
+                name: declaration.name().clone(),
+                inputs: declaration.inputs().to_vec(),
+            })
+            .output(reference.clone())
+            .build()
+            .unwrap();
+            let mut document: serde_json::Value = serde_json::from_slice(&bundle.registry_document).unwrap();
+            document["components"][0]["operations"][0]["outcomes"]["result"] = serde_json::to_value(reference).unwrap();
+            set_registry_document(&mut bundle, &document);
+            let mut normalized = normalized_operation("add");
+            normalized.output = Some(native.into());
+            let mut candidate = candidate_metadata(raw_operation("add"), normalized);
+            if native == "Grouping" {
+                candidate.schema.types.push(TypeDef {
+                    name: "Grouping".into(),
+                    kind: TypeKind::Struct,
+                    fields: vec![
+                        Field {
+                            name: "key".into(),
+                            ty: "string".into(),
+                        },
+                        Field {
+                            name: "items".into(),
+                            ty: "List<i32>".into(),
+                        },
+                    ],
+                    variants: Vec::new(),
+                });
+            }
+            let plan = build_plan(&bundle, &candidate).unwrap();
+            let mut equivalent = expected.clone();
+            if native == "List<Tuple<string, i32>>" {
+                let Value::List(pairs) = &mut equivalent else { unreachable!() };
+                pairs.reverse();
+            }
+            let reference = captured_values(Value::Integer(2), expected);
+            let actual = captured_values(Value::Integer(2), equivalent);
+            let report = compare_captures(&plan, &reference, &actual);
+            assert!(report.equivalent, "{report:#?}");
+            for value in changed {
+                let actual = captured_values(Value::Integer(2), value);
+                let report = compare_captures(&plan, &reference, &actual);
+                assert!(report.validation_failures.is_empty() && report.errors.is_empty(), "{report:#?}");
+                assert!(!report.mismatches.is_empty(), "{report:#?}");
+            }
+        }
     }
 
     #[test]
@@ -992,6 +1479,97 @@ mod cases {
         }
         assert!(!system.exists("missing.otlp.json"));
         assert_eq!(system.read("existing.otlp.json").unwrap(), b"original");
+    }
+
+    #[test]
+    fn candidate_unique_collection_and_pair_map_results_reject_duplicates_before_publication() {
+        use specgate::__rt::{ToNativeValue as _, Value};
+        let pair = |key| Value::List(vec![key, Value::Integer(1)]);
+        for (reference, native, item) in [
+            (ReplayType::set(ReplayType::primitive("i32")), "List<i32>", Value::Integer(2)),
+            (ReplayType::collection(ReplayType::primitive("i32"), true, true), "List<i32>", Value::Integer(2)),
+            (ReplayType::map(ReplayType::primitive("string"), ReplayType::primitive("i32")), "List<Tuple<string, i32>>", pair(Value::String("key".to_string()))),
+            (serde_json::from_value(serde_json::json!({"kind":"map","ordered":true,"keys":{"kind":"primitive","name":"string"},"values":{"kind":"primitive","name":"i32"}})).unwrap(), "List<Tuple<string, i32>>", pair(Value::String("key".to_string()))),
+            (ReplayType::map(ReplayType::primitive("i32"), ReplayType::primitive("i32")), "List<Tuple<i32, i32>>", pair(Value::Integer(2))),
+        ] {
+            let mut bundle = reference_bundle();
+            let operation = &bundle.registry.operations[0];
+            bundle.registry.operations[0] = replay_model::RegistryOp::builder(replay_model::OpDeps {
+                component_id: operation.component_id().clone(), name: operation.name().clone(), inputs: operation.inputs().to_vec(),
+            }).output(reference.clone()).build().unwrap();
+            let mut document: serde_json::Value = serde_json::from_slice(&bundle.registry_document).unwrap();
+            document["components"][0]["operations"][0]["outcomes"]["result"] = serde_json::to_value(reference).unwrap();
+            set_registry_document(&mut bundle, &document);
+            let mut normalized = normalized_operation("add");
+            normalized.output = Some(native.into());
+            let plan = build_plan(&bundle, &candidate_metadata(raw_operation("add"), normalized)).unwrap();
+            let system = CommandEnvironment::fake();
+            let valid = captured_values(Value::Integer(2), Value::List(vec![item.clone()]));
+            write(&plan, &[valid], "valid.otlp.json", &system).unwrap();
+            system.seed_file("existing.otlp.json", b"original");
+            let invalid = captured_values(Value::Integer(2), Value::List(vec![item.clone(), item]));
+            for path in ["missing.otlp.json", "existing.otlp.json"] {
+                let error = write(&plan, std::slice::from_ref(&invalid), path, &system).unwrap_err();
+                let Value::Map(fields) = error.to_native_value() else { panic!("expected structured error") };
+                assert_eq!(fields["kind"], ErrorKind::Publication.to_native_value());
+            }
+            assert!(!system.exists("missing.otlp.json"));
+            assert_eq!(system.read("existing.otlp.json").unwrap(), b"original");
+        }
+    }
+
+    #[test]
+    fn structured_inputs_are_validated_even_when_the_result_is_primitive() {
+        use specgate::__rt::Value;
+        let mut bundle = reference_bundle();
+        let operation = &bundle.registry.operations[0];
+        let mut inputs = operation.inputs().to_vec();
+        inputs[0].value_type = ReplayType::set(ReplayType::primitive("i32"));
+        bundle.registry.operations[0] = replay_model::RegistryOp::builder(replay_model::OpDeps {
+            component_id: operation.component_id().clone(),
+            name: operation.name().clone(),
+            inputs,
+        })
+        .output(ReplayType::primitive("i32"))
+        .build()
+        .unwrap();
+        let mut document: serde_json::Value = serde_json::from_slice(&bundle.registry_document).unwrap();
+        document["components"][0]["operations"][0]["inputs"][0]["type"] =
+            serde_json::to_value(ReplayType::set(ReplayType::primitive("i32"))).unwrap();
+        set_registry_document(&mut bundle, &document);
+        let mut raw = raw_operation("add");
+        raw.params[0].ty = "Vec<i32>".into();
+        let mut normalized = normalized_operation("add");
+        normalized.inputs[0].ty = "List<i32>".into();
+        let plan = build_plan(&bundle, &candidate_metadata(raw, normalized)).unwrap();
+        let system = CommandEnvironment::fake();
+        let capture = captured_values(Value::List(vec![Value::Integer(2), Value::Integer(2)]), Value::Integer(5));
+        let error = write(&plan, &[capture], "invalid.otlp.json", &system).unwrap_err();
+        assert!(error.to_string().contains("failed linked validation"), "{error}");
+        assert!(!system.exists("invalid.otlp.json"));
+    }
+
+    fn captured_values(input: specgate::__rt::Value, result: specgate::__rt::Value) -> Capture {
+        use specgate::__rt::{self as capture, Value};
+        let config = capture::Config::builder(capture::ConfigDeps {
+            scenario_name: "add".into(),
+            trace_id: "33333333333333333333333333333333".try_into().unwrap(),
+            run_id: "3333333333333301".try_into().unwrap(),
+            scenario_id: "3333333333333302".try_into().unwrap(),
+        })
+        .build()
+        .unwrap();
+        capture::start(config).unwrap();
+        let mut operation = capture::begin_operation("fixture.stateless_add".into(), "add".into()).unwrap();
+        operation.input("a", input).unwrap();
+        operation.input("b", Value::Integer(3)).unwrap();
+        operation.result(result).unwrap();
+        capture::finish().unwrap()
+    }
+
+    fn set_registry_document(bundle: &mut ReplayBundle, document: &serde_json::Value) {
+        bundle.registry_document = serde_json::to_vec(document).unwrap();
+        bundle.registry.identity.digest = document_digest(&bundle.registry_document);
     }
 
     #[test]
@@ -1068,6 +1646,7 @@ mod cases {
         .unwrap()
         .registry_json
         .into_bytes();
+        bundle.registry.identity.digest = document_digest(&bundle.registry_document);
         let operation = &bundle.registry.operations[0];
         bundle.registry.operations[0] = replay_model::RegistryOp::builder(replay_model::OpDeps {
             component_id: operation.component_id().clone(),
@@ -1237,15 +1816,25 @@ mod cases {
                 value: ReplayValue::I32(3),
             },
         ];
+        let schema = serde_json::to_string(&candidate_metadata(raw_operation("add"), normalized_operation("add")).schema).unwrap();
+        let registry_document = specgate_ctsc::registry::encode(
+            "urn:ctsc:registry:fixture.stateless_add",
+            "0.1.0",
+            specgate_ctsc::registry::Schema::new(&schema),
+        )
+        .unwrap()
+        .registry_json
+        .into_bytes();
+        let digest = document_digest(&registry_document);
         ReplayBundle {
-            registry_document: Vec::new(),
+            registry_document,
             observed_operations: Vec::new(),
             component_id: specgate_ctsc::replay::model::ComponentId::try_new("fixture.stateless_add").unwrap(),
             registry: replay_model::Registry {
                 identity: replay_model::RegistryIdentity {
                     id: serde_json::from_str("\"urn:ctsc:registry:fixture.stateless_add\"").unwrap(),
                     version: serde_json::from_str("\"0.1.0\"").unwrap(),
-                    digest: specgate_ctsc::replay::model::ArtifactDigest::try_new(format!("sha256:{}", "a".repeat(64))).unwrap(),
+                    digest,
                 },
                 operations: vec![
                     replay_model::RegistryOp::builder(replay_model::OpDeps {
@@ -1313,6 +1902,11 @@ mod cases {
             cs_params: Vec::new(),
             cs_exceptions: specgate_discovery::registry::ExceptionMetadata::default(),
         }
+    }
+
+    fn document_digest(bytes: &[u8]) -> replay_model::ArtifactDigest {
+        use sha2::Digest as _;
+        replay_model::ArtifactDigest::try_new(format!("sha256:{:x}", sha2::Sha256::digest(bytes))).unwrap()
     }
 
     fn normalized_operation(name: impl AsRef<str>) -> Operation {

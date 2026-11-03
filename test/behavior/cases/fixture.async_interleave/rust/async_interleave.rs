@@ -6,7 +6,7 @@
 //! rather than to each other, and neither poisons the run.
 //!
 //! The captured trace therefore carries two *overlapping* sibling operation
-//! spans, which `ctsc.strict/0.1.0` comparison rejects outside
+//! spans, which `ctsc.strict/0.2.0` comparison rejects outside
 //! `conformance.parallel`. The matrix row is `replay.mode: "unsupported"`, so
 //! comparison never runs against it.
 //!

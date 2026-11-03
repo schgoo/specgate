@@ -82,6 +82,11 @@ pub fn make_widget() -> Widget {
 - See [`../reference/value-mapping.md`](../reference/value-mapping.md) for
   supported types.
 
+Native tuples of arity 2-4 are supported recursively. Independent discovery
+still declares `Vec<T>` as a list, but replay can bind it to reference bags,
+sets, or ordered sets. Pair vectors can store ordered/non-string maps.
+See [replay storage](../reference/value-mapping.md#candidate-replay-values).
+
 ### 3. Annotate setups for stateful operations
 
 A method operation needs a setup that constructs its receiver:

@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using SpecGate.Annotations;
+using SpecGate.Collections;
 
 namespace SpecGate.Runtime;
 
@@ -24,8 +25,13 @@ internal enum SemanticKind
     /// <summary>A declared <see cref="object"/>, whose family is decided per value.</summary>
     Dynamic,
     List,
+    Bag,
     Set,
+    OrderedSet,
     Map,
+    OrderedMap,
+    Tuple,
+    Record,
     Option,
     Result,
 
@@ -70,6 +76,10 @@ internal sealed class SemanticType : IEquatable<SemanticType>
     /// <summary>The annotated CLR type, for <see cref="SemanticKind.Named"/>.</summary>
     internal Type? Declared { get; }
 
+    internal Type[]? ClrArguments { get; private init; }
+    internal string? EnumerationProperty { get; private init; }
+    internal CollectionProjection Projection { get; private init; }
+
     private static SemanticType Scalar(SemanticKind kind) => new(kind, null, null, null);
 
     private static SemanticType Of(SemanticKind kind, SemanticType first, SemanticType? second = null) =>
@@ -90,25 +100,44 @@ internal sealed class SemanticType : IEquatable<SemanticType>
     /// a non-generic value type contributes none, and <c>T?</c> contributes only
     /// whatever <c>T</c> contributes.
     /// </remarks>
-    internal static SemanticType Map(Type type, NullableFlagReader flags)
+    internal static SemanticType Map(Type type, NullableFlagReader flags) => Map(type, flags, []);
+
+    private static SemanticType Map(Type type, NullableFlagReader flags, HashSet<Type> mapping)
+    {
+        if (!mapping.Add(type))
+        {
+            throw new SpecGateCaptureException(CaptureRejection.UnsupportedType,
+                $"specgate: recursive collection declaration '{type}' has no finite CTSC representation.");
+        }
+        try
+        {
+            return MapType(type, flags, mapping);
+        }
+        finally
+        {
+            mapping.Remove(type);
+        }
+    }
+
+    private static SemanticType MapType(Type type, NullableFlagReader flags, HashSet<Type> mapping)
     {
         Type? underlying = Nullable.GetUnderlyingType(type);
         if (underlying is not null)
         {
-            return Of(SemanticKind.Option, Map(underlying, flags));
+            return Of(SemanticKind.Option, Map(underlying, flags, mapping));
         }
 
         if (type.IsArray)
         {
             bool nullable = flags.NextIsNullable();
-            SemanticType list = Of(SemanticKind.List, Map(type.GetElementType()!, flags));
+            SemanticType list = Of(SemanticKind.List, Map(type.GetElementType()!, flags, mapping));
             return nullable ? Of(SemanticKind.Option, list) : list;
         }
 
         if (!type.IsValueType)
         {
             bool nullable = flags.NextIsNullable();
-            SemanticType core = MapCore(type, flags);
+            SemanticType core = MapCore(type, flags, mapping);
             return nullable ? Of(SemanticKind.Option, core) : core;
         }
 
@@ -117,10 +146,10 @@ internal sealed class SemanticType : IEquatable<SemanticType>
             flags.Next();
         }
 
-        return MapCore(type, flags);
+        return MapCore(type, flags, mapping);
     }
 
-    private static SemanticType MapCore(Type type, NullableFlagReader flags)
+    private static SemanticType MapCore(Type type, NullableFlagReader flags, HashSet<Type> mapping)
     {
         if (type == typeof(bool))
         {
@@ -184,27 +213,17 @@ internal sealed class SemanticType : IEquatable<SemanticType>
 
             if (definition == typeof(Option<>))
             {
-                return Of(SemanticKind.Option, Map(arguments[0], flags));
+                return Of(SemanticKind.Option, Map(arguments[0], flags, mapping));
             }
 
             if (definition == typeof(Result<,>))
             {
-                return Of(SemanticKind.Result, Map(arguments[0], flags), Map(arguments[1], flags));
+                return Of(SemanticKind.Result, Map(arguments[0], flags, mapping), Map(arguments[1], flags, mapping));
             }
 
-            if (definition == typeof(List<>))
+            if (definition == typeof(ValueTuple<,>))
             {
-                return Of(SemanticKind.List, Map(arguments[0], flags));
-            }
-
-            if (definition == typeof(Dictionary<,>) || definition == typeof(SortedDictionary<,>))
-            {
-                return Of(SemanticKind.Map, Map(arguments[0], flags), Map(arguments[1], flags));
-            }
-
-            if (definition == typeof(HashSet<>) || definition == typeof(SortedSet<>))
-            {
-                return Of(SemanticKind.Set, Map(arguments[0], flags));
+                return Of(SemanticKind.Tuple, Map(arguments[0], flags, mapping), Map(arguments[1], flags, mapping));
             }
         }
 
@@ -213,11 +232,61 @@ internal sealed class SemanticType : IEquatable<SemanticType>
             return Named(type);
         }
 
+        CollectionShape? collection;
+        try
+        {
+            collection = CollectionContractResolver.Resolve(type);
+        }
+        catch (InvalidOperationException error)
+        {
+            throw new SpecGateCaptureException(CaptureRejection.AmbiguousDeclaration, error.Message);
+        }
+        if (collection is not null)
+        {
+            Type[] arguments = type.GetGenericArguments();
+            NullableFlagReader[] readers = new NullableFlagReader[arguments.Length];
+            for (int index = 0; index < arguments.Length; index++)
+            {
+                readers[index] = flags.Fork();
+                flags.Skip(arguments[index]);
+            }
+            SemanticType[] mapped = GenericTypeBinding.Bind(collection, type,
+                index => Map(arguments[index], readers[index].Fork(), mapping),
+                argument => Map(argument, NullableFlagReader.Oblivious, mapping),
+                Construct);
+            return collection.Describe(mapped, type, Construct);
+        }
+
         throw new SpecGateCaptureException(
             CaptureRejection.UnsupportedType,
             $"specgate: '{type.FullName}' has no CTSC representation. Use a supported scalar, "
-            + "List, Dictionary, SortedDictionary, HashSet, SortedSet, Option, Result, or a type "
+            + "generic enumerable, dictionary, Option, Result, or a type "
             + "annotated with [SpecEvent].");
+    }
+
+    private static SemanticType Construct(ShapeConstructor constructor, SemanticType[] arguments, Type? declaration)
+    {
+        SemanticType result = Of(constructor switch
+        {
+            ShapeConstructor.List => SemanticKind.List,
+            ShapeConstructor.Bag => SemanticKind.Bag,
+            ShapeConstructor.Set => SemanticKind.Set,
+            ShapeConstructor.OrderedSet => SemanticKind.OrderedSet,
+            ShapeConstructor.Map => SemanticKind.Map,
+            ShapeConstructor.OrderedMap => SemanticKind.OrderedMap,
+            ShapeConstructor.Tuple => SemanticKind.Tuple,
+            ShapeConstructor.Option => SemanticKind.Option,
+            ShapeConstructor.Result => SemanticKind.Result,
+            ShapeConstructor.Record => SemanticKind.Record,
+            _ => throw new InvalidOperationException($"Unknown semantic constructor '{constructor}'."),
+        }, arguments[0], arguments.Length > 1 ? arguments[1] : null);
+        CollectionShape? collection = declaration is null ? null : CollectionContractResolver.Resolve(declaration);
+        return collection is null ? result : new SemanticType(result.Kind, result.First, result.Second, null)
+        {
+            ClrArguments = collection.Arguments,
+            EnumerationProperty = collection.EnumerationProperty,
+            Projection = collection.Projection,
+        };
     }
 
     /// <summary>

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using SpecGate.Collections;
 
 namespace SpecGate.Discovery;
 
@@ -17,6 +18,7 @@ internal sealed class SemanticTypes
     private readonly NullabilityInfoContext nullability;
     private readonly List<Type> queue = [];
     private readonly HashSet<Type> seen = [];
+    private readonly HashSet<Type> rendering = [];
     private bool collecting = true;
 
     internal SemanticTypes(NullabilityInfoContext nullability) => this.nullability = nullability;
@@ -44,6 +46,23 @@ internal sealed class SemanticTypes
 
     /// <summary>Renders <paramref name="type"/> including its nullable annotation.</summary>
     internal string Render(Type type, NullabilityInfo? info)
+    {
+        if (!rendering.Add(type))
+        {
+            throw new InvalidOperationException(
+                $"specgate: recursive collection declaration '{type}' has no finite CTSC representation.");
+        }
+        try
+        {
+            return RenderType(type, info);
+        }
+        finally
+        {
+            rendering.Remove(type);
+        }
+    }
+
+    private string RenderType(Type type, NullabilityInfo? info)
     {
         Type? underlying = Nullable.GetUnderlyingType(type);
         if (underlying is not null)
@@ -106,19 +125,9 @@ internal sealed class SemanticTypes
                 return "Result<" + Render(arguments[0], At(0)) + ", " + Render(arguments[1], At(1)) + ">";
             }
 
-            if (definition == typeof(List<>))
+            if (definition == typeof(ValueTuple<,>))
             {
-                return "List<" + Render(arguments[0], At(0)) + ">";
-            }
-
-            if (definition == typeof(Dictionary<,>) || definition == typeof(SortedDictionary<,>))
-            {
-                return "map<" + Render(arguments[0], At(0)) + ", " + Render(arguments[1], At(1)) + ">";
-            }
-
-            if (definition == typeof(HashSet<>) || definition == typeof(SortedSet<>))
-            {
-                return "set<" + Render(arguments[0], At(0)) + ">";
+                return "Tuple<" + Render(arguments[0], At(0)) + ", " + Render(arguments[1], At(1)) + ">";
             }
         }
 
@@ -126,6 +135,23 @@ internal sealed class SemanticTypes
         {
             Collect(type);
             return NameOf(type);
+        }
+
+        CollectionShape? collection = CollectionContractResolver.Resolve(type);
+        if (collection is not null)
+        {
+            string Construct(ShapeConstructor constructor, string[] arguments, Type? _) => constructor switch
+            {
+                ShapeConstructor.Record => "{ key: " + arguments[0] + ", items: " + arguments[1] + " }",
+                ShapeConstructor.Map => "map<" + string.Join(", ", arguments) + ">",
+                ShapeConstructor.Set => "set<" + string.Join(", ", arguments) + ">",
+                _ => constructor + "<" + string.Join(", ", arguments) + ">",
+            };
+            string[] arguments = GenericTypeBinding.Bind(collection, type,
+                index => Render(type.GetGenericArguments()[index],
+                    info?.GenericTypeArguments is { } generics && index < generics.Length ? generics[index] : null),
+                argument => Render(argument, null), Construct);
+            return collection.Describe(arguments, type, Construct);
         }
 
         return type.Name;

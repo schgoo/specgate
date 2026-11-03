@@ -49,6 +49,11 @@ the component's registry plus a reference trace of what the tests did.
 - A test that leaves an operation open when it ends is dropped with a
   diagnostic (see [`async-capture.md`](async-capture.md)).
 
+Collection capture uses the declared contract, not the observed contents.
+C# lookups retain keys as maps of bags, and groupings retain `key` and `items`
+fields. Enumeration is fresh and non-consuming; it can execute user code.
+See [collection mappings](../reference/value-mapping.md#c-collection-contracts).
+
 ## Expected output
 
 [smoke]

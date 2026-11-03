@@ -32,7 +32,7 @@ format.
 
 ## Documents and supporting artifacts
 
-This directory contains the **0.3 draft**:
+This directory contains the **0.4 draft**:
 
 - [`trace.md`](trace.md) — OTLP trace format and generation requirements.
 - [`registry.md`](registry.md) — registry documents, operations, types, imports,
@@ -50,6 +50,11 @@ This directory contains the **0.3 draft**:
   trace/registry pairs.
 
 The draft is not yet a stable compatibility commitment.
+
+Version 0.4 intentionally replaces `list`/`set` wire kinds with `collection`
+and required `ordered`/`unique` fields; maps require `ordered`. Recapture 0.3
+bundles rather than changing only their version. See the ratified
+[collection-dimensions decision](../decisions/collection-dimensions.md).
 
 ## Conformance corpus
 

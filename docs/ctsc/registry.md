@@ -1,4 +1,4 @@
-# CTSC Registry 0.3
+# CTSC Registry 0.4
 
 **Status:** Draft
 
@@ -19,7 +19,7 @@ A registry document is one JSON object with:
 ```json
 {
   "format": "ctsc.registry",
-  "formatVersion": "0.3.0",
+  "formatVersion": "0.4.0",
   "registryId": "...",
   "version": "...",
   "components": []
@@ -144,26 +144,35 @@ bytes
 Named references may additionally specify `componentId` and `registryId`
 according to Section 8.
 
-### 5.3 Lists and sets
+### 5.3 Collections
 
-Lists are ordered collections. Item position is part of the declared value
-semantics.
-
-```json
-{
-  "kind": "list",
-  "items": { "kind": "primitive", "name": "string" }
-}
-```
-
-Sets are unordered, duplicate-free collections.
+Collections declare one item type and two required, independent semantic
+properties. `ordered` means item position participates in equality, not that
+items are sorted. `unique` forbids duplicate elements under recursive CTSC
+value equality.
 
 ```json
 {
-  "kind": "set",
-  "items": { "kind": "primitive", "name": "string" }
+  "kind": "collection",
+  "items": { "kind": "primitive", "name": "string" },
+  "ordered": false,
+  "unique": false
 }
 ```
+
+The familiar names are conveniences, not separate wire kinds:
+
+| `ordered` | `unique` | Meaning |
+|---|---|---|
+| `true` | `false` | List |
+| `false` | `false` | Bag (multiplicity matters) |
+| `false` | `true` | Set |
+| `true` | `true` | Ordered set |
+
+Producers MUST NOT infer these properties from observed contents, sort order,
+or the absence of duplicates in one execution. Consumers MUST reject missing
+properties and unrecognized semantic fields rather than assume weaker
+semantics. The 0.3 `list` and `set` wire kinds are not valid in 0.4.
 
 ### 5.4 Maps
 
@@ -171,9 +180,15 @@ Sets are unordered, duplicate-free collections.
 {
   "kind": "map",
   "keys": { "kind": "primitive", "name": "string" },
-  "values": { "kind": "primitive", "name": "i64" }
+  "values": { "kind": "primitive", "name": "i64" },
+  "ordered": false
 }
 ```
+
+Maps declare key/value association and inherently unique keys under recursive
+CTSC equality. The required `ordered` property determines whether entry
+position participates in equality. There is no separate map `unique` field.
+An ordered map does not imply sorted keys. Unknown semantic fields are invalid.
 
 ### 5.5 Tuple
 

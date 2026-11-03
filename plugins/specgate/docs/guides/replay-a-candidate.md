@@ -41,23 +41,45 @@ The reference may be Rust or C#; the candidate must be Rust.
 ### What replay does
 
 1. Validates the bundle and decodes its scenarios.
-2. Discovers the candidate and links each captured operation to exactly one
+2. Discovers the candidate and links each top-level reference operation to exactly one
    candidate operation by component, operation name, and input names, checking
    that types are compatible.
 3. Generates a runner or a selected Cargo test-target entry that calls the
    candidate with recorded operation and setup construction inputs, scenario by
    scenario, under native capture. Async calls use the selected candidate engine
    or a custom candidate-owned wrapper.
-4. Writes the resulting trace with deterministic ids and timestamps.
+4. Converts actual captured inputs, results, and errors through the checked
+   storage bindings, validates the whole trace against the reference registry,
+   and writes it with deterministic ids and timestamps.
 
 Replay does not run your tests; it calls your operations directly.
 Annotated synchronous setups reconstruct receiver and injected environments.
 Private/test-only producers remain in their original Cargo target. Equal
 receiver producer/input identities share state within a scenario; scenario
-boundaries release receivers and setup guards. Structured outcomes must match
-the reference's reachable CTSC declarations. See
+boundaries release receivers and setup guards. Structured outcomes retain named
+identity and use the reference's nested collection dimensions. See
 [`../status.md`](https://github.com/schgoo/specgate/blob/v0.6.0/docs/status.md#candidate-replay-and-explicit-generic-operations)
 for explicit generic specializations.
+
+Use `Vec<T>` for reference bags, sets, and ordered sets as well as lists.
+Use `Vec<(K,V)>` for ordered maps or supported non-string map keys. Bag inputs
+keep their existing sorted construction; ordered map positions are preserved.
+Tuples of arity 2-4 are supported recursively. Duplicate semantic keys or
+unique items fail before publication, including candidate results.
+An inline reference record, such as a C# grouping, can bind to an annotated
+Rust record in the same component with exact `key` and `items` fields and
+supported field types. Named reference types cannot bind to inline candidates.
+See [storage bindings](../reference/value-mapping.md#candidate-replay-values).
+
+Replay calls only top-level reference operations. It checks observed nested
+operations declared by the candidate in their owning component, including calls
+to other components. Missing observed-only calls do not block planning;
+comparison reports the missing behavior. Extra candidate calls declared in the
+reference registry use the same checked storage conversions, including
+pair-vector maps. Incompatible unused declarations do not block planning, but
+capturing such a call fails publication. Valid extra calls remain in the output
+and produce comparison mismatches. Undeclared calls or values that violate the
+reference registry still fail before publication.
 
 Each Cargo target used for generated discovery/replay hooks must declare
 `specgate::spec_component!("…")` at its own crate root, including binary-unit

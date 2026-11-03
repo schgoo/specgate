@@ -39,6 +39,13 @@ public sealed class MetadataTests
                 continue;
             }
 
+            if (row.Rust is null)
+            {
+                Assert.Equal("not-applicable", row.Parity.Mode);
+                Assert.False(string.IsNullOrWhiteSpace(row.Parity.Reason));
+                continue;
+            }
+
             Assert.Contains(row.Parity.Mode, ComparableParityModes);
             if (row.Parity.Mode == "exception")
             {
@@ -218,6 +225,7 @@ public sealed class MetadataTests
         string Id,
         string Classification,
         string? Component,
+        MatrixLanguage? Rust,
         MatrixLanguage? CSharp,
         MatrixParity Parity);
 

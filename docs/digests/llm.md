@@ -12,7 +12,7 @@ authoritative; update the source contract or implementation document first.
 SpecGate discovers implementation metadata as a CTSC registry, captures
 ordinary Rust or C# tests as a reference CTSC bundle, replays the reference stimuli
 against a Rust candidate, validates the artifacts, and compares reference and
-candidate traces with `ctsc.strict/0.1.0`.
+candidate traces with `ctsc.strict/0.2.0`.
 
 The active CLI surface is `discover`, `capture`, `replay`, `validate`, and
 `compare`. Rust and C# support discovery and capture; replay currently supports
@@ -200,10 +200,25 @@ The matrix is exact:
 The detailed list is the single table in `docs/reference/limitations.md`;
 architecture and status are in `docs/status.md`. Important current boundaries include:
 
+- CTSC `0.4.0` uses `collection` with required `ordered`/`unique` and `map`
+  with required `ordered`; old bundles require recapture. Strict `0.2.0`
+  preserves bag multiplicity and uses recursive uniqueness. C# generic
+  enumerable contracts default to bags, including concrete implementations.
+  Lists, ordered enumerables, sets, ordered dictionaries, and priority
+  element/priority bags are recognized through a shared discovery/capture
+  resolver. Lookups map keys to bags; groupings use fixed `key` and `items`
+  record fields. Independent Rust `Vec` discovery remains a list. Checked
+  replay bindings use vectors for any reference collection dimensions and pair
+  vectors for ordered/non-string maps. Bag inputs keep current sorting.
+  Converted actual inputs/results/errors must pass linked validation before
+  publication; duplicate semantic keys or unique items reject;
+
 - reference capture supports Rust libtest targets and C# native test projects;
 - replay supports public Rust free functions and setup-backed instance methods,
   directly awaited async calls, explicit generic specializations, and structured
-  results/errors with matching CTSC declarations;
+  results/errors with checked nested storage bindings and retained named identity.
+  Inline reference records can bind to same-component annotated Rust records
+  with exact fields, not the reverse;
 - Rust test-only/private setup producers are resolved semantically in actual
   Cargo test targets; generated replay hooks run instead of ordinary tests.
   Each target declares `spec_component!` at its own crate root; the declaration
@@ -211,8 +226,8 @@ architecture and status are in `docs/status.md`. Important current boundaries in
   Generated builds diagnose missing declarations even with explicit `spec` values;
   a hook-only default does not register an unused component.
   Configured compiler wrappers remain under normal Cargo handling.
-  Construction inputs support primitives and recursive lists, sets, string-keyed
-  maps, and optionals. Explicit property setups recursively fold nested opted-in
+  Construction inputs support primitives, tuples of arity 2-4, and recursive
+  collections, supported map keys, and optionals. Explicit property setups recursively fold nested opted-in
   records, including producer arguments, into flat semantic leaves. Duplicate
   leaf names and cyclic expansions are rejected; records inside containers are
   not decomposed. Equal receiver producer/input identities share state within a scenario;

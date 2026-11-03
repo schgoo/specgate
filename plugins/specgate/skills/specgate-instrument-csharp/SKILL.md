@@ -108,6 +108,19 @@ public sealed class Counter
 See [`../reference/value-mapping.md`](${PLUGIN_DIR}/docs/reference/value-mapping.md) for every
 supported type and the values capture rejects.
 
+Generic collection contracts are recognized without wrapper APIs:
+`IEnumerable<T>` is a bag; list and ordered-enumerable contracts preserve
+position; set contracts require uniqueness. This includes concrete
+`FooEnumerable : IEnumerable<Foo>` implementations. `Task<IEnumerable<T>>`
+records its awaited result with the same bag semantics. Collection items still
+need supported types; a model owned by a test project cannot be referenced from
+the product project's generic specialization. See
+[collection mappings](${PLUGIN_DIR}/docs/reference/value-mapping.md#c-collection-contracts).
+`ILookup<K,V>` records a map from keys to bags of values. `IGrouping<K,V>`
+records an inline record with fixed fields `key` and `items`. Optional keys
+retain their type, and projected duplicate lookup keys fail capture. Capture
+uses fresh, non-consuming enumeration; it does not advance caller-held cursors.
+
 #### 4. Declare outcomes
 
 | Return or annotation | Recorded outcome |
@@ -295,6 +308,12 @@ candidate. Nested abandonment can replay through a completing enclosing
 operation; top-level abandonment remains unsupported. Generic async operations
 require explicit concrete specializations, and setup producers must remain
 synchronous. See [`replay-a-candidate.md`](${PLUGIN_DIR}/docs/guides/replay-a-candidate.md).
+
+Awaited C# collections use the same declared mappings as synchronous results:
+`Task<IEnumerable<T>>` is a bag, lookups retain keyed bags, and groupings retain
+their `key` and `items` fields. Rust replay applies the same checked storage
+bindings after awaiting; it does not translate empty/error completion channels.
+See [value mapping](${PLUGIN_DIR}/docs/reference/value-mapping.md#candidate-replay-values).
 
 ### Failure modes
 

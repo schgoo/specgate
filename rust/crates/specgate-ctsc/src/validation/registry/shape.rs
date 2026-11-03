@@ -408,13 +408,13 @@ fn validate_type_at(value_type: &TypeRef, path: &Path, location: &mut String, is
                 );
             }
         }
-        TypeRef::List { items } | TypeRef::Set { items } => {
+        TypeRef::Collection { items, .. } => {
             let base = location.len();
             location.push_str(".items");
             validate_type_at(items, path, location, issues);
             location.truncate(base);
         }
-        TypeRef::Map { keys, values } => {
+        TypeRef::Map { keys, values, .. } => {
             let base = location.len();
             location.push_str(".keys");
             validate_type_at(keys, path, location, issues);
@@ -521,8 +521,8 @@ pub(super) fn type_uses(value_type: &TypeRef, registry_id: impl AsRef<str>) -> b
         TypeRef::Named {
             registry_id: referenced, ..
         } => referenced.as_deref() == Some(registry_id),
-        TypeRef::List { items } | TypeRef::Set { items } => type_uses(items, registry_id),
-        TypeRef::Map { keys, values } => type_uses(keys, registry_id) || type_uses(values, registry_id),
+        TypeRef::Collection { items, .. } => type_uses(items, registry_id),
+        TypeRef::Map { keys, values, .. } => type_uses(keys, registry_id) || type_uses(values, registry_id),
         TypeRef::Tuple { items } => items.iter().any(|item| type_uses(item, registry_id)),
         TypeRef::Record { fields } => fields.iter().any(|field| type_uses(&field.value_type, registry_id)),
         TypeRef::Optional { value } => type_uses(value, registry_id),

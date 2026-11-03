@@ -214,6 +214,24 @@ fn native_projection_recurses_through_collections_and_annotated_records() {
     );
 }
 
+#[test]
+fn native_sets_preserve_projection_collisions_for_linked_rejection() {
+    #[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
+    struct Colliding(u8);
+
+    impl ToNativeValue for Colliding {
+        fn to_native_value(&self) -> Value {
+            Value::Integer(1)
+        }
+    }
+
+    let ordered = std::collections::BTreeSet::from([Colliding(1), Colliding(2)]);
+    let hashed = std::collections::HashSet::from([Colliding(1), Colliding(2)]);
+    let expected = Value::List(vec![Value::Integer(1), Value::Integer(1)]);
+    assert_eq!(ordered.to_native_value(), expected);
+    assert_eq!(hashed.to_native_value(), expected);
+}
+
 /// Recording begins at first poll, not at construction.
 ///
 /// `#[spec_operation]` desugars an `async fn` so construction-time code can

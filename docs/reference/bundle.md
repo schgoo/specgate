@@ -14,6 +14,12 @@
 `candidate-<impl>-<capture-dir name>.otlp.json`. Pass `--out` to write it
 elsewhere.
 
+Replay keeps the reference registry bytes and digest unchanged. Checked
+storage bindings convert actual candidate inputs, results, and error payloads
+to that registry's encoding; the whole candidate trace must pass linked
+validation before publication. See
+[candidate replay values](value-mapping.md#candidate-replay-values).
+
 ## `manifest.json`
 
 Example (from
@@ -61,6 +67,11 @@ as versioned by `formatVersion`; other formatting may change.
 A CTSC registry: the operations, inputs, outcomes, and named types the
 component publishes. Format: [`../ctsc/registry.md`](../ctsc/registry.md). Type
 mapping from native code: [`value-mapping.md`](value-mapping.md).
+
+Produced registries and trace resources use CTSC `0.4.0`; the capture-manifest
+format remains `0.1.0`. Collection ordering/uniqueness and map ordering are
+explicit registry semantics. Old 0.3 bundles must be recaptured, not
+relabelled: changing registry bytes also changes linkage and manifest digests.
 
 ## `reference.otlp.json`
 

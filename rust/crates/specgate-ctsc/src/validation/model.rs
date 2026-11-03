@@ -367,15 +367,15 @@ pub(crate) enum TypeRef {
         #[serde(default, rename = "registryId", deserialize_with = "deserialize_present")]
         registry_id: Option<RawText>,
     },
-    List {
+    Collection {
         items: Box<TypeRef>,
-    },
-    Set {
-        items: Box<TypeRef>,
+        ordered: bool,
+        unique: bool,
     },
     Map {
         keys: Box<TypeRef>,
         values: Box<TypeRef>,
+        ordered: bool,
     },
     Tuple {
         items: Vec<TypeRef>,

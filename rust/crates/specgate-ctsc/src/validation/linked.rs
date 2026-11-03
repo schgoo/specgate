@@ -267,14 +267,9 @@ fn validate_value(
             };
             validate_value(value, &definition.as_type(), target, registry, location, issues);
         }
-        TypeRef::List { items } | TypeRef::Set { items } => {
-            let kind = if matches!(value_type, TypeRef::List { .. }) {
-                "list"
-            } else {
-                "set"
-            };
+        TypeRef::Collection { items, unique, .. } => {
             let AnyValue::Array(values) = value else {
-                model_issue(location, format!("{kind} must use {ARRAY_VALUE}"), issues);
+                model_issue(location, format!("collection must use {ARRAY_VALUE}"), issues);
                 return;
             };
             let before = issues.len();
@@ -284,18 +279,18 @@ fn validate_value(
                 write!(item_location, "{location}[{index}]").expect("writing to a String cannot fail");
                 validate_value(value, items, component, registry, &item_location, issues);
             }
-            if kind == "set" && issues.len() == before {
+            if *unique && issues.len() == before {
                 let canonical = values
                     .iter()
                     .filter_map(|value| canonical_value(value, items, component, registry))
                     .collect::<Vec<_>>();
                 if canonical.iter().collect::<BTreeSet<_>>().len() != canonical.len() {
-                    model_issue(location, "set contains duplicate elements", issues);
+                    model_issue(location, "unique collection contains duplicate elements", issues);
                 }
             }
         }
-        TypeRef::Map { keys, values } => {
-            if matches!(keys.as_ref(), TypeRef::Primitive { name } if name == PRIMITIVE_STRING) {
+        TypeRef::Map { keys, values, ordered } => {
+            if !ordered && matches!(keys.as_ref(), TypeRef::Primitive { name } if name == PRIMITIVE_STRING) {
                 let AnyValue::KvList(entries) = value else {
                     model_issue(location, "string-keyed map must use kvlistValue", issues);
                     return;
@@ -309,7 +304,7 @@ fn validate_value(
                 }
             } else {
                 let AnyValue::Array(entries) = value else {
-                    model_issue(location, format!("non-string-keyed map must use {ARRAY_VALUE}"), issues);
+                    model_issue(location, format!("ordered or non-string-keyed map must use {ARRAY_VALUE}"), issues);
                     return;
                 };
                 let mut seen = BTreeSet::new();
@@ -521,28 +516,21 @@ pub(crate) fn canonical_value(
             let definition = target.component.types.iter().find(|item| item.name() == name)?;
             canonical_value(value, &definition.as_type(), target, registry)
         }
-        TypeRef::List { items } => {
+        TypeRef::Collection { items, ordered, .. } => {
             let AnyValue::Array(values) = value else {
                 return None;
             };
-            values
+            let mut values = values
                 .iter()
                 .map(|value| canonical_value(value, items, component, registry))
-                .collect::<Option<Vec<_>>>()
-                .map(|values| CanonicalValue::List(values.into_boxed_slice()))
+                .collect::<Option<Vec<_>>>()?;
+            if !ordered {
+                values.sort();
+            }
+            Some(CanonicalValue::List(values.into_boxed_slice()))
         }
-        TypeRef::Set { items } => {
-            let AnyValue::Array(values) = value else {
-                return None;
-            };
-            values
-                .iter()
-                .map(|value| canonical_value(value, items, component, registry))
-                .collect::<Option<BTreeSet<_>>>()
-                .map(CanonicalValue::Set)
-        }
-        TypeRef::Map { keys, values } => {
-            if matches!(keys.as_ref(), TypeRef::Primitive { name } if name == PRIMITIVE_STRING) {
+        TypeRef::Map { keys, values, ordered } => {
+            if !ordered && matches!(keys.as_ref(), TypeRef::Primitive { name } if name == PRIMITIVE_STRING) {
                 let AnyValue::KvList(entries) = value else {
                     return None;
                 };
@@ -558,7 +546,7 @@ pub(crate) fn canonical_value(
                 let AnyValue::Array(entries) = value else {
                     return None;
                 };
-                entries
+                let entries = entries
                     .iter()
                     .map(|entry| {
                         let AnyValue::KvList(entry) = entry else {
@@ -569,8 +557,12 @@ pub(crate) fn canonical_value(
                             canonical_value(entry.get(MAP_VALUE)?, values, component, registry)?,
                         ))
                     })
-                    .collect::<Option<BTreeMap<_, _>>>()
-                    .map(CanonicalValue::Map)
+                    .collect::<Option<Vec<_>>>()?;
+                if *ordered {
+                    Some(CanonicalValue::OrderedMap(entries.into_boxed_slice()))
+                } else {
+                    Some(CanonicalValue::Map(entries.into_iter().collect()))
+                }
             }
         }
         TypeRef::Tuple { items } => {
@@ -702,7 +694,7 @@ mod tests {
         let value_type: TypeRef = serde_json::from_value(serde_json::json!({
             "kind": "record",
             "fields": [
-                {"name": "items", "type": {"kind": "set", "items": {"kind": "primitive", "name": "i32"}}},
+                {"name": "items", "type": {"kind": "collection", "ordered": false, "unique": true, "items": {"kind": "primitive", "name": "i32"}}},
                 {"name": "choice", "type": {"kind": "optional", "value": {"kind": "tuple", "items": [
                     {"kind": "primitive", "name": "string"}, {"kind": "primitive", "name": "bool"}
                 ]}}}
@@ -728,11 +720,15 @@ mod tests {
 
         let duplicate_set = AnyValue::Array(vec![AnyValue::Int(1), AnyValue::Int(1)].into_boxed_slice());
         let set_type: TypeRef = serde_json::from_value(serde_json::json!({
-            "kind": "set", "items": {"kind": "primitive", "name": "i32"}
+            "kind": "collection", "ordered": false, "unique": true, "items": {"kind": "primitive", "name": "i32"}
         }))
         .expect("set type");
         validate_value(&duplicate_set, &set_type, &component, &registry, "$.set", &mut issues);
-        assert!(issues.iter().any(|issue| issue.message == "set contains duplicate elements"));
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.message == "unique collection contains duplicate elements")
+        );
     }
 
     #[test]
@@ -883,11 +879,11 @@ mod tests {
                 AnyValue::KvList(BTreeMap::from([("value".into(), AnyValue::String("ok".into()))])),
             ),
             (
-                serde_json::json!({"kind": "map", "keys": {"kind": "primitive", "name": "string"}, "values": {"kind": "primitive", "name": "bool"}}),
+                serde_json::json!({"kind": "map", "ordered": false, "keys": {"kind": "primitive", "name": "string"}, "values": {"kind": "primitive", "name": "bool"}}),
                 AnyValue::KvList(BTreeMap::from([("enabled".into(), AnyValue::Bool(true))])),
             ),
             (
-                serde_json::json!({"kind": "map", "keys": {"kind": "primitive", "name": "i32"}, "values": {"kind": "primitive", "name": "string"}}),
+                serde_json::json!({"kind": "map", "ordered": false, "keys": {"kind": "primitive", "name": "i32"}, "values": {"kind": "primitive", "name": "string"}}),
                 AnyValue::Array(
                     vec![AnyValue::KvList(BTreeMap::from([
                         (MAP_KEY.into(), AnyValue::Int(1)),

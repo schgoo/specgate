@@ -273,8 +273,8 @@ pub(crate) struct Plan {
     pub(crate) registry_digest: RegistryDigest,
     /// Exact linked registry document for validating structured candidate outcomes.
     pub(crate) registry_document: Vec<u8>,
-    /// Whether outcomes require the full structured-value validator.
-    pub(crate) structured_outcomes: bool,
+    /// Checked storage conversions for candidate operations declared in the reference registry.
+    pub(crate) value_bindings: binding::Bindings,
     /// Resolved candidate target.
     pub(crate) target: Target,
     /// Distinct semantic-to-candidate operation links.
@@ -347,7 +347,7 @@ mod tests {
             registry_version: RegistryVersion::from("0.1.0".to_string()),
             registry_digest: RegistryDigest::try_new(format!("sha256:{}", "a".repeat(64))).unwrap(),
             registry_document: Vec::new(),
-            structured_outcomes: false,
+            value_bindings: super::super::binding::Bindings::default(),
             target: Target {
                 crate_name: "fixture".to_string(),
                 language: Language::Rust,

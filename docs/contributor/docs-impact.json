@@ -39,6 +39,7 @@
       "code": [
         "csharp/SpecGate.Annotations/**",
         "csharp/SpecGate.Runtime/**",
+        "csharp/Shared/**",
         "csharp/SpecGate.Weaver/**"
       ],
       "docs": [
@@ -58,6 +59,7 @@
         "rust/crates/specgate-discovery/src/csharp_discovery/**",
         "rust/crates/specgate-discovery/src/runner/**",
         "rust/crates/specgate-cli/src/discover/**",
+        "csharp/Shared/**",
         "csharp/SpecGate.Discovery/**"
       ],
       "docs": [

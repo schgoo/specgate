@@ -80,6 +80,147 @@ public sealed class ExplodingAttribute : Attribute
 
 public class DiscoveryRunnerTests
 {
+    [Theory]
+    [InlineData(typeof(IEnumerable<int>), "Bag<i32>")]
+    [InlineData(typeof(ICollection<int>), "Bag<i32>")]
+    [InlineData(typeof(IReadOnlyCollection<int>), "Bag<i32>")]
+    [InlineData(typeof(System.Collections.Concurrent.ConcurrentBag<int>), "Bag<i32>")]
+    [InlineData(typeof(System.Collections.Concurrent.BlockingCollection<int>), "Bag<i32>")]
+    [InlineData(typeof(IOrderedEnumerable<int>), "List<i32>")]
+    [InlineData(typeof(IReadOnlyList<int>), "List<i32>")]
+    [InlineData(typeof(Queue<int>), "List<i32>")]
+    [InlineData(typeof(Stack<int>), "List<i32>")]
+    [InlineData(typeof(LinkedList<int>), "List<i32>")]
+    [InlineData(typeof(ArraySegment<int>), "List<i32>")]
+    [InlineData(typeof(System.Collections.Concurrent.ConcurrentQueue<int>), "List<i32>")]
+    [InlineData(typeof(System.Collections.Concurrent.ConcurrentStack<int>), "List<i32>")]
+    [InlineData(typeof(System.Collections.Immutable.ImmutableArray<int>), "List<i32>")]
+    [InlineData(typeof(System.Collections.Immutable.ImmutableList<int>), "List<i32>")]
+    [InlineData(typeof(System.Collections.Immutable.ImmutableQueue<int>), "List<i32>")]
+    [InlineData(typeof(System.Collections.Immutable.ImmutableStack<int>), "List<i32>")]
+    [InlineData(typeof(System.Collections.Frozen.FrozenSet<int>), "set<i32>")]
+    [InlineData(typeof(System.Collections.Immutable.ImmutableHashSet<int>), "set<i32>")]
+    [InlineData(typeof(System.Collections.Immutable.ImmutableSortedSet<int>), "set<i32>")]
+    [InlineData(typeof(SortedSet<int>), "set<i32>")]
+    [InlineData(typeof(IReadOnlyDictionary<string, int>), "map<string, i32>")]
+    [InlineData(typeof(System.Collections.Concurrent.ConcurrentDictionary<string, int>), "map<string, i32>")]
+    [InlineData(typeof(System.Collections.Frozen.FrozenDictionary<string, int>), "map<string, i32>")]
+    [InlineData(typeof(OrderedDictionary<string, int>), "OrderedMap<string, i32>")]
+    [InlineData(typeof(PriorityQueue<string, int>), "Bag<Tuple<string, i32>>")]
+    [InlineData(typeof(ILookup<string, int>), "map<string, Bag<i32>>")]
+    [InlineData(typeof(Lookup<int, string>), "map<i32, Bag<string>>")]
+    [InlineData(typeof(IGrouping<string, int>), "{ key: string, items: Bag<i32> }")]
+    [InlineData(typeof(ExplicitGrouping<int, string>), "{ key: string, items: Bag<i32> }")]
+    [InlineData(typeof(InheritedGrouping<string, int>), "{ key: string, items: Bag<i32> }")]
+    [InlineData(typeof(ExplicitLookup<int, string>), "map<string, Bag<i32>>")]
+    [InlineData(typeof(ConcreteEnumerable), "Bag<Reading>")]
+    [InlineData(typeof(IOrderedUnique), "OrderedSet<i32>")]
+    public void CollectionContractsPublishStructuralSemantics(Type type, string expected)
+    {
+        SemanticTypes types = new(new NullabilityInfoContext());
+        Assert.Equal(expected, types.Render(type, null));
+    }
+
+    private sealed class ConcreteEnumerable : IEnumerable<Fixtures.Reading>
+    {
+        IEnumerator<Fixtures.Reading> IEnumerable<Fixtures.Reading>.GetEnumerator() =>
+            Enumerable.Empty<Fixtures.Reading>().GetEnumerator();
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() =>
+            ((IEnumerable<Fixtures.Reading>)this).GetEnumerator();
+    }
+
+    private interface IOrderedUnique : IReadOnlyList<int>, IReadOnlySet<int>;
+
+    [Theory]
+    [InlineData(typeof(IRecursiveEnumerable))]
+    [InlineData(typeof(IMutuallyRecursiveEnumerable))]
+    public void RecursiveEnumerableDeclarationsAreRejectedAndDoNotPoisonLaterMapping(Type type)
+    {
+        SemanticTypes types = new(new NullabilityInfoContext());
+        InvalidOperationException error = Assert.Throws<InvalidOperationException>(() => types.Render(type, null));
+        Assert.Contains("recursive collection declaration", error.Message);
+        Assert.Equal("List<List<i32>>", types.Render(typeof(List<List<int>>), null));
+        Assert.Equal("Reading", types.Render(typeof(Fixtures.Reading), null));
+    }
+
+    private interface IRecursiveEnumerable : IEnumerable<IRecursiveEnumerable>;
+    private interface IMutuallyRecursiveEnumerable : IEnumerable<IRecursiveLink>;
+    private interface IRecursiveLink : IEnumerable<IMutuallyRecursiveEnumerable>;
+
+    private class ExplicitGrouping<TItem, TKey> : IGrouping<TKey, TItem>
+    {
+        TKey IGrouping<TKey, TItem>.Key => default!;
+        IEnumerator<TItem> IEnumerable<TItem>.GetEnumerator() => Enumerable.Empty<TItem>().GetEnumerator();
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() =>
+            throw new InvalidOperationException();
+    }
+
+    private sealed class InheritedGrouping<TKey, TItem> : ExplicitGrouping<TItem, TKey>;
+
+    private sealed class ExplicitLookup<TItem, TKey> : ILookup<TKey, TItem>
+    {
+        public int Count => 0;
+        public IEnumerable<TItem> this[TKey key] => [];
+        public bool Contains(TKey key) => false;
+        IEnumerator<IGrouping<TKey, TItem>> IEnumerable<IGrouping<TKey, TItem>>.GetEnumerator() =>
+            Enumerable.Empty<IGrouping<TKey, TItem>>().GetEnumerator();
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() =>
+            throw new InvalidOperationException();
+    }
+
+    [Theory]
+    [InlineData(nameof(KeyedDeclarations.Lookup), "map<Option<string>, Bag<Option<string>>>")]
+    [InlineData(nameof(KeyedDeclarations.Group), "{ key: Option<string>, items: Bag<Option<string>> }")]
+    [InlineData(nameof(KeyedDeclarations.Inherited), "{ key: Option<string>, items: Bag<i32> }")]
+    [InlineData(nameof(KeyedDeclarations.Explicit), "map<Option<string>, Bag<i32>>")]
+    [InlineData(nameof(KeyedDeclarations.Nested), "List<{ key: Option<string>, items: Bag<i32> }>")]
+    public void KeyedContractsKeepDeclaredNullablePositions(string name, string expected)
+    {
+        MethodInfo method = typeof(KeyedDeclarations).GetMethod(name)!;
+        SemanticTypes types = new(new NullabilityInfoContext());
+        Assert.Equal(expected, types.RenderParameter(method.GetParameters()[0]));
+    }
+
+    private sealed class NestedGrouping<T> : List<IGrouping<T, int>>;
+
+    private static class KeyedDeclarations
+    {
+        public static void Lookup(ILookup<string?, string?> value) => _ = value;
+        public static void Group(IGrouping<string?, string?> value) => _ = value;
+        public static void Inherited(InheritedGrouping<string?, int> value) => _ = value;
+        public static void Explicit(ExplicitLookup<int, string?> value) => _ = value;
+        public static void Nested(NestedGrouping<string?> value) => _ = value;
+    }
+
+    [Theory]
+    [InlineData(typeof(IConflictingGrouping))]
+    [InlineData(typeof(IConflictingLookup))]
+    [InlineData(typeof(IConflictingKeyedContract))]
+    public void ConflictingKeyedContractsAreRejected(Type declaration)
+    {
+        SemanticTypes types = new(new NullabilityInfoContext());
+        Assert.Throws<InvalidOperationException>(() => types.Render(declaration, null));
+    }
+
+    private interface IConflictingGrouping : IGrouping<string, int>, IGrouping<int, int>;
+    private interface IConflictingLookup : ILookup<string, int>, ILookup<int, int>;
+    private interface IConflictingKeyedContract : ILookup<int, int>, IDictionary<int, int>;
+
+    [Fact]
+    public void ConflictingEnumerableContractsAreRejected()
+    {
+        SemanticTypes types = new(new NullabilityInfoContext());
+        Assert.Throws<InvalidOperationException>(() => types.Render(typeof(AmbiguousEnumerable), null));
+    }
+
+    private sealed class AmbiguousEnumerable : IEnumerable<int>, IEnumerable<string>
+    {
+        IEnumerator<int> IEnumerable<int>.GetEnumerator() => Enumerable.Empty<int>().GetEnumerator();
+        IEnumerator<string> IEnumerable<string>.GetEnumerator() => Enumerable.Empty<string>().GetEnumerator();
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() =>
+            throw new InvalidOperationException();
+    }
+
     [Fact]
     public void GenericSpecializationsPublishConcreteSignatures()
     {

@@ -25,7 +25,7 @@ except ImportError as error:
     ) from error
 
 
-CTSC_VERSION = "0.3.0"
+CTSC_VERSION = "0.4.0"
 CTSC_SPANS = {
     "conformance.run",
     "conformance.scenario",
@@ -196,7 +196,7 @@ def unique_names(
 
 
 def ascending_component_order(components: Any, validator: Validator) -> None:
-    """Registry 0.3 section 3.1: components are ordered by ascending id.
+    """Registry 0.4 section 3.1: components are ordered by ascending id.
 
     Python compares ``str`` by Unicode code point, which is exactly the
     comparison the contract specifies.
@@ -476,7 +476,7 @@ def validate_value_type(
         )
         return
 
-    if kind in {"list", "set"}:
+    if kind == "collection":
         if wire_kind != "arrayValue":
             validator.error(location, f"{kind} must use arrayValue")
             return
@@ -491,7 +491,7 @@ def validate_value_type(
                 f"{location}[{index}]",
                 validator,
             )
-        if kind == "set" and len(validator.errors) == errors_before:
+        if type_ref["unique"] and len(validator.errors) == errors_before:
             canonical = [
                 canonical_typed_value(
                     item, type_ref["items"], current_component, components
@@ -499,7 +499,7 @@ def validate_value_type(
                 for item in items
             ]
             if len(canonical) != len(set(canonical)):
-                validator.error(location, "set contains duplicate elements")
+                validator.error(location, "unique collection contains duplicate elements")
         return
 
     if kind == "tuple":
@@ -596,7 +596,7 @@ def validate_value_type(
     if kind == "map":
         key_type = type_ref["keys"]
         value_type = type_ref["values"]
-        if key_type == {"kind": "primitive", "name": "string"}:
+        if not type_ref["ordered"] and key_type == {"kind": "primitive", "name": "string"}:
             entries = kvlist_entries(value, location, validator)
             if entries is None:
                 return
@@ -611,7 +611,7 @@ def validate_value_type(
                 )
             return
         if wire_kind != "arrayValue":
-            validator.error(location, "non-string-keyed map must use arrayValue")
+            validator.error(location, "ordered or non-string-keyed map must use arrayValue")
             return
         seen_keys: set[Any] = set()
         for index, item in enumerate(value["arrayValue"].get("values", [])):
@@ -670,29 +670,21 @@ def canonical_typed_value(
         elif primitive == "unit":
             raw = ()
         return (primitive, raw)
-    if kind in {"list", "tuple"}:
+    if kind in {"collection", "tuple"}:
         item_types = (
             type_ref["items"]
             if kind == "tuple"
             else [type_ref["items"]] * len(value["arrayValue"].get("values", []))
         )
-        return (
-            kind,
-            tuple(
-                canonical_typed_value(item, item_type, current_component, components)
-                for item, item_type in zip(
-                    value["arrayValue"].get("values", []), item_types, strict=True
-                )
-            ),
-        )
-    if kind == "set":
         items = [
-            canonical_typed_value(
-                item, type_ref["items"], current_component, components
+            canonical_typed_value(item, item_type, current_component, components)
+            for item, item_type in zip(
+                value["arrayValue"].get("values", []), item_types, strict=True
             )
-            for item in value["arrayValue"].get("values", [])
         ]
-        return ("set", tuple(sorted(items, key=repr)))
+        if kind == "collection" and not type_ref["ordered"]:
+            items.sort(key=repr)
+        return (kind, tuple(items))
     if kind == "record":
         entries = {
             item["key"]: item["value"]
@@ -741,7 +733,7 @@ def canonical_typed_value(
     if kind == "map":
         key_type = type_ref["keys"]
         value_type = type_ref["values"]
-        if key_type == {"kind": "primitive", "name": "string"}:
+        if not type_ref["ordered"] and key_type == {"kind": "primitive", "name": "string"}:
             entries = [
                 (
                     item["key"],
@@ -765,7 +757,7 @@ def canonical_typed_value(
                         ),
                     )
                 )
-        return ("map", tuple(sorted(entries, key=repr)))
+        return ("map", tuple(entries if type_ref["ordered"] else sorted(entries, key=repr)))
     raise ValueError(f"unsupported registry type kind {kind!r}")
 
 

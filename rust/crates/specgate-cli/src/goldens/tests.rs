@@ -88,7 +88,7 @@ mod cases {
         check_coverage(&root, &matrix).expect("golden sources should be covered");
         check_replacements(&root, &matrix).unwrap_or_else(|error| panic!("replacement validation failed: {error}"));
         for (classification, count) in [
-            (Classification::ImplementationComponent, 62),
+            (Classification::ImplementationComponent, 63),
             (Classification::NegativeFixture, 13),
             (Classification::Replacement, 9),
         ] {
@@ -264,7 +264,7 @@ mod cases {
         // absent subtree. Generation must not create that subtree through a link.
         let sentinels = if missing { external.path() } else { &external_root };
         let artifacts = expected_artifacts(&matrix);
-        assert_eq!(artifacts.len(), 199);
+        assert_eq!(artifacts.len(), 202);
         for artifact in &artifacts {
             write_bytes(sentinels.join(artifact), b"external sentinel bytes").unwrap();
         }
@@ -716,7 +716,12 @@ mod cases {
                 .iter()
                 .map(|row| (row.component.as_deref().unwrap(), row.parity.allowed_differences.len()))
                 .collect::<Vec<_>>(),
-            [("comp.app", 4), ("fixture.enum_event", 3), ("fixture.scalar_types", 6)]
+            [
+                ("fixture.collection_shapes", 42),
+                ("comp.app", 4),
+                ("fixture.enum_event", 3),
+                ("fixture.scalar_types", 6)
+            ]
         );
         // Actual native differences are checked against this exact set by the
         // full matrix gate; no second checked-in producer registry is needed.

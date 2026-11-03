@@ -49,6 +49,29 @@ fn native_registry_validator_classifies_entire_corpus() {
 }
 
 #[test]
+fn collection_semantics_are_required_and_unknown_dimensions_are_rejected() {
+    let path = corpus().join("registry").join("valid").join("values.registry.json");
+    let registry: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    for invalid in [
+        serde_json::json!({"kind":"list","items":{"kind":"primitive","name":"i32"}}),
+        serde_json::json!({"kind":"set","items":{"kind":"primitive","name":"i32"}}),
+        serde_json::json!({"kind":"collection","items":{"kind":"primitive","name":"i32"},"ordered":true}),
+        serde_json::json!({"kind":"collection","items":{"kind":"primitive","name":"i32"},"unique":false}),
+        serde_json::json!({"kind":"collection","items":{"kind":"primitive","name":"i32"},"ordered":true,"unique":false,"sorted":true}),
+        serde_json::json!({"kind":"map","keys":{"kind":"primitive","name":"string"},"values":{"kind":"primitive","name":"i32"}}),
+    ] {
+        let mut registry = registry.clone();
+        registry["components"][0]["operations"][0]["observations"][0]["type"] = invalid.clone();
+        let document = serde_json::to_vec(&registry).unwrap();
+        assert!(
+            !bytes::validate_registry(DocumentBytes::new(&path, &document), []).valid,
+            "{invalid}"
+        );
+        serde_json::from_value::<specgate_ctsc::replay::model::Type>(invalid).unwrap_err();
+    }
+}
+
+#[test]
 fn native_trace_validator_classifies_entire_corpus_including_jsonl() {
     let root = corpus().join("trace");
     for path in files(&root.join("valid"), &["json", "jsonl"]) {

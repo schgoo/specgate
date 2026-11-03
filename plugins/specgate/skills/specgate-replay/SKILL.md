@@ -59,23 +59,45 @@ The reference may be Rust or C#; the candidate must be Rust.
 #### What replay does
 
 1. Validates the bundle and decodes its scenarios.
-2. Discovers the candidate and links each captured operation to exactly one
+2. Discovers the candidate and links each top-level reference operation to exactly one
    candidate operation by component, operation name, and input names, checking
    that types are compatible.
 3. Generates a runner or a selected Cargo test-target entry that calls the
    candidate with recorded operation and setup construction inputs, scenario by
    scenario, under native capture. Async calls use the selected candidate engine
    or a custom candidate-owned wrapper.
-4. Writes the resulting trace with deterministic ids and timestamps.
+4. Converts actual captured inputs, results, and errors through the checked
+   storage bindings, validates the whole trace against the reference registry,
+   and writes it with deterministic ids and timestamps.
 
 Replay does not run your tests; it calls your operations directly.
 Annotated synchronous setups reconstruct receiver and injected environments.
 Private/test-only producers remain in their original Cargo target. Equal
 receiver producer/input identities share state within a scenario; scenario
-boundaries release receivers and setup guards. Structured outcomes must match
-the reference's reachable CTSC declarations. See
+boundaries release receivers and setup guards. Structured outcomes retain named
+identity and use the reference's nested collection dimensions. See
 [`../status.md`](https://github.com/schgoo/specgate/blob/v0.6.0/docs/status.md#candidate-replay-and-explicit-generic-operations)
 for explicit generic specializations.
+
+Use `Vec<T>` for reference bags, sets, and ordered sets as well as lists.
+Use `Vec<(K,V)>` for ordered maps or supported non-string map keys. Bag inputs
+keep their existing sorted construction; ordered map positions are preserved.
+Tuples of arity 2-4 are supported recursively. Duplicate semantic keys or
+unique items fail before publication, including candidate results.
+An inline reference record, such as a C# grouping, can bind to an annotated
+Rust record in the same component with exact `key` and `items` fields and
+supported field types. Named reference types cannot bind to inline candidates.
+See [storage bindings](${PLUGIN_DIR}/docs/reference/value-mapping.md#candidate-replay-values).
+
+Replay calls only top-level reference operations. It checks observed nested
+operations declared by the candidate in their owning component, including calls
+to other components. Missing observed-only calls do not block planning;
+comparison reports the missing behavior. Extra candidate calls declared in the
+reference registry use the same checked storage conversions, including
+pair-vector maps. Incompatible unused declarations do not block planning, but
+capturing such a call fails publication. Valid extra calls remain in the output
+and produce comparison mismatches. Undeclared calls or values that violate the
+reference registry still fail before publication.
 
 Each Cargo target used for generated discovery/replay hooks must declare
 `specgate::spec_component!("…")` at its own crate root, including binary-unit
@@ -194,6 +216,13 @@ inputs must be primitives, recursively supported collections and optionals, or
 opted-in property setups. The full list is in
 [limitations](${PLUGIN_DIR}/docs/reference/limitations.md).
 
+The candidate can use `Vec<T>` for C# bags, sets, or ordered sets, and pair
+vectors for ordered/non-string maps. Tuples of arity 2-4 work recursively.
+Keyed lookups map to maps of bags; groupings map to fixed `key`/`items` record
+fields. Named types still require the same component/type identity, except
+that an inline reference record can bind to an exact same-component annotated
+Rust record. See [value mapping](${PLUGIN_DIR}/docs/reference/value-mapping.md#candidate-replay-values).
+
 ### Steps
 
 1. Capture the original:
@@ -303,7 +332,7 @@ specgate compare test/behavior/cases/fixture.setup_with_params/expected/referenc
 ```text
 Complete(component=fixture.setup_with_params, scenarios=1, operations=1, plans=1, output=candidate.otlp.json)
 valid: linked candidate.otlp.json
-policy: ctsc.strict/0.1.0
+policy: ctsc.strict/0.2.0
 reference: test/behavior/cases/fixture.setup_with_params/expected/reference.otlp.json
 candidate: candidate.otlp.json
 equivalent: true
@@ -331,7 +360,7 @@ For the free-function example. Lines are not yet a stable contract
 ```text
 Complete(component=fixture.stateless_add, scenarios=1, operations=2, plans=1, output=candidate.otlp.json)
 valid: linked candidate.otlp.json
-policy: ctsc.strict/0.1.0
+policy: ctsc.strict/0.2.0
 reference: test/behavior/cases/fixture.stateless_add/expected/reference.otlp.json
 candidate: candidate.otlp.json
 equivalent: true
@@ -353,7 +382,7 @@ Every command exits 0.
 | Replay `Error(...)` naming an operation or type | Names or types differ from the original's registry, or a replay limitation applies. | Match the names; see [`troubleshoot-capture.md`](${PLUGIN_DIR}/docs/guides/troubleshoot-capture.md#replay). |
 | `replay currently supports only Rust candidates; implementation language is` | The port is C#. | Not supported yet. |
 | `uses unsupported structured type` | An operation or setup construction input, or a property-setup field, is a record that is not an opted-in property setup, or a record sits inside a collection or optional. | Opt the record in as a property setup if its fields are primitives, collections, optionals, or opted-in records. Otherwise report the limitation and ask before changing the boundary. Do not replace the input with a fixture name. |
-| `uses unsupported structured replay type mapping` | The port's structured result or error type, or a type reachable from it, does not match the reference's CTSC declaration. Replay has no explicit type mappings. | Make the port's type declare the same semantic name, fields, and variants (rename fields with `#[spec_event(name = "…")]`). If the shapes must differ, report the limitation. |
+| `uses unsupported structured replay type mapping` | A structured type is outside the checked storage bindings, or its named identity, fields, or variants differ. Replay has no configurable type mappings. | Keep named identity and exact fields/variants; use the supported vector, pair-vector, tuple, or inline-record bindings in [value mapping](${PLUGIN_DIR}/docs/reference/value-mapping.md#candidate-replay-values). Otherwise report the limitation. |
 
 ### Verify
 

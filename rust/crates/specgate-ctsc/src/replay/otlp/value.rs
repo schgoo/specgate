@@ -63,7 +63,7 @@ mod tests {
         let error = decode(reordered.clone(), &Type::set(Type::set(Type::primitive("i32"))))
             .unwrap_err()
             .to_string();
-        assert!(error.contains("duplicate set elements"), "{error}");
+        assert!(error.contains("duplicate unique collection elements"), "{error}");
         let Value::Set(lists) = decode(reordered, &Type::set(Type::list(Type::primitive("i32")))).unwrap() else {
             panic!("expected a set of lists");
         };
@@ -94,6 +94,61 @@ mod tests {
             decode(invalid, &Type::optional(Type::primitive("i32"))).unwrap_err();
         }
     }
+
+    #[test]
+    fn bags_keep_duplicates_and_sort_while_tuples_keep_positions() {
+        let values = json!({"arrayValue":{"values":[{"intValue":"2"},{"intValue":"1"},{"intValue":"2"}]}});
+        assert_eq!(
+            decode(values, &Type::collection(Type::primitive("i32"), false, false)).unwrap(),
+            Value::List(vec![Value::I32(1), Value::I32(2), Value::I32(2)])
+        );
+        let ty = Type::tuple(vec![Type::primitive("string"), Type::optional(Type::primitive("i32"))]);
+        let value = json!({"arrayValue":{"values":[
+            {"stringValue":"item"}, {"kvlistValue":{"values":[{"key":"Some","value":{"intValue":"7"}}]}}
+        ]}});
+        assert_eq!(
+            decode(value, &ty).unwrap(),
+            Value::Tuple(vec![
+                Value::String("item".to_string()),
+                Value::Optional(Some(Box::new(Value::I32(7))))
+            ])
+        );
+        decode(json!({"arrayValue":{"values":[{"stringValue":"item"}]}}), &ty).unwrap_err();
+        decode(json!({"arrayValue":{"values":[{"stringValue":"item"},{"boolValue":true}]}}), &ty).unwrap_err();
+    }
+
+    #[test]
+    fn entry_maps_preserve_order_and_reject_duplicate_or_malformed_entries() {
+        let entry = |key| {
+            json!({"kvlistValue":{"values":[
+                {"key":"key","value":{"intValue":key}}, {"key":"value","value":{"stringValue":"value"}}
+            ]}})
+        };
+        let value = |entries| json!({"arrayValue":{"values":entries}});
+        let ordered: Type = serde_json::from_value(
+            json!({"kind":"map","ordered":true,"keys":{"kind":"primitive","name":"i32"},"values":{"kind":"primitive","name":"string"}}),
+        )
+        .unwrap();
+        let unordered = Type::map(Type::primitive("i32"), Type::primitive("string"));
+        let forward = value(vec![entry("2"), entry("1")]);
+        let reverse = value(vec![entry("1"), entry("2")]);
+        assert_ne!(
+            decode(forward.clone(), &ordered).unwrap(),
+            decode(reverse.clone(), &ordered).unwrap()
+        );
+        assert_eq!(decode(forward, &unordered).unwrap(), decode(reverse, &unordered).unwrap());
+        for invalid in [
+            value(vec![entry("1"), entry("1")]),
+            value(vec![json!({"kvlistValue":{"values":[{"key":"key","value":{"intValue":"1"}}]}})]),
+            value(vec![json!({"kvlistValue":{"values":[
+                {"key":"key","value":{"intValue":"1"}}, {"key":"value","value":{"stringValue":"one"}},
+                {"key":"extra","value":{"boolValue":true}}
+            ]}})]),
+            value(vec![json!({"intValue":"1"})]),
+        ] {
+            decode(invalid, &ordered).unwrap_err();
+        }
+    }
 }
 
 pub(super) fn decode_value(value: &AnyValue, value_type: &Type, location: impl AsRef<str>) -> Result<Value, error::Error> {
@@ -102,19 +157,23 @@ pub(super) fn decode_value(value: &AnyValue, value_type: &Type, location: impl A
         let AnyValue::Array(array) = value else {
             return Err(format!("{location} collection value must use arrayValue").into());
         };
-        let values = array
+        let mut values = array
             .values
             .iter()
             .enumerate()
             .map(|(index, item)| decode_value(item, item_type, format!("{location}[{index}]")))
             .collect::<Result<Vec<_>, _>>()?;
-        if value_type.kind_name() == "set" {
+        if value_type.unique() == Some(true) {
             let count = values.len();
-            let values = values.into_iter().collect::<std::collections::BTreeSet<_>>();
-            if values.len() != count {
-                return Err(format!("{location} has duplicate set elements").into());
+            let unique = values.iter().collect::<std::collections::BTreeSet<_>>();
+            if unique.len() != count {
+                return Err(format!("{location} has duplicate unique collection elements").into());
             }
-            return Ok(Value::Set(values));
+            if value_type.ordered() == Some(false) {
+                return Ok(Value::Set(values.into_iter().collect()));
+            }
+        } else if value_type.ordered() == Some(false) {
+            values.sort();
         }
         return Ok(Value::List(values));
     }
@@ -136,8 +195,35 @@ pub(super) fn decode_value(value: &AnyValue, value_type: &Type, location: impl A
         };
     }
     if let Some((keys, values)) = value_type.map_types() {
-        if keys.primitive_name() != Some("string") {
-            return Err(format!("{location} replay map keys must be strings").into());
+        if value_type.ordered() == Some(true) || keys.primitive_name() != Some("string") {
+            let AnyValue::Array(array) = value else {
+                return Err(format!("{location} map entries must use arrayValue").into());
+            };
+            let mut entries = Vec::with_capacity(array.values.len());
+            let mut unique = std::collections::BTreeSet::new();
+            for (index, entry) in array.values.iter().enumerate() {
+                let AnyValue::Kvlist(fields) = entry else {
+                    return Err(format!("{location}[{index}] map entry must use kvlistValue").into());
+                };
+                let key = fields.values.iter().find(|field| field.key.as_ref() == "key");
+                let item = fields.values.iter().find(|field| field.key.as_ref() == "value");
+                let (Some(key), Some(item)) = (key, item) else {
+                    return Err(format!("{location}[{index}] map entry requires key and value").into());
+                };
+                if fields.values.len() != 2 {
+                    return Err(format!("{location}[{index}] map entry requires exactly key and value").into());
+                }
+                let key = decode_value(&key.value, keys, format!("{location}[{index}].key"))?;
+                if !unique.insert(key.clone()) {
+                    return Err(format!("{location}[{index}] has a duplicate map key").into());
+                }
+                let item = decode_value(&item.value, values, format!("{location}[{index}].value"))?;
+                entries.push((key, item));
+            }
+            if value_type.ordered() == Some(false) {
+                entries.sort();
+            }
+            return Ok(Value::MapEntries(entries));
         }
         let AnyValue::Kvlist(list) = value else {
             return Err(format!("{location} map must use kvlistValue").into());
@@ -150,6 +236,22 @@ pub(super) fn decode_value(value: &AnyValue, value_type: &Type, location: impl A
             }
         }
         return Ok(Value::Map(result));
+    }
+    if let Some(items) = value_type.tuple_items() {
+        let AnyValue::Array(array) = value else {
+            return Err(format!("{location} tuple must use arrayValue").into());
+        };
+        if array.values.len() != items.len() {
+            return Err(format!("{location} tuple length differs from its declaration").into());
+        }
+        return array
+            .values
+            .iter()
+            .zip(items)
+            .enumerate()
+            .map(|(index, (value, ty))| decode_value(value, ty, format!("{location}[{index}]")))
+            .collect::<Result<Vec<_>, _>>()
+            .map(Value::Tuple);
     }
     let Some(name) = value_type.primitive_name() else {
         return Err(format!("{location} uses unsupported structured replay type {}", type_name(value_type)).into());

@@ -4,7 +4,7 @@ use super::TypeSyntax;
 
 use crate::discovery::model::{Dependency, Field, TypeDef, TypeDefDeps, TypeKind, Variant};
 use crate::discovery::registry::Registry;
-use crate::discovery::types::{builtin, collect_into, map};
+use crate::discovery::types::{collect_into, constructor, map};
 use crate::error::{Error, ErrorKind};
 use crate::identity::{ComponentId, TypeExpression, TypeName};
 use std::collections::{BTreeMap, BTreeSet};
@@ -106,14 +106,8 @@ fn direct(component: &ComponentId, traversal: Traversal, registry: &Registry) ->
     Ok(dependencies.into_iter().collect())
 }
 
-/// Registry spelling for the CTSC unit primitive, which has no component owner.
-const UNIT_TYPE: &str = "unit";
-
 fn owner(name: impl AsRef<str>, component: &ComponentId, registry: &Registry) -> Result<Option<ComponentId>, Error> {
     let name = name.as_ref();
-    if builtin(name) || name == UNIT_TYPE {
-        return Ok(None);
-    }
     let mut local = registry
         .types
         .iter()
@@ -202,7 +196,9 @@ impl Qualifier {
                 }
                 let token = &type_ref[start..end];
                 let already_qualified = type_ref[..start].ends_with("::");
+                let application = constructor(token) && type_ref[end..].trim_start().starts_with('<');
                 if !already_qualified
+                    && !application
                     && !self.local.contains(token)
                     && let Some(owner) = self.external.get(token)
                 {

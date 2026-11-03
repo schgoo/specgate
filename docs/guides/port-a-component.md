@@ -27,6 +27,13 @@ inputs must be primitives, recursively supported collections and optionals, or
 opted-in property setups. The full list is in
 [limitations](../reference/limitations.md).
 
+The candidate can use `Vec<T>` for C# bags, sets, or ordered sets, and pair
+vectors for ordered/non-string maps. Tuples of arity 2-4 work recursively.
+Keyed lookups map to maps of bags; groupings map to fixed `key`/`items` record
+fields. Named types still require the same component/type identity, except
+that an inline reference record can bind to an exact same-component annotated
+Rust record. See [value mapping](../reference/value-mapping.md#candidate-replay-values).
+
 ## Steps
 
 1. Capture the original: [smoke]
@@ -136,7 +143,7 @@ specgate compare test/behavior/cases/fixture.setup_with_params/expected/referenc
 ```text
 Complete(component=fixture.setup_with_params, scenarios=1, operations=1, plans=1, output=candidate.otlp.json)
 valid: linked candidate.otlp.json
-policy: ctsc.strict/0.1.0
+policy: ctsc.strict/0.2.0
 reference: test/behavior/cases/fixture.setup_with_params/expected/reference.otlp.json
 candidate: candidate.otlp.json
 equivalent: true
@@ -164,7 +171,7 @@ the boundary.
 ```text
 Complete(component=fixture.stateless_add, scenarios=1, operations=2, plans=1, output=candidate.otlp.json)
 valid: linked candidate.otlp.json
-policy: ctsc.strict/0.1.0
+policy: ctsc.strict/0.2.0
 reference: test/behavior/cases/fixture.stateless_add/expected/reference.otlp.json
 candidate: candidate.otlp.json
 equivalent: true
@@ -186,7 +193,7 @@ Every command exits 0.
 | Replay `Error(...)` naming an operation or type | Names or types differ from the original's registry, or a replay limitation applies. | Match the names; see [`troubleshoot-capture.md`](troubleshoot-capture.md#replay). |
 | `replay currently supports only Rust candidates; implementation language is` | The port is C#. | Not supported yet. |
 | `uses unsupported structured type` | An operation or setup construction input, or a property-setup field, is a record that is not an opted-in property setup, or a record sits inside a collection or optional. | Opt the record in as a property setup if its fields are primitives, collections, optionals, or opted-in records. Otherwise report the limitation and ask before changing the boundary. Do not replace the input with a fixture name. |
-| `uses unsupported structured replay type mapping` | The port's structured result or error type, or a type reachable from it, does not match the reference's CTSC declaration. Replay has no explicit type mappings. | Make the port's type declare the same semantic name, fields, and variants (rename fields with `#[spec_event(name = "…")]`). If the shapes must differ, report the limitation. |
+| `uses unsupported structured replay type mapping` | A structured type is outside the checked storage bindings, or its named identity, fields, or variants differ. Replay has no configurable type mappings. | Keep named identity and exact fields/variants; use the supported vector, pair-vector, tuple, or inline-record bindings in [value mapping](../reference/value-mapping.md#candidate-replay-values). Otherwise report the limitation. |
 
 ## Verify
 

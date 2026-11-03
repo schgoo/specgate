@@ -371,6 +371,9 @@ pub(super) struct TypeParser<'a> {
 impl TypeParser<'_> {
     pub(super) fn parse_type(&mut self) -> error::Result<TypeRef> {
         self.skip_whitespace();
+        if self.consume('{') {
+            return self.parse_record();
+        }
         if self.remaining().starts_with("()") {
             self.position += 2;
             return Ok(TypeRef::primitive("unit"));
@@ -387,6 +390,40 @@ impl TypeParser<'_> {
             Ok(TypeRef::primitive(name))
         } else {
             self.named_type(name)
+        }
+    }
+
+    fn parse_record(&mut self) -> error::Result<TypeRef> {
+        let mut fields = Vec::new();
+        let mut names = BTreeSet::new();
+        if self.consume('}') {
+            return Ok(TypeRef::record(fields));
+        }
+        loop {
+            self.skip_whitespace();
+            let start = self.position;
+            while self
+                .remaining()
+                .chars()
+                .next()
+                .is_some_and(|character| character.is_alphanumeric() || character == '_')
+            {
+                self.position += self.remaining().chars().next().expect("checked field character").len_utf8();
+            }
+            let name = self.input[start..self.position].to_string();
+            if name.is_empty() || !names.insert(name.clone()) || !self.consume(':') {
+                return Err(format!("expected a unique record field followed by ':' at byte {}", self.position).into());
+            }
+            fields.push(NamedValue {
+                name,
+                value_type: self.parse_type()?,
+            });
+            if self.consume('}') {
+                return Ok(TypeRef::record(fields));
+            }
+            if !self.consume(',') {
+                return Err(format!("expected ',' or '}}' at byte {}", self.position).into());
+            }
         }
     }
 
@@ -505,11 +542,16 @@ pub(super) fn construct_generic(name: impl AsRef<str>, mut arguments: Vec<TypeRe
             expect_arity(name, &arguments, 1)?;
             Ok(TypeRef::set(arguments.remove(0)))
         }
-        "Map" | "map" => {
+        "Bag" | "bag" | "OrderedSet" | "ordered_set" => {
+            expect_arity(name, &arguments, 1)?;
+            let ordered = matches!(name, "OrderedSet" | "ordered_set");
+            Ok(TypeRef::collection(arguments.remove(0), ordered, ordered))
+        }
+        "Map" | "map" | "OrderedMap" | "ordered_map" => {
             expect_arity(name, &arguments, 2)?;
             let values = arguments.remove(1);
             let keys = arguments.remove(0);
-            Ok(TypeRef::map(keys, values))
+            Ok(TypeRef::map_with_order(keys, values, matches!(name, "OrderedMap" | "ordered_map")))
         }
         "Tuple" | "tuple" => {
             if arguments.is_empty() {
@@ -545,4 +587,38 @@ pub(super) fn is_primitive(name: impl AsRef<str>) -> bool {
 
 pub(super) fn is_unit(type_ref: impl AsRef<str>) -> bool {
     matches!(type_ref.as_ref().trim(), "" | "()" | "unit")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inline_records_parse_recursively_and_reject_invalid_fields() {
+        let dependencies = BTreeSet::new();
+        let types = BTreeMap::from([("fixture.grouping".to_string(), BTreeSet::from(["Item".to_string()]))]);
+        let context = TypeContext {
+            component: "fixture.grouping",
+            dependencies: &dependencies,
+            types_by_component: &types,
+        };
+        let parsed = type_ref("Option<{ key: string, items: Bag<{ value: Item }> }>", &context).unwrap();
+        let value = serde_json::to_value(parsed).unwrap();
+        assert_eq!(value["kind"], "optional");
+        let items = &value["value"]["fields"][1]["type"];
+        assert_eq!(items["ordered"], false);
+        assert_eq!(items["unique"], false);
+        assert_eq!(items["items"]["fields"][0]["type"]["name"], "Item");
+        for invalid in [
+            "{ key string }",
+            "{ key: i32, key: i64 }",
+            "{ key: i32 items: i32 }",
+            "{ key: i32, }",
+            "{ key: Missing }",
+            "{ key: i32",
+            "{ : i32 }",
+        ] {
+            type_ref(invalid, &context).unwrap_err();
+        }
+    }
 }

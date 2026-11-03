@@ -83,6 +83,12 @@ operation; top-level abandonment remains unsupported. Generic async operations
 require explicit concrete specializations, and setup producers must remain
 synchronous. See [`replay-a-candidate.md`](replay-a-candidate.md).
 
+Awaited C# collections use the same declared mappings as synchronous results:
+`Task<IEnumerable<T>>` is a bag, lookups retain keyed bags, and groupings retain
+their `key` and `items` fields. Rust replay applies the same checked storage
+bindings after awaiting; it does not translate empty/error completion channels.
+See [value mapping](../reference/value-mapping.md#candidate-replay-values).
+
 ## Failure modes
 
 | Message fragment | Cause | Fix |
