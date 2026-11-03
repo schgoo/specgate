@@ -543,7 +543,26 @@ In the 821 s run, `check-ctsc` was the critical path: smoke 236 s, the golden
 harness unit tests 100 s, and the golden matrix 438 s. The Rust shards finished
 after about 370 s. In the earlier layout, one lane ran smoke, the golden
 matrix, and the shared-fixture tests in sequence. The persistent directories
-used 11.1 GB (`replay`) and 8.8 GB (`other`).
+used 11.1 GB (`replay`) and 8.8 GB (`other`); about 5.5 GB of that was stale
+child build namespaces from earlier runs.
+
+The wrapper builds persistent shard test binaries and every child build with
+`line-tables-only` debug info, and child builds with `CARGO_INCREMENTAL=0`.
+Panic locations keep file and line. Shard test binaries keep incremental
+state, because contributors edit those crates. CI sets
+`CARGO_PROFILE_DEV_DEBUG=line-tables-only` for the whole job;
+`Swatinem/rust-cache` already sets `CARGO_INCREMENTAL=0`. Both shards in
+parallel from empty directories:
+
+| Both shards | Old settings | New settings |
+|---|---:|---:|
+| Cold wall time | 709–786 s | 746 s |
+| Cold disk use (`replay` + `other`) | 14.35 GB | 8.51 GB |
+| Warm wall time after a `specgate-runtime` edit | 344 s | 314 s |
+| Disk added by that warm run | 2.81 GB | 0.78 GB |
+
+The two old cold runs show that cold wall time varies by about 75 s between
+runs. Incremental state for children did not make the warm run faster.
 
 Three-lane runs
 [40951562582](https://github.com/schgoo/specgate/actions/runs/40951562582)

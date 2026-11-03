@@ -18,11 +18,16 @@ function cargo {
     $childBuildDir = ConvertTo-Json -InputObject (Join-Path $scratch 'build') -Compress
     $expected = @('test', '--workspace')
     if ($state.BuildDir -eq 'persistent') {
-        $expected += '--target-dir', (Join-Path $scratch 'target')
+        $expected += @(
+            '--target-dir', (Join-Path $scratch 'target'),
+            '--config', "profile.dev.debug='line-tables-only'"
+        )
     }
     $expected += @(
         '--config', "env.CARGO_BUILD_BUILD_DIR.value=$childBuildDir",
         '--config', 'env.CARGO_BUILD_BUILD_DIR.force=true',
+        '--config', "env.CARGO_PROFILE_DEV_DEBUG='line-tables-only'",
+        '--config', "env.CARGO_INCREMENTAL='0'",
         '--', '--test-threads=1', '--skip', 'goldens::tests::cases'
     )
     $expected += @{
