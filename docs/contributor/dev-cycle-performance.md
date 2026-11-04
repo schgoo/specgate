@@ -605,6 +605,16 @@ builds its own generated runners; Windows `rust-other` also spends ~2 min in
 Lanes use more runner minutes; GitHub does not bill them for public
 repositories.
 
+Three more changes were measured together and rejected
+([#121](https://github.com/schgoo/specgate/pull/121)): a separate smoke
+fixture package so smoke and the golden matrix run as parallel lanes, a
+Windows Dev Drive, and prebuilt `cargo-deny`. Local `just check` went from
+821 s to 759 s, because the golden matrix is CPU-bound on 8 cores. The warm CI
+critical path went from 12.0 to 11.5 min on Windows and from 6.0 to 6.4 min on
+Ubuntu, which is within runner variance; a Rust shard stays the critical path.
+`cargo-doc2readme` has no Windows binary, so `taiki-e/install-action` compiles
+it on every run (~3 min) unless `cargo install` and the Cargo cache keep it.
+
 Persisting the `rust-test` child build directory across CI runs was measured
 and rejected. Locally it cut `rust-test` from 1,137 s cold to 586 s warm, but
 the directory reached 11.2 GB on Windows (debug 1.8 GB plus 19 harness and 22
