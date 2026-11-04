@@ -79,6 +79,9 @@ includes a "which guide" table and the agent quick path.
 - [`contributor/component-identity-and-replay.md`](contributor/component-identity-and-replay.md)
   — exploratory notes on scenario identity, the replay unit, and artifact
   granularity. Not ratified.
+- [`contributor/custom-collection-contract.md`](contributor/custom-collection-contract.md)
+  — proposed lossless native values and a `spec_collection` attribute macro
+  using existing Rust type and setup contracts. Detailed API under review.
 - [`digests/llm.md`](digests/llm.md) — dense operational summary for agents.
 - [`digests/human.md`](digests/human.md) — concise status, risks, and ownership
   boundaries.
