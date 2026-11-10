@@ -46,7 +46,8 @@ Vocabulary follows Rust: `optional`, `none`, and `some`.
 
 - A **record** decomposes into paths: `x.a`, `x.b.c`.
 - A **one_of** uses the variant tag as a path segment: `x.circle.r`, or
-  `x.empty: ()` for a unit variant. Exactly one variant path exists.
+  `x.empty: ()` for a unit variant. A record with no fields reads like unit,
+  so `A {}` gives `x.A: ()`. Exactly one variant path exists.
 - A **collection** stops decomposition and keeps its laws. Each item decomposes
   again, relative to the item.
 - The **type** defines the set of paths. A value never moves its path.
