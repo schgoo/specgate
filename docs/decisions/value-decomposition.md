@@ -38,7 +38,7 @@ same concept compares equal.
 | scalar | A leaf value: bool, integer, float, string, bytes, or unit. |
 | record | Named fields. All fields are present. A tuple is a record with fields `0`, `1`, and so on. |
 | one_of | A closed list of named variants. Exactly one variant is present. |
-| collection | Items with laws: ordered or unique. A map is a collection of key/value entries with unique keys (#116). |
+| collection | Items with laws: ordered or unique. A map keeps its own `map` kind with unique keys. |
 
 Vocabulary follows Rust: `optional`, `none`, and `some`.
 
@@ -53,7 +53,8 @@ Vocabulary follows Rust: `optional`, `none`, and `some`.
 
 Paths are how validation and comparison read and report values. **The wire
 format does not change**: the trace keeps the nested OTLP value tree, which
-also holds `none` and the outcome channels.
+also holds `none` and the outcome channels. Path rules, such as the elided
+`some` segment below, are reading rules only.
 
 ### Slot properties
 
@@ -67,6 +68,7 @@ Any slot (field, input, result, item, map value, or variant payload) can have:
 
 The registry keeps the existing `optional` type kind. Validation and
 comparison read `optional<T>` as a slot of type `T` with `optional: true`.
+`optional<optional<T>>` is an optional slot whose type is `optional<T>`.
 Other sum types, including a nested `Result`, stay `tagged_union`; only
 `optional` is a slot property, because C# `T?` is a property of the slot, not
 a sum type.
@@ -107,7 +109,7 @@ the same encoding.
 | C# class without `[SpecUnion]`, abstract or concrete | record |
 | Rust and C# tuples | record with fields `0`, `1`, … |
 | Rust `Vec<T>`, C# `List<T>`, and similar | ordered collection |
-| Rust and C# maps and dictionaries | collection of key/value entries |
+| Rust and C# maps and dictionaries | `map` |
 
 - A C# record type includes inherited public fields and properties,
   base-first (#127). Methods keep `DeclaredOnly`.
@@ -164,6 +166,19 @@ registry. They record the observed value with its observed type and add a
 - Discovery does not widen the registry. Strict golden capture still fails on
   any violation.
 
+Violations have two causes, with separate codes:
+
+- **Product behavior**, for example duplicate elements in a collection
+  declared unique, or a duplicate map key. This is a finding about the product.
+- **Annotation error**, for example a custom serializer (#116, PR #129) that
+  returns a shape different from its declaration. This is a finding about the
+  annotation, not the product.
+
+Producers detect invalid values and never deduplicate them silently. A
+string-keyed map is a key/value list on the wire and cannot hold a duplicate
+key, so the violation event carries the key and the conflicting values. Until
+record and warn is implemented, producers keep rejecting invalid values.
+
 ### Replay inputs
 
 | Case | Action |
@@ -178,7 +193,7 @@ Generated values (property testing) are deferred.
 
 | Class | Source |
 |---|---|
-| Signature difference | Registry vs registry. `oblivious` is compatible with `optional` and with required; it is never a signature difference, and only behavior is compared. |
+| Signature difference | Registry vs registry. `oblivious` is compatible with `optional` and with required; it is never a signature difference, and only behavior is compared. This rule compares one pair at a time; it is not an equivalence and is never used for grouping or registry identity. |
 | Behavior difference | Trace vs trace. |
 | Registry violation | Trace vs its own registry. |
 | Inconclusive | Replay used a default or skipped an input. |
@@ -196,17 +211,55 @@ subsystem.
 
 ## Open questions
 
-1. OTLP encoding of `none`. The empty `AnyValue` is invalid today
-   (`trace.md` §8) and OTLP tools can drop it. Prefer a reserved typed marker.
-2. Registry spelling of `oblivious`.
-3. A variant with one payload: Rust `Set(5)` gives `x.Set.0`, and a C#
-   `[SpecUnion]` variant `Set(int Value)` gives `x.Set.Value`. Either put the
-   payload directly at the variant path, or report the difference and let a
-   rename map it.
-4. Variant and field name casing across languages.
-5. Whether the `conformance.empty` event is renamed with the property.
-6. The initial list of violation codes and their parameters.
-7. `Option<Result<T, E>>`: keep its mapping or reject it.
+Items 1-9 come from review; each has a proposed answer for the owner to accept
+or change.
+
+1. **Encoding of `none`.** Proposed: keep today's `{"None":{}}` wire encoding,
+   also for C# `null`. No new marker.
+2. **Spoofed violations.** Proposed: linked validation recomputes violations
+   and requires an exact match with the events. A missing, extra, duplicate, or
+   wrongly parameterized event fails validation.
+3. **Observed type in a violation.** Rust values carry no type. Proposed: the
+   parameters are the path, the declared type, and the observed shape (scalar,
+   record, one_of, collection, map, or none). The comparator lists violations
+   but does not compare them.
+4. **Exit code for inconclusive.** Today the codes are 0, 1, and 2
+   (`cli.md`); this is a CLI decision. Proposed: exit 0 with an
+   `inconclusive:` output line.
+5. **Ignored inputs that affect behavior**, for example a cancelled
+   `CancellationToken`. Proposed: `ignore` asserts that the input does not
+   affect behavior. Cancellation behavior is out of scope until it is modeled.
+6. **Rust `ignore`.** Replay must build the default. Proposed: discovery
+   rejects `ignore` on a type without `Default`; the same applies to an ignored
+   SpecEvent field when replay rebuilds the struct.
+7. **`has_default` use.** Replay runs only Rust candidates, and Rust never sets
+   it. Proposed: metadata only for now; replay does not use it yet.
+8. **Subtype members dropped.** A derived instance in a record slot records
+   only the declared members. Proposed: report a violation.
+9. **Semantic error names.** Review rates this high for DSAPI: C# throws
+   status-specific exceptions, and Rust returns string kinds. Proposed: keep
+   deferred and file an issue.
+10. Registry spelling of `oblivious`. Resolve before the first slice.
+11. A variant with one payload: Rust `Set(5)` gives `x.Set.0`, and a C#
+    `[SpecUnion]` variant `Set(int Value)` gives `x.Set.Value`. Either put the
+    payload directly at the variant path, or report the difference and let a
+    rename map it.
+12. Variant and field name casing across languages.
+13. Whether the `conformance.empty` event is renamed with the property.
+14. The initial list of violation codes and their parameters, including
+    `duplicate_element`, `duplicate_key`, and `serializer_shape_mismatch`.
+15. `Option<Result<T, E>>`: keep its mapping or reject it.
+
+## Related work
+
+- **#116 / PR #129, custom collections.** Adds lossless native collection and
+  map payloads. Compatible with this ADR. It detects invalid values and
+  rejects them; this ADR later changes rejection to record and warn. #129 does
+  not freeze replay, default, or optional policy.
+- **DSAPI path.** Capture of the DSAPI client needs #122, #127, `ignore`, and
+  outcomes with `oblivious` and `none`. Replay also needs #123 and #124.
+  Signature comparison, `[SpecUnion]`, violation codes, `has_default`, and
+  inconclusive replay are not on that path.
 
 ## Consequences
 
@@ -218,9 +271,10 @@ subsystem.
   change; that is an owner decision. CTSC consumers need a migration note.
 - Breaking for C# authors: an abstract `[SpecEvent]` class becomes a record
   unless it has `[SpecUnion]`. Existing fixtures add the attribute.
-- Implement in slices, for example: slot properties and `none` encoding;
-  nested `Option`; outcomes; `oblivious`; `[SpecUnion]`; inherited members
-  (#127); `ignore`, `has_default`, and replay inputs; record and warn.
+- Implement in slices, for example: slot properties and `none` reading;
+  nested `Option`; outcomes; `oblivious`; inherited members (#127); `ignore`,
+  `has_default`, and replay inputs; record and warn; `[SpecUnion]`, which
+  reports unlisted subclasses as violations.
 
 ## Validation
 
