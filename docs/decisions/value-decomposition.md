@@ -73,6 +73,12 @@ Other sum types, including a nested `Result`, stay `tagged_union`; only
 `optional` is a slot property, because C# `T?` is a property of the slot, not
 a sum type.
 
+On the wire, `optional` and `oblivious` slots use the same encoding:
+`{"Some": v}` or `{"None": {}}`. C# `T?` already uses it. The path reading
+elides the innermost `Some`, so a C# oblivious `{"Some": 5}` and a Rust
+required `5` both read as `x = 5`. `oblivious` differs from `optional` only
+in registry compatibility (see Comparison report).
+
 `none` is a distinct value. It is not unit and it is not absence:
 
 | `Option<()>` | Path value |
@@ -119,6 +125,9 @@ the same encoding.
   The variants must be in an assembly that the base can reference; a union
   split across assemblies is not supported. At capture, an unlisted subclass is
   a registry violation.
+- A derived instance in a record slot is recorded as it is: the declared
+  members plus the extra members of its runtime type. Validation reports each
+  extra member as an `undeclared_member` violation.
 
 ### Annotations
 
@@ -130,6 +139,11 @@ Use the existing annotations, plus `[SpecUnion]` for C#.
   SpecEvent fields. It is for context that SpecGate does not create, such as a
   `CancellationToken`, caller-info parameters, or a logger. Ignored inputs are
   not captured or compared. Replay passes the language default.
+  `ignore` is the author's assertion that the input does not affect the
+  captured behavior. Cancellation is not modeled: if a test cancels an ignored
+  token, the comparator reports a behavior difference with no further cause.
+  In Rust, `ignore` requires `T: Default`; the macro enforces this at compile
+  time, for inputs and for ignored SpecEvent fields.
 - **Union:** `[SpecUnion(params Type[])]` on a C# abstract class declares a
   one_of. This replaces the inference from all concrete subclasses.
 
@@ -143,6 +157,9 @@ language-specific.
   (`[CallerFilePath]` and similar) are filled at the call site by the
   compiler, so replay through reflection passes the declared default.
 - Rust has no default parameters. `has_default` is never set from Rust today.
+- `has_default` is registry metadata only. Signature comparison shows it.
+  Replay runs only Rust candidates, so replay uses it only when C# replay
+  exists.
 
 ### Outcomes
 
@@ -154,30 +171,33 @@ language-specific.
 
 ### Record and warn
 
-Capture and validation never drop a scenario because it does not match its
-registry. They record the observed value with its observed type and add a
-`conformance.violation` event to the operation span.
+The trace is raw observed output. Capture never drops a scenario because a
+value does not match its registry; it records the value as observed and adds
+no violation marker.
 
-- CTSC lists the canonical violation codes. Each code has defined parameters,
-  for example `path`, `declared`, and `observed`.
+- Validation recomputes violations from the trace and the registry and reports
+  them as warnings. The comparator reports them in the registry violation
+  class. Neither trusts anything in the trace about violations.
+- CTSC lists the canonical violation codes and their parameters in the
+  validation and comparison contract, not in `trace.md`. Each violation has a
+  `code`, a `path`, the `declared` type, and the `observed` shape: `scalar`,
+  `record`, `one_of`, `collection`, `map`, or `none`. A code can add
+  parameters, for example `member` for `undeclared_member`.
 - Implementations choose the message text.
-- Linked validation accepts a mismatch only when a violation event declares it,
-  and reports it as a warning.
 - Discovery does not widen the registry. Strict golden capture still fails on
   any violation.
 
-Violations have two causes, with separate codes:
+Record and warn covers product behavior only. A value that breaks its own
+declaration is an **annotation error**, and capture stops with an error that
+names the path:
 
-- **Product behavior**, for example duplicate elements in a collection
-  declared unique, or a duplicate map key. This is a finding about the product.
-- **Annotation error**, for example a custom serializer (#116, PR #129) that
-  returns a shape different from its declaration. This is a finding about the
-  annotation, not the product.
+- a duplicate key in a value declared as a map, or a duplicate element in a
+  collection declared unique (native maps and sets cannot hold duplicates, so
+  these come only from projection or a custom serializer);
+- a custom serializer (#116, PR #129) that returns a shape different from its
+  declaration.
 
-Producers detect invalid values and never deduplicate them silently. A
-string-keyed map is a key/value list on the wire and cannot hold a duplicate
-key, so the violation event carries the key and the conflicting values. Until
-record and warn is implemented, producers keep rejecting invalid values.
+Producers never deduplicate silently.
 
 ### Replay inputs
 
@@ -189,6 +209,33 @@ record and warn is implemented, producers keep rejecting invalid values.
 
 Generated values (property testing) are deferred.
 
+`replay` only runs the candidate and records what happened. It does not judge
+the result. It writes the candidate trace plus a **link file** in SpecGate
+format, documented with the capture manifest in `docs/reference/bundle.md`
+(not CTSC). The link file records:
+
+- the SHA-256 digests of the reference bundle manifest, registry, and trace;
+- the candidate identity and language, and the SpecGate version;
+- each input that replay defaulted or skipped.
+
+`compare` reads the link file, checks the digests, and classifies each
+scenario, including **inconclusive**.
+
+### Exit codes and reports
+
+`replay`, `compare`, and `validate` exit 1 only when they cannot run, for
+example when an input file cannot be read. An invalid artifact, a mismatch, a
+violation, or an inconclusive scenario is a finding in the command's report,
+not an exit code. CI gates on the report. This changes the CLI:
+
+- `compare` and `validate` write a stable, machine-readable report in SpecGate
+  format. The CTSC comparison result (`comparison.md` §6) defines the content,
+  not the serialization.
+- `scripts/ctsc-smoke.ps1` expects `compare` to exit 1 on a mismatch; it
+  changes.
+- Capture, replay, and goldens call validation as a library and are not
+  affected.
+
 ### Comparison report
 
 | Class | Source |
@@ -196,66 +243,44 @@ Generated values (property testing) are deferred.
 | Signature difference | Registry vs registry. `oblivious` is compatible with `optional` and with required; it is never a signature difference, and only behavior is compared. This rule compares one pair at a time; it is not an equivalence and is never used for grouping or registry identity. |
 | Behavior difference | Trace vs trace. |
 | Registry violation | Trace vs its own registry. |
-| Inconclusive | Replay used a default or skipped an input. |
+| Inconclusive | The link file shows that replay used a default or skipped an input. |
+
+The comparator lists each side's violations but does not compare them; a
+mismatch already shows as a behavior difference at the same path.
 
 The comparator compares only traces today. Signature comparison is a new
 subsystem.
 
 ## Deferred
 
-- **Semantic error names.** Rust `Result<T, E>` and C# `[SpecException]` give
-  one error named `error`. A different error shows as a value difference, not
-  as a different error name. Annotations for named errors come later.
+- **Semantic error names (#130).** Rust `Result<T, E>` and C#
+  `[SpecException]` give one error named `error`. Its value is the C#
+  `exception.Message` or the Rust projection of `E`. A different error shows
+  as a value difference, not as a different error name, and message text often
+  differs between languages. #130 also records the C# exception type.
 - **Cross-assembly unions.** A reverse form, `[SpecVariant(typeof(Base))]` on
   the subclass, only if a real codebase needs it.
 
 ## Open questions
 
-Items 1-9 come from review; each has a proposed answer for the owner to accept
-or change.
-
-1. **Encoding of `none`.** Proposed: keep today's `{"None":{}}` wire encoding,
-   also for C# `null`. No new marker.
-2. **Spoofed violations.** Proposed: linked validation recomputes violations
-   and requires an exact match with the events. A missing, extra, duplicate, or
-   wrongly parameterized event fails validation.
-3. **Observed type in a violation.** Rust values carry no type. Proposed: the
-   parameters are the path, the declared type, and the observed shape (scalar,
-   record, one_of, collection, map, or none). The comparator lists violations
-   but does not compare them.
-4. **Exit code for inconclusive.** Today the codes are 0, 1, and 2
-   (`cli.md`); this is a CLI decision. Proposed: exit 0 with an
-   `inconclusive:` output line.
-5. **Ignored inputs that affect behavior**, for example a cancelled
-   `CancellationToken`. Proposed: `ignore` asserts that the input does not
-   affect behavior. Cancellation behavior is out of scope until it is modeled.
-6. **Rust `ignore`.** Replay must build the default. Proposed: discovery
-   rejects `ignore` on a type without `Default`; the same applies to an ignored
-   SpecEvent field when replay rebuilds the struct.
-7. **`has_default` use.** Replay runs only Rust candidates, and Rust never sets
-   it. Proposed: metadata only for now; replay does not use it yet.
-8. **Subtype members dropped.** A derived instance in a record slot records
-   only the declared members. Proposed: report a violation.
-9. **Semantic error names.** Review rates this high for DSAPI: C# throws
-   status-specific exceptions, and Rust returns string kinds. Proposed: keep
-   deferred and file an issue.
-10. Registry spelling of `oblivious`. Resolve before the first slice.
-11. A variant with one payload: Rust `Set(5)` gives `x.Set.0`, and a C#
-    `[SpecUnion]` variant `Set(int Value)` gives `x.Set.Value`. Either put the
-    payload directly at the variant path, or report the difference and let a
-    rename map it.
-12. Variant and field name casing across languages.
-13. Whether the `conformance.empty` event is renamed with the property.
-14. The initial list of violation codes and their parameters, including
-    `duplicate_element`, `duplicate_key`, and `serializer_shape_mismatch`.
-15. `Option<Result<T, E>>`: keep its mapping or reject it.
+1. Registry spelling of `oblivious`. Resolve before the first slice.
+2. A variant with one payload: Rust `Set(5)` gives `x.Set.0`, and a C#
+   `[SpecUnion]` variant `Set(int Value)` gives `x.Set.Value`. Either put the
+   payload directly at the variant path, or report the difference and let a
+   rename map it.
+3. Variant and field name casing across languages.
+4. Whether the `conformance.empty` event is renamed with the property.
+5. The initial list of violation codes, including `undeclared_member`.
+6. `Option<Result<T, E>>`: keep its mapping or reject it.
+7. The schemas of the replay link file and the `compare` and `validate`
+   reports.
 
 ## Related work
 
 - **#116 / PR #129, custom collections.** Adds lossless native collection and
-  map payloads. Compatible with this ADR. It detects invalid values and
-  rejects them; this ADR later changes rejection to record and warn. #129 does
-  not freeze replay, default, or optional policy.
+  map payloads. Compatible with this ADR. A duplicate key or element is an
+  annotation error, so #129's capture rejection stays. #129 does not freeze
+  replay, default, or optional policy.
 - **DSAPI path.** Capture of the DSAPI client needs #122, #127, `ignore`, and
   outcomes with `oblivious` and `none`. Replay also needs #123 and #124.
   Signature comparison, `[SpecUnion]`, violation codes, `has_default`, and
@@ -263,8 +288,11 @@ or change.
 
 ## Consequences
 
-- Normative changes to CTSC `registry.md` §4.1 and §5, `trace.md` §8, and
-  `comparison.md`.
+- Normative changes to CTSC `registry.md` §4.1 and §5 and `comparison.md`.
+  `trace.md` changes only if the `conformance.empty` event is renamed; the
+  value encoding does not change.
+- CLI changes: exit codes, the replay link file, and stable `compare` and
+  `validate` reports.
 - The `optional<T>` registry kind stays. Only its reading changes.
 - Rust and C# discovery, capture, replay, validators, comparator, and goldens
   change. The hand-authored parity entries in `test/behavior/matrix.json`
@@ -273,8 +301,9 @@ or change.
   unless it has `[SpecUnion]`. Existing fixtures add the attribute.
 - Implement in slices, for example: slot properties and `none` reading;
   nested `Option`; outcomes; `oblivious`; inherited members (#127); `ignore`,
-  `has_default`, and replay inputs; record and warn; `[SpecUnion]`, which
-  reports unlisted subclasses as violations.
+  `has_default`, and replay inputs; exit codes, link file, and reports;
+  record and warn; `[SpecUnion]`, which reports unlisted subclasses as
+  violations.
 
 ## Validation
 
