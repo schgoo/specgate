@@ -5,7 +5,7 @@ Reuse the existing type, serialization, and construction contracts.**
 
 > **Status:** attribute macro selected; detailed API proposed; not implemented
 > **Reviewer:** @schgoo
-> **Date:** 2026-11-04
+> **Date:** 2026-11-10
 > **Issue:** [#116](https://github.com/schgoo/specgate/issues/116)
 
 ## What changes
@@ -55,6 +55,27 @@ records. The serializer supplies entries without assembling wire-format records.
 Update native sidecar serialization, decoding, and replay conversion together.
 The CTSC wire format and reference registry remain unchanged.
 
+## Violation policy and sequencing
+
+Detect declared-shape and uniqueness violations without silently discarding
+data. Until record-and-warn is implemented, preserve today's behavior and
+reject them before publication. This extension can therefore ship first.
+Future violation handling and evidence encoding follow
+[#126](https://github.com/schgoo/specgate/pull/126), not a separate policy here.
+This slice does not freeze future value or replay semantics.
+
+Distinguish observed contract violations from known serializer shape bugs.
+A duplicate element or key does not by itself prove a product bug: custom
+projection can also introduce collisions. Attribute a wrong shape to the
+serializer only when that origin is established; canonical codes belong to #126.
+
+CTSC requires unique keys in `kvlistValue`, so an unordered string-keyed map
+with duplicate keys cannot be published in its ordinary encoding. Retain every
+conflicting entry in `MapEntries` until rejection. Future record-and-warn must
+define both lossless violation evidence and what occupies the ordinary
+input/result slot; never silently choose one conflicting value. That encoding
+decision belongs to #126.
+
 ## Proposed author syntax
 
 Use one attribute containing the declaration, without a companion derive:
@@ -101,12 +122,13 @@ These modes replace default iteration and require no reconstruction function.
 - **Declare, do not infer.** Collection/map semantics come from the annotation,
   never the backing field, type name, sort order, or observed contents.
   Existing record/union annotations and standard mappings keep their defaults.
-- **Preserve the value.** Keep duplicates unless uniqueness forbids them.
-  Reject duplicate semantic elements or map keys; never silently merge them.
-  Keep map entries intact until duplicate-key checks finish.
+- **Preserve the value.** Retain every occurrence and map entry, including
+  duplicates that violate uniqueness. Detect duplicate semantic elements or
+  keys; never silently merge them. Reject violations under the current policy.
 - **Check the declared shape.** A custom serializer must produce values that
   match its declaration, including nested types. Reuse existing encoding and
-  linked validation for inputs, results, and errors before publication.
+  linked validation for inputs, results, and errors before publication, with
+  violation handling governed by the sequencing above.
 - **Do not consume caller state.** Generated projection uses fresh borrowed
   traversal, not draining, dequeuing, or advancing an existing cursor.
   Custom serialization code remains the author's responsibility.
@@ -140,7 +162,8 @@ or comparison rules. Existing named record identity remains unchanged.
   colliding projected keys until validation. Cover nested values and each map
   wire encoding.
 - Exercise borrowed iteration and manual serialization. Reject incompatible
-  values, duplicate unique elements/keys, and conflicting shape annotations.
+  values and duplicate unique elements/keys under today's policy, retaining
+  evidence until rejection. Reject conflicting shape annotations.
 - Verify the attribute preserves the original type declaration and works with
   unrelated derives and attributes in either order. Reject combining it with
   `#[derive(SpecEvent)]` regardless of attribute order.
