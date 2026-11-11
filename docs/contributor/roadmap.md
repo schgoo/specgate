@@ -346,6 +346,29 @@ Rust reference against C# candidate. Depends on V2.1 and on M6.
 
 ---
 
+## Value model
+
+Implements the
+[value decomposition ADR](../decisions/value-decomposition.md) (#125) and
+custom collections (#116). Slices 1-4 are the DSAPI capture path; replay of
+DSAPI also needs #123 and #124.
+
+| Slice | Issue | Depends on |
+|---|---|---|
+| 1. Slot properties, `none` reading, `oblivious` | #131 | - |
+| 2. Outcomes: `optional`, `conformance.none`, `fallible` | #132 | 1 |
+| 3. Inherited members and type aliases | #127, #122 | - |
+| 4. `ignore` for context inputs and fields | #133 | - |
+| 5. Record and warn with violation codes | #134 | 1, 2 |
+| 6. Custom collections | #116 | - |
+| 7. Exit codes, replay link file, versioned reports | #135 | 5 |
+| 8. `has_default` and inconclusive replay | #136 | 7 |
+| 9. Signature comparison | #137 | 7 |
+
+Semantic error names (#130) are deferred.
+
+---
+
 ## Open questions by tier
 
 | Question | Gates |
