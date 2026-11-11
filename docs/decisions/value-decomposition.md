@@ -20,8 +20,8 @@ falls short of that goal:
 - A scenario that does not match its registry is dropped, so the difference is
   never reported.
 - C# record types omit inherited members (#127).
-- Every concrete C# subclass of an abstract `[SpecEvent]` class becomes a
-  union variant, even if the hierarchy is open.
+- A Rust `Err` nested in a value, such as `Option<Result<T, E>>`, reads
+  differently from a top-level `Err` or a C# exception.
 
 ## Decision
 
@@ -48,6 +48,10 @@ Vocabulary follows Rust: `optional`, `none`, and `some`.
 - A **one_of** uses the variant tag as a path segment: `x.circle.r`, or
   `x.empty: ()` for a unit variant. A record with no fields reads like unit,
   so `A {}` gives `x.A: ()`. Exactly one variant path exists.
+- A variant payload is read faithfully. Rust `Count(5)` gives `x.Count.0`,
+  and a C# variant class `Count` with property `Value` gives
+  `x.Count.Value`. The `.0` segment is never elided; the comparator reports
+  the difference.
 - A **collection** stops decomposition and keeps its laws. Each item decomposes
   again, relative to the item.
 - The **type** defines the set of paths. A value never moves its path.
@@ -66,13 +70,17 @@ Any slot (field, input, result, item, map value, or variant payload) can have:
 | `type` | The concept or scalar type. |
 | `optional` | The source declares that the value can be `none`. |
 | `oblivious` | The source does not declare whether the value can be `none`. |
+| `errors` | The value can be an error instead of a `type` value. |
 
 The registry keeps the existing `optional` type kind. Validation and
 comparison read `optional<T>` as a slot of type `T` with `optional: true`.
-`optional<optional<T>>` is an optional slot whose type is `optional<T>`.
-Other sum types, including a nested `Result`, stay `tagged_union`; only
-`optional` is a slot property, because C# `T?` is a property of the slot, not
-a sum type.
+`oblivious` is a flag on that kind:
+`{"kind":"optional","value":T,"oblivious":true}`. A new `fallible` kind,
+`{"kind":"fallible","value":T,"errors":[...]}`, carries `errors` the same
+way. Each wrapper level is its own slot, so `optional<optional<T>>` is an
+optional slot whose type is `optional<T>`, and the registry keeps the order of
+`Option<Result<T, E>>` and `Result<Option<T>, E>`. Signature comparison
+reports a different order. Other sum types are one_of.
 
 On the wire, `optional` and `oblivious` slots use the same encoding:
 `{"Some": v}` or `{"None": {}}`. C# `T?` already uses it. The path reading
@@ -90,10 +98,29 @@ in registry compatibility (see Comparison report).
 `none` at a record slot is different from `none` in its fields:
 `x: none` and `x.a: none` are different paths.
 
-### Nested `Option`
+### Errors
 
-Each nested `Option` level adds one `some` segment. The innermost `Some` is
-elided. Every state has a distinct path, so nothing is lost.
+An error reads as an `err` segment; `Ok` is elided. The wire format keeps
+`{"Ok": v}` and `{"Err": e}` for a nested `Result`, and the error outcome
+event at the top level.
+
+| `Result<i32, E>` | Path value |
+|---|---|
+| `Ok(5)` | `x: 5` |
+| `Err(e)` | `x.err: e` |
+
+The top-level error outcome, from a Rust `Err` or a C# exception, reads as
+`result.err: e`. A nested `Err` reads the same, so `Some(Err(e))` in
+`Option<Result<T, E>>` compares equal to a C# exception.
+
+### Nested wrappers
+
+`Some` and `Ok` are elided unless two states would then read the same. Every
+state has a distinct path, so nothing is lost.
+
+- An `Option` directly in an `Option` adds one `some` segment.
+- A `Result` directly in a `Result` adds one `ok` segment.
+- Mixed nesting needs no segment: `none` and `err` do not collide.
 
 | `Option<Option<i32>>` | Path value |
 |---|---|
@@ -101,8 +128,17 @@ elided. Every state has a distinct path, so nothing is lost.
 | `Some(None)` | `x.some: none` |
 | `Some(Some(5))` | `x.some: 5` |
 
+| `Result<Result<i32, E1>, E2>` | Path value |
+|---|---|
+| `Err(e2)` | `x.err: e2` |
+| `Ok(Err(e1))` | `x.ok.err: e1` |
+| `Ok(Ok(5))` | `x.ok: 5` |
+
+`Option<Result<T, E>>` and `Result<Option<T>, E>` read the same: `x: v`,
+`x: none`, and `x.err: e`. Only their registries differ.
+
 C# `T?` cannot nest. C# can nest `SpecGate.Annotations.Option<T>`, which uses
-the same encoding.
+the same encoding. C# has no value-level `Result`.
 
 ### Language mapping
 
@@ -111,9 +147,10 @@ the same encoding.
 | Rust `Option<T>`; C# `T?`, `Nullable<T>`, `SpecGate.Annotations.Option<T>` | `optional` slot |
 | C# reference type without a nullable context | `oblivious` slot |
 | C# `null` in an `optional` or `oblivious` slot | `none` |
+| Rust `Result<T, E>` | `fallible` slot |
 | Rust `enum` with data | one_of |
-| C# abstract class with `[SpecUnion(typeof(A), typeof(B))]` | one_of with exactly the listed variants |
-| C# class without `[SpecUnion]`, abstract or concrete | record |
+| C# abstract `[SpecEvent]` class | one_of of the concrete subclasses that discovery sees |
+| C# concrete class | record |
 | Rust and C# tuples | record with fields `0`, `1`, … |
 | Rust `Vec<T>`, C# `List<T>`, and similar | ordered collection |
 | Rust and C# maps and dictionaries | `map` |
@@ -122,20 +159,23 @@ the same encoding.
   base-first (#127). Methods keep `DeclaredOnly`.
 - A concrete base class stays a record, even if it acts like an enum. No
   reliable signal identifies such classes.
-- `[SpecUnion]` lists its variants explicitly, as `[JsonDerivedType]` does.
-  The variants must be in an assembly that the base can reference; a union
-  split across assemblies is not supported. At capture, an unlisted subclass is
-  a registry violation.
+- Union inference does not change: discovery makes an abstract `[SpecEvent]`
+  class a one_of of the concrete subclasses it sees. No new attribute is
+  added. At capture, a subclass that discovery did not see is recorded as
+  observed; validation reports it as an `undeclared_variant` violation.
 - A derived instance in a record slot is recorded as it is: the declared
   members plus the extra members of its runtime type. Validation reports each
   extra member as an `undeclared_member` violation.
 
 ### Annotations
 
-Use the existing annotations, plus `[SpecUnion]` for C#.
+Use the existing annotations. No new attribute is added.
 
 - **Rename:** `[SpecInput("name")]` / `#[spec_input("name")]`, and SpecEvent
   `name`.
+- **Names:** Field, variant, and input names are the source names. Neither
+  language converts case. Authors align names with the rename annotations;
+  the comparator reports names that differ.
 - **Ignore:** add `Ignore = true` / `ignore` to `SpecInput`/`spec_input` and to
   SpecEvent fields. It is for context that SpecGate does not create, such as a
   `CancellationToken`, caller-info parameters, or a logger. Ignored inputs are
@@ -145,8 +185,6 @@ Use the existing annotations, plus `[SpecUnion]` for C#.
   token, the comparator reports a behavior difference with no further cause.
   In Rust, `ignore` requires `T: Default`; the macro enforces this at compile
   time, for inputs and for ignored SpecEvent fields.
-- **Union:** `[SpecUnion(params Type[])]` on a C# abstract class declares a
-  one_of. This replaces the inference from all concrete subclasses.
 
 ### Inputs with defaults
 
@@ -164,11 +202,18 @@ language-specific.
 
 ### Outcomes
 
-- Rename the outcome property `empty` to `optional`.
+The outcome is the result slot. Its properties describe the outermost wrapper
+of the return type; inner wrappers stay `optional` or `fallible` kinds in
+`result`.
+
+- Rename the outcome property `empty` to `optional`, and the
+  `conformance.empty` event to `conformance.none` (`trace.md` §7.3).
+- Add the outcome property `oblivious` next to `optional`.
 - Remove the rule that `empty` requires `result` (`registry.md` §4.1). No
   `result` means unit, so `Option<()>` is `optional: true` with no `result`.
-- Normalize Rust nesting: `Result<Option<T>, E>` gives `result: T`,
-  `optional: true`, and `errors`.
+- `Result<Option<T>, E>` gives `errors` and `result: optional<T>`.
+  `Option<Result<T, E>>` gives `optional: true` and `result: fallible<T>`.
+  Both read the same (see Nested wrappers).
 
 ### Record and warn
 
@@ -188,9 +233,19 @@ no violation marker.
   after `compare` or `validate linked`.
 - CTSC lists the canonical violation codes and their parameters in the
   validation and comparison contract, not in `trace.md`. Each violation has a
-  `code`, a `path`, the `declared` type, and the `observed` shape: `scalar`,
-  `record`, `one_of`, `collection`, `map`, or `none`. A code can add
-  parameters, for example `member` for `undeclared_member`.
+  `code` and a `path`:
+
+  | Code | Parameters | Meaning |
+  |---|---|---|
+  | `type_mismatch` | `declared`, `observed` | Wrong shape or scalar, or `none` in a slot that is not `optional` or `oblivious`. `observed` is `scalar`, `record`, `one_of`, `collection`, `map`, or `none`. |
+  | `missing_member` | `member` | A declared field or tuple element is absent. |
+  | `undeclared_member` | `member` | A field or tuple element is not declared. |
+  | `undeclared_variant` | `variant` | A variant is not declared. |
+  | `undeclared_outcome` | `outcome` | An outcome is not declared. |
+  | `undeclared_observation` | `name` | An observation is not declared. |
+
+  These are not violations: a duplicate (an annotation error), and an unknown
+  type or component (a registry defect).
 - Implementations choose the message text.
 - Discovery does not widen the registry. The golden check keeps linked
   validation and still fails on any violation.
@@ -227,7 +282,9 @@ format, documented with the capture manifest in `docs/reference/bundle.md`
 - each input that replay defaulted or skipped.
 
 `compare` reads the link file, checks the digests, and classifies each
-scenario, including **inconclusive**.
+scenario, including **inconclusive**. If a digest does not match the
+reference bundle, the inputs do not belong together: `compare` cannot run,
+exits 1, and names each digest that does not match.
 
 ### Exit codes and reports
 
@@ -239,6 +296,9 @@ not an exit code. CI gates on the report. This changes the CLI:
 - `compare` and `validate` write a stable, machine-readable report in SpecGate
   format. The CTSC comparison result (`comparison.md` §6) defines the content,
   not the serialization.
+- The link file and the reports are JSON with a `schemaVersion` field. Each
+  has a JSON Schema in `docs/reference/`, and a test validates the output
+  against it. The slice that adds each file defines its fields.
 - `scripts/ctsc-smoke.ps1` expects `compare` to exit 1 on a mismatch; it
   changes.
 - Capture and replay stop running linked validation; today a linked
@@ -267,24 +327,10 @@ subsystem.
   `exception.Message` or the Rust projection of `E`. A different error shows
   as a value difference, not as a different error name, and message text often
   differs between languages. #130 also records the C# exception type.
-- **Cross-assembly unions.** A reverse form, `[SpecVariant(typeof(Base))]` on
-  the subclass, only if a real codebase needs it.
-
-## Open questions
-
-1. Registry spelling of `oblivious`. Resolve before the first slice.
-2. A variant with one payload: Rust `Set(5)` gives `x.Set.0`, and a C#
-   `[SpecUnion]` variant `Set(int Value)` gives `x.Set.Value`. Either put the
-   payload directly at the variant path, or report the difference and let a
-   rename map it.
-3. Variant and field name casing across languages.
-4. Whether the `conformance.empty` event is renamed with the property.
-5. The initial list of violation codes, including `undeclared_member`.
-6. `Option<Result<T, E>>`: keep its mapping or reject it.
-7. The schemas of the replay link file and the `compare` and `validate`
-   reports.
-8. A link file whose digests do not match the reference bundle: `compare`
-   exits 1 (it cannot run), or reports it as a finding.
+- **Explicit unions.** An attribute that lists or closes C# variants, only if
+  a real codebase needs it.
+- **Name and payload mapping.** Annotations that map a variant payload or a
+  name beyond the existing renames.
 
 ## Related work
 
@@ -294,34 +340,35 @@ subsystem.
   replay, default, or optional policy.
 - **DSAPI path.** Capture of the DSAPI client needs #122, #127, `ignore`, and
   outcomes with `oblivious` and `none`. Replay also needs #123 and #124.
-  Signature comparison, `[SpecUnion]`, violation codes, `has_default`, and
-  inconclusive replay are not on that path.
+  Signature comparison, violation codes, `has_default`, and inconclusive
+  replay are not on that path.
 
 ## Consequences
 
-- Normative changes to CTSC `registry.md` §4.1 and §5 and `comparison.md`.
-  `trace.md` changes only if the `conformance.empty` event is renamed; the
-  value encoding does not change.
+- Normative changes to CTSC `registry.md` §4.1 and §5 (the `oblivious` flag
+  and the `fallible` kind) and `comparison.md`. `trace.md` §7.3 renames the
+  `conformance.empty` event to `conformance.none`; the value encoding does
+  not change.
 - CLI changes: exit codes, the replay link file, and stable `compare` and
   `validate` reports.
 - The `optional<T>` registry kind stays. Only its reading changes.
 - Rust and C# discovery, capture, replay, validators, comparator, and goldens
   change. The hand-authored parity entries in `test/behavior/matrix.json`
   change; that is an owner decision. CTSC consumers need a migration note.
-- Breaking for C# authors: an abstract `[SpecEvent]` class becomes a record
-  unless it has `[SpecUnion]`. Existing fixtures add the attribute.
+- No new C# attribute. Union inference stays; an unseen subclass becomes a
+  violation instead of a capture failure.
 - Implement in slices, for example: slot properties and `none` reading;
-  nested `Option`; outcomes; `oblivious`; inherited members (#127); `ignore`,
-  `has_default`, and replay inputs; exit codes, link file, and reports;
-  record and warn; `[SpecUnion]`, which reports unlisted subclasses as
-  violations.
+  nested wrappers and `fallible`; outcomes; `oblivious`; inherited members
+  (#127); `ignore`, `has_default`, and replay inputs; exit codes, link file,
+  and reports; record and warn with violation codes.
 
 ## Validation
 
 Focused registry, trace, capture, replay, validator, and comparator tests, plus
 regenerated goldens with cross-language parity rows for `Option<T>` / `T?`,
-`Option<Option<T>>`, `Option<()>`, `Result<Option<T>, E>`, oblivious
-references, inherited members, `[SpecUnion]` unions, and registry violations.
+`Option<Option<T>>`, `Option<()>`, `Result<Option<T>, E>`,
+`Option<Result<T, E>>`, `Result<Result<T, E1>, E2>`, oblivious references,
+inherited members, inferred unions, and registry violations.
 
 ## Supersedes / superseded by
 
