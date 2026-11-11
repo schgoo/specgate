@@ -79,6 +79,13 @@ includes a "which guide" table and the agent quick path.
 - [`contributor/component-identity-and-replay.md`](contributor/component-identity-and-replay.md)
   — exploratory notes on scenario identity, the replay unit, and artifact
   granularity. Not ratified.
+- [`contributor/custom-collection-contract.md`](contributor/custom-collection-contract.md)
+  — proposed lossless native values and a `spec_collection` attribute macro
+  extending `SpecEvent` for compiler-directed metadata while reusing setup
+  contracts. Detailed API under review.
+- [`decisions/custom-collection-metadata.md`](decisions/custom-collection-metadata.md)
+  — accepted metadata direction and permanent collection annotation errors;
+  not implemented.
 - [`digests/llm.md`](digests/llm.md) — dense operational summary for agents.
 - [`digests/human.md`](digests/human.md) — concise status, risks, and ownership
   boundaries.
