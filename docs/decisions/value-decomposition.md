@@ -176,17 +176,24 @@ The trace is raw observed output. Capture never drops a scenario because a
 value does not match its registry; it records the value as observed and adds
 no violation marker.
 
-- Validation recomputes violations from the trace and the registry and reports
-  them as warnings. The comparator reports them in the registry violation
-  class. Neither trusts anything in the trace about violations.
+- Only `compare` and `validate linked` check values against the registry.
+  `validate linked` reports violations as warnings; the comparator reports
+  them in the registry violation class. Both recompute violations from the
+  trace and the registry, and neither trusts anything in the trace about
+  violations.
+- Capture and replay do not check values against the registry. The trace still
+  names its registry by id, version, and digest. Capture and replay run only
+  the structural trace validation; a failure there is a SpecGate defect and
+  stops the command. A product-behavior violation is therefore visible only
+  after `compare` or `validate linked`.
 - CTSC lists the canonical violation codes and their parameters in the
   validation and comparison contract, not in `trace.md`. Each violation has a
   `code`, a `path`, the `declared` type, and the `observed` shape: `scalar`,
   `record`, `one_of`, `collection`, `map`, or `none`. A code can add
   parameters, for example `member` for `undeclared_member`.
 - Implementations choose the message text.
-- Discovery does not widen the registry. Strict golden capture still fails on
-  any violation.
+- Discovery does not widen the registry. The golden check keeps linked
+  validation and still fails on any violation.
 
 Record and warn covers product behavior only. A value that breaks its own
 declaration is an **annotation error**, and capture stops with an error that
@@ -234,8 +241,9 @@ not an exit code. CI gates on the report. This changes the CLI:
   not the serialization.
 - `scripts/ctsc-smoke.ps1` expects `compare` to exit 1 on a mismatch; it
   changes.
-- Capture, replay, and goldens call validation as a library and are not
-  affected.
+- Capture and replay stop running linked validation; today a linked
+  validation failure fails both (`capture/encoding.rs`, `replay/output.rs`).
+  The golden check calls linked validation as a library and keeps it.
 
 ### Comparison report
 
@@ -275,6 +283,8 @@ subsystem.
 6. `Option<Result<T, E>>`: keep its mapping or reject it.
 7. The schemas of the replay link file and the `compare` and `validate`
    reports.
+8. A link file whose digests do not match the reference bundle: `compare`
+   exits 1 (it cannot run), or reports it as a finding.
 
 ## Related work
 
