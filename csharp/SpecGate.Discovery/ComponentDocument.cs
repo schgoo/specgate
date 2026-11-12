@@ -278,7 +278,7 @@ internal sealed class ComponentDocument
         IReadOnlyList<MemberInfo> effective = RecordMembers.Effective(type);
         bool setup = Annotations.PropertySetup(type);
         bool all = setup && !effective.Any(member => Annotations.Has(member, Annotations.Event, inherit: false));
-        HashSet<string> names = new(StringComparer.Ordinal);
+        HashSet<string> names = [];
 
         foreach (MemberInfo member in effective)
         {
@@ -293,11 +293,13 @@ internal sealed class ComponentDocument
                     }
                     continue;
                 }
-                Add(property, semantic.Render(property.PropertyType, nullability.Create(property)));
+                Add(property, semantic.Render(property.PropertyType,
+                    nullability.Create((PropertyInfo)RecordMembers.DeclarationOf(property))));
             }
             else if (member is FieldInfo field)
             {
-                Add(field, semantic.Render(field.FieldType, nullability.Create(field)));
+                Add(field, semantic.Render(field.FieldType,
+                    nullability.Create((FieldInfo)RecordMembers.DeclarationOf(field))));
             }
         }
 

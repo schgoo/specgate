@@ -16,7 +16,7 @@ internal static class RecordMembers
         }
 
         List<MemberInfo> members = [];
-        Dictionary<string, int> slots = new(StringComparer.Ordinal);
+        Dictionary<string, int> slots = [];
         const BindingFlags selection = BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly;
         while (hierarchy.Count > 0)
         {
@@ -46,4 +46,10 @@ internal static class RecordMembers
             }
         }
     }
+
+    /// <summary>The source signature before declaring-type arguments were substituted.</summary>
+    internal static MemberInfo DeclarationOf(MemberInfo member) =>
+        member.DeclaringType is { IsConstructedGenericType: true } declaring
+            ? declaring.GetGenericTypeDefinition().GetMemberWithSameMetadataDefinitionAs(member)
+            : member;
 }

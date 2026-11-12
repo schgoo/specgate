@@ -84,6 +84,13 @@ inheriting `[SpecEvent]` from the replaced declaration. Nullability and nested
 named types come from the actual selected declaration. Distinct effective
 source names with the same final semantic name are rejected.
 
+For members inherited from closed generic bases, discovery and capture align
+the open member signature with its CLR type substitutions before reading
+nullability. For example, `Dictionary<T, string?>` on `Base<T>` remains
+`map<i32, optional<string>>` on a child of `Base<int>`; replacing `T` must not
+shift the nullable string's metadata position. The same applies to properties,
+fields, nested collections, and tuples, including nullable value tuples.
+
 Ordinary unannotated members, static/private members, and properties without
 public non-indexed getters are excluded. Property setups use the same effective
 scope both to detect explicit annotations and to select members: only when
@@ -104,8 +111,9 @@ when their element expansion revisits a type without a named record boundary.
 For example, `Nodes : IEnumerable<Nodes>` has no finite inline collection type.
 Generic argument nullability follows the annotated operation/member declaration,
 including reordered arguments and nested collection expressions. Nullable
-annotations written only on an inherited interface/base declaration are not
-recovered; declare the nullable element on the exposed generic contract when
+annotations written only on a collection interface/base-type expression (rather
+than a member declaration) are not recovered; declare the nullable element on
+the exposed generic contract when
 needed. Observed nulls in a required element still reject capture rather than
 being silently dropped.
 

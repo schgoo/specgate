@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using SpecGate.Reflection;
 
 namespace SpecGate.Runtime;
 
@@ -86,8 +87,88 @@ internal sealed class NullableFlagReader
         Create(parameter.CustomAttributes, ContextOf(method));
 
     /// <summary>Creates a reader for a property or field.</summary>
-    internal static NullableFlagReader ForMember(MemberInfo member) =>
-        Create(member.CustomAttributes, ContextOf(member));
+    internal static NullableFlagReader ForMember(MemberInfo member)
+    {
+        MemberInfo declaration = RecordMembers.DeclarationOf(member);
+        NullableFlagReader source = Create(declaration.CustomAttributes, ContextOf(declaration));
+        if (declaration == member)
+        {
+            return source;
+        }
+
+        List<byte> flags = [];
+        Substitute(MemberType(declaration), MemberType(member));
+        return new NullableFlagReader([.. flags], 0);
+
+        // Metadata positions belong to the open signature: T consumes one
+        // position even when its closed substitution (such as int) consumes none.
+        void Substitute(Type open, Type closed)
+        {
+            if (open.IsGenericParameter)
+            {
+                byte flag = HasPosition(open) ? source.Next() : (byte)0;
+                Append(closed, flag);
+                return;
+            }
+            if (Nullable.GetUnderlyingType(open) is Type inner)
+            {
+                Substitute(inner, Nullable.GetUnderlyingType(closed)!);
+                return;
+            }
+            if (HasPosition(open))
+            {
+                flags.Add(source.Next());
+            }
+            if (open.IsArray)
+            {
+                Substitute(open.GetElementType()!, closed.GetElementType()!);
+            }
+            else
+            {
+                Type[] arguments = open.GetGenericArguments();
+                Type[] substitutions = closed.GetGenericArguments();
+                for (int index = 0; index < arguments.Length; index++)
+                {
+                    Substitute(arguments[index], substitutions[index]);
+                }
+            }
+        }
+
+        void Append(Type closed, byte flag)
+        {
+            if (Nullable.GetUnderlyingType(closed) is Type inner)
+            {
+                Append(inner, flag);
+                return;
+            }
+            if (HasPosition(closed))
+            {
+                flags.Add(flag);
+            }
+            if (closed.IsArray)
+            {
+                Append(closed.GetElementType()!, 0);
+            }
+            else
+            {
+                // A member's T annotation describes T itself, not the nullable
+                // arguments of a type supplied by an inheritance use site.
+                foreach (Type argument in closed.GetGenericArguments())
+                {
+                    Append(argument, 0);
+                }
+            }
+        }
+    }
+
+    private static bool HasPosition(Type type) => !type.IsValueType || type.IsGenericType;
+
+    private static Type MemberType(MemberInfo member) => member switch
+    {
+        PropertyInfo property => property.PropertyType,
+        FieldInfo field => field.FieldType,
+        _ => throw new ArgumentException("Expected a property or field.", nameof(member)),
+    };
 
     private static NullableFlagReader Create(IEnumerable<CustomAttributeData> attributes, byte context)
     {

@@ -130,6 +130,26 @@ public class DiscoveryRunnerTests
             record.GetProperty("fields").EnumerateArray().Select(field => field[0].GetString()));
     }
 
+    [Theory]
+    [InlineData(typeof(InheritedGenericRecord), "i32")]
+    [InlineData(typeof(InheritedGenericReferenceRecord), "string")]
+    [InlineData(typeof(InheritedGenericNestedRecord), "List<i32>")]
+    [InlineData(typeof(InheritedGenericTupleRecord), "Tuple<i32, i32>")]
+    public void InheritedGenericMembersPublishSubstitutedTypesWithDeclaredNullability(Type type, string argument)
+    {
+        JsonElement record = InheritedDocument(type).GetProperty("types")[0];
+        Assert.Equal(
+            [
+                $"Values:map<{argument}, Option<string>>",
+                $"Nested:List<Tuple<{argument}, Option<Option<string>>>>",
+                $"Required:map<{argument}, string>",
+                $"Pair:Tuple<{argument}, Option<string>>",
+                $"Wrapped:Option<map<{argument}, Option<string>>>",
+                $"NullablePair:Option<Tuple<{argument}, Option<string>>>",
+            ],
+            record.GetProperty("fields").EnumerateArray().Select(field => $"{field[0].GetString()}:{field[1].GetString()}"));
+    }
+
     [Fact]
     public void DifferentInheritedSourceNamesCannotShareASemanticName()
     {
@@ -214,6 +234,34 @@ public class DiscoveryRunnerTests
         public int Selected { get; set; }
         public int Unhidden { get; set; }
     }
+
+    private class InheritedGenericBase<T> where T : notnull
+    {
+        [SpecEvent]
+        public Dictionary<T, string?> Values { get; set; } = [];
+        [SpecEvent]
+        public List<(T, Option<string?>)> Nested { get; set; } = [];
+        [SpecEvent]
+        public Dictionary<T, string> Required { get; set; } = [];
+        [SpecEvent]
+        public (T, string?) Pair = (default!, "present");
+        [SpecEvent]
+        public Option<Dictionary<T, string?>> Wrapped = Option<Dictionary<T, string?>>.None();
+        [SpecEvent]
+        public (T, string?)? NullablePair = null;
+    }
+
+    [SpecEvent]
+    private sealed class InheritedGenericRecord : InheritedGenericBase<int>;
+
+    [SpecEvent]
+    private sealed class InheritedGenericReferenceRecord : InheritedGenericBase<string>;
+
+    [SpecEvent]
+    private sealed class InheritedGenericNestedRecord : InheritedGenericBase<List<int>>;
+
+    [SpecEvent]
+    private sealed class InheritedGenericTupleRecord : InheritedGenericBase<(int, int)>;
 
     [SpecEvent(Setup = true)]
     private sealed class InheritedSubset : SelectionBase

@@ -89,6 +89,78 @@ public sealed class ValueProjectionTests
         Assert.Equal(expected, span.Result());
     }
 
+    [Theory]
+    [InlineData(nameof(InheritedGenericBase<int>.Values))]
+    [InlineData(nameof(InheritedGenericBase<int>.Pair))]
+    [InlineData(nameof(InheritedGenericBase<int>.Nested))]
+    [InlineData(nameof(InheritedGenericBase<int>.Wrapped))]
+    [InlineData(nameof(InheritedGenericBase<int>.NullablePair))]
+    public void InheritedGenericMembersKeepNullablePositionsAfterValueTypeSubstitution(string member)
+    {
+        var value = new InheritedGenericRecord();
+        Value none = Value.Tagged("None", Value.Unit);
+        Value expected;
+        switch (member)
+        {
+            case nameof(value.Values):
+                value.Values[1] = null;
+                expected = Value.List([Map(("key", Value.Integer(1)), ("value", none))]);
+                break;
+            case nameof(value.Pair):
+                value.Pair = (2, null);
+                expected = Value.List([Value.Integer(2), none]);
+                break;
+            case nameof(value.Nested):
+                value.Nested = [(3, Option<string?>.Some(null))];
+                expected = Value.List([Value.List([Value.Integer(3), Value.Tagged("Some", none)])]);
+                break;
+            case nameof(value.Wrapped):
+                value.Wrapped = Option<Dictionary<int, string?>>.Some(new() { [4] = null });
+                expected = Value.Tagged("Some", Value.List([Map(("key", Value.Integer(4)), ("value", none))]));
+                break;
+            default:
+                value.NullablePair = (5, null);
+                expected = Value.Tagged("Some", Value.List([Value.Integer(5), none]));
+                break;
+        }
+
+        OperationSpan span = Capture(nameof(Declarations.InheritedGeneric), [value], value);
+        Assert.False(span.OperationCompletion is FaultCompletion,
+            (span.OperationCompletion as FaultCompletion)?.Message);
+        Assert.Equal(expected, Named(span, "value").AsMap()[member]);
+        Assert.Equal(Named(span, "value"), span.Result());
+    }
+
+    [Fact]
+    public void InheritedGenericRequiredValuesStillRejectNull()
+    {
+        var value = new InheritedGenericRecord();
+        value.Required[1] = null!;
+        FaultCompletion fault = Unrecordable(nameof(Declarations.InheritedGeneric), [value], value);
+        Assert.Contains("a null was observed where", fault.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void InheritedGenericSubstitutionsCanExpandToReferenceCollectionAndTupleTypes()
+    {
+        Value none = Value.Tagged("None", Value.Unit);
+        Check(nameof(Declarations.InheritedGenericReference),
+            new InheritedGenericReferenceRecord { Pair = ("key", null) }, Value.String("key"));
+        Check(nameof(Declarations.InheritedGenericNested),
+            new InheritedGenericNestedRecord { Pair = ([7], null) }, Value.List([Value.Integer(7)]));
+        Check(nameof(Declarations.InheritedGenericTuple),
+            new InheritedGenericTupleRecord { Pair = ((7, 8), null) }, Value.List([Value.Integer(7), Value.Integer(8)]));
+
+        void Check(string declaration, object value, Value first)
+        {
+            OperationSpan span = Capture(declaration, [value], value);
+            Assert.False(span.OperationCompletion is FaultCompletion,
+                (span.OperationCompletion as FaultCompletion)?.Message);
+            Assert.Equal(Value.List([first, none]), Named(span, "value").AsMap()["Pair"]);
+            Assert.Equal(Named(span, "value"), span.Result());
+        }
+    }
+
     [Fact]
     public void ScalarsProjectOntoTheirValueFamilies()
     {
@@ -958,6 +1030,18 @@ public sealed class ValueProjectionTests
         [SpecOperation("declared_context", Spec = Component)]
         internal static NullableContextBase DeclaredContext(NullableContextBase value) => value;
 
+        [SpecOperation("inherited_generic", Spec = Component)]
+        internal static InheritedGenericRecord InheritedGeneric(InheritedGenericRecord value) => value;
+
+        [SpecOperation("inherited_generic_reference", Spec = Component)]
+        internal static InheritedGenericReferenceRecord InheritedGenericReference(InheritedGenericReferenceRecord value) => value;
+
+        [SpecOperation("inherited_generic_nested", Spec = Component)]
+        internal static InheritedGenericNestedRecord InheritedGenericNested(InheritedGenericNestedRecord value) => value;
+
+        [SpecOperation("inherited_generic_tuple", Spec = Component)]
+        internal static InheritedGenericTupleRecord InheritedGenericTuple(InheritedGenericTupleRecord value) => value;
+
         internal static RuntimeMethodHandle Of(string name) =>
             typeof(Declarations)
                 .GetMethod(name, BindingFlags.Static | BindingFlags.NonPublic)!
@@ -1122,6 +1206,34 @@ internal class InheritedSelection
     public int Selected { get; set; }
     public int Unhidden { get; set; }
 }
+
+internal class InheritedGenericBase<T> where T : notnull
+{
+    [SpecEvent]
+    public Dictionary<T, string?> Values { get; set; } = [];
+    [SpecEvent]
+    public List<(T, Option<string?>)> Nested { get; set; } = [];
+    [SpecEvent]
+    public Dictionary<T, string> Required { get; set; } = [];
+    [SpecEvent]
+    public (T, string?) Pair = (default!, "present");
+    [SpecEvent]
+    public Option<Dictionary<T, string?>> Wrapped = Option<Dictionary<T, string?>>.None();
+    [SpecEvent]
+    public (T, string?)? NullablePair = null;
+}
+
+[SpecEvent]
+internal sealed class InheritedGenericRecord : InheritedGenericBase<int>;
+
+[SpecEvent]
+internal sealed class InheritedGenericReferenceRecord : InheritedGenericBase<string>;
+
+[SpecEvent]
+internal sealed class InheritedGenericNestedRecord : InheritedGenericBase<List<int>>;
+
+[SpecEvent]
+internal sealed class InheritedGenericTupleRecord : InheritedGenericBase<(int, int)>;
 
 [SpecEvent(Setup = true)]
 internal sealed class InheritedSubset : InheritedSelection
