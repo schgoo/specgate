@@ -76,6 +76,17 @@ Rust and C# registry output is byte-identical for the stateless, rich-type, and
 setup-folding fixtures. Raw language-specific invocation metadata remains
 separate from the language-neutral CTSC registry.
 
+C# inherited record members (#127) are supported in discovery and capture,
+including property setups and union payloads. Effective public instance members
+are selected base-first by source name, with overrides and `new` members
+replacing the original slot before annotation selection. Renames and nullability
+use the selected declaration; distinct members with colliding semantic names
+reject. Ordinary unannotated members stay excluded, and operation/setup methods
+remain declared-only. The existing structured-output C# reference exercises an
+inherited first field without changing its semantic surface or Rust candidate.
+Rust type-alias resolution (#122) is not implemented. See
+[value mapping](reference/value-mapping.md#c-inherited-record-members).
+
 Environment-driven Rust capture atomically persists the capture-so-far as a
 provisional snapshot (see [below](#provisional-capture-sidecars)). Persistence
 failures terminalize the session and carry a hidden runtime/facade marker that

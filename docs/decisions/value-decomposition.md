@@ -1,9 +1,19 @@
 # Language-neutral value decomposition
 
-> **Status:** proposed
+> **Status:** accepted; implementation pending
 > **Owner:** @schgoo
 > **Date:** 2026-11-04
 > **Tracking:** #125, #127
+
+The owner accepted this design on 2026-11-12, including the specified CTSC,
+CLI, replay, and golden-matrix changes. Implementation follows the bounded
+slices in the [value-model roadmap](../contributor/roadmap.md#value-model).
+This acceptance does not claim that the behavior is already implemented.
+The inherited-member slice (#127) is now implemented; the other value-model
+slices, including type aliases (#122), remain pending.
+For the future coordinated wrapper slice, the owner approved a joint cutover to
+CTSC `0.5.0` and `ctsc.strict/0.3.0`, requiring recapture with no legacy reader.
+The inheritance-only slice leaves current contract and policy versions unchanged.
 
 ## Context
 
@@ -19,7 +29,7 @@ falls short of that goal:
   scenario is dropped. Example: the DSAPI SDK returns `null` for an HTTP 404.
 - A scenario that does not match its registry is dropped, so the difference is
   never reported.
-- C# record types omit inherited members (#127).
+- C# record types previously omitted inherited members (#127, now delivered).
 - A Rust `Err` nested in a value, such as `Option<Result<T, E>>`, reads
   differently from a top-level `Err` or a C# exception.
 
@@ -60,6 +70,12 @@ Paths are how validation and comparison read and report values. **The wire
 format does not change**: the trace keeps the nested OTLP value tree, which
 also holds `none` and the outcome channels. Path rules, such as the elided
 `some` segment below, are reading rules only.
+
+The nested typed tree is authoritative; there is no wire flattening. Shortened
+display labels must never merge distinct states. Ambiguous literal names use
+quoted bracket notation: a real field `["err"]` differs from the synthetic
+`.err` segment. These are owner-approved requirements for the future wrapper
+slice, not changes delivered by #127.
 
 ### Slot properties
 
@@ -120,7 +136,10 @@ state has a distinct path, so nothing is lost.
 
 - An `Option` directly in an `Option` adds one `some` segment.
 - A `Result` directly in a `Result` adds one `ok` segment.
-- Mixed nesting needs no segment: `none` and `err` do not collide.
+- The illustrated two-wrapper mixed cases need no additional segment:
+  `none` and `err` do not collide. Repeated kinds separated by other wrappers
+  must still retain distinct states; this does not prescribe a generalized
+  shortening algorithm.
 
 | `Option<Option<i32>>` | Path value |
 |---|---|
@@ -138,7 +157,10 @@ state has a distinct path, so nothing is lost.
 `x: none`, and `x.err: e`. Only their registries differ.
 
 C# `T?` cannot nest. C# can nest `SpecGate.Annotations.Option<T>`, which uses
-the same encoding. C# has no value-level `Result`.
+the same encoding. C# also has the existing public
+`SpecGate.Annotations.Result<T, E>` helper. The owner confirmed on 2026-11-12
+that its support is preserved and its recorded meaning must match Rust
+`Result` in the future coordinated wrapper slice; #127 does not change it.
 
 ### Language mapping
 
@@ -166,6 +188,32 @@ the same encoding. C# has no value-level `Result`.
 - A derived instance in a record slot is recorded as it is: the declared
   members plus the extra members of its runtime type. Validation reports each
   extra member as an `undeclared_member` violation.
+
+#### Inherited-member selection (#127, owner-approved 2026-11-12)
+
+Discovery and capture select effective public instance fields and properties
+across the hierarchy **by CLR/source member name first**, before applying the
+existing annotation/default-selection rules. Walk base-first, properties before
+fields within each declaring type. If `Child` replaces `Parent.Name`, use
+`Child.Name` once in `Parent.Name`'s original position. This applies to both
+virtual overrides and `new` hiding, even when the child changes the semantic
+rename or type. Preserve the selected member's actual declaration nullability
+and recursively queue its referenced annotated types.
+
+An unannotated child follows the existing non-inheriting member-annotation
+lookup; this decision adds no attribute-inheritance semantics. Ordinary
+unannotated members are never silently selected. Static/private members and
+ordinary properties without public non-indexed getters are excluded. Property
+setups use the **same effective scope** for detecting explicit annotations and
+selecting members: inherited explicit annotations prevent all-member inference.
+Selected setup properties still require public non-indexed getters.
+Distinct effective source members whose final semantic names collide reject;
+replacement is not semantic-name deduplication.
+
+This rule is delivered for ordinary records, property setups, and inherited
+union payload fields. Operation/setup method discovery remains `DeclaredOnly`.
+It does not implement runtime-subtype extra-member observation or the
+record-and-warn validation changes described above.
 
 ### Annotations
 
@@ -372,6 +420,8 @@ inherited members, inferred unions, and registry violations.
 
 ## Supersedes / superseded by
 
-Will supersede
+Supersedes the design in
 [`null-values-are-capture-diagnostics.md`](null-values-are-capture-diagnostics.md)
-when accepted.
+as the implementation slices land. Until then, current behavior remains
+documented in [`../status.md`](../status.md) and
+[`../reference/limitations.md`](../reference/limitations.md).

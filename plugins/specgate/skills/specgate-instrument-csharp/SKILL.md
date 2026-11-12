@@ -101,9 +101,19 @@ public sealed class Counter
 
 | C# declaration | CTSC type |
 | --- | --- |
-| Class or struct with `[SpecEvent]` | Record of its public `[SpecEvent]` properties and fields declared on that type |
+| Class or struct with `[SpecEvent]` | Record of its public `[SpecEvent]` readable properties and fields, including inherited members base-first |
 | Abstract class with `[SpecEvent]` | Tagged union whose variants are its concrete `[SpecEvent]` subclasses |
 | Enum with `[SpecEvent]` | Tagged union of its members, in declaration order, without payloads; `[SpecEvent("…")]` on a member renames it |
+
+Base classes need not be annotated. Within each declaring type, properties
+precede fields. An override or `new` member replaces the same source-name member
+in its original base-first slot, even if its rename or type changes. Selection
+then uses the effective member's own annotation; an unannotated replacement
+does not inherit a base member's `[SpecEvent]`. Different source names that
+resolve to the same semantic name are rejected. Unannotated ordinary members,
+static/private members, and properties without public non-indexed getters are
+not recorded. Union payloads follow the same rules. Operation and setup method
+discovery remains declared-only.
 
 See [`../reference/value-mapping.md`](${PLUGIN_DIR}/docs/reference/value-mapping.md) for every
 supported type and the values capture rejects.
@@ -159,8 +169,11 @@ unsupported ([limitations](${PLUGIN_DIR}/docs/reference/limitations.md)).
 produced value, and its parameters are the construction inputs.
 
 For object-initializer parameters, use `[SpecEvent(Setup = true)]` on the type.
-Without member annotations, all public instance fields and readable properties
-declared on the type participate; otherwise only annotated members participate.
+Without member annotations in the effective inherited scope, all public instance
+fields and readable properties participate; otherwise only annotated members
+participate. The same base-first replacement rule applies, so inherited explicit
+annotations prevent accidental all-member inference. Selected property-setup
+properties must have public non-indexed getters.
 Capture reads their final values at operation entry and folds their semantic
 names into flat inputs. A member whose type is itself `Setup = true` is folded
 recursively, including in setup-producer arguments; records inside collections

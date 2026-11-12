@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using SpecGate.Reflection;
 
 namespace SpecGate.Discovery;
 
@@ -274,29 +275,45 @@ internal sealed class ComponentDocument
     private List<string[]> SpecMembers(Type type)
     {
         var members = new List<string[]>();
-        const BindingFlags selection = BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly;
-        bool all = Annotations.PropertySetup(type)
-            && !type.GetProperties(selection).Cast<MemberInfo>().Concat(type.GetFields(selection))
-                .Any(member => Annotations.Has(member, Annotations.Event, inherit: false));
+        IReadOnlyList<MemberInfo> effective = RecordMembers.Effective(type);
+        bool setup = Annotations.PropertySetup(type);
+        bool all = setup && !effective.Any(member => Annotations.Has(member, Annotations.Event, inherit: false));
+        HashSet<string> names = [];
 
-        foreach (PropertyInfo property in type.GetProperties(selection))
+        foreach (MemberInfo member in effective)
         {
-            if (!all && !Annotations.Has(property, Annotations.Event, inherit: false)) continue;
-            if (Annotations.PropertySetup(type)
-                && (property.GetMethod is not { IsPublic: true } || property.GetIndexParameters().Length != 0))
+            if (!all && !Annotations.Has(member, Annotations.Event, inherit: false)) continue;
+            if (member is PropertyInfo property)
             {
-                throw new GenericSpecializationException($"property setup member '{type.FullName}.{property.Name}' must have a public non-indexed getter.");
+                if (property.GetMethod is not { IsPublic: true } || property.GetIndexParameters().Length != 0)
+                {
+                    if (setup)
+                    {
+                        throw new GenericSpecializationException($"property setup member '{type.FullName}.{property.Name}' must have a public non-indexed getter.");
+                    }
+                    continue;
+                }
+                Add(property, semantic.Render(property.PropertyType,
+                    nullability.Create((PropertyInfo)RecordMembers.DeclarationOf(property))));
             }
-            members.Add([SemanticTypes.NameOf(property), semantic.Render(property.PropertyType, nullability.Create(property))]);
-        }
-
-        foreach (FieldInfo field in type.GetFields(selection))
-        {
-            if (!all && !Annotations.Has(field, Annotations.Event, inherit: false)) continue;
-            members.Add([SemanticTypes.NameOf(field), semantic.Render(field.FieldType, nullability.Create(field))]);
+            else if (member is FieldInfo field)
+            {
+                Add(field, semantic.Render(field.FieldType,
+                    nullability.Create((FieldInfo)RecordMembers.DeclarationOf(field))));
+            }
         }
 
         return members;
+
+        void Add(MemberInfo member, string rendered)
+        {
+            string name = SemanticTypes.NameOf(member);
+            if (!names.Add(name))
+            {
+                throw new GenericSpecializationException($"'{type.FullName}' declares the member name '{name}' more than once.");
+            }
+            members.Add([name, rendered]);
+        }
     }
 
     private List<string[]> BuildParams(MethodBase method)

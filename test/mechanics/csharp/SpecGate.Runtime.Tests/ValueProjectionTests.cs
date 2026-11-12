@@ -23,6 +23,145 @@ public sealed class ValueProjectionTests
     private const string Component = "fixture.projection";
 
     [Fact]
+    public void InheritedRecordsAndUnionPayloadsCaptureTheSameEffectiveMembers()
+    {
+        var value = new InheritedRecord { Changed = "new", Nested = new Address { City = "Oslo" } };
+        using CaptureSession session = CaptureScenario.Begin(Component);
+        Assert.Same(value, Declarations.Inheritance(value, value,
+            new InheritedSubset { Selected = 7, Extra = 99 },
+            new InheritedAll { Selected = 8, Extra = 9, Unhidden = 10 }));
+        OperationSpan span = Assert.Single(session.Finish().Operations);
+        Value expected = Map(
+            ("child_title", Value.String("child")),
+            ("nested", Value.Tagged("Some", Map(("city", Value.String("Oslo"))))),
+            ("changed", Value.Tagged("Some", Value.String("new"))),
+            ("middle", Value.Integer(5)),
+            ("last", Value.Integer(6)));
+        Assert.Equal(expected, Named(span, "value"));
+        Assert.Equal(expected, span.Result());
+        Assert.Equal(Value.Tagged(nameof(InheritedRecord), expected), Named(span, "variant"));
+        Assert.Equal(["Extra", "Selected", "Unhidden", "selected", "value", "variant"], span.Inputs.Keys);
+        Assert.Equal(Value.Integer(7), Named(span, "selected"));
+        Assert.Equal(Value.Integer(8), Named(span, "Selected"));
+        Assert.Equal(Value.Integer(9), Named(span, "Extra"));
+        Assert.Equal(Value.Integer(10), Named(span, "Unhidden"));
+        Assert.Equal(["Selected", "Unhidden", "Extra"],
+            SemanticType.MembersOf(typeof(InheritedAll)).Select(member => member.Name));
+        Assert.Equal(
+            ["child_title", "nested", "changed", "middle", "last"],
+            SemanticType.MembersOf(typeof(InheritedRecord)).Select(member => member.Name));
+        Assert.Same(SemanticType.MembersOf(typeof(InheritedRecord)), SemanticType.MembersOf(typeof(InheritedRecord)));
+    }
+
+    [Fact]
+    public void DistinctInheritedMembersWithTheSameSemanticNameRejectCapture()
+    {
+        Assert.Equal(CaptureRejection.AmbiguousDeclaration,
+            Reject(nameof(Declarations.InheritedCollision), [new InheritedCollision()]).Rejection);
+    }
+
+    [Fact]
+    public void InheritedNullableAbsenceUsesTheMembersDeclaringContext()
+    {
+        var value = new NullableContextRecord { Maybe = null, Required = "required", Local = "local" };
+        OperationSpan span = Capture(nameof(Declarations.NullableContext), [value], value);
+        Value expected = Map(
+            ("Maybe", Value.Tagged("None", Value.Unit)),
+            ("Required", Value.String("required")),
+            ("Local", Value.String("local")));
+        Assert.Equal(expected, Named(span, "value"));
+        Assert.Equal(expected, span.Result());
+
+        value.Required = null!;
+        FaultCompletion fault = Unrecordable(nameof(Declarations.NullableContext), [value], value);
+        Assert.Contains("a null was observed where", fault.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AConcreteRecordSlotProjectsOnlyItsDeclaredSurfaceForADerivedInstance()
+    {
+        var value = new NullableContextRecord { Maybe = null, Required = "required", Local = "not recorded" };
+        OperationSpan span = Capture(nameof(Declarations.DeclaredContext), [value], value);
+        Value expected = Map(
+            ("Maybe", Value.Tagged("None", Value.Unit)),
+            ("Required", Value.String("required")));
+        Assert.Equal(expected, Named(span, "value"));
+        Assert.Equal(expected, span.Result());
+    }
+
+    [Theory]
+    [InlineData(nameof(InheritedGenericBase<int>.Values))]
+    [InlineData(nameof(InheritedGenericBase<int>.Pair))]
+    [InlineData(nameof(InheritedGenericBase<int>.Nested))]
+    [InlineData(nameof(InheritedGenericBase<int>.Wrapped))]
+    [InlineData(nameof(InheritedGenericBase<int>.NullablePair))]
+    public void InheritedGenericMembersKeepNullablePositionsAfterValueTypeSubstitution(string member)
+    {
+        var value = new InheritedGenericRecord();
+        Value none = Value.Tagged("None", Value.Unit);
+        Value expected;
+        switch (member)
+        {
+            case nameof(value.Values):
+                value.Values[1] = null;
+                expected = Value.List([Map(("key", Value.Integer(1)), ("value", none))]);
+                break;
+            case nameof(value.Pair):
+                value.Pair = (2, null);
+                expected = Value.List([Value.Integer(2), none]);
+                break;
+            case nameof(value.Nested):
+                value.Nested = [(3, Option<string?>.Some(null))];
+                expected = Value.List([Value.List([Value.Integer(3), Value.Tagged("Some", none)])]);
+                break;
+            case nameof(value.Wrapped):
+                value.Wrapped = Option<Dictionary<int, string?>>.Some(new() { [4] = null });
+                expected = Value.Tagged("Some", Value.List([Map(("key", Value.Integer(4)), ("value", none))]));
+                break;
+            default:
+                value.NullablePair = (5, null);
+                expected = Value.Tagged("Some", Value.List([Value.Integer(5), none]));
+                break;
+        }
+
+        OperationSpan span = Capture(nameof(Declarations.InheritedGeneric), [value], value);
+        Assert.False(span.OperationCompletion is FaultCompletion,
+            (span.OperationCompletion as FaultCompletion)?.Message);
+        Assert.Equal(expected, Named(span, "value").AsMap()[member]);
+        Assert.Equal(Named(span, "value"), span.Result());
+    }
+
+    [Fact]
+    public void InheritedGenericRequiredValuesStillRejectNull()
+    {
+        var value = new InheritedGenericRecord();
+        value.Required[1] = null!;
+        FaultCompletion fault = Unrecordable(nameof(Declarations.InheritedGeneric), [value], value);
+        Assert.Contains("a null was observed where", fault.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void InheritedGenericSubstitutionsCanExpandToReferenceCollectionAndTupleTypes()
+    {
+        Value none = Value.Tagged("None", Value.Unit);
+        Check(nameof(Declarations.InheritedGenericReference),
+            new InheritedGenericReferenceRecord { Pair = ("key", null) }, Value.String("key"));
+        Check(nameof(Declarations.InheritedGenericNested),
+            new InheritedGenericNestedRecord { Pair = ([7], null) }, Value.List([Value.Integer(7)]));
+        Check(nameof(Declarations.InheritedGenericTuple),
+            new InheritedGenericTupleRecord { Pair = ((7, 8), null) }, Value.List([Value.Integer(7), Value.Integer(8)]));
+
+        void Check(string declaration, object value, Value first)
+        {
+            OperationSpan span = Capture(declaration, [value], value);
+            Assert.False(span.OperationCompletion is FaultCompletion,
+                (span.OperationCompletion as FaultCompletion)?.Message);
+            Assert.Equal(Value.List([first, none]), Named(span, "value").AsMap()["Pair"]);
+            Assert.Equal(Named(span, "value"), span.Result());
+        }
+    }
+
+    [Fact]
     public void ScalarsProjectOntoTheirValueFamilies()
     {
         OperationSpan span = Capture(
@@ -872,6 +1011,37 @@ public sealed class ValueProjectionTests
     /// <summary>Declarations standing in for the woven methods under capture.</summary>
     private static class Declarations
     {
+        [SpecOperation("inheritance", Spec = Component)]
+        internal static InheritedRecord Inheritance(
+            InheritedRecord value, InheritedUnion variant, InheritedSubset subset, InheritedAll all)
+        {
+            OperationScope scope = SpecGateRuntime.EnterOperation(Of(nameof(Inheritance)), "inheritance", Component);
+            SpecGateRuntime.RecordInputs(scope, [value, variant, subset, all]);
+            SpecGateRuntime.ExitOk(scope, value);
+            return value;
+        }
+
+        [SpecOperation("inherited_collision", Spec = Component)]
+        internal static void InheritedCollision(InheritedCollision value) => _ = value;
+
+        [SpecOperation("nullable_context", Spec = Component)]
+        internal static NullableContextRecord NullableContext(NullableContextRecord value) => value;
+
+        [SpecOperation("declared_context", Spec = Component)]
+        internal static NullableContextBase DeclaredContext(NullableContextBase value) => value;
+
+        [SpecOperation("inherited_generic", Spec = Component)]
+        internal static InheritedGenericRecord InheritedGeneric(InheritedGenericRecord value) => value;
+
+        [SpecOperation("inherited_generic_reference", Spec = Component)]
+        internal static InheritedGenericReferenceRecord InheritedGenericReference(InheritedGenericReferenceRecord value) => value;
+
+        [SpecOperation("inherited_generic_nested", Spec = Component)]
+        internal static InheritedGenericNestedRecord InheritedGenericNested(InheritedGenericNestedRecord value) => value;
+
+        [SpecOperation("inherited_generic_tuple", Spec = Component)]
+        internal static InheritedGenericTupleRecord InheritedGenericTuple(InheritedGenericTupleRecord value) => value;
+
         internal static RuntimeMethodHandle Of(string name) =>
             typeof(Declarations)
                 .GetMethod(name, BindingFlags.Static | BindingFlags.NonPublic)!
@@ -989,6 +1159,119 @@ public sealed class ValueProjectionTests
         }
     }
 }
+
+internal class InheritedBase
+{
+    [SpecEvent("base_title")]
+    public virtual string Title => "base";
+    [SpecEvent("nested")]
+    public Address? Nested { get; set; }
+    [SpecEvent]
+    public virtual int Removed => 1;
+    [SpecEvent]
+    public int Changed = 1;
+    public int Unannotated => Private;
+    [SpecEvent]
+    public static int Static => 3;
+    [SpecEvent]
+    private int Private => Changed + 1;
+    [SpecEvent]
+    public int WriteOnly { set => Changed = value; }
+    [SpecEvent]
+    public int PrivateGetter { private get; set; }
+}
+
+[SpecEvent]
+internal abstract class InheritedUnion : InheritedBase
+{
+    [SpecEvent("middle")]
+    public int Middle = 5;
+}
+
+[SpecEvent]
+internal sealed class InheritedRecord : InheritedUnion
+{
+    [SpecEvent("child_title")]
+    public override string Title => "child";
+    public override int Removed => 2;
+    [SpecEvent("changed")]
+    public new string? Changed { get; set; }
+    [SpecEvent("last")]
+    public int Last { get; set; } = 6;
+}
+
+internal class InheritedSelection
+{
+    [SpecEvent("selected")]
+    public int Selected { get; set; }
+    public int Unhidden { get; set; }
+}
+
+internal class InheritedGenericBase<T> where T : notnull
+{
+    [SpecEvent]
+    public Dictionary<T, string?> Values { get; set; } = [];
+    [SpecEvent]
+    public List<(T, Option<string?>)> Nested { get; set; } = [];
+    [SpecEvent]
+    public Dictionary<T, string> Required { get; set; } = [];
+    [SpecEvent]
+    public (T, string?) Pair = (default!, "present");
+    [SpecEvent]
+    public Option<Dictionary<T, string?>> Wrapped = Option<Dictionary<T, string?>>.None();
+    [SpecEvent]
+    public (T, string?)? NullablePair = null;
+}
+
+[SpecEvent]
+internal sealed class InheritedGenericRecord : InheritedGenericBase<int>;
+
+[SpecEvent]
+internal sealed class InheritedGenericReferenceRecord : InheritedGenericBase<string>;
+
+[SpecEvent]
+internal sealed class InheritedGenericNestedRecord : InheritedGenericBase<List<int>>;
+
+[SpecEvent]
+internal sealed class InheritedGenericTupleRecord : InheritedGenericBase<(int, int)>;
+
+[SpecEvent(Setup = true)]
+internal sealed class InheritedSubset : InheritedSelection
+{
+    public int Extra { get; set; }
+}
+
+[SpecEvent(Setup = true)]
+internal sealed class InheritedAll : InheritedSelection
+{
+    public new int Selected { get; set; }
+    public int Extra { get; set; }
+}
+
+[SpecEvent]
+internal sealed class InheritedCollision : InheritedSelection
+{
+    [SpecEvent("selected")]
+    public int Different { get; set; }
+}
+
+[SpecEvent]
+internal class NullableContextBase
+{
+    [SpecEvent]
+    public string? Maybe { get; set; }
+    [SpecEvent]
+    public string Required { get; set; } = "";
+}
+
+#nullable disable
+[SpecEvent]
+internal sealed class NullableContextRecord : NullableContextBase
+{
+    [SpecEvent]
+    public string Local { get; set; } = "";
+}
+#nullable restore
 
 [SpecEvent]
 internal sealed class Address

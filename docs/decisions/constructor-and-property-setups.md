@@ -19,6 +19,12 @@ participate. Existing semantic field names resolve naming differences.
 Duplicate folded input names are rejected, never prefixed or overwritten.
 Explicit producers take precedence for the parameters they fill.
 
+For C#, the owner-approved [inherited-member rule](value-decomposition.md#inherited-member-selection-127-owner-approved-2026-11-12)
+selects effective public instance members across the hierarchy before applying
+the annotation/default rule above. Overrides and `new` members replace the
+original base-first source-name slot; annotation detection uses that same
+effective scope, so inherited explicit annotations prevent all-member inference.
+
 Capture decomposes property-setup arguments at operation entry, after object
 initializers and any other caller-side mutation. Discovery and capture publish
 the same folded surface. Rust replay reconstructs its own value with a struct

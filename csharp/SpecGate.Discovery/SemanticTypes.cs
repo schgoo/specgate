@@ -67,8 +67,9 @@ internal sealed class SemanticTypes
         Type? underlying = Nullable.GetUnderlyingType(type);
         if (underlying is not null)
         {
-            NullabilityInfo? inner = info?.GenericTypeArguments is { Length: > 0 } g ? g[0] : null;
-            return "Option<" + RenderCore(underlying, inner) + ">";
+            // NullabilityInfo exposes the underlying value type's arguments
+            // directly, without a separate Nullable<T> argument node.
+            return "Option<" + RenderCore(underlying, info) + ">";
         }
 
         if (info is not null && !type.IsValueType && info.ReadState == NullabilityState.Nullable)
