@@ -5,6 +5,7 @@ using System.Linq;
 using System.Reflection;
 using SpecGate.Annotations;
 using SpecGate.Collections;
+using SpecGate.Reflection;
 
 namespace SpecGate.Runtime;
 
@@ -367,39 +368,37 @@ internal sealed class SemanticType : IEquatable<SemanticType>
     /// <summary>
     /// Gets the annotated members of <paramref name="type"/>, matching the
     /// selection <c>specgate discover</c> publishes: public instance members
-    /// declared on the type itself, properties before fields, each carrying
-    /// <see cref="SpecEventAttribute"/>.
+    /// base-first, properties before fields within each declaration. Overrides
+    /// and hidden members replace the source-name slot before annotation selection.
     /// </summary>
     internal static SemanticMember[] MembersOf(Type type) => MemberCache.GetOrAdd(type, Describe);
 
     private static SemanticMember[] Describe(Type type)
     {
-        const BindingFlags Selection =
-            BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly;
-
+        IReadOnlyList<MemberInfo> effective = RecordMembers.Effective(type);
         List<SemanticMember> members = [];
-        bool all = IsPropertySetup(type)
-            && !type.GetProperties(Selection).Cast<MemberInfo>().Concat(type.GetFields(Selection)).Any(HasSpecEvent);
-        foreach (PropertyInfo property in type.GetProperties(Selection))
+        bool setup = IsPropertySetup(type);
+        bool all = setup && !effective.Any(HasSpecEvent);
+        foreach (MemberInfo member in effective)
         {
-            if ((all || HasSpecEvent(property)) && (property.CanRead || IsPropertySetup(type)))
+            if (!all && !HasSpecEvent(member)) continue;
+            if (member is PropertyInfo property)
             {
-                if (IsPropertySetup(type)
-                    && (property.GetMethod is not { IsPublic: true } || property.GetIndexParameters().Length != 0))
+                if (property.GetMethod is not { IsPublic: true } || property.GetIndexParameters().Length != 0)
                 {
-                    throw new SpecGateCaptureException(CaptureRejection.UnsupportedType,
-                        $"specgate: property setup member '{type.FullName}.{property.Name}' must have a public non-indexed getter.");
+                    if (setup)
+                    {
+                        throw new SpecGateCaptureException(CaptureRejection.UnsupportedType,
+                            $"specgate: property setup member '{type.FullName}.{property.Name}' must have a public non-indexed getter.");
+                    }
+                    continue;
                 }
                 members.Add(new SemanticMember(
                     EventName(property),
                     Map(property.PropertyType, NullableFlagReader.ForMember(property)),
                     instance => property.GetValue(instance)));
             }
-        }
-
-        foreach (FieldInfo field in type.GetFields(Selection))
-        {
-            if (all || HasSpecEvent(field))
+            else if (member is FieldInfo field)
             {
                 members.Add(new SemanticMember(
                     EventName(field),

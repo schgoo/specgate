@@ -23,6 +23,73 @@ public sealed class ValueProjectionTests
     private const string Component = "fixture.projection";
 
     [Fact]
+    public void InheritedRecordsAndUnionPayloadsCaptureTheSameEffectiveMembers()
+    {
+        var value = new InheritedRecord { Changed = "new", Nested = new Address { City = "Oslo" } };
+        using CaptureSession session = CaptureScenario.Begin(Component);
+        Assert.Same(value, Declarations.Inheritance(value, value,
+            new InheritedSubset { Selected = 7, Extra = 99 },
+            new InheritedAll { Selected = 8, Extra = 9, Unhidden = 10 }));
+        OperationSpan span = Assert.Single(session.Finish().Operations);
+        Value expected = Map(
+            ("child_title", Value.String("child")),
+            ("nested", Value.Tagged("Some", Map(("city", Value.String("Oslo"))))),
+            ("changed", Value.Tagged("Some", Value.String("new"))),
+            ("middle", Value.Integer(5)),
+            ("last", Value.Integer(6)));
+        Assert.Equal(expected, Named(span, "value"));
+        Assert.Equal(expected, span.Result());
+        Assert.Equal(Value.Tagged(nameof(InheritedRecord), expected), Named(span, "variant"));
+        Assert.Equal(["Extra", "Selected", "Unhidden", "selected", "value", "variant"], span.Inputs.Keys);
+        Assert.Equal(Value.Integer(7), Named(span, "selected"));
+        Assert.Equal(Value.Integer(8), Named(span, "Selected"));
+        Assert.Equal(Value.Integer(9), Named(span, "Extra"));
+        Assert.Equal(Value.Integer(10), Named(span, "Unhidden"));
+        Assert.Equal(["Selected", "Unhidden", "Extra"],
+            SemanticType.MembersOf(typeof(InheritedAll)).Select(member => member.Name));
+        Assert.Equal(
+            ["child_title", "nested", "changed", "middle", "last"],
+            SemanticType.MembersOf(typeof(InheritedRecord)).Select(member => member.Name));
+        Assert.Same(SemanticType.MembersOf(typeof(InheritedRecord)), SemanticType.MembersOf(typeof(InheritedRecord)));
+    }
+
+    [Fact]
+    public void DistinctInheritedMembersWithTheSameSemanticNameRejectCapture()
+    {
+        Assert.Equal(CaptureRejection.AmbiguousDeclaration,
+            Reject(nameof(Declarations.InheritedCollision), [new InheritedCollision()]).Rejection);
+    }
+
+    [Fact]
+    public void InheritedNullableAbsenceUsesTheMembersDeclaringContext()
+    {
+        var value = new NullableContextRecord { Maybe = null, Required = "required", Local = "local" };
+        OperationSpan span = Capture(nameof(Declarations.NullableContext), [value], value);
+        Value expected = Map(
+            ("Maybe", Value.Tagged("None", Value.Unit)),
+            ("Required", Value.String("required")),
+            ("Local", Value.String("local")));
+        Assert.Equal(expected, Named(span, "value"));
+        Assert.Equal(expected, span.Result());
+
+        value.Required = null!;
+        FaultCompletion fault = Unrecordable(nameof(Declarations.NullableContext), [value], value);
+        Assert.Contains("a null was observed where", fault.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AConcreteRecordSlotProjectsOnlyItsDeclaredSurfaceForADerivedInstance()
+    {
+        var value = new NullableContextRecord { Maybe = null, Required = "required", Local = "not recorded" };
+        OperationSpan span = Capture(nameof(Declarations.DeclaredContext), [value], value);
+        Value expected = Map(
+            ("Maybe", Value.Tagged("None", Value.Unit)),
+            ("Required", Value.String("required")));
+        Assert.Equal(expected, Named(span, "value"));
+        Assert.Equal(expected, span.Result());
+    }
+
+    [Fact]
     public void ScalarsProjectOntoTheirValueFamilies()
     {
         OperationSpan span = Capture(
@@ -872,6 +939,25 @@ public sealed class ValueProjectionTests
     /// <summary>Declarations standing in for the woven methods under capture.</summary>
     private static class Declarations
     {
+        [SpecOperation("inheritance", Spec = Component)]
+        internal static InheritedRecord Inheritance(
+            InheritedRecord value, InheritedUnion variant, InheritedSubset subset, InheritedAll all)
+        {
+            OperationScope scope = SpecGateRuntime.EnterOperation(Of(nameof(Inheritance)), "inheritance", Component);
+            SpecGateRuntime.RecordInputs(scope, [value, variant, subset, all]);
+            SpecGateRuntime.ExitOk(scope, value);
+            return value;
+        }
+
+        [SpecOperation("inherited_collision", Spec = Component)]
+        internal static void InheritedCollision(InheritedCollision value) => _ = value;
+
+        [SpecOperation("nullable_context", Spec = Component)]
+        internal static NullableContextRecord NullableContext(NullableContextRecord value) => value;
+
+        [SpecOperation("declared_context", Spec = Component)]
+        internal static NullableContextBase DeclaredContext(NullableContextBase value) => value;
+
         internal static RuntimeMethodHandle Of(string name) =>
             typeof(Declarations)
                 .GetMethod(name, BindingFlags.Static | BindingFlags.NonPublic)!
@@ -989,6 +1075,91 @@ public sealed class ValueProjectionTests
         }
     }
 }
+
+internal class InheritedBase
+{
+    [SpecEvent("base_title")]
+    public virtual string Title => "base";
+    [SpecEvent("nested")]
+    public Address? Nested { get; set; }
+    [SpecEvent]
+    public virtual int Removed => 1;
+    [SpecEvent]
+    public int Changed = 1;
+    public int Unannotated => Private;
+    [SpecEvent]
+    public static int Static => 3;
+    [SpecEvent]
+    private int Private => Changed + 1;
+    [SpecEvent]
+    public int WriteOnly { set => Changed = value; }
+    [SpecEvent]
+    public int PrivateGetter { private get; set; }
+}
+
+[SpecEvent]
+internal abstract class InheritedUnion : InheritedBase
+{
+    [SpecEvent("middle")]
+    public int Middle = 5;
+}
+
+[SpecEvent]
+internal sealed class InheritedRecord : InheritedUnion
+{
+    [SpecEvent("child_title")]
+    public override string Title => "child";
+    public override int Removed => 2;
+    [SpecEvent("changed")]
+    public new string? Changed { get; set; }
+    [SpecEvent("last")]
+    public int Last { get; set; } = 6;
+}
+
+internal class InheritedSelection
+{
+    [SpecEvent("selected")]
+    public int Selected { get; set; }
+    public int Unhidden { get; set; }
+}
+
+[SpecEvent(Setup = true)]
+internal sealed class InheritedSubset : InheritedSelection
+{
+    public int Extra { get; set; }
+}
+
+[SpecEvent(Setup = true)]
+internal sealed class InheritedAll : InheritedSelection
+{
+    public new int Selected { get; set; }
+    public int Extra { get; set; }
+}
+
+[SpecEvent]
+internal sealed class InheritedCollision : InheritedSelection
+{
+    [SpecEvent("selected")]
+    public int Different { get; set; }
+}
+
+[SpecEvent]
+internal class NullableContextBase
+{
+    [SpecEvent]
+    public string? Maybe { get; set; }
+    [SpecEvent]
+    public string Required { get; set; } = "";
+}
+
+#nullable disable
+[SpecEvent]
+internal sealed class NullableContextRecord : NullableContextBase
+{
+    [SpecEvent]
+    public string Local { get; set; } = "";
+}
+#nullable restore
 
 [SpecEvent]
 internal sealed class Address

@@ -2,12 +2,15 @@ using SpecGate.Annotations;
 
 namespace SpecGate.CtscFixtures.Conformance.Structured;
 
-[SpecEvent("EntityType")]
-public sealed class EntityType
+public class NamedEntity
 {
     [SpecEvent("entity_name")]
     public string Name { get; set; } = string.Empty;
+}
 
+[SpecEvent("EntityType")]
+public sealed class EntityType : NamedEntity
+{
     [SpecEvent("key_properties")]
     public List<string> KeyProperties { get; set; } = [];
 

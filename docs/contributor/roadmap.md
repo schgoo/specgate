@@ -357,7 +357,7 @@ DSAPI also needs #123 and #124.
 |---|---|---|
 | 1. Slot properties, `none` reading, `oblivious` | #131 | - |
 | 2. Outcomes: `optional`, `conformance.none`, `fallible` | #132 | 1 |
-| 3. Inherited members and type aliases | #127, #122 | - |
+| 3. Inherited members and type aliases | #127 delivered (ordinary records, property setups, union payloads); #122 not implemented | - |
 | 4. `ignore` for context inputs and fields | #133 | - |
 | 5. Record and warn with violation codes | #134 | 1, 2 |
 | 6. Custom collections | #116 | - |
@@ -366,6 +366,14 @@ DSAPI also needs #123 and #124.
 | 9. Signature comparison | #137 | 7 |
 
 Semantic error names (#130) are deferred.
+
+The #127 slice selects effective public instance members by source name before
+annotation/default selection. Overrides and `new` members replace the original
+base-first slot; distinct effective members with colliding semantic names
+reject. Methods remain declared-only. The structured-output fixture keeps its
+semantic surface and scenario identities while inheriting its first field.
+This does not deliver wrappers, aliases, runtime-subtype extra-member observation,
+or the other value-model slices.
 
 ---
 

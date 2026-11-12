@@ -80,6 +80,179 @@ public sealed class ExplodingAttribute : Attribute
 
 public class DiscoveryRunnerTests
 {
+    [Fact]
+    public void InheritedRecordsSelectEffectiveMembersBeforeAnnotationsInBaseFirstSlots()
+    {
+        JsonElement[] types = [.. InheritedDocument(typeof(InheritedRecord)).GetProperty("types").EnumerateArray()];
+        JsonElement record = types.Single(type => type.GetProperty("name").GetString() == nameof(InheritedRecord));
+        Assert.Equal(
+            ["child_title:string", "nested:Option<Reading>", "changed:Option<string>", "middle:i32", "last:i32"],
+            record.GetProperty("fields").EnumerateArray().Select(field => $"{field[0].GetString()}:{field[1].GetString()}"));
+        Assert.Contains(types, type => type.GetProperty("name").GetString() == "Reading");
+        Assert.Contains(types, type => type.GetProperty("name").GetString() == "Phase");
+    }
+
+    [Fact]
+    public void UnionPayloadsIncludeInheritedFields()
+    {
+        JsonElement union = InheritedDocument(typeof(InheritedMiddle)).GetProperty("types")[0];
+        JsonElement payload = Assert.Single(union.GetProperty("variants").EnumerateArray());
+        Assert.Equal(nameof(InheritedRecord), payload.GetProperty("name").GetString());
+        Assert.Equal(
+            ["child_title", "nested", "changed", "middle", "last"],
+            payload.GetProperty("fields").EnumerateArray().Select(field => field[0].GetString()));
+    }
+
+    [Fact]
+    public void PropertySetupSelectionUsesTheWholeEffectiveScope()
+    {
+        JsonElement subset = InheritedDocument(typeof(InheritedSubset)).GetProperty("types")[0];
+        Assert.Equal(["selected"], subset.GetProperty("fields").EnumerateArray().Select(field => field[0].GetString()));
+        JsonElement all = InheritedDocument(typeof(InheritedAll)).GetProperty("types")[0];
+        Assert.Equal(["Selected", "Unhidden", "Extra"], all.GetProperty("fields").EnumerateArray().Select(field => field[0].GetString()));
+    }
+
+    [Fact]
+    public void InheritedNullabilityUsesTheMembersDeclaringContext()
+    {
+        JsonElement record = InheritedDocument(typeof(NullableContextRecord)).GetProperty("types")[0];
+        Assert.Equal(
+            ["Maybe:Option<string>", "Required:string", "Local:string"],
+            record.GetProperty("fields").EnumerateArray().Select(field => $"{field[0].GetString()}:{field[1].GetString()}"));
+    }
+
+    [Fact]
+    public void ADeclaredConcreteRecordDoesNotPublishDerivedMembers()
+    {
+        JsonElement record = InheritedDocument(typeof(NullableContextBase)).GetProperty("types")[0];
+        Assert.Equal("struct", record.GetProperty("kind").GetString());
+        Assert.Equal(["Maybe", "Required"],
+            record.GetProperty("fields").EnumerateArray().Select(field => field[0].GetString()));
+    }
+
+    [Fact]
+    public void DifferentInheritedSourceNamesCannotShareASemanticName()
+    {
+        GenericSpecializationException error = Assert.Throws<GenericSpecializationException>(
+            () => InheritedDocument(typeof(InheritedCollision)));
+        Assert.Contains("selected", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void InheritedMethodsAreNotRediscoveredOnDerivedTypes()
+    {
+        AssemblyBuilder assembly = AssemblyBuilder.DefineDynamicAssembly(new AssemblyName("InheritedMethods"), AssemblyBuilderAccess.Run);
+        ModuleBuilder module = assembly.DefineDynamicModule("fixture");
+        TypeBuilder parent = module.DefineType("Parent", TypeAttributes.Public);
+        MethodBuilder method = parent.DefineMethod("Read", MethodAttributes.Public, typeof(void), Type.EmptyTypes);
+        method.SetCustomAttribute(new CustomAttributeBuilder(
+            typeof(SpecOperationAttribute).GetConstructor([typeof(string)])!, ["read"],
+            [typeof(SpecOperationAttribute).GetProperty(nameof(SpecOperationAttribute.Spec))!], ["fixtures.inherited"]));
+        method.GetILGenerator().Emit(OpCodes.Ret);
+        module.DefineType("Child", TypeAttributes.Public, parent.CreateType()).CreateType();
+        RecordingSystem system = new(assembly);
+
+        Assert.Equal(0, DiscoveryRunner.Run(["out", "assembly.dll", "bin", "fixtures.inherited"], system.Adapter));
+        JsonElement operation = Assert.Single(Document(system, 0).GetProperty("operations").EnumerateArray());
+        Assert.Equal("Parent", operation.GetProperty("cs_class").GetString());
+    }
+
+    private static JsonElement InheritedDocument(Type type)
+    {
+        MethodInfo method = typeof(GenericFixture).GetMethod(nameof(GenericFixture.Items))!;
+        ComponentDocument document = new("fixtures.inherited",
+            [typeof(InheritedRecord), typeof(Fixtures.Reading), typeof(Fixtures.Phase)],
+            [new AnnotatedMethod(method,
+                [new SpecOperationAttribute("read") { Spec = "fixtures.inherited", TypeArguments = [type] }], [])],
+            new NullabilityInfoContext());
+        return JsonSerializer.SerializeToElement(document.Build());
+    }
+
+    private class InheritedBase
+    {
+        [SpecEvent("base_title")]
+        public virtual string Title => "base";
+        [SpecEvent("nested")]
+        public Fixtures.Reading? Nested { get; set; }
+        [SpecEvent]
+        public virtual int Removed => 1;
+        [SpecEvent]
+        public int Changed = 1;
+        public int Unannotated => Private;
+        [SpecEvent]
+        public static int Static => 3;
+        [SpecEvent]
+        private int Private => Changed + 1;
+        [SpecEvent]
+        public int WriteOnly { set => Changed = value; }
+        [SpecEvent]
+        public int PrivateGetter { private get; set; }
+    }
+
+    [SpecEvent]
+    private abstract class InheritedMiddle : InheritedBase
+    {
+        [SpecEvent("middle")]
+        public int Middle = 5;
+    }
+
+    [SpecEvent]
+    private sealed class InheritedRecord : InheritedMiddle
+    {
+        [SpecEvent("child_title")]
+        public override string Title => "child";
+        public override int Removed => 2;
+        [SpecEvent("changed")]
+        public new string? Changed { get; set; }
+        [SpecEvent("last")]
+        public int Last { get; set; } = 6;
+    }
+
+    private class SelectionBase
+    {
+        [SpecEvent("selected")]
+        public int Selected { get; set; }
+        public int Unhidden { get; set; }
+    }
+
+    [SpecEvent(Setup = true)]
+    private sealed class InheritedSubset : SelectionBase
+    {
+        public int Extra { get; set; }
+    }
+
+    [SpecEvent(Setup = true)]
+    private sealed class InheritedAll : SelectionBase
+    {
+        public new int Selected { get; set; }
+        public int Extra { get; set; }
+    }
+
+    [SpecEvent]
+    private sealed class InheritedCollision : SelectionBase
+    {
+        [SpecEvent("selected")]
+        public int Different { get; set; }
+    }
+
+    [SpecEvent]
+    private class NullableContextBase
+    {
+        [SpecEvent]
+        public string? Maybe { get; set; }
+        [SpecEvent]
+        public string Required { get; set; } = "";
+    }
+
+#nullable disable
+    [SpecEvent]
+    private sealed class NullableContextRecord : NullableContextBase
+    {
+        [SpecEvent]
+        public string Local { get; set; } = "";
+    }
+#nullable restore
+
     [Theory]
     [InlineData(typeof(IEnumerable<int>), "Bag<i32>")]
     [InlineData(typeof(ICollection<int>), "Bag<i32>")]
