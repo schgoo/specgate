@@ -186,7 +186,8 @@ public sealed class OperationScope
     /// </summary>
     internal ReturnOutcome? ProjectResult(object? result)
     {
-        SemanticType? declared = OperationMetadata.For(Method).Result;
+        OperationMetadata metadata = OperationMetadata.For(Method);
+        SemanticType? declared = metadata.Result;
         if (declared is null)
         {
             return null;
@@ -194,7 +195,11 @@ public sealed class OperationScope
 
         try
         {
-            return ValueProjector.ProjectReturn(declared, result);
+            // Discovery's exception Result is synthetic, not a boxed CLR wrapper.
+            // Only CompleteThrown may select its outer error channel.
+            return metadata.DeclaredExceptions is not null
+                ? new ReturnOutcome(ReturnChannel.Result, ValueProjector.Project(declared, result))
+                : ValueProjector.ProjectReturn(declared, result);
         }
         catch (SpecGateCaptureException exception) when (NativeFault.IsDiagnostic(exception))
         {

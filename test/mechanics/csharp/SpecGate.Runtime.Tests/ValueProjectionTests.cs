@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.Json;
 using SpecGate.Annotations;
 using SpecGate.TestSupport;
 using Xunit;
@@ -21,6 +22,75 @@ namespace SpecGate.Runtime.Tests;
 public sealed class ValueProjectionTests
 {
     private const string Component = "fixture.projection";
+
+    [Fact]
+    public void DeclaredExceptionMetadataKeepsTheActualClrReturn()
+    {
+        OperationMetadata option = OperationMetadata.For(Declarations.Of(nameof(Declarations.DeclaredOption)));
+        Assert.Empty(option.DeclaredExceptions!);
+        Assert.Equal(SemanticKind.Option, option.Result!.Kind);
+        Assert.Equal(SemanticKind.I32, option.Result.First!.Kind);
+        OperationMetadata result = OperationMetadata.For(Declarations.Of(nameof(Declarations.DeclaredResult)));
+        Assert.Empty(result.DeclaredExceptions!);
+        Assert.Equal(SemanticKind.Result, result.Result!.Kind);
+        Assert.Equal(SemanticKind.I32, result.Result.Second!.Kind);
+        Assert.Null(OperationMetadata.For(Declarations.Of(nameof(Declarations.ReturnOption))).DeclaredExceptions);
+    }
+
+    [Fact]
+    public void CatchAllDeclarationsKeepNormalWrappersInsideTheResult()
+    {
+        OperationSpan none = Capture(nameof(Declarations.DeclaredOption), [], Option<int>.None());
+        Assert.Equal(SpanStatus.Ok, none.Status);
+        Assert.Equal(Value.Tagged("None", Value.Unit), none.Result());
+        Assert.Equal(Value.Tagged("Some", Value.Integer(5)),
+            Capture(nameof(Declarations.DeclaredOption), [], Option<int>.Some(5)).Result());
+        OperationSpan error = Capture(nameof(Declarations.DeclaredResult), [], Result<int, int>.Err(17));
+        Assert.Equal(SpanStatus.Ok, error.Status);
+        Assert.Equal(Value.Tagged("Err", Value.Integer(17)), error.Result());
+        Assert.Equal(Value.Tagged("Ok", Value.Integer(5)),
+            Capture(nameof(Declarations.DeclaredResult), [], Result<int, int>.Ok(5)).Result());
+    }
+
+    [Fact]
+    public void WithoutDeclaredExceptionsTheActualOuterReturnStillSelectsTheChannel()
+    {
+        Assert.IsType<EmptyCompletion>(
+            Capture(nameof(Declarations.ReturnOption), [], Option<int>.None()).OperationCompletion);
+        Assert.Equal(Value.Integer(5),
+            Capture(nameof(Declarations.ReturnOption), [], Option<int>.Some(5)).Result());
+        ErrorCompletion error = Assert.IsType<ErrorCompletion>(
+            Capture(nameof(Declarations.ReturnResult), [], Result<int, int>.Err(17)).OperationCompletion);
+        Assert.Equal(Value.Integer(17), error.ErrorValue);
+        Assert.Equal(Value.Integer(5),
+            Capture(nameof(Declarations.ReturnResult), [], Result<int, int>.Ok(5)).Result());
+    }
+
+    [Fact]
+    public void NormalNestedNoneAndErrorKeepTheirResultChannelInTheNativeSidecar()
+    {
+        using CaptureSession session = CaptureScenario.Begin(Component);
+        foreach ((string method, object value) in new (string, object)[]
+        {
+            (nameof(Declarations.DeclaredOption), Option<int>.None()),
+            (nameof(Declarations.DeclaredResult), Result<int, int>.Err(17)),
+        })
+        {
+            OperationScope scope = SpecGateRuntime.EnterOperation(Declarations.Of(method), method, Component);
+            SpecGateRuntime.RecordInputs(scope, []);
+            SpecGateRuntime.ExitOk(scope, value);
+        }
+
+        using JsonDocument document = JsonDocument.Parse(CaptureJson.Serialize(session.Finish()));
+        JsonElement[] completions = [.. document.RootElement.GetProperty("operations")
+            .EnumerateArray().Select(operation => operation.GetProperty("completion"))];
+        Assert.Equal(2, completions.Length);
+        Assert.All(completions, completion => Assert.Equal("result", completion.GetProperty("kind").GetString()));
+        Assert.Empty(completions[0].GetProperty("value").GetProperty("value").GetProperty("None")
+            .GetProperty("value").EnumerateObject());
+        Assert.Equal(17, completions[1].GetProperty("value").GetProperty("value")
+            .GetProperty("Err").GetProperty("value").GetInt32());
+    }
 
     [Fact]
     public void InheritedRecordsAndUnionPayloadsCaptureTheSameEffectiveMembers()
@@ -1011,6 +1081,16 @@ public sealed class ValueProjectionTests
     /// <summary>Declarations standing in for the woven methods under capture.</summary>
     private static class Declarations
     {
+        [SpecException]
+        internal static Option<int> DeclaredOption() => Option<int>.None();
+
+        [SpecException]
+        internal static Result<int, int> DeclaredResult() => Result<int, int>.Err(17);
+
+        internal static Option<int> ReturnOption() => Option<int>.None();
+
+        internal static Result<int, int> ReturnResult() => Result<int, int>.Err(17);
+
         [SpecOperation("inheritance", Spec = Component)]
         internal static InheritedRecord Inheritance(
             InheritedRecord value, InheritedUnion variant, InheritedSubset subset, InheritedAll all)

@@ -16,6 +16,65 @@ namespace SpecGate.Weaver.Tests;
 [Collection(WovenCaptureSerialization.Name)]
 public sealed class WovenCaptureTests
 {
+    [Theory]
+    [InlineData(0)]
+    [InlineData(7)]
+    public void DeclaredExceptionsDoNotPeelNormalReturnedWrappers(int state)
+    {
+        using CaptureSession session = CaptureScenario.Begin("weaver.exception_wrappers");
+        _ = Arithmetic.DeclaredOption(state);
+        _ = Arithmetic.DeclaredResult(state);
+        Assert.Equal(state, Arithmetic.DeclaredScalar(state));
+        Arithmetic.DeclaredUnit(state);
+        _ = Arithmetic.CatchAllOption(state);
+
+        OperationSpan[] spans = [.. session.Finish().Operations];
+        Assert.Equal(5, spans.Length);
+        Assert.All(spans, span => Assert.Equal(SpanStatus.Ok, span.Status));
+        Assert.Equal(state == 0
+            ? Value.Tagged("None", Value.Unit)
+            : Value.Tagged("Some", Value.Integer(state)), spans[0].Result());
+        Assert.Equal(state == 0
+            ? Value.Tagged("Err", Value.Integer(17))
+            : Value.Tagged("Ok", Value.Integer(state)), spans[1].Result());
+        Assert.Equal(Value.Integer(state), spans[2].Result());
+        Assert.Null(spans[3].OperationCompletion);
+        Assert.Equal(spans[0].Result(), spans[4].Result());
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(-2)]
+    public void OnlyActualDeclaredThrowsUseTheSyntheticErrorChannel(int state)
+    {
+        using CaptureSession session = CaptureScenario.Begin("weaver.exception_wrappers");
+        Assert.ThrowsAny<Exception>(() => Arithmetic.DeclaredOption(state));
+        Assert.ThrowsAny<Exception>(() => Arithmetic.DeclaredResult(state));
+        Assert.ThrowsAny<Exception>(() => Arithmetic.DeclaredScalar(state));
+        Assert.ThrowsAny<Exception>(() => Arithmetic.DeclaredUnit(state));
+        Assert.ThrowsAny<Exception>(() => Arithmetic.CatchAllOption(state));
+
+        Capture capture = session.Finish();
+        Assert.Equal(5, capture.Operations.Count);
+        Assert.All(capture.Operations.Take(4), span =>
+        {
+            Assert.Equal(SpanStatus.Error, span.Status);
+            if (state == -1)
+            {
+                ErrorCompletion error = Assert.IsType<ErrorCompletion>(span.OperationCompletion);
+                Assert.Equal("error", error.Name);
+                Assert.Equal(Value.String("declared"), error.ErrorValue);
+            }
+            else
+            {
+                Assert.IsType<FaultCompletion>(span.OperationCompletion);
+            }
+        });
+        ErrorCompletion caught = Assert.IsType<ErrorCompletion>(capture.Operations[4].OperationCompletion);
+        Assert.Equal("error", caught.Name);
+        Assert.Equal(Value.String(state == -1 ? "declared" : "undeclared"), caught.ErrorValue);
+    }
+
     [Fact]
     public void RecordsNothingForUntargetedComponent()
     {

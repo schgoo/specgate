@@ -143,6 +143,15 @@ uses fresh, non-consuming enumeration; it does not advance caller-held cursors.
 | `[SpecException]` with no types | Every exception is the `error` outcome |
 | Any other exception | An unexpected target fault |
 
+With `[SpecException]`, only actual declared throws use its outer error channel.
+Normal returns retain the complete returned value: `Option.None` stays a result
+containing `None`, and returned `Result.Err` stays a native result containing
+`Err`, after any Task/ValueTask transport is unwrapped. Void and nongeneric
+Task/ValueTask success still emit no result. Without the annotation, the outer
+Option/Result split above is unchanged. Nested standard Result registry/replay
+support is not added by this runtime behavior; see
+[operation outcomes](${PLUGIN_DIR}/docs/reference/value-mapping.md#operation-outcomes).
+
 #### 5. Annotate setups for stateful operations
 
 ```csharp

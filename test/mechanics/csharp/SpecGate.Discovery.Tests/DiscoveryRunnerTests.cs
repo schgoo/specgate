@@ -80,6 +80,55 @@ public sealed class ExplodingAttribute : Attribute
 
 public class DiscoveryRunnerTests
 {
+    [Theory]
+    [InlineData(nameof(ExceptionReturns.Sync), typeof(int), "Result<i32, string>", false)]
+    [InlineData(nameof(ExceptionReturns.Sync), typeof(Option<int>), "Result<Option<i32>, string>", false)]
+    [InlineData(nameof(ExceptionReturns.Sync), typeof(Result<int, int>), "Result<Result<i32, i32>, string>", false)]
+    [InlineData(nameof(ExceptionReturns.Task), typeof(int), "Result<i32, string>", true)]
+    [InlineData(nameof(ExceptionReturns.Task), typeof(Option<int>), "Result<Option<i32>, string>", true)]
+    [InlineData(nameof(ExceptionReturns.Task), typeof(Result<int, int>), "Result<Result<i32, i32>, string>", true)]
+    [InlineData(nameof(ExceptionReturns.ValueTask), typeof(int), "Result<i32, string>", true)]
+    [InlineData(nameof(ExceptionReturns.ValueTask), typeof(Option<int>), "Result<Option<i32>, string>", true)]
+    [InlineData(nameof(ExceptionReturns.ValueTask), typeof(Result<int, int>), "Result<Result<i32, i32>, string>", true)]
+    [InlineData(nameof(ExceptionReturns.Unit), null, "Result<(), string>", false)]
+    [InlineData(nameof(ExceptionReturns.UnitTask), null, "Result<(), string>", true)]
+    [InlineData(nameof(ExceptionReturns.UnitValueTask), null, "Result<(), string>", true)]
+    public void DeclaredExceptionsWrapTheFullActualReturnAfterTransportUnwrapping(
+        string name, Type? argument, string expected, bool isAsync)
+    {
+        MethodInfo method = typeof(ExceptionReturns).GetMethod(name)!;
+        SpecOperationAttribute operation = new("read")
+        {
+            Spec = "fixtures.exception_wrappers",
+            TypeArguments = argument is null ? [] : [argument],
+        };
+        ComponentDocument document = new(operation.Spec, [],
+            [new AnnotatedMethod(method, [operation], [])], new NullabilityInfoContext());
+
+        JsonElement actual = Assert.Single(
+            JsonSerializer.SerializeToElement(document.Build()).GetProperty("operations").EnumerateArray());
+        Assert.Equal(expected, actual.GetProperty("return_type").GetString());
+        Assert.Equal(isAsync, actual.GetProperty("is_async").GetBoolean());
+        Assert.Equal(["InvalidOperationException"],
+            actual.GetProperty("cs_exceptions").EnumerateArray().Select(value => value.GetString()));
+    }
+
+    private static class ExceptionReturns
+    {
+        [SpecException(typeof(InvalidOperationException))]
+        public static T Sync<T>() => default!;
+        [SpecException(typeof(InvalidOperationException))]
+        public static Task<T> Task<T>() => System.Threading.Tasks.Task.FromResult(default(T)!);
+        [SpecException(typeof(InvalidOperationException))]
+        public static ValueTask<T> ValueTask<T>() => new(default(T)!);
+        [SpecException(typeof(InvalidOperationException))]
+        public static void Unit() { }
+        [SpecException(typeof(InvalidOperationException))]
+        public static Task UnitTask() => System.Threading.Tasks.Task.CompletedTask;
+        [SpecException(typeof(InvalidOperationException))]
+        public static ValueTask UnitValueTask() => default;
+    }
+
     [Fact]
     public void InheritedRecordsSelectEffectiveMembersBeforeAnnotationsInBaseFirstSlots()
     {
