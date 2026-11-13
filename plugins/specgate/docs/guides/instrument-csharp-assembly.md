@@ -125,14 +125,10 @@ uses fresh, non-consuming enumeration; it does not advance caller-held cursors.
 | `[SpecException]` with no types | Every exception is the `error` outcome |
 | Any other exception | An unexpected target fault |
 
-With `[SpecException]`, only actual declared throws use its outer error channel.
-Normal returns retain the complete returned value: `Option.None` stays a result
-containing `None`, and returned `Result.Err` stays a native result containing
-`Err`, after any Task/ValueTask transport is unwrapped. Void and nongeneric
-Task/ValueTask success still emit no result. Without the annotation, the outer
-Option/Result split above is unchanged. Nested standard Result registry/replay
-support is not added by this runtime behavior; see
-[operation outcomes](../reference/value-mapping.md#operation-outcomes).
+With `[SpecException]`, matching throws use the error channel; normal returns
+preserve the complete value instead of the Option/Result split above. See
+[operation outcomes](../reference/value-mapping.md#operation-outcomes) for
+async and void behavior and the remaining nested Result registry/replay limits.
 
 ### 5. Annotate setups for stateful operations
 
