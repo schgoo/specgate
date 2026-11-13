@@ -729,7 +729,7 @@ public class DiscoveryRunnerTests
     }
 
     private static JsonElement Document(RecordingSystem system, int index) =>
-        JsonDocument.Parse(system.Files[Path.Combine("out", index + ".json")]).RootElement;
+        JsonElement.Parse(system.Files[Path.Combine("out", index + ".json")]);
 }
 
 /// <summary>

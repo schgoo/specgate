@@ -5,7 +5,17 @@
 1. Install the pinned Rust toolchain from `rust/rust-toolchain.toml`.
 2. Install `just`, `cargo-deny`, and `cargo-doc2readme`.
 3. Install Python dependencies from `docs/ctsc/requirements.txt`.
-4. Install the .NET 10 SDK.
+4. Install the .NET 10 or 11 SDK and the .NET 8 and 10 runtimes.
+
+The C# source uses an explicit C# 14 baseline, independent of the installed
+SDK's newest language version. `global.json` permits stable SDKs starting at
+.NET 10; CI verifies SDK 10 and 11 separately instead of relying on whichever
+SDK the runner selects by default. Other SDK major versions are not covered by
+that compatibility claim.
+
+The discovery tool still targets .NET 10. Capture supports .NET 8 applications:
+the injected-target tests build and run real woven operations under .NET 8 and
+10, while SpecGate's own tools use the newer SDK.
 
 ## CTSC-first development
 
