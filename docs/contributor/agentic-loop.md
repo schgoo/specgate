@@ -37,9 +37,9 @@ under `.github/skills/`.
    mutating agent runs at a time. Preserve unrelated changes and use existing
    CTSC and repository mechanisms rather than parallel assertion formats.
 4. **Verify** — inspect the actual diff, not the implementer's summary.
-   Regenerate intended golden artifacts, review their diff, run focused checks,
-   and finish with `just check`. Run `just package-smoke` for release or
-   packaging changes.
+   Regenerate intended golden artifacts, review their diff, and follow the
+   [validation policy](../../CONTRIBUTING.md#validation-policy) for required
+   checks, focused-check exceptions, evidence reuse, and merge gates.
 5. **Stop or repeat** — stop at completion, an unresolved human-owned decision,
    an external blocker, or a repeated failure that requires replanning.
 

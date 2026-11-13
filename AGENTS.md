@@ -53,9 +53,8 @@ Use the observe → plan → act → verify loop described in
 - Update the docs that describe changed behavior and resolve
   `just docs-impact` findings
   ([documentation impact](CONTRIBUTING.md#documentation-impact)).
-- Run focused recipes while iterating and `just check` from the repository root
-  before commit or handoff. Release and packaging changes also run
-  `just package-smoke`.
+- Follow the [validation policy](CONTRIBUTING.md#validation-policy) before
+  commit or handoff, including its focused-check exceptions and merge gates.
 
 Custom delivery roles live under [`.github/agents/`](.github/agents/) and their
 reusable playbooks live under [`.github/skills/`](.github/skills/).

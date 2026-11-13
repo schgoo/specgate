@@ -46,9 +46,10 @@ may run in parallel.
 ## Verify
 
 After mutation, invoke the reviewer. Require inspection of the actual diff,
-focused checks, intended golden regeneration and review, and `just check`.
-Release or packaging changes also require `just package-smoke`. Route blocking
-findings back to the responsible agent, then verify again.
+intended golden regeneration and review, and validation under the
+[validation policy](../../CONTRIBUTING.md#validation-policy), including its
+focused-check exceptions and evidence reuse. Route blocking findings back to
+the responsible agent, then verify again.
 
 ## Guards
 

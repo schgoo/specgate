@@ -252,9 +252,10 @@ declaration meaning.
 
 ## Validation
 
-Use focused `just` recipes while iterating. Run `just check` from the repository
-root before commit or handoff. Release and packaging changes also run
-`just package-smoke`.
+Use focused `just` recipes while iterating. Follow the
+[validation policy](../../CONTRIBUTING.md#validation-policy) before commit or
+handoff; it defines required checks, focused-check exceptions, evidence reuse,
+and merge gates.
 
 Crate READMEs are generated from crate-level `lib.rs` documentation. Edit the
 crate docs and run `just readme`; do not edit generated crate READMEs directly.

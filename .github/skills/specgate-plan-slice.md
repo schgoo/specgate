@@ -18,8 +18,8 @@ Read-only.
    - focused registry, trace, capture, replay, validator, or comparator
      evidence;
    - matrix rows or generated artifacts expected to change;
-   - focused validation recipes and the final `just check`;
-   - release/package validation when applicable;
+   - required validation recipes and evidence under the
+     [validation policy](../../CONTRIBUTING.md#validation-policy);
    - human stop conditions.
 4. Surface human-owned decisions listed in `AGENTS.md`. Do not resolve them.
 

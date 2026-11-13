@@ -31,18 +31,10 @@ Implement one approved SpecGate slice end to end.
 
 ## Validate
 
-Run the smallest focused recipes that cover the change while iterating. Before
-handoff, run:
-
-```text
-just check
-```
-
-For release or packaging changes, also run:
-
-```text
-just package-smoke
-```
+Run the smallest focused recipes that cover the change while iterating. Follow
+the [validation policy](../../CONTRIBUTING.md#validation-policy) before
+handoff, including required checks, focused-check exceptions, evidence reuse,
+and merge gates.
 
 Fix failures at their cause. Do not weaken tests, matrix declarations, lints,
 or validators merely to pass.
