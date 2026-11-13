@@ -83,7 +83,9 @@ internal static class ValueProjector
     /// <c>result</c> channel carrying the inner value, an absent option is
     /// <c>empty</c>, and an <c>Err</c> is the <c>error</c> channel. Only the
     /// outermost wrapper is unwrapped; inputs and nested values keep the tagged
-    /// projection.
+    /// projection. This split applies only without a declared exception channel:
+    /// discovery's synthetic exception Result has no CLR box to unwrap.
+    /// OperationScope projects its complete normal return through Project instead.
     /// </remarks>
     internal static ReturnOutcome ProjectReturn(SemanticType type, object? value)
     {

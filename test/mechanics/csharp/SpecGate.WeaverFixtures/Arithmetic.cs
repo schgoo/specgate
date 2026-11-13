@@ -9,6 +9,53 @@ namespace SpecGate.WeaverFixtures;
 /// </summary>
 public static class Arithmetic
 {
+    [SpecOperation("catch_all_option", Spec = "weaver.exception_wrappers"), SpecException]
+    public static Option<int> CatchAllOption(int state) => SelectOption(state);
+
+    [SpecOperation("declared_option", Spec = "weaver.exception_wrappers")]
+    [SpecException(typeof(InvalidOperationException))]
+    public static Option<int> DeclaredOption([SpecInput("state")] int state) => SelectOption(state);
+
+    [SpecOperation("declared_result", Spec = "weaver.exception_wrappers")]
+    [SpecException(typeof(InvalidOperationException))]
+    public static Result<int, int> DeclaredResult([SpecInput("state")] int state) => SelectResult(state);
+
+    [SpecOperation("declared_scalar", Spec = "weaver.exception_wrappers")]
+    [SpecException(typeof(InvalidOperationException))]
+    public static int DeclaredScalar([SpecInput("state")] int state)
+    {
+        ThrowIfRequested(state);
+        return state;
+    }
+
+    [SpecOperation("declared_unit", Spec = "weaver.exception_wrappers")]
+    [SpecException(typeof(InvalidOperationException))]
+    public static void DeclaredUnit([SpecInput("state")] int state) => ThrowIfRequested(state);
+
+    internal static Option<int> SelectOption(int state)
+    {
+        ThrowIfRequested(state);
+        return state == 0 ? Option<int>.None() : Option<int>.Some(state);
+    }
+
+    internal static Result<int, int> SelectResult(int state)
+    {
+        ThrowIfRequested(state);
+        return state == 0 ? Result<int, int>.Err(17) : Result<int, int>.Ok(state);
+    }
+
+    internal static void ThrowIfRequested(int state)
+    {
+        if (state == -1)
+        {
+            throw new InvalidOperationException("declared");
+        }
+        if (state == -2)
+        {
+            throw new ArgumentException("undeclared");
+        }
+    }
+
     [SpecOperation("describe", Spec = "weaver.basic")]
     public static string Describe([SpecInput("value")] int value)
     {

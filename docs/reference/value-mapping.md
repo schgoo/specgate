@@ -171,6 +171,20 @@ The return type maps to the CTSC outcome channels
 | C# method with `[SpecException]` | As `Result<T, string>`: one error named `error` of type `string`. |
 | C# `Task<T>` / `ValueTask<T>` | As `T`; the operation is async. |
 
+C# `[SpecException]` reserves an outer error channel for actual matching throws
+(or every throw when no types are listed). Normal completion preserves the whole
+actual return value after Task/ValueTask transport unwrapping: returned
+`Option.None` is a result containing `None`, not the empty channel. Returned
+`Result.Err(17)` is a native result containing `Err(17)`, not the exception error.
+Only a thrown declared exception selects that outer error; undeclared throws
+remain faults. Normal `void`, `Task`, and `ValueTask` emit no result.
+
+This distinction does not add nested standard Result registry normalization or
+replay support. Returned Result values under `[SpecException]` are covered at
+the native capture boundary; they are not yet a supported end-to-end bundle
+shape. Without `[SpecException]`, the outer return wrapper still selects the
+channels in the table above.
+
 ## Recorded values
 
 Capture records each value at the operation boundary, while the call is on the
@@ -182,7 +196,7 @@ stack. Rust and C# produce the same shapes, so their traces can be compared:
 | Tagged-union variant | Single-entry map from variant name to its payload; a payload-free variant (including a C# enum member) has the empty map as payload. |
 | Optional | `Some` with the value, or `None`. |
 | Nested `Result` | `Ok` or `Err` with the value. |
-| Outermost `Option` / `Result` of a return value | Unwrapped onto the `result`, `empty`, or `error` channel, as in the table above. |
+| Outermost `Option` / `Result` of a return value without C# `[SpecException]` | Unwrapped onto the `result`, `empty`, or `error` channel, as in the table above. |
 
 C# capture also reports, without failing the test, a `null` where the declared
 type is not nullable: the scenario is dropped and `specgate capture` prints a

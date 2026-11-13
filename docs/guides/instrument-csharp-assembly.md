@@ -127,6 +127,11 @@ uses fresh, non-consuming enumeration; it does not advance caller-held cursors.
 | `[SpecException]` with no types | Every exception is the `error` outcome |
 | Any other exception | An unexpected target fault |
 
+With `[SpecException]`, matching throws use the error channel; normal returns
+preserve the complete value instead of the Option/Result split above. See
+[operation outcomes](../reference/value-mapping.md#operation-outcomes) for
+async and void behavior and the remaining nested Result registry/replay limits.
+
 ### 5. Annotate setups for stateful operations
 
 ```csharp

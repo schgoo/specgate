@@ -10,6 +10,86 @@ namespace SpecGate.WeaverFixtures;
 /// </summary>
 public static class AsyncOperations
 {
+    [SpecOperation("catch_all_option_task", Spec = "weaver.exception_wrappers"), SpecException]
+    public static async Task<Option<int>> CatchAllOptionTask(int state)
+    {
+        await Task.Yield();
+        return Arithmetic.SelectOption(state);
+    }
+
+    [SpecOperation("catch_all_option_value_task", Spec = "weaver.exception_wrappers"), SpecException]
+    public static async ValueTask<Option<int>> CatchAllOptionValueTask(int state)
+    {
+        await Task.Yield();
+        return Arithmetic.SelectOption(state);
+    }
+
+    [SpecOperation("declared_option_task", Spec = "weaver.exception_wrappers")]
+    [SpecException(typeof(InvalidOperationException))]
+    public static async Task<Option<int>> DeclaredOptionTask([SpecInput("state")] int state)
+    {
+        await Task.Yield();
+        return Arithmetic.SelectOption(state);
+    }
+
+    [SpecOperation("declared_option_value_task", Spec = "weaver.exception_wrappers")]
+    [SpecException(typeof(InvalidOperationException))]
+    public static async ValueTask<Option<int>> DeclaredOptionValueTask([SpecInput("state")] int state)
+    {
+        await Task.Yield();
+        return Arithmetic.SelectOption(state);
+    }
+
+    [SpecOperation("declared_result_task", Spec = "weaver.exception_wrappers")]
+    [SpecException(typeof(InvalidOperationException))]
+    public static async Task<Result<int, int>> DeclaredResultTask([SpecInput("state")] int state)
+    {
+        await Task.Yield();
+        return Arithmetic.SelectResult(state);
+    }
+
+    [SpecOperation("declared_result_value_task", Spec = "weaver.exception_wrappers")]
+    [SpecException(typeof(InvalidOperationException))]
+    public static async ValueTask<Result<int, int>> DeclaredResultValueTask([SpecInput("state")] int state)
+    {
+        await Task.Yield();
+        return Arithmetic.SelectResult(state);
+    }
+
+    [SpecOperation("declared_scalar_task", Spec = "weaver.exception_wrappers")]
+    [SpecException(typeof(InvalidOperationException))]
+    public static async Task<int> DeclaredScalarTask([SpecInput("state")] int state)
+    {
+        await Task.Yield();
+        Arithmetic.ThrowIfRequested(state);
+        return state;
+    }
+
+    [SpecOperation("declared_scalar_value_task", Spec = "weaver.exception_wrappers")]
+    [SpecException(typeof(InvalidOperationException))]
+    public static async ValueTask<int> DeclaredScalarValueTask([SpecInput("state")] int state)
+    {
+        await Task.Yield();
+        Arithmetic.ThrowIfRequested(state);
+        return state;
+    }
+
+    [SpecOperation("declared_unit_task", Spec = "weaver.exception_wrappers")]
+    [SpecException(typeof(InvalidOperationException))]
+    public static async Task DeclaredUnitTask([SpecInput("state")] int state)
+    {
+        await Task.Yield();
+        Arithmetic.ThrowIfRequested(state);
+    }
+
+    [SpecOperation("declared_unit_value_task", Spec = "weaver.exception_wrappers")]
+    [SpecException(typeof(InvalidOperationException))]
+    public static async ValueTask DeclaredUnitValueTask([SpecInput("state")] int state)
+    {
+        await Task.Yield();
+        Arithmetic.ThrowIfRequested(state);
+    }
+
     [SpecOperation("echo_i32", Spec = "weaver.generic", TypeArguments = new[] { typeof(int) })]
     [SpecOperation("echo_string", Spec = "weaver.generic", TypeArguments = new[] { typeof(string) })]
     public static async Task<T> EchoAsync<T>([SpecInput("value")] T value)

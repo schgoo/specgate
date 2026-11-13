@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using SpecGate.Runtime;
@@ -15,6 +16,85 @@ namespace SpecGate.Weaver.Tests;
 [Collection(WovenCaptureSerialization.Name)]
 public sealed class WovenAsyncCaptureTests
 {
+    [Theory]
+    [InlineData(0)]
+    [InlineData(7)]
+    public async Task DeclaredExceptionsPreserveTheFullAwaitedReturn(int state)
+    {
+        using CaptureSession session = CaptureScenario.Begin("weaver.exception_wrappers");
+        _ = await AsyncOperations.DeclaredOptionTask(state);
+        _ = await AsyncOperations.DeclaredOptionValueTask(state);
+        _ = await AsyncOperations.DeclaredResultTask(state);
+        _ = await AsyncOperations.DeclaredResultValueTask(state);
+        Assert.Equal(state, await AsyncOperations.DeclaredScalarTask(state));
+        Assert.Equal(state, await AsyncOperations.DeclaredScalarValueTask(state));
+        await AsyncOperations.DeclaredUnitTask(state);
+        await AsyncOperations.DeclaredUnitValueTask(state);
+        _ = await AsyncOperations.CatchAllOptionTask(state);
+        _ = await AsyncOperations.CatchAllOptionValueTask(state);
+
+        OperationSpan[] spans = [.. session.Finish().Operations];
+        Assert.Equal(10, spans.Length);
+        Assert.All(spans, span => Assert.Equal(SpanStatus.Ok, span.Status));
+        Value option = state == 0
+            ? Value.Tagged("None", Value.Unit)
+            : Value.Tagged("Some", Value.Integer(state));
+        Value result = state == 0
+            ? Value.Tagged("Err", Value.Integer(17))
+            : Value.Tagged("Ok", Value.Integer(state));
+        Assert.Equal(option, spans[0].Result());
+        Assert.Equal(option, spans[1].Result());
+        Assert.Equal(result, spans[2].Result());
+        Assert.Equal(result, spans[3].Result());
+        Assert.Equal(Value.Integer(state), spans[4].Result());
+        Assert.Equal(Value.Integer(state), spans[5].Result());
+        Assert.Null(spans[6].OperationCompletion);
+        Assert.Null(spans[7].OperationCompletion);
+        Assert.Equal(option, spans[8].Result());
+        Assert.Equal(option, spans[9].Result());
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(-2)]
+    public async Task OnlyActualDeclaredAsyncThrowsUseTheSyntheticErrorChannel(int state)
+    {
+        using CaptureSession session = CaptureScenario.Begin("weaver.exception_wrappers");
+        await Assert.ThrowsAnyAsync<Exception>(() => AsyncOperations.DeclaredOptionTask(state));
+        await Assert.ThrowsAnyAsync<Exception>(async () => await AsyncOperations.DeclaredOptionValueTask(state));
+        await Assert.ThrowsAnyAsync<Exception>(() => AsyncOperations.DeclaredResultTask(state));
+        await Assert.ThrowsAnyAsync<Exception>(async () => await AsyncOperations.DeclaredResultValueTask(state));
+        await Assert.ThrowsAnyAsync<Exception>(() => AsyncOperations.DeclaredScalarTask(state));
+        await Assert.ThrowsAnyAsync<Exception>(async () => await AsyncOperations.DeclaredScalarValueTask(state));
+        await Assert.ThrowsAnyAsync<Exception>(() => AsyncOperations.DeclaredUnitTask(state));
+        await Assert.ThrowsAnyAsync<Exception>(async () => await AsyncOperations.DeclaredUnitValueTask(state));
+        await Assert.ThrowsAnyAsync<Exception>(() => AsyncOperations.CatchAllOptionTask(state));
+        await Assert.ThrowsAnyAsync<Exception>(async () => await AsyncOperations.CatchAllOptionValueTask(state));
+
+        Capture capture = session.Finish();
+        Assert.Equal(10, capture.Operations.Count);
+        Assert.All(capture.Operations.Take(8), span =>
+        {
+            Assert.Equal(SpanStatus.Error, span.Status);
+            if (state == -1)
+            {
+                ErrorCompletion error = Assert.IsType<ErrorCompletion>(span.OperationCompletion);
+                Assert.Equal("error", error.Name);
+                Assert.Equal(Value.String("declared"), error.ErrorValue);
+            }
+            else
+            {
+                Assert.IsType<FaultCompletion>(span.OperationCompletion);
+            }
+        });
+        Assert.All(capture.Operations.Skip(8), span =>
+        {
+            ErrorCompletion caught = Assert.IsType<ErrorCompletion>(span.OperationCompletion);
+            Assert.Equal("error", caught.Name);
+            Assert.Equal(Value.String(state == -1 ? "declared" : "undeclared"), caught.ErrorValue);
+        });
+    }
+
     [Fact]
     public async Task RecordsConcreteGenericSpecializations()
     {
