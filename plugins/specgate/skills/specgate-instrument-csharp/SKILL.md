@@ -58,7 +58,19 @@ public static class Arithmetic
 - `Spec` is the component id and is required for capture.
 - Repeat `[SpecOperation]` only for distinct explicit generic specializations.
 - `[SpecInput("name")]` sets an input name; without it the parameter name is
-  used.
+  used. Parameter annotations inherit through overrides, including intermediate
+  declarations; discovery and capture preserve the same name.
+
+For context that does not affect the captured behavior, use
+`[SpecInput("context", Ignore = true)]`, for example on a `CancellationToken`
+or logger. This also applies to setup-producer parameters. The ordinary method
+still receives the original argument, but discovery and capture omit it without
+mapping or projecting its type. Raw C# invocation metadata keeps the full
+signature. `Ignore` does not permit by-reference, pointer, or non-boxable
+parameters such as `Span<T>` and generic parameters with `allows ref struct`;
+the weaver rejects these before emitting capture code.
+Rust ignored inputs and ignored record fields are not yet implemented.
+See [ignored context inputs](${PLUGIN_DIR}/docs/reference/value-mapping.md#ignored-context-inputs).
 
 #### 2. Reuse the existing tests
 
@@ -309,6 +321,11 @@ value as its result.
 | Never finished | Top-level abandonment, or work still open at test end: the scenario is dropped with a diagnostic | An unawaited task still outstanding when the test's session finishes: the open span is recorded as a fault and `InvalidOperationException` is thrown, so that test contributes no scenario |
 | Rejected | Async setups | Async setups, `async void`, async iterators, `async` methods returning other awaitables |
 | Replay | Directly awaited free functions and setup-backed methods use the candidate's Arty, Smol, Tokio, or custom execution wrapper | Captured C# stimuli can replay against Rust async candidates; C# candidate replay is unsupported |
+
+C# async operations can omit context parameters with
+`[SpecInput("context", Ignore = true)]`. The original argument still reaches
+the body. Ignoring a token does not change cancellation recording or explain
+why cancellation occurred; see [value mapping](${PLUGIN_DIR}/docs/reference/value-mapping.md#ignored-context-inputs).
 
 Wrap a future you intend to abandon inside an enclosing annotated operation
 that completes; the abandonment is then recorded on the inner span

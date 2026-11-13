@@ -24,6 +24,14 @@ public sealed class ValueProjectionTests
     private const string Component = "fixture.projection";
 
     [Fact]
+    public void IgnoringAllInputsStillRequiresTheFullNativeArgumentList()
+    {
+        Assert.Empty(Capture(nameof(Declarations.IgnoredContext), [new object()]).Inputs);
+        Assert.Equal(CaptureRejection.TypeMismatch,
+            Reject(nameof(Declarations.IgnoredContext), []).Rejection);
+    }
+
+    [Fact]
     public void DeclaredExceptionMetadataKeepsTheActualClrReturn()
     {
         OperationMetadata option = OperationMetadata.For(Declarations.Of(nameof(Declarations.DeclaredOption)));
@@ -1081,6 +1089,8 @@ public sealed class ValueProjectionTests
     /// <summary>Declarations standing in for the woven methods under capture.</summary>
     private static class Declarations
     {
+        internal static void IgnoredContext([SpecInput("context", Ignore = true)] object context) => _ = context;
+
         [SpecException]
         internal static Option<int> DeclaredOption() => Option<int>.None();
 

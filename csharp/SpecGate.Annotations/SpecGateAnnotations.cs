@@ -45,6 +45,9 @@ public sealed class SpecInputAttribute : Attribute
 
     /// <summary>Gets the semantic input name.</summary>
     public string Name { get; }
+
+    /// <summary>Gets or sets whether this context parameter is omitted from discovery and capture.</summary>
+    public bool Ignore { get; set; }
 }
 
 /// <summary>Marks a type or member for semantic type discovery.</summary>

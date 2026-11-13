@@ -42,7 +42,19 @@ public static class Arithmetic
 - `Spec` is the component id and is required for capture.
 - Repeat `[SpecOperation]` only for distinct explicit generic specializations.
 - `[SpecInput("name")]` sets an input name; without it the parameter name is
-  used.
+  used. Parameter annotations inherit through overrides, including intermediate
+  declarations; discovery and capture preserve the same name.
+
+For context that does not affect the captured behavior, use
+`[SpecInput("context", Ignore = true)]`, for example on a `CancellationToken`
+or logger. This also applies to setup-producer parameters. The ordinary method
+still receives the original argument, but discovery and capture omit it without
+mapping or projecting its type. Raw C# invocation metadata keeps the full
+signature. `Ignore` does not permit by-reference, pointer, or non-boxable
+parameters such as `Span<T>` and generic parameters with `allows ref struct`;
+the weaver rejects these before emitting capture code.
+Rust ignored inputs and ignored record fields are not yet implemented.
+See [ignored context inputs](../reference/value-mapping.md#ignored-context-inputs).
 
 ### 2. Reuse the existing tests
 

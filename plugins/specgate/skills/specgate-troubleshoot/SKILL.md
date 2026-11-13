@@ -133,6 +133,7 @@ sources, so a search for it finds the code that raises it.
 | `requires one concrete TypeArguments entry per generic method parameter` | A generic operation lacks a complete specialization. | Supply concrete `TypeArguments` for every generic method parameter. |
 | `is declared on generic type` | Declared on a generic type. | Move it to a non-generic type. |
 | `must take parameters by value.` | `ref`, `out`, `in`, or pointer parameters. | Take parameters by value. |
+| `cannot be boxed` | A ref-struct parameter, such as `Span<T>`, or a generic parameter with `allows ref struct`, even with `SpecInput.Ignore = true`. | Use a boxable context parameter; ignoring an input does not remove this weaving constraint. |
 | `Iterator capture is not supported;` | An iterator method. | Return a materialized collection. |
 | `Stream capture is not supported;` | An async iterator. | Return a materialized collection. |
 | `Async capture supports operations returning Task, Task<T>, ValueTask, or` | `async void`, an async setup, or an `async` method returning another awaitable. | Use a supported return type ([`async-capture.md`](${PLUGIN_DIR}/docs/guides/async-capture.md)). |

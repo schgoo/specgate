@@ -16,6 +16,20 @@ namespace SpecGate.Weaver.Tests;
 [Collection(WovenCaptureSerialization.Name)]
 public sealed class WovenAsyncCaptureTests
 {
+    [Fact]
+    public async Task IgnoredContextsKeepTheirNativePositionAcrossSuspension()
+    {
+        using CaptureSession session = CaptureScenario.Begin("weaver.async");
+        bool called = false;
+        Assert.Equal(5, await AsyncOperations.AddWithContext(2, () => called = true, 3));
+        Assert.True(called);
+
+        OperationSpan span = Assert.Single(session.Finish().Operations);
+        Assert.Equal(["after", "before"], span.Inputs.Keys);
+        Assert.Equal([Value.Integer(3), Value.Integer(2)], span.Inputs.Values);
+        Assert.Equal(Value.Integer(5), span.Result());
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(7)]
