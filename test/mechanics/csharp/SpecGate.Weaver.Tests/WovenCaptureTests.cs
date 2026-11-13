@@ -24,7 +24,7 @@ public sealed class WovenCaptureTests
         Assert.Equal(7, new Accumulator.ContextLeaf().Read(() => called = true, 7));
         Assert.True(called);
         OperationSpan span = Assert.Single(session.Finish().Operations);
-        Assert.Equal(Value.Integer(7), span.Inputs["value"]);
+        Assert.Equal(Value.Integer(7), span.Inputs["amount"]);
         Assert.Single(span.Inputs);
         Assert.Equal(Value.Integer(7), span.Result());
     }

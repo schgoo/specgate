@@ -303,6 +303,9 @@ unimplemented; this does not add a replay-default mechanism.
   `[SpecEvent("wire_name")]`.
 - C# parameter names can be set with `[SpecInput("name")]`. Variant and type
   names can be set the same way with `[SpecEvent("name")]`.
+- C# parameter annotations inherit through overrides, including intermediate
+  declarations. Discovery and capture use the same inherited rename and ignore
+  metadata.
 - A bare annotated Rust type named `Bag`, `Tuple`, or another collection
   constructor remains a named type, including across component dependencies.
   Constructor applications such as `Bag<i32>` keep their collection meaning.

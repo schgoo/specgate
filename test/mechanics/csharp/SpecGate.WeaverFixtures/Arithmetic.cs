@@ -113,7 +113,8 @@ public sealed class Accumulator
 
     public abstract class ContextMiddle : ContextRoot
     {
-        public override int Read([SpecInput("context", Ignore = true)] Action context, int value) => value;
+        public override int Read([SpecInput("context", Ignore = true)] Action context,
+            [SpecInput("amount")] int value) => value;
     }
 
     public sealed class ContextLeaf : ContextMiddle

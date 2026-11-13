@@ -198,7 +198,7 @@ internal sealed class OperationMetadata
     /// </remarks>
     private static string InputName(ParameterInfo parameter)
     {
-        SpecInputAttribute? annotation = parameter.GetCustomAttribute<SpecInputAttribute>(inherit: false);
+        SpecInputAttribute? annotation = parameter.GetCustomAttribute<SpecInputAttribute>(inherit: true);
         return annotation?.Name ?? parameter.Name!;
     }
 

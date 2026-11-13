@@ -89,8 +89,8 @@ public class DiscoveryRunnerTests
             new NullabilityInfoContext());
         JsonElement operation = Assert.Single(
             JsonSerializer.SerializeToElement(document.Build()).GetProperty("operations").EnumerateArray());
-        Assert.Equal("value", Assert.Single(operation.GetProperty("params").EnumerateArray())[0].GetString());
-        Assert.Equal(["context", "value"], operation.GetProperty("cs_params").EnumerateArray()
+        Assert.Equal("amount", Assert.Single(operation.GetProperty("params").EnumerateArray())[0].GetString());
+        Assert.Equal(["context", "amount"], operation.GetProperty("cs_params").EnumerateArray()
             .Select(parameter => parameter[0].GetString()));
     }
 
@@ -101,7 +101,8 @@ public class DiscoveryRunnerTests
 
     private abstract class IgnoredMiddle : IgnoredRoot
     {
-        public override int Read([SpecInput("context", Ignore = true)] Action context, int value) => value;
+        public override int Read([SpecInput("context", Ignore = true)] Action context,
+            [SpecInput("amount")] int value) => value;
     }
 
     private sealed class IgnoredLeaf : IgnoredMiddle
