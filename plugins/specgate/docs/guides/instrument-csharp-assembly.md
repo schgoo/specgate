@@ -9,7 +9,7 @@ capture its tests as reference behavior.
 
 - The CLI with its C# tools beside it ([`install.md`](install.md)).
 - The .NET 10 runtime for the C# discovery tool (`SpecGate.Discovery` targets
-  `net10.0`; building it from source needs the .NET 10 SDK).
+  `net10.0`; building it from source supports the .NET 10 and 11 SDKs).
 - An SDK that builds your projects. The project that holds your operations must
   target .NET 8 or later for capture (`SpecGate.Runtime` targets `net8.0` and
   `net10.0`).

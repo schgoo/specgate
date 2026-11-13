@@ -11,14 +11,16 @@ on:
 jobs:
   # Each lane is a `just check-<lane>` recipe; `just check` is their union.
   check:
-    name: check ${{ matrix.lane }} (${{ matrix.os }})
+    name: check ${{ matrix.lane }} (${{ matrix.os }})${{ matrix.sdk == '11.0.x' && ' [.NET 11]' || '' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
         lane: [rust-replay, rust-other, static, ctsc-smoke, ctsc-goldens]
+        sdk: [10.0.x, 11.0.x]
     env:
+      SPECGATE_CACHE_DIR: ${{ github.workspace }}/artifacts/specgate-build-cache
       SPECGATE_CTSC_GOLDENS_BUILD_CACHE: artifacts/ctsc-goldens-build-cache/v2
       # The rust/target cache stays small; each Rust test run builds children from empty.
       SPECGATE_RUST_TEST_BUILD_DIR: scratch
@@ -43,10 +45,40 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.SPECGATE_CTSC_GOLDENS_BUILD_CACHE }}
-          key: ctsc-goldens-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cachekey }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/rust-toolchain.toml', '**/.cargo/config.toml', '**/.cargo/config', '!**/target/**', '!artifacts/**') }}
+          key: ctsc-goldens-v2-${{ runner.os }}-${{ runner.arch }}-${{ matrix.sdk }}-${{ steps.toolchain.outputs.cachekey }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/rust-toolchain.toml', '**/.cargo/config.toml', '**/.cargo/config', '!**/target/**', '!artifacts/**') }}
       - uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: |
+            8.0.x
+            10.0.x
+            ${{ matrix.sdk }}
+      - name: Select and verify .NET SDK
+        shell: pwsh
+        run: |
+          $major = '${{ matrix.sdk }}'.Split('.')[0]
+          $version = dotnet --list-sdks |
+            ForEach-Object { ($_ -split ' ')[0] } |
+            Where-Object { $_ -match "^$major\.0\.\d+$" } |
+            Sort-Object { [version]$_ } |
+            Select-Object -Last 1
+          if (-not $version) { throw "No stable .NET SDK $major is installed" }
+          $selection = @{ sdk = @{ version = $version; rollForward = 'disable'; allowPrerelease = $false } } |
+            ConvertTo-Json -Depth 3
+          [IO.File]::WriteAllText((Join-Path $PWD 'global.json'),
+            $selection.Replace("`r`n", "`n") + "`n", [Text.UTF8Encoding]::new($false))
+          [void](New-Item -ItemType Directory -Force -Path $env:SPECGATE_CACHE_DIR)
+          foreach ($directory in @($PWD.Path, $env:SPECGATE_CACHE_DIR)) {
+            Push-Location $directory
+            try {
+              $actual = dotnet --version
+              if ($LASTEXITCODE -ne 0 -or $actual -ne $version) {
+                throw "Expected .NET SDK $version from $directory, selected $actual"
+              }
+            } finally {
+              Pop-Location
+            }
+          }
+          dotnet --info
       - uses: extractions/setup-just@v3
       - name: Install Rust gate tools
         if: matrix.lane == 'static'
