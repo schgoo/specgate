@@ -2,7 +2,6 @@
   <PropertyGroup>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
-    <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <RootNamespace>SpecGate.Runtime</RootNamespace>
     <AssemblyName>SpecGate.Runtime</AssemblyName>

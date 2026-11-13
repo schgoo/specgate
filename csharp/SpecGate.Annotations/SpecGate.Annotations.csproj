@@ -2,7 +2,6 @@
   <PropertyGroup>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <TargetFramework>netstandard2.0</TargetFramework>
-    <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <RootNamespace>SpecGate.Annotations</RootNamespace>
     <AssemblyName>SpecGate.Annotations</AssemblyName>
