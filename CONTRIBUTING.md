@@ -101,6 +101,29 @@ described in
 
 ## Gate
 
+### Validation policy
+
+Validate before committing; do not repeat the full gate before every push.
+
+- Production code, behavior, contract, fixture, dependency, or build changes
+  require `just check` from the repository root before committing.
+- Documentation-only changes may use `just docs-check` and any required
+  generator checks. This exception does not cover normative contract changes.
+- Explicitly approved temporary CI diagnostics may use syntax checks and
+  focused validation. They must not weaken required checks and must be removed
+  before final review.
+- Reuse a successful full-gate result when subsequent changes qualify for
+  these exceptions. Record the commit that corresponds to the tested tree and
+  the checks run afterward. Other changes require a new full-gate run.
+- A push alone does not require another local gate run.
+- Before merge, all required CI checks must pass on the final commit, review
+  findings must be resolved, and human merge approval must be explicit.
+
+Release and packaging changes also require `just package-smoke`. Report the
+commands run, their results, and any checks not run when handing off a change.
+
+### Full gate
+
 Run from the repository root:
 
 ```powershell
