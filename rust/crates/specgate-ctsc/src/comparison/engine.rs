@@ -8,6 +8,7 @@ use crate::validation::{
     AnyValue, DocumentBytes, Loaded, RegistryOperation, RegistrySet, ResolvedComponent, TraceDocument, TraceEvent, TraceSpan, TypeRef,
     ValidationIssue, canonical_value, check_linked, find_operation, load_bytes, registry,
 };
+use crate::value_path::literal_path;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Write as _};
 use std::path::{Path, PathBuf};
@@ -656,8 +657,6 @@ fn compare_inputs(
         .chain(candidate_inputs.keys())
         .cloned()
         .collect::<BTreeSet<_>>();
-    let max_name_len = names.iter().map(String::len).max().unwrap_or_default();
-    let mut input_path = String::with_capacity(path.len() + ".inputs.".len() + max_name_len);
     for name in names {
         let value_type = declaration.and_then(|(_, operation)| {
             operation
@@ -666,8 +665,7 @@ fn compare_inputs(
                 .find(|input| input.name == name)
                 .map(|input| &input.value_type)
         });
-        input_path.clear();
-        write!(input_path, "{path}.inputs.{name}").expect("writing to a String cannot fail");
+        let input_path = literal_path(&format!("{path}.inputs"), &name);
         compare_value(
             reference_inputs.get(&name),
             candidate_inputs.get(&name),

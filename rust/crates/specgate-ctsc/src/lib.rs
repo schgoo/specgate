@@ -144,3 +144,4 @@ pub mod registry;
 pub mod replay;
 /// Registry, Trace Core, Linked, and capture-bundle validators.
 pub mod validation;
+mod value_path;

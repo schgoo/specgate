@@ -108,6 +108,21 @@ A semantic mismatch location SHOULD include:
 
 Diagnostic wording and serialization format are not defined by CTSC 0.4.
 
+SpecGate's linked validator displays literal input names, record fields,
+ordinary union variants, and string-map keys as `.ordinary` only for names
+matching ASCII `[A-Za-z_][A-Za-z0-9_]*`. All other names use JSON-quoted bracket
+notation: `["a.b"]`, `["0"]`, or `["q\"\\"]`. Unicode names, including
+`["한글"]`, `["café"]`, and combining marks, also use brackets. This explicit
+rule avoids differences between language runtimes' Unicode properties or versions;
+it never rejects a legal Unicode name.
+The names `some`, `none`, `ok`, `err`, `Some`, `None`, `Ok`, `Err`, `result`,
+and `unit` also use brackets to distinguish literal names from synthetic tags.
+Thus literal `["a.b"]` differs from nested `.a.b`, `["0"]` from tuple index
+`[0]`, and an ordinary union's `["Some"]` from optional `.Some`.
+This is diagnostic escaping only: allowed names, wire values, equality, and
+`ctsc.strict/0.2.0` are unchanged. The comparator uses the same escaping for its
+input-name mismatch locations; this does not add recursive comparator paths.
+
 ## 7. CTSC Strict reference policy
 
 `ctsc.strict/0.2.0` is an optional reference policy. Implementing CTSC does not

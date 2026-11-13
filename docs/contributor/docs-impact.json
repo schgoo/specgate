@@ -118,6 +118,7 @@
       "id": "ctsc-documents",
       "code": [
         "rust/crates/specgate-ctsc/src/lib.rs",
+        "rust/crates/specgate-ctsc/src/value_path.rs",
         "rust/crates/specgate-ctsc/src/capture.rs",
         "rust/crates/specgate-ctsc/src/capture/**",
         "rust/crates/specgate-ctsc/src/comparison.rs",
