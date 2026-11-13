@@ -13,6 +13,9 @@ SDK's newest language version. `global.json` permits stable SDKs starting at
 SDK the runner selects by default. Other SDK major versions are not covered by
 that compatibility claim.
 
+CI keeps discovery's invocation cache under the checkout and verifies SDK
+selection from both directories, so child builds inherit the same SDK pin.
+
 The discovery tool still targets .NET 10. Capture supports .NET 8 applications:
 the injected-target tests build and run real woven operations under .NET 8 and
 10, while SpecGate's own tools use the newer SDK.
