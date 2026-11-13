@@ -11,14 +11,16 @@ on:
 jobs:
   # Each lane is a `just check-<lane>` recipe; `just check` is their union.
   check:
-    name: check ${{ matrix.lane }} (${{ matrix.os }})
+    name: check ${{ matrix.lane }} (${{ matrix.os }})${{ matrix.sdk == '11.0.x' && ' [.NET 11]' || '' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
         lane: [rust-replay, rust-other, static, ctsc-smoke, ctsc-goldens]
+        sdk: [10.0.x, 11.0.x]
     env:
+      SPECGATE_CACHE_DIR: ${{ github.workspace }}/artifacts/specgate-build-cache
       SPECGATE_CTSC_GOLDENS_BUILD_CACHE: artifacts/ctsc-goldens-build-cache/v2
       # The rust/target cache stays small; each Rust test run builds children from empty.
       SPECGATE_RUST_TEST_BUILD_DIR: scratch
@@ -43,10 +45,40 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.SPECGATE_CTSC_GOLDENS_BUILD_CACHE }}
-          key: ctsc-goldens-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cachekey }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/rust-toolchain.toml', '**/.cargo/config.toml', '**/.cargo/config', '!**/target/**', '!artifacts/**') }}
+          key: ctsc-goldens-v2-${{ runner.os }}-${{ runner.arch }}-${{ matrix.sdk }}-${{ steps.toolchain.outputs.cachekey }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/rust-toolchain.toml', '**/.cargo/config.toml', '**/.cargo/config', '!**/target/**', '!artifacts/**') }}
       - uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: |
+            8.0.x
+            10.0.x
+            ${{ matrix.sdk }}
+      - name: Select and verify .NET SDK
+        shell: pwsh
+        run: |
+          $major = '${{ matrix.sdk }}'.Split('.')[0]
+          $version = dotnet --list-sdks |
+            ForEach-Object { ($_ -split ' ')[0] } |
+            Where-Object { $_ -match "^$major\.0\.\d+$" } |
+            Sort-Object { [version]$_ } |
+            Select-Object -Last 1
+          if (-not $version) { throw "No stable .NET SDK $major is installed" }
+          $selection = @{ sdk = @{ version = $version; rollForward = 'disable'; allowPrerelease = $false } } |
+            ConvertTo-Json -Depth 3
+          [IO.File]::WriteAllText((Join-Path $PWD 'global.json'),
+            $selection.Replace("`r`n", "`n") + "`n", [Text.UTF8Encoding]::new($false))
+          [void](New-Item -ItemType Directory -Force -Path $env:SPECGATE_CACHE_DIR)
+          foreach ($directory in @($PWD.Path, $env:SPECGATE_CACHE_DIR)) {
+            Push-Location $directory
+            try {
+              $actual = dotnet --version
+              if ($LASTEXITCODE -ne 0 -or $actual -ne $version) {
+                throw "Expected .NET SDK $version from $directory, selected $actual"
+              }
+            } finally {
+              Pop-Location
+            }
+          }
+          dotnet --info
       - uses: extractions/setup-just@v3
       - name: Install Rust gate tools
         if: matrix.lane == 'static'
@@ -55,41 +87,6 @@ jobs:
           cargo install cargo-doc2readme --locked
       - name: Run gate lane
         run: just --timestamp --verbose check-${{ matrix.lane }}
-      - name: Inspect failing Weaver analyzer
-        if: failure() && runner.os == 'Linux' && matrix.lane == 'rust-other'
-        shell: bash
-        run: |
-          set +e
-          diagnostics="$PWD/artifacts/analyzer-diagnostics"
-          project="csharp/SpecGate.Weaver/SpecGate.Weaver.csproj"
-          source="csharp/SpecGate.Weaver/OperationDeclaration.cs"
-          mkdir -p "$diagnostics"
-          dotnet --info > "$diagnostics/dotnet-info.txt" 2>&1
-          dotnet msbuild "$project" -getProperty:NETCoreSdkVersion,LangVersion,TargetFramework,AnalysisLevel,EnforceCodeStyleInBuild,TreatWarningsAsErrors,RunAnalyzersDuringBuild > "$diagnostics/build-settings.json" 2>&1
-          dotnet build "$project" --no-restore --no-incremental --output "$diagnostics/before" -p:UseSharedCompilation=false -p:ReportAnalyzer=true -p:ErrorLog="$diagnostics/analyzers.sarif" > "$diagnostics/build-before.log" 2>&1
-          echo "$?" > "$diagnostics/build-before.exit"
-          dotnet format style "$project" --diagnostics IDE0028 --include "$source" --no-restore --verbosity detailed --report "$diagnostics" > "$diagnostics/format.log" 2>&1
-          echo "$?" > "$diagnostics/format.exit"
-          git diff -- "$source" > "$diagnostics/proposed-fix.patch"
-          git diff --name-only > "$diagnostics/modified-files.txt"
-          find csharp/SpecGate.Weaver/obj -name '*.editorconfig' -exec cp {} "$diagnostics" \;
-          dotnet build "$project" --no-restore --no-incremental --output "$diagnostics/after" -p:UseSharedCompilation=false > "$diagnostics/build-after.log" 2>&1
-          echo "$?" > "$diagnostics/build-after.exit"
-          exit 0
-      - name: Upload Weaver analyzer evidence
-        if: failure() && runner.os == 'Linux' && matrix.lane == 'rust-other'
-        uses: actions/upload-artifact@v4
-        with:
-          name: weaver-analyzer-diagnostics
-          path: |
-            artifacts/analyzer-diagnostics/*.txt
-            artifacts/analyzer-diagnostics/*.json
-            artifacts/analyzer-diagnostics/*.log
-            artifacts/analyzer-diagnostics/*.exit
-            artifacts/analyzer-diagnostics/*.patch
-            artifacts/analyzer-diagnostics/*.sarif
-            artifacts/analyzer-diagnostics/*.editorconfig
-          retention-days: 7
       - name: Packaged-context smoke
         if: matrix.os == 'ubuntu-latest' && matrix.lane == 'ctsc-smoke'
         run: just package-smoke
