@@ -20,6 +20,7 @@ jobs:
         lane: [rust-replay, rust-other, static, ctsc-smoke, ctsc-goldens]
         sdk: [10.0.x, 11.0.x]
     env:
+      SPECGATE_CACHE_DIR: ${{ github.workspace }}/artifacts/specgate-build-cache
       SPECGATE_CTSC_GOLDENS_BUILD_CACHE: artifacts/ctsc-goldens-build-cache/v2
       # The rust/target cache stays small; each Rust test run builds children from empty.
       SPECGATE_RUST_TEST_BUILD_DIR: scratch
@@ -65,9 +66,17 @@ jobs:
             ConvertTo-Json -Depth 3
           [IO.File]::WriteAllText((Join-Path $PWD 'global.json'),
             $selection.Replace("`r`n", "`n") + "`n", [Text.UTF8Encoding]::new($false))
-          $actual = dotnet --version
-          if ($LASTEXITCODE -ne 0 -or $actual -ne $version) {
-            throw "Expected .NET SDK $version, selected $actual"
+          [void](New-Item -ItemType Directory -Force -Path $env:SPECGATE_CACHE_DIR)
+          foreach ($directory in @($PWD.Path, $env:SPECGATE_CACHE_DIR)) {
+            Push-Location $directory
+            try {
+              $actual = dotnet --version
+              if ($LASTEXITCODE -ne 0 -or $actual -ne $version) {
+                throw "Expected .NET SDK $version from $directory, selected $actual"
+              }
+            } finally {
+              Pop-Location
+            }
           }
           dotnet --info
       - uses: extractions/setup-just@v3
