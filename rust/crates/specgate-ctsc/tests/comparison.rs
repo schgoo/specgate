@@ -210,6 +210,34 @@ fn strict_reports_changed_result_inputs_completion_and_event_order() {
 }
 
 #[test]
+fn strict_escapes_literal_input_locations() {
+    for (name, suffix) in [
+        ("ordinary", ".ordinary"),
+        ("a.b", "[\"a.b\"]"),
+        ("Some", "[\"Some\"]"),
+        ("한글", "[\"한글\"]"),
+        ("café", "[\"café\"]"),
+        ("\u{0345}", "[\"\u{0345}\"]"),
+        ("\u{05b0}", "[\"\u{05b0}\"]"),
+    ] {
+        let mut reference = read_json(&corpus().join("trace/valid/sequential.otlp.json"));
+        let operation = first_span_mut(&mut reference, "conformance.operation");
+        let inputs = attribute_mut(operation, "conformance.operation.inputs");
+        inputs["kvlistValue"]["values"][0]["key"] = name.into();
+        assert!(compare_values(&reference, &reference, None).equivalent);
+        let mut candidate = reference.clone();
+        let operation = first_span_mut(&mut candidate, "conformance.operation");
+        let inputs = attribute_mut(operation, "conformance.operation.inputs");
+        inputs["kvlistValue"]["values"][0]["value"] = serde_json::json!({"stringValue":"changed"});
+        let report = compare_values(&reference, &candidate, None);
+        assert!(!report.equivalent);
+        assert!(report.validation_failures.is_empty(), "{report:#?}");
+        assert_eq!(report.mismatches.len(), 1, "{report:#?}");
+        assert!(report.mismatches[0].path.ends_with(&format!(".inputs{suffix}")), "{report:#?}");
+    }
+}
+
+#[test]
 fn strict_compares_finite_binary64_exactly_and_non_finite_values_by_normalized_symbol() {
     let mut reference = read_json(&corpus().join("trace").join("valid").join("sequential.otlp.json"));
     let values = [

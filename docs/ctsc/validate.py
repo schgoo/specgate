@@ -383,6 +383,17 @@ def kvlist_entries(
     return entries
 
 
+def literal_path(parent: str, name: str) -> str:
+    """Keep literal source names distinct from synthetic tags and indexes."""
+    ordinary = (
+        re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) is not None
+        and name not in {
+            "some", "none", "ok", "err", "Some", "None", "Ok", "Err", "result", "unit"
+        }
+    )
+    return f"{parent}.{name}" if ordinary else f"{parent}[{json.dumps(name, ensure_ascii=False)}]"
+
+
 def validate_value_type(
     value: dict[str, Any],
     type_ref: dict[str, Any],
@@ -536,7 +547,7 @@ def validate_value_type(
                 field_type,
                 current_component,
                 components,
-                f"{location}.{name}",
+                literal_path(location, name),
                 validator,
             )
         return
@@ -562,7 +573,7 @@ def validate_value_type(
             payload_type,
             current_component,
             components,
-            f"{location}.{name}",
+            literal_path(location, name),
             validator,
         )
         return
@@ -606,7 +617,7 @@ def validate_value_type(
                     value_type,
                     current_component,
                     components,
-                    f"{location}.{name}",
+                    literal_path(location, name),
                     validator,
                 )
             return
@@ -1369,7 +1380,7 @@ def validate_linked(trace_path: Path, registry_path: Path) -> Validator:
                                     input_type,
                                     component_id,
                                     components,
-                                    f"{span_location}.inputs.{input_name}",
+                                    literal_path(f"{span_location}.inputs", input_name),
                                     validator,
                                 )
 

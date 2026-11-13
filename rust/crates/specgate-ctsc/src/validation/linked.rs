@@ -9,6 +9,7 @@ use super::model::{
     AnyValue, CanonicalValue, F64Value, RegistryOperation, RegistrySet, ResolvedComponent, TraceDocument, TraceSpan, TypeRef,
 };
 use super::{ValidationIssue, issue};
+use crate::value_path::literal_path;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
@@ -119,17 +120,9 @@ fn validate_operation(
         let names_match =
             inputs.len() == operation.inputs.len() && operation.inputs.iter().all(|declared| inputs.contains_key(declared.name.as_str()));
         if names_match {
-            let max_name_len = operation
-                .inputs
-                .iter()
-                .map(|input| input.name.as_str().len())
-                .max()
-                .unwrap_or_default();
-            let mut location = String::with_capacity(span.location.len() + ".inputs.".len() + max_name_len);
             for declared in &operation.inputs {
                 let name = declared.name.as_str();
-                location.clear();
-                write!(location, "{}.inputs.{name}", span.location).expect("writing to a String cannot fail");
+                let location = literal_path(&format!("{}.inputs", span.location), name);
                 validate_value(&inputs[name], &declared.value_type, component, registry, &location, issues);
             }
         } else {
@@ -295,11 +288,8 @@ fn validate_value(
                     model_issue(location, "string-keyed map must use kvlistValue", issues);
                     return;
                 };
-                let max_key_len = entries.keys().map(String::len).max().unwrap_or_default();
-                let mut value_location = String::with_capacity(location.len() + ".".len() + max_key_len);
                 for (key, value) in entries {
-                    value_location.clear();
-                    write!(value_location, "{location}.{key}").expect("writing to a String cannot fail");
+                    let value_location = literal_path(location, key);
                     validate_value(value, values, component, registry, &value_location, issues);
                 }
             } else {
@@ -360,11 +350,8 @@ fn validate_value(
                 model_issue(location, "record fields do not match registry type", issues);
                 return;
             }
-            let max_name_len = fields.iter().map(|field| field.name.len()).max().unwrap_or_default();
-            let mut field_location = String::with_capacity(location.len() + ".".len() + max_name_len);
             for field in fields {
-                field_location.clear();
-                write!(field_location, "{location}.{}", field.name).expect("writing to a String cannot fail");
+                let field_location = literal_path(location, &field.name);
                 validate_value(
                     &entries[field.name.as_str()],
                     &field.value_type,
@@ -408,9 +395,9 @@ fn validate_value(
                 return;
             };
             if let Some(value_type) = &variant.payload {
-                validate_value(payload, value_type, component, registry, format!("{location}.{name}"), issues);
+                validate_value(payload, value_type, component, registry, literal_path(location, name), issues);
             } else {
-                validate_primitive(payload, PRIMITIVE_UNIT, format!("{location}.{name}"), issues);
+                validate_primitive(payload, PRIMITIVE_UNIT, literal_path(location, name), issues);
             }
         }
     }
@@ -814,6 +801,73 @@ mod tests {
             location: "$.spans[0]".into(),
         };
         (registry, span)
+    }
+
+    #[test]
+    fn literal_diagnostic_locations() {
+        use super::{TypeRef, validate_operation};
+        use std::collections::BTreeMap;
+
+        let (registry, mut span) = linked_fixture();
+        let mut component = registry.components["demo"].clone();
+        let mut issues = Vec::new();
+        for name in ["a.b", "한글", "café", "\u{0345}", "\u{05b0}", "a\u{0345}", "a\u{05b0}"] {
+            component.component.operations[0].inputs[0].name = name.into();
+            let quoted = serde_json::to_string(name).expect("JSON string");
+            for value in [AnyValue::Int(7), AnyValue::Bool(true)] {
+                span.attributes.insert(
+                    OP_INPUTS_ATTR.into(),
+                    AnyValue::KvList(BTreeMap::from([(name.into(), value.clone())])),
+                );
+                issues.clear();
+                validate_operation(&span, &component, &component.component.operations[0], &registry, &mut issues);
+                if matches!(value, AnyValue::Int(_)) {
+                    assert!(issues.is_empty(), "{name}: {issues:?}");
+                } else {
+                    assert_eq!(issues.len(), 1);
+                    assert_eq!(issues[0].location, format!("$.spans[0].inputs[{quoted}]"));
+                }
+            }
+        }
+
+        let integer = serde_json::json!({"kind":"primitive","name":"i32"});
+        let field = |name: &str, value_type| serde_json::json!({"name":name,"type":value_type});
+        let record = |fields| serde_json::json!({"kind":"record","fields":fields});
+        let kv = |name: &str, value| AnyValue::KvList(BTreeMap::from([(name.into(), value)]));
+        let bad = AnyValue::Bool(true);
+        let cases = [
+            (record(vec![field("a.b", integer.clone())]), kv("a.b", bad.clone()), "$[\"a.b\"]"),
+            (
+                record(vec![field("a", record(vec![field("b", integer.clone())]))]),
+                kv("a", kv("b", bad.clone())),
+                "$.a.b",
+            ),
+            (record(vec![field("0", integer.clone())]), kv("0", bad.clone()), "$[\"0\"]"),
+            (
+                serde_json::json!({"kind":"tuple","items":[integer.clone()]}),
+                AnyValue::Array(vec![bad.clone()].into_boxed_slice()),
+                "$[0]",
+            ),
+            (
+                serde_json::json!({"kind":"map","ordered":false,"keys":{"kind":"primitive","name":"string"},"values":integer.clone()}),
+                kv("q\"\\", bad.clone()),
+                "$[\"q\\\"\\\\\"]",
+            ),
+            (
+                serde_json::json!({"kind":"tagged_union","variants":[{"name":"Some","payload":integer.clone()}]}),
+                kv("Some", bad.clone()),
+                "$[\"Some\"]",
+            ),
+            (serde_json::json!({"kind":"optional","value":integer}), kv("Some", bad), "$.Some"),
+        ];
+        for (value_type, value, expected) in cases {
+            let value_type: TypeRef = serde_json::from_value(value_type).expect("type");
+            issues.clear();
+            super::validate_value(&value, &value_type, &component, &registry, "$", &mut issues);
+            assert_eq!(issues.len(), 1, "{expected}: {issues:?}");
+            assert_eq!(issues[0].location, expected);
+            assert_eq!(issues[0].message, "i32 must use intValue");
+        }
     }
 
     #[test]
