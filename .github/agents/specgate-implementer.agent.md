@@ -23,8 +23,9 @@ assertion path.
 Add focused tests and directly related documentation; update the pages that
 `docs/contributor/docs-impact.json` maps to the changed code and resolve every
 `just docs-impact` finding. Regenerate generated
-goldens; never hand-edit them. Use focused `just` recipes while iterating, then
-run `just check`. Release or packaging work also runs `just package-smoke`.
+goldens; never hand-edit them. Follow the
+[validation policy](../../CONTRIBUTING.md#validation-policy) for required
+checks, focused-check exceptions, evidence reuse, and merge gates.
 
 Return the diff summary, artifact changes, validation evidence, and any
 remaining assumptions. Do not commit or push without explicit authorization.

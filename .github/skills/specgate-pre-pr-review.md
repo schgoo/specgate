@@ -23,13 +23,9 @@ running validation.
      `docs/contributor/docs-impact.json` was checked, a search for the old
      rule's wording finds no stale statement, and `just docs-impact` passes;
    - no human-owned decision was silently finalized.
-3. Run focused validation and the complete gate:
-
-   ```text
-   just check
-   ```
-
-4. Run `just package-smoke` when release or packaging behavior changed.
+3. Follow the [validation policy](../../CONTRIBUTING.md#validation-policy) for
+   required checks, focused-check exceptions, evidence reuse, and merge gates.
+   Report the commands run, their results, and any checks not run.
 
 ## Output
 
