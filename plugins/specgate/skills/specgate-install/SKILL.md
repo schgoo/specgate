@@ -28,7 +28,7 @@ you instrument.
 - C# targets:
   - The .NET 10 runtime, to run the C# discovery tool (`SpecGate.Discovery`
     targets `net10.0` and ships framework-dependent). Building it from source
-    needs the .NET 10 SDK.
+    supports the .NET 10 and 11 SDKs.
   - An SDK that can build and test your projects, which must target .NET 8 or
     later. Capture builds and runs your tests with `dotnet`.
 
