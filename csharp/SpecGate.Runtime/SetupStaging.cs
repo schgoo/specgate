@@ -55,22 +55,23 @@ public sealed class SetupStaging
             return null;
         }
 
-        SemanticInput[] declared = OperationMetadata.For(method).Inputs;
-        if (declared.Length != arguments.Length)
+        OperationMetadata metadata = OperationMetadata.For(method);
+        SemanticInput[] declared = metadata.Inputs;
+        if (metadata.ParameterCount != arguments.Length)
         {
             throw new SpecGateCaptureException(
                 CaptureRejection.TypeMismatch,
                 $"specgate: setup '{declarations[0].Key.Producer}' received {arguments.Length} "
-                + $"argument(s) but declares {declared.Length}.");
+                + $"argument(s) but declares {metadata.ParameterCount}.");
         }
 
         SortedDictionary<string, Value> inputs = new(Utf8KeyComparer.Instance);
         string? unrecordable = null;
-        for (int index = 0; index < declared.Length; index++)
+        foreach (SemanticInput input in declared)
         {
             try
             {
-                foreach (KeyValuePair<string, Value> leaf in InputFolding.Project(declared[index], arguments[index]))
+                foreach (KeyValuePair<string, Value> leaf in InputFolding.Project(input, arguments[input.Position]))
                 {
                     if (!inputs.TryAdd(leaf.Key, leaf.Value))
                     {
@@ -85,7 +86,7 @@ public sealed class SetupStaging
                 // The producer still runs as written; only the operations it
                 // prepares become unrecordable, and only if one is invoked.
                 unrecordable ??= NativeFault.Unrecordable(
-                    $"parameter '{declared[index].Name}' of setup '{declarations[0].Key.Producer}'", exception);
+                    $"parameter '{input.Name}' of setup '{declarations[0].Key.Producer}'", exception);
             }
         }
 

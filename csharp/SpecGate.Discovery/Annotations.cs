@@ -82,6 +82,12 @@ internal static class Annotations
     internal static string? Text(object? attribute, string property) =>
         attribute?.GetType().GetProperty(property)?.GetValue(attribute) as string;
 
+    internal static bool InputIgnored(ParameterInfo parameter)
+    {
+        object? attribute = FirstOn(parameter, Input, inherit: true);
+        return attribute?.GetType().GetProperty("Ignore")?.GetValue(attribute) is true;
+    }
+
     internal static bool PropertySetup(Type type)
     {
         object? attribute = FirstOn(type, Event, inherit: false);
@@ -150,7 +156,14 @@ internal static class Annotations
         if (!inherit || parameter.Member is not MethodInfo method) yield break;
         MethodInfo baseDefinition = method.GetBaseDefinition();
         if (baseDefinition == method) yield break;
-        ParameterInfo[] baseParameters = baseDefinition.GetParameters();
-        if (parameter.Position >= 0 && parameter.Position < baseParameters.Length) yield return baseParameters[parameter.Position];
+        for (Type? current = method.DeclaringType?.BaseType; current is not null; current = current.BaseType)
+        {
+            MethodInfo? declaration = current.GetMethods(
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+                .FirstOrDefault(candidate => candidate.GetBaseDefinition() == baseDefinition);
+            if (declaration is null) continue;
+            ParameterInfo[] parameters = declaration.GetParameters();
+            if (parameter.Position >= 0 && parameter.Position < parameters.Length) yield return parameters[parameter.Position];
+        }
     }
 }

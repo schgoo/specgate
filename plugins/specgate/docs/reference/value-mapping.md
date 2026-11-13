@@ -278,6 +278,24 @@ C# `TypeArguments` annotations. See
 [`../status.md`](https://github.com/schgoo/specgate/blob/v0.6.0/docs/status.md#candidate-replay-and-explicit-generic-operations)
 for specialization syntax and completion-channel restrictions.
 
+## Ignored context inputs
+
+C# operation and setup-producer parameters can use
+`[SpecInput("context", Ignore = true)]`. These parameters do not contribute
+semantic inputs, type declarations, or captured values. Remaining inputs keep
+their native argument positions; ordinary calls still receive every argument.
+Raw C# discovery metadata retains ignored parameters and their native types.
+Ignored parameters are absent from setup matching as well as comparison.
+Ignored contexts must still be boxable: by-value ref structs such as `Span<T>`
+and generic parameters with `allows ref struct` are rejected by the weaver.
+
+Ignoring context is the author's assertion that it does not affect captured
+behavior. Cancellation causes are not modeled: cancellation can still change
+the recorded outcome. This implements the C# input part of the accepted
+[value-decomposition decision](https://github.com/schgoo/specgate/blob/v0.6.0/docs/decisions/value-decomposition.md#annotations).
+Rust ignored inputs, ignored record fields, and C# candidate replay remain
+unimplemented; this does not add a replay-default mechanism.
+
 ## Names
 
 - Rust field names and C# member names become CTSC field names. Rust fields can

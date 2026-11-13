@@ -314,6 +314,11 @@ value as its result.
 | Rejected | Async setups | Async setups, `async void`, async iterators, `async` methods returning other awaitables |
 | Replay | Directly awaited free functions and setup-backed methods use the candidate's Arty, Smol, Tokio, or custom execution wrapper | Captured C# stimuli can replay against Rust async candidates; C# candidate replay is unsupported |
 
+C# async operations can omit context parameters with
+`[SpecInput("context", Ignore = true)]`. The original argument still reaches
+the body. Ignoring a token does not change cancellation recording or explain
+why cancellation occurred; see [value mapping](${PLUGIN_DIR}/docs/reference/value-mapping.md#ignored-context-inputs).
+
 Wrap a future you intend to abandon inside an enclosing annotated operation
 that completes; the abandonment is then recorded on the inner span
 ([`decisions/top-level-abandonment-unsupported.md`](https://github.com/schgoo/specgate/blob/v0.6.0/docs/decisions/top-level-abandonment-unsupported.md)).

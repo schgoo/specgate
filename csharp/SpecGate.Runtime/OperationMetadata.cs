@@ -43,14 +43,17 @@ internal sealed class OperationMetadata
     private static readonly ConcurrentDictionary<RuntimeMethodHandle, OperationMetadata> Cache = new();
     private static readonly ConcurrentDictionary<(RuntimeMethodHandle Method, string Component, string Operation), string> OperationNames = new();
 
-    private OperationMetadata(SemanticInput[] inputs, SemanticType? result, Type[]? declaredExceptions)
+    private OperationMetadata(int parameterCount, SemanticInput[] inputs, SemanticType? result, Type[]? declaredExceptions)
     {
+        ParameterCount = parameterCount;
         Inputs = inputs;
         Result = result;
         DeclaredExceptions = declaredExceptions;
     }
 
     internal SemanticInput[] Inputs { get; }
+
+    internal int ParameterCount { get; }
 
     /// <summary>The return value's meaning, or <see langword="null"/> for a void operation.</summary>
     internal SemanticType? Result { get; }
@@ -122,13 +125,10 @@ internal sealed class OperationMetadata
                 "specgate: a woven operation's method could not be resolved.");
 
         ParameterInfo[] parameters = method.GetParameters();
-        SemanticInput[] inputs = new SemanticInput[parameters.Length];
-        for (int index = 0; index < parameters.Length; index++)
-        {
-            ParameterInfo parameter = parameters[index];
-            inputs[index] = new SemanticInput(
-                InputName(parameter), SemanticType.ForParameter(parameter, method));
-        }
+        SemanticInput[] inputs = [.. parameters
+            .Where(parameter => parameter.GetCustomAttribute<SpecInputAttribute>(inherit: true)?.Ignore != true)
+            .Select(parameter => new SemanticInput(
+                InputName(parameter), SemanticType.ForParameter(parameter, method), parameter.Position))];
 
         RejectDuplicates(method, inputs);
 
@@ -142,7 +142,7 @@ internal sealed class OperationMetadata
             result = SemanticType.Named(method.DeclaringType!);
         }
 
-        return new OperationMetadata(inputs, result, DeclaredExceptionsOf(method));
+        return new OperationMetadata(parameters.Length, inputs, result, DeclaredExceptionsOf(method));
     }
 
     /// <summary>
@@ -219,9 +219,11 @@ internal sealed class OperationMetadata
 }
 
 /// <summary>One recorded operation input.</summary>
-internal sealed class SemanticInput(string name, SemanticType type)
+internal sealed class SemanticInput(string name, SemanticType type, int position)
 {
     internal string Name { get; } = name;
 
     internal SemanticType Type { get; } = type;
+
+    internal int Position { get; } = position;
 }
