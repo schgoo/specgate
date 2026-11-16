@@ -24,6 +24,78 @@ public sealed class ValueProjectionTests
     private const string Component = "fixture.projection";
 
     [Fact]
+    public void IgnoredMembersOmitOpaqueContextAcrossRecordsNestedValuesAndUnionPayloads()
+    {
+        var value = new IgnoredRecord();
+        OperationSpan span = Capture(nameof(Declarations.IgnoredMembers), [value, value], value);
+        Value expected = Map(("Visible", Value.Integer(7)), ("Nested", Value.Unit));
+        Assert.Equal(expected, Named(span, "value"));
+        Assert.Equal(Value.Tagged(nameof(IgnoredRecord), expected), Named(span, "variant"));
+        Assert.Equal(expected, span.Result());
+        Assert.Equal(["Visible", "Nested"],
+            SemanticType.MembersOf(typeof(IgnoredRecord)).Select(member => member.Name));
+    }
+
+    [Fact]
+    public void IgnoredInheritedSetupAnnotationsDisableInferenceWithoutValidatingOrReadingGetters()
+    {
+        OperationSpan span = Capture(nameof(Declarations.IgnoredSetups),
+            [new IgnoredOnlySetup(), new IgnoredMixedSetup(), new IgnoredReplacedSetup()]);
+        Assert.Equal(["Context", "chosen"], span.Inputs.Keys);
+        Assert.Equal(Value.Integer(9), Named(span, "chosen"));
+        Assert.Equal(Value.Integer(11), Named(span, "Context"));
+        Assert.Empty(SemanticType.MembersOf(typeof(IgnoredOnlySetup)));
+    }
+
+    [SpecEvent]
+    private abstract class IgnoredBase
+    {
+        [SpecEvent] public int Removed { get; set; } = 1;
+        [SpecEvent] public int Visible { get; set; } = 7;
+        [SpecEvent(Ignore = true)] public virtual int Unannotated => 2;
+    }
+
+    [SpecEvent]
+    private sealed class IgnoredRecord : IgnoredBase
+    {
+        [SpecEvent(Ignore = true)] public new Action Removed => throw new InvalidOperationException(GetType().Name);
+        public override int Unannotated => throw new InvalidOperationException();
+        [SpecEvent("Visible", Ignore = true)] public Action Context = null!;
+        [SpecEvent(Ignore = true)] public int Explodes => throw new InvalidOperationException(GetType().Name);
+        [SpecEvent] public IgnoredEmpty Nested { get; set; } = new();
+    }
+
+    [SpecEvent]
+    private sealed class IgnoredEmpty
+    {
+        [SpecEvent(Ignore = true)] public Action Context { get; set; } = null!;
+    }
+
+    private class IgnoredSetupBase
+    {
+        [SpecEvent(Ignore = true)] public Action Context { private get; set; } = null!;
+    }
+
+    [SpecEvent(Setup = true)]
+    private sealed class IgnoredOnlySetup : IgnoredSetupBase
+    {
+        public Action Extra => throw new InvalidOperationException(GetType().Name);
+    }
+
+    [SpecEvent(Setup = true)]
+    private sealed class IgnoredMixedSetup : IgnoredSetupBase
+    {
+        [SpecEvent("chosen")] public int Selected { get; set; } = 9;
+        public Action Extra => throw new InvalidOperationException(GetType().Name);
+    }
+
+    [SpecEvent(Setup = true)]
+    private sealed class IgnoredReplacedSetup : IgnoredSetupBase
+    {
+        public new int Context { get; set; } = 11;
+    }
+
+    [Fact]
     public void IgnoringAllInputsStillRequiresTheFullNativeArgumentList()
     {
         Assert.Empty(Capture(nameof(Declarations.IgnoredContext), [new object()]).Inputs);
@@ -1089,6 +1161,10 @@ public sealed class ValueProjectionTests
     /// <summary>Declarations standing in for the woven methods under capture.</summary>
     private static class Declarations
     {
+        internal static IgnoredRecord IgnoredMembers(IgnoredRecord value, IgnoredBase variant) => value;
+        internal static void IgnoredSetups(IgnoredOnlySetup empty, IgnoredMixedSetup mixed, IgnoredReplacedSetup replaced) =>
+            _ = (empty, mixed, replaced);
+
         internal static void IgnoredContext([SpecInput("context", Ignore = true)] object context) => _ = context;
 
         [SpecException]
@@ -1343,6 +1419,8 @@ internal sealed class InheritedCollision : InheritedSelection
 {
     [SpecEvent("selected")]
     public int Different { get; set; }
+    [SpecEvent("selected", Ignore = true)]
+    public Action Context { get; set; } = null!;
 }
 
 [SpecEvent]

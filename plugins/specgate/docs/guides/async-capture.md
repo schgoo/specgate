@@ -73,6 +73,8 @@ C# async operations can omit context parameters with
 `[SpecInput("context", Ignore = true)]`. The original argument still reaches
 the body. Ignoring a token does not change cancellation recording or explain
 why cancellation occurred; see [value mapping](../reference/value-mapping.md#ignored-context-inputs).
+C# record members marked `[SpecEvent(Ignore = true)]` are also omitted from
+async inputs and awaited results, using the same projection as synchronous calls.
 
 Wrap a future you intend to abandon inside an enclosing annotated operation
 that completes; the abandonment is then recorded on the inner span

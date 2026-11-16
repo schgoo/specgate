@@ -6,6 +6,9 @@ public class NamedEntity
 {
     [SpecEvent("entity_name")]
     public string Name { get; set; } = string.Empty;
+
+    [SpecEvent(Ignore = true)]
+    public Action Context => throw new InvalidOperationException(Name);
 }
 
 [SpecEvent("EntityType")]

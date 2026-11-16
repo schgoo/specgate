@@ -200,6 +200,10 @@ The matrix is exact:
 The detailed list is the single table in `docs/reference/limitations.md`;
 architecture and status are in `docs/status.md`. Important current boundaries include:
 
+- C# `SpecEvent.Ignore` omits effective record fields/properties before mapping
+  or getter evaluation, including nested records, union payloads, and property
+  setups. Setup annotation presence is detected before ignoring; ignored-only
+  annotations yield zero fields. Rust ignored fields remain unsupported.
 - CTSC `0.4.0` uses `collection` with required `ordered`/`unique` and `map`
   with required `ordered`; old bundles require recapture. Strict `0.2.0`
   preserves bag multiplicity and uses recursive uniqueness. C# generic

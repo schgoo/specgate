@@ -17,6 +17,21 @@ namespace SpecGate.Weaver.Tests;
 public sealed class WovenCaptureTests
 {
     [Fact]
+    public void IgnoredRecordContextReachesTheBodyButNotNativeInputsOrResults()
+    {
+        int calls = 0;
+        var value = new Arithmetic.ContextRecord { Visible = 7, Callback = () => calls++ };
+        Assert.Same(value, Arithmetic.RecordContext(value));
+        using CaptureSession session = CaptureScenario.Begin("weaver.basic");
+        Assert.Same(value, Arithmetic.RecordContext(value));
+        Assert.Equal(2, calls);
+        Assert.Equal(9, value.Visible);
+        OperationSpan span = Assert.Single(session.Finish().Operations);
+        Assert.Equal(Value.Map([new("Visible", Value.Integer(8))]), Assert.Single(span.Inputs).Value);
+        Assert.Equal(Value.Map([new("Visible", Value.Integer(9))]), span.Result());
+    }
+
+    [Fact]
     public void IgnoreOnAnIntermediateOverridePreservesSurvivingNativePositions()
     {
         using CaptureSession session = CaptureScenario.Begin("weaver.basic");

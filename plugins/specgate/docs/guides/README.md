@@ -19,7 +19,7 @@ Before you annotate anything, write down:
 | Candidate mapping | The Rust function or method that implements each reference operation, with the same component id, operation names, and input names. |
 | Existing tests | The tests that already call the reference API. Each passing test that calls one of the component's operations directly becomes a scenario. |
 | Semantic inputs | Where each operation input comes from: a parameter, or a setup construction input. |
-| Ignored context | Author-asserted nonsemantic parameters; Rust uses `#[spec_input(ignore)]` with `Default` for replay, C# uses `SpecInput.Ignore`. Ignored fields are not supported. |
+| Ignored context | Author-asserted nonsemantic parameters; Rust uses `#[spec_input(ignore)]` with `Default` for replay, C# uses `SpecInput.Ignore`. C# record fields/properties support `SpecEvent.Ignore`; Rust ignored fields remain unsupported. |
 | Setup producers | Which annotated setup builds each receiver or injected parameter, in each language. |
 | Observable results | The return values, declared errors, and nested annotated operations that comparison will check. |
 

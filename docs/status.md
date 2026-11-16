@@ -78,8 +78,12 @@ separate from the language-neutral CTSC registry.
 
 Rust and C# operation/setup ignored parameters (#133) are supported. Rust uses
 `#[spec_input(ignore)]` with a compile-time `Default` bound; capture preserves
-the actual context and replay defaults it in native order. Ignored `SpecEvent`
-fields remain unsupported in both languages; #133 is not wholly complete.
+the actual context and replay defaults it in native order. C# record fields and
+properties support `SpecEvent.Ignore` in discovery/capture, including nested
+records, inherited members, union payloads, and property setups. Effective slots
+and setup annotation presence are resolved before ignore filtering; ignored-only
+setup annotations yield zero semantic fields. Rust ignored `SpecEvent` fields
+remain unsupported; #133 is not wholly complete.
 
 C# inherited record members (#127) are supported in discovery and capture,
 including property setups and union payloads. Effective public instance members

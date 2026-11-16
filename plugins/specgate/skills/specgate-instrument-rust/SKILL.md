@@ -71,7 +71,8 @@ fn adds_two_numbers() {
   `#[spec_input(ignore)]` or `#[spec_input("context", ignore)]`. The type must
   implement `Default`, but needs no `ToNativeValue`. Ordinary calls retain the
   supplied context; only replay constructs its default in the native argument
-  position. This does not support ignored `SpecEvent` fields.
+  position. Rust ignored `SpecEvent` fields remain unsupported; C# reference
+  record fields/properties can use `[SpecEvent(Ignore = true)]`.
 - The macros resolve your actual `specgate` dependency, so a renamed
   dependency (`sg = { package = "specgate", … }`) works.
 
@@ -326,6 +327,8 @@ C# async operations can omit context parameters with
 `[SpecInput("context", Ignore = true)]`. The original argument still reaches
 the body. Ignoring a token does not change cancellation recording or explain
 why cancellation occurred; see [value mapping](${PLUGIN_DIR}/docs/reference/value-mapping.md#ignored-context-inputs).
+C# record members marked `[SpecEvent(Ignore = true)]` are also omitted from
+async inputs and awaited results, using the same projection as synchronous calls.
 
 Wrap a future you intend to abandon inside an enclosing annotated operation
 that completes; the abandonment is then recorded on the inner span

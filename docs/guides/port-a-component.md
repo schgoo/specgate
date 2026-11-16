@@ -28,8 +28,9 @@ opted-in property setups. The full list is in
 [limitations](../reference/limitations.md).
 
 Nonsemantic parameters can be ignored with C# `SpecInput.Ignore` and Rust
-`#[spec_input(ignore)]`. Rust replay defaults ignored parameters; neither
-language currently supports ignored `SpecEvent` fields. See
+`#[spec_input(ignore)]`. Rust replay defaults ignored parameters. C# reference
+record fields/properties can use `SpecEvent.Ignore`; Rust ignored `SpecEvent`
+fields remain unsupported. Match the reference's surviving semantic fields. See
 [ignored context inputs](../reference/value-mapping.md#ignored-context-inputs).
 
 The candidate can use `Vec<T>` for C# bags, sets, or ordered sets, and pair

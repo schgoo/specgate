@@ -55,7 +55,8 @@ fn adds_two_numbers() {
   `#[spec_input(ignore)]` or `#[spec_input("context", ignore)]`. The type must
   implement `Default`, but needs no `ToNativeValue`. Ordinary calls retain the
   supplied context; only replay constructs its default in the native argument
-  position. This does not support ignored `SpecEvent` fields.
+  position. Rust ignored `SpecEvent` fields remain unsupported; C# reference
+  record fields/properties can use `[SpecEvent(Ignore = true)]`.
 - The macros resolve your actual `specgate` dependency, so a renamed
   dependency (`sg = { package = "specgate", … }`) works.
 

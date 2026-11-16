@@ -54,7 +54,8 @@ signature. `Ignore` does not permit by-reference, pointer, or non-boxable
 parameters such as `Span<T>` and generic parameters with `allows ref struct`;
 the weaver rejects these before emitting capture code.
 Rust operation and synchronous setup parameters use `#[spec_input(ignore)]`
-with `Default` for replay. Ignored `SpecEvent` fields remain unsupported in both languages.
+with `Default` for replay. C# record members use `SpecEvent.Ignore` (below);
+Rust ignored `SpecEvent` fields remain unsupported.
 See [ignored context inputs](../reference/value-mapping.md#ignored-context-inputs).
 
 ### 2. Reuse the existing tests
@@ -111,6 +112,13 @@ resolve to the same semantic name are rejected. Unannotated ordinary members,
 static/private members, and properties without public non-indexed getters are
 not recorded. Union payloads follow the same rules. Operation and setup method
 discovery remains declared-only.
+
+Use `[SpecEvent(Ignore = true)]` on nonsemantic record fields or properties,
+including inherited members, nested records, and union payload members.
+Their types need not be supported, and their getters are never validated or
+read. Ignoring changes only semantic mapping/projection, not the native object.
+An ignored child declaration removes its source-name slot without falling back
+to the base declaration. Ignoring whole types or enum variants is not supported.
 
 See [`../reference/value-mapping.md`](../reference/value-mapping.md) for every
 supported type and the values capture rejects.
@@ -174,7 +182,10 @@ For object-initializer parameters, use `[SpecEvent(Setup = true)]` on the type.
 Without member annotations in the effective inherited scope, all public instance
 fields and readable properties participate; otherwise only annotated members
 participate. The same base-first replacement rule applies, so inherited explicit
-annotations prevent accidental all-member inference. Selected property-setup
+annotations prevent accidental all-member inference. This detection includes
+ignored annotations **before** ignore filtering: an ignored-only annotation
+leaves zero semantic fields, not all-minus-ignored. In mixed setups, annotate
+every desired surviving member. Selected property-setup
 properties must have public non-indexed getters.
 Capture reads their final values at operation entry and folds their semantic
 names into flat inputs. A member whose type is itself `Setup = true` is folded

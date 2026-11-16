@@ -378,9 +378,11 @@ internal sealed class SemanticType : IEquatable<SemanticType>
         IReadOnlyList<MemberInfo> effective = RecordMembers.Effective(type);
         List<SemanticMember> members = [];
         bool setup = IsPropertySetup(type);
+        // Even ignored annotations disable setup inference; filter only after slot replacement.
         bool all = setup && !effective.Any(HasSpecEvent);
         foreach (MemberInfo member in effective)
         {
+            if (member.GetCustomAttribute<SpecEventAttribute>(inherit: false)?.Ignore == true) continue;
             if (!all && !HasSpecEvent(member)) continue;
             if (member is PropertyInfo property)
             {

@@ -9,6 +9,22 @@ namespace SpecGate.WeaverFixtures;
 /// </summary>
 public static class Arithmetic
 {
+    [SpecEvent]
+    public sealed class ContextRecord
+    {
+        [SpecEvent] public int Visible { get; set; }
+        [SpecEvent(Ignore = true)] public Action Callback { get; set; } = null!;
+        [SpecEvent(Ignore = true)] public int Explodes => throw new InvalidOperationException(GetType().Name);
+    }
+
+    [SpecOperation("record_context", Spec = "weaver.basic")]
+    public static ContextRecord RecordContext(ContextRecord value)
+    {
+        value.Callback();
+        value.Visible++;
+        return value;
+    }
+
     [SpecOperation("context_add", Spec = "weaver.basic")]
     public static int AddWithContext(int before,
         [SpecInput("before", Ignore = true)] Action context, int after)

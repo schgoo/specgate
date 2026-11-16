@@ -35,6 +35,12 @@ Cargo intermediates can reuse incompatible unhashed library artifacts;
 SpecGate isolates these builds for `cdylib`, `staticlib`, and `dylib` candidates
 while retaining shared dependency builds for ordinary Rust libraries.
 
+For C# opaque record context, `[SpecEvent(Ignore = true)]` excludes the member
+before type mapping and getter validation/evaluation. In property setups, even
+an inherited ignored annotation disables all-member inference: annotate each
+desired surviving member, or an ignored-only setup has zero semantic fields.
+See [ignored members](../reference/value-mapping.md#c-ignored-record-fields-and-properties).
+
 ## Expected output
 
 After the fix, `Complete(...)` and exit code 0. [smoke]
