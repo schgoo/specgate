@@ -57,8 +57,8 @@ public sealed class WovenSetupTests
     {
         using CaptureSession session = CaptureScenario.Begin("weaver.setup");
 
-        _ = Counter.Make(5);
-        Counter counter = Counter.Make(5);
+        _ = Counter.Make(new object(), 5);
+        Counter counter = Counter.Make(new object(), 5);
         Assert.Equal(7, counter.Increment(2));
 
         OperationSpan span = Assert.Single(session.Finish().Operations);
@@ -70,10 +70,10 @@ public sealed class WovenSetupTests
     public void ASetupThatRunsTwiceWithDifferentInputsIsRejected()
     {
         using CaptureSession session = CaptureScenario.Begin("weaver.setup");
-        _ = Counter.Make(5);
+        _ = Counter.Make(new object(), 5);
 
         SpecGateCaptureException rejection =
-            Assert.Throws<SpecGateCaptureException>(() => Counter.Make(6));
+            Assert.Throws<SpecGateCaptureException>(() => Counter.Make(new object(), 6));
 
         Assert.Equal(CaptureRejection.SetupAmbiguity, rejection.Rejection);
         Assert.Contains("start=5 then start=6", rejection.Message, StringComparison.Ordinal);

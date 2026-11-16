@@ -12,10 +12,22 @@ namespace SpecGate.Weaver.Tests;
 /// </summary>
 public sealed class WeaveRejectionTests
 {
+    [Theory]
+    [InlineData("SpanContext", "operation")]
+    [InlineData("SpanSetup", "setup")]
+    [InlineData("GenericContext", "operation")]
+    public void RejectsIgnoredRefStructContextsBeforeEmittingInvalidBoxing(string method, string kind)
+    {
+        WeaveException failure = WeaveFixture("SpecGate.WeaverNegativeFixtures", method);
+        Assert.Contains("context", failure.Message, StringComparison.Ordinal);
+        Assert.Contains("cannot be boxed", failure.Message, StringComparison.Ordinal);
+        Assert.Contains($"SpecGate {kind}s", failure.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void RejectsAsyncVoidOperation()
     {
-        WeaveException failure = WeaveFixture("SpecGate.WeaverNegativeFixtures");
+        WeaveException failure = WeaveFixture("SpecGate.WeaverNegativeFixtures", "FireAndForget");
 
         Assert.Contains("FireAndForget", failure.Message, StringComparison.Ordinal);
         Assert.Contains("async operation returning", failure.Message, StringComparison.Ordinal);
@@ -123,7 +135,7 @@ public sealed class WeaveRejectionTests
     /// must raise. Weaving a copy leaves the fixture assembly in the test
     /// output untouched for the other facts.
     /// </summary>
-    private static WeaveException WeaveFixture(string assemblyName)
+    private static WeaveException WeaveFixture(string assemblyName, string? onlyMethod = null)
     {
         string source = Path.Combine(AppContext.BaseDirectory, assemblyName + ".dll");
         Assert.True(File.Exists(source), $"Negative fixture assembly not found at {source}.");
@@ -133,7 +145,19 @@ public sealed class WeaveRejectionTests
         try
         {
             string target = Path.Combine(workingDirectory, Path.GetFileName(source));
-            File.Copy(source, target);
+            if (onlyMethod is null)
+            {
+                File.Copy(source, target);
+            }
+            else
+            {
+                using AssemblyDefinition assembly = AssemblyDefinition.ReadAssembly(source);
+                foreach (MethodDefinition method in assembly.MainModule.Types.SelectMany(type => type.Methods))
+                {
+                    if (method.Name != onlyMethod) method.CustomAttributes.Clear();
+                }
+                assembly.Write(target);
+            }
             File.Copy(
                 Path.Combine(AppContext.BaseDirectory, "SpecGate.Annotations.dll"),
                 Path.Combine(workingDirectory, "SpecGate.Annotations.dll"));

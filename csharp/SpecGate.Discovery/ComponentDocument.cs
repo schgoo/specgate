@@ -321,6 +321,7 @@ internal sealed class ComponentDocument
         var list = new List<string[]>();
         foreach (ParameterInfo parameter in method.GetParameters())
         {
+            if (Annotations.InputIgnored(parameter)) continue;
             list.Add([ParameterName(parameter), semantic.RenderParameter(parameter)]);
         }
 

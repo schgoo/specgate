@@ -10,6 +10,15 @@ namespace SpecGate.WeaverFixtures;
 /// </summary>
 public static class AsyncOperations
 {
+    [SpecOperation("context_add", Spec = "weaver.async")]
+    public static async Task<int> AddWithContext(int before,
+        [SpecInput("context", Ignore = true)] Action context, int after)
+    {
+        await Task.Yield();
+        context();
+        return before + after;
+    }
+
     [SpecOperation("catch_all_option_task", Spec = "weaver.exception_wrappers"), SpecException]
     public static async Task<Option<int>> CatchAllOptionTask(int state)
     {

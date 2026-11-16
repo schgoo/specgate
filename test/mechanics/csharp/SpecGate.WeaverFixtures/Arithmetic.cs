@@ -9,6 +9,17 @@ namespace SpecGate.WeaverFixtures;
 /// </summary>
 public static class Arithmetic
 {
+    [SpecOperation("context_add", Spec = "weaver.basic")]
+    public static int AddWithContext(int before,
+        [SpecInput("before", Ignore = true)] Action context, int after)
+    {
+        context();
+        return before + after;
+    }
+
+    [SpecOperation("context_only", Spec = "weaver.basic")]
+    public static void ContextOnly([SpecInput("context", Ignore = true)] Action context) => context();
+
     [SpecOperation("catch_all_option", Spec = "weaver.exception_wrappers"), SpecException]
     public static Option<int> CatchAllOption(int state) => SelectOption(state);
 
@@ -93,5 +104,26 @@ public sealed class Accumulator
     {
         _total += amount;
         return _total;
+    }
+
+    public abstract class ContextRoot
+    {
+        public abstract int Read(Action context, int value);
+    }
+
+    public abstract class ContextMiddle : ContextRoot
+    {
+        public override int Read([SpecInput("context", Ignore = true)] Action context,
+            [SpecInput("amount")] int value) => value;
+    }
+
+    public sealed class ContextLeaf : ContextMiddle
+    {
+        [SpecOperation("inherited_context", Spec = "weaver.basic")]
+        public override int Read(Action context, int value)
+        {
+            context();
+            return value;
+        }
     }
 }

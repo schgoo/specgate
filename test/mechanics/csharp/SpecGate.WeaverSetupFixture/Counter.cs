@@ -15,7 +15,8 @@ public sealed class Counter
     public int Start { get; }
 
     [SpecSetup("increment", Spec = "weaver.setup")]
-    public static Counter Make([SpecInput("start")] int start) => new(start);
+    public static Counter Make([SpecInput("context", Ignore = true)] object context,
+        [SpecInput("start")] int start) => new(start);
 
     /// <summary>A setup whose body throws, so its provenance is never committed.</summary>
     [SpecSetup("broken", Spec = "weaver.setup")]

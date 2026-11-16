@@ -80,6 +80,72 @@ public sealed class ExplodingAttribute : Attribute
 
 public class DiscoveryRunnerTests
 {
+    [Fact]
+    public void IgnoreOnAnIntermediateOverrideIsInheritedWithoutLosingTheNativeSignature()
+    {
+        MethodInfo method = typeof(IgnoredLeaf).GetMethod(nameof(IgnoredLeaf.Read))!;
+        ComponentDocument document = new("fixtures.ignored_inputs", [],
+            [new AnnotatedMethod(method, [.. method.GetCustomAttributes<SpecOperationAttribute>()], [])],
+            new NullabilityInfoContext());
+        JsonElement operation = Assert.Single(
+            JsonSerializer.SerializeToElement(document.Build()).GetProperty("operations").EnumerateArray());
+        Assert.Equal("amount", Assert.Single(operation.GetProperty("params").EnumerateArray())[0].GetString());
+        Assert.Equal(["context", "amount"], operation.GetProperty("cs_params").EnumerateArray()
+            .Select(parameter => parameter[0].GetString()));
+    }
+
+    private abstract class IgnoredRoot
+    {
+        public abstract int Read(Action context, int value);
+    }
+
+    private abstract class IgnoredMiddle : IgnoredRoot
+    {
+        public override int Read([SpecInput("context", Ignore = true)] Action context,
+            [SpecInput("amount")] int value) => value;
+    }
+
+    private sealed class IgnoredLeaf : IgnoredMiddle
+    {
+        [SpecOperation("inherited_context", Spec = "fixtures.ignored_inputs")]
+        public override int Read(Action context, int value) => value;
+    }
+
+    [Theory]
+    [InlineData(nameof(IgnoredInputs.Read), false)]
+    [InlineData(nameof(IgnoredInputs.Prepare), true)]
+    public void IgnoredInputsLeaveSemanticParametersButKeepTheFullNativeSignature(string name, bool setup)
+    {
+        MethodInfo method = typeof(IgnoredInputs).GetMethod(name)!;
+        ComponentDocument document = new("fixtures.ignored_inputs", [],
+            [new AnnotatedMethod(method,
+                setup ? [] : [.. method.GetCustomAttributes<SpecOperationAttribute>()],
+                setup ? [.. method.GetCustomAttributes<SpecSetupAttribute>()] : [])],
+            new NullabilityInfoContext());
+
+        JsonElement actual = Assert.Single(
+            JsonSerializer.SerializeToElement(document.Build()).GetProperty("operations").EnumerateArray());
+        Assert.Equal(["before:i32", "after:i32"], actual.GetProperty("params").EnumerateArray()
+            .Select(parameter => $"{parameter[0].GetString()}:{parameter[1].GetString()}"));
+        Assert.Equal(["before", "context", "after"], actual.GetProperty("cs_params").EnumerateArray()
+            .Select(parameter => parameter[0].GetString()));
+        Assert.Equal("Action", actual.GetProperty("cs_params")[1][1].GetString());
+        Assert.Equal(name, actual.GetProperty("cs_method").GetString());
+        Assert.True(actual.GetProperty("cs_is_static").GetBoolean());
+        Assert.Equal(setup, actual.GetProperty("is_setup").GetBoolean());
+    }
+
+    private static class IgnoredInputs
+    {
+        [SpecOperation("read", Spec = "fixtures.ignored_inputs")]
+        public static int Read(int before,
+            [SpecInput("context", Ignore = true)][Exploding] Action context, int after) => before + after;
+
+        [SpecSetup("read", Spec = "fixtures.ignored_inputs")]
+        public static int Prepare(int before,
+            [SpecInput("context", Ignore = true)] Action context, int after) => before + after;
+    }
+
     [Theory]
     [InlineData(nameof(ExceptionReturns.Sync), typeof(int), "Result<i32, string>", false)]
     [InlineData(nameof(ExceptionReturns.Sync), typeof(Option<int>), "Result<Option<i32>, string>", false)]
@@ -643,7 +709,7 @@ public class DiscoveryRunnerTests
 
         Assert.Equal(["out"], system.Directories);
         string[] inventory = JsonSerializer.Deserialize<string[]>(system.Files[Path.Combine("out", "components.json")])!;
-        Assert.Equal(["fixtures.alpha", "fixtures.beta", "fixtures.gamma", "fixtures.generic"], inventory);
+        Assert.Equal(["fixtures.alpha", "fixtures.beta", "fixtures.gamma", "fixtures.generic", "fixtures.ignored_inputs"], inventory);
     }
 
     /// <summary>
@@ -658,7 +724,7 @@ public class DiscoveryRunnerTests
         Assert.Equal(0, DiscoveryRunner.Run(["out", "assembly.dll", "bin"], system.Adapter));
 
         string[] inventory = JsonSerializer.Deserialize<string[]>(system.Files[Path.Combine("out", "components.json")])!;
-        Assert.Equal(["fixtures.alpha", "fixtures.beta", "fixtures.gamma", "fixtures.generic"], inventory);
+        Assert.Equal(["fixtures.alpha", "fixtures.beta", "fixtures.gamma", "fixtures.generic", "fixtures.ignored_inputs"], inventory);
         Assert.Equal(
             ["record_reading", "record_reading"],
             Document(system, 0).GetProperty("operations").EnumerateArray().Select(operation => operation.GetProperty("name").GetString()));

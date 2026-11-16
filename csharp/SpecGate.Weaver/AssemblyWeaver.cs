@@ -33,7 +33,8 @@ public sealed class AssemblyWeaver
         }
 
         string pdbPath = Path.ChangeExtension(assemblyPath, ".pdb");
-        DefaultAssemblyResolver resolver = new();
+        using DefaultAssemblyResolver resolver = new();
+        resolver.AddSearchDirectory(Path.GetDirectoryName(typeof(object).Assembly.Location)!);
         string? directory = Path.GetDirectoryName(assemblyPath);
         if (!string.IsNullOrEmpty(directory))
         {

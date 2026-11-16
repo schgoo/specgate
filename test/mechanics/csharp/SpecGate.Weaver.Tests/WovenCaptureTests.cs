@@ -16,6 +16,37 @@ namespace SpecGate.Weaver.Tests;
 [Collection(WovenCaptureSerialization.Name)]
 public sealed class WovenCaptureTests
 {
+    [Fact]
+    public void IgnoreOnAnIntermediateOverridePreservesSurvivingNativePositions()
+    {
+        using CaptureSession session = CaptureScenario.Begin("weaver.basic");
+        bool called = false;
+        Assert.Equal(7, new Accumulator.ContextLeaf().Read(() => called = true, 7));
+        Assert.True(called);
+        OperationSpan span = Assert.Single(session.Finish().Operations);
+        Assert.Equal(Value.Integer(7), span.Inputs["amount"]);
+        Assert.Single(span.Inputs);
+        Assert.Equal(Value.Integer(7), span.Result());
+    }
+
+    [Fact]
+    public void IgnoredContextsStillReachTheBodyWithoutBeingProjectedOrShiftingInputs()
+    {
+        using CaptureSession session = CaptureScenario.Begin("weaver.basic");
+        int calls = 0;
+        Assert.Equal(5, Arithmetic.AddWithContext(2, () => calls++, 3));
+        Arithmetic.ContextOnly(() => calls++);
+        Assert.Equal(2, calls);
+
+        OperationSpan[] spans = [.. session.Finish().Operations];
+        Assert.Equal(2, spans.Length);
+        Assert.Equal(["after", "before"], spans[0].Inputs.Keys);
+        Assert.Equal([Value.Integer(3), Value.Integer(2)], spans[0].Inputs.Values);
+        Assert.Equal(Value.Integer(5), spans[0].Result());
+        Assert.Empty(spans[1].Inputs);
+        Assert.Null(spans[1].OperationCompletion);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(7)]

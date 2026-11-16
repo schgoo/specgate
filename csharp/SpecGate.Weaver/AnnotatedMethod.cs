@@ -14,6 +14,9 @@ internal static class AnnotatedMethod
     internal const string SpecOperationAttribute = "SpecGate.Annotations.SpecOperationAttribute";
     internal const string SpecSetupAttribute = "SpecGate.Annotations.SpecSetupAttribute";
 
+    // ECMA-335's AllowByRefLike flag is not named in this Cecil version.
+    private const int AllowByRefLike = 0x20;
+
     private const string AsyncStateMachineAttribute =
         "System.Runtime.CompilerServices.AsyncStateMachineAttribute";
     private const string IteratorStateMachineAttribute =
@@ -115,10 +118,23 @@ internal static class AnnotatedMethod
                     $"{method.FullName} has by-reference parameter '{parameter.Name}'. "
                     + $"SpecGate {kind}s must take parameters by value.");
             }
+
+            if (CannotBox(parameter.ParameterType))
+            {
+                throw new WeaveException(
+                    $"{method.FullName} has parameter '{parameter.Name}' that cannot be boxed. "
+                    + $"SpecGate {kind}s require boxable parameters even when SpecInput.Ignore is true.");
+            }
         }
 
         return [.. method.Parameters];
     }
+
+    private static bool CannotBox(TypeReference type) =>
+        type is GenericParameter parameter
+            ? ((int)parameter.Attributes & AllowByRefLike) != 0
+            : type.IsValueType && !type.IsPrimitive && type.Resolve().CustomAttributes.Any(
+                attribute => attribute.AttributeType.FullName == "System.Runtime.CompilerServices.IsByRefLikeAttribute");
 
     private static bool HasAttribute(MethodDefinition method, string fullName) =>
         method.CustomAttributes.Any(
