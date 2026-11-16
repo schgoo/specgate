@@ -50,7 +50,7 @@ pub fn expand_setup(attribute: TokenStream2, item: TokenStream2) -> syn::Result<
         ));
     }
     let stacked = function.attrs.iter().any(|attribute| attribute.path().is_ident("spec_setup"));
-    let params = collect_parameters(&mut function, !stacked);
+    let params = collect_parameters(&mut function, !stacked)?;
     let rt = runtime();
     let component = component(owner.as_deref());
     let explicit_component = owner.is_some();
@@ -65,17 +65,23 @@ pub fn expand_setup(attribute: TokenStream2, item: TokenStream2) -> syn::Result<
     if !is_async {
         let recorded = params
             .iter()
-            .map(|(ident, ty, semantic_name)| {
+            .filter(|(_, _, _, ignored)| !ignored)
+            .map(|(ident, ty, semantic_name, _)| {
                 let value = if is_mut_ref(ty) { quote!(&*#ident) } else { quote!(&#ident) };
                 quote!((#rt::FieldName::new(#semantic_name), #rt::ToNativeValue::to_native_value(#value)))
             })
             .collect::<Vec<_>>();
+        let defaults = params
+            .iter()
+            .filter(|(_, _, _, ignored)| *ignored)
+            .map(|(_, ty, _, _)| quote!(let _ = <#ty as ::core::default::Default>::default;));
         let body = function.block.clone();
         let return_type = match &function.sig.output {
             ReturnType::Default => quote!(()),
             ReturnType::Type(_, ty) => quote!(#ty),
         };
         *function.block = parse_quote!({
+            #(#defaults)*
             let __sg_setup_inputs = #rt::defer_setup(
                 #rt::SetupProvenance {
                     component_id: #rt::ComponentName::new(#component),
@@ -101,13 +107,15 @@ pub fn expand_setup(attribute: TokenStream2, item: TokenStream2) -> syn::Result<
         && owned_output(&function.sig.output)
     {
         let function_ident = &function.sig.ident;
-        let construct = if params.iter().all(|(_, ty, _)| primitive(ty).is_some()) {
-            let bindings = params.iter().map(|(ident, ty, name)| {
+        let construct = if params.iter().all(|(_, ty, _, ignored)| *ignored || primitive(ty).is_some()) {
+            let bindings = params.iter().filter(|(_, _, _, ignored)| !ignored).map(|(ident, ty, name, _)| {
                 let (ty, _) = primitive(ty).expect("validated primitive setup input");
                 quote!(let #ident: #ty = #rt::harness::argument(&mut values, #name)?;)
             });
-            let arguments = params.iter().map(|(ident, ty, _)| {
-                if primitive(ty).expect("validated primitive setup input").1 {
+            let arguments = params.iter().map(|(ident, ty, _, ignored)| {
+                if *ignored {
+                    quote!(::core::default::Default::default())
+                } else if primitive(ty).expect("validated primitive setup input").1 {
                     quote!(&#ident)
                 } else {
                     quote!(#ident)
@@ -179,12 +187,12 @@ pub fn expand_setup(attribute: TokenStream2, item: TokenStream2) -> syn::Result<
     } else {
         TokenStream2::new()
     };
-    let parameter_metadata = params.iter().map(|(_ident, ty, name)| {
+    let parameter_metadata = params.iter().map(|(_ident, ty, name, ignored)| {
         let ty = quote!(#ty).to_string();
         quote!(#rt::FieldMeta::new(
             #rt::FieldName::new(#name),
             #rt::RustType::new(#ty),
-        ))
+        ).ignored(#ignored))
     });
     let return_type = match &function.sig.output {
         ReturnType::Default => "()".to_string(),

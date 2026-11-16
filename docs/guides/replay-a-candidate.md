@@ -53,6 +53,9 @@ The reference may be Rust or C#; the candidate must be Rust.
    and writes it with deterministic ids and timestamps.
 
 Replay does not run your tests; it calls your operations directly.
+Rust operation and synchronous setup parameters marked `#[spec_input(ignore)]`
+consume no reference value: replay supplies `Default::default()` in their
+original native positions. Capture still uses the caller's actual context.
 Annotated synchronous setups reconstruct receiver and injected environments.
 Private/test-only producers remain in their original Cargo target. Equal
 receiver producer/input identities share state within a scenario; scenario

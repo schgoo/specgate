@@ -29,8 +29,17 @@ fn typed_async_client() {
         .block_on(async {
             let mut client = make_client(r#"[{"value":7},{"value":11}]"#.to_string());
             let offset = make_offset(3);
-            assert_eq!(client.find_by_type_name::<Item>("Item".to_string(), &offset).await[0].value, 7);
-            assert_eq!(client.find_by_type_name::<Item>("Item".to_string(), &offset).await.len(), 2);
+            assert_eq!(
+                client.find_by_type_name::<Item>("Item".to_string(), Context(17), &offset).await[0].value,
+                7
+            );
+            assert_eq!(
+                client
+                    .find_by_type_name::<Item>("Item".to_string(), Context(17), &offset)
+                    .await
+                    .len(),
+                2
+            );
             assert_eq!(client.calls(), 2);
         });
 }

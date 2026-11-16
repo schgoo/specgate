@@ -68,6 +68,10 @@ A CTSC registry: the operations, inputs, outcomes, and named types the
 component publishes. Format: [`../ctsc/registry.md`](../ctsc/registry.md). Type
 mapping from native code: [`value-mapping.md`](value-mapping.md).
 
+Ignored Rust and C# operation/setup parameters do not enter the registry or
+trace inputs. Native ignored positions and Rust replay defaults are internal
+invocation metadata, not additional bundle fields.
+
 Produced registries and trace resources use CTSC `0.4.0`; the capture-manifest
 format remains `0.1.0`. Collection ordering/uniqueness and map ordering are
 explicit registry semantics. Old 0.3 bundles must be recaptured, not

@@ -4,8 +4,17 @@ specgate::spec_component!("fixture.cli");
 
 pub const SPECIAL: &str = "nul:\0 backspace:\u{8} formfeed:\u{c} quote:\" slash:\\ cr:\r lf:\n tab:\t unicode:雪🙂";
 
+pub struct Context(u8);
+
+impl Default for Context {
+    fn default() -> Self {
+        Self(17)
+    }
+}
+
 #[spec_operation("add", spec = "fixture.cli.replay")]
-pub fn add(a: i32, b: i32) -> i32 {
+pub fn add(#[spec_input("a", ignore)] first: Context, a: i32, #[spec_input(ignore)] middle: Context, b: i32) -> i32 {
+    assert_eq!((first.0, middle.0), (17, 17));
     a + b
 }
 
@@ -22,7 +31,8 @@ pub struct Counter {
 }
 
 #[spec_setup("increment", spec = "fixture.cli.setup")]
-pub fn make_counter(initial: i32) -> Counter {
+pub fn make_counter(#[spec_input("initial", ignore)] context: Context, initial: i32) -> Counter {
+    assert_eq!(context.0, 17);
     Counter { count: initial }
 }
 
@@ -107,7 +117,7 @@ mod tests {
 
     #[test]
     fn adds_two_and_three() {
-        assert_eq!(add(2, 3), 5);
+        assert_eq!(add(Context(17), 2, Context(17), 3), 5);
     }
 
     #[test]
@@ -117,7 +127,7 @@ mod tests {
 
     #[test]
     fn folds_setup_construction_input() {
-        let mut counter = make_counter(4);
+        let mut counter = make_counter(Context(17), 4);
         counter.increment();
         assert_eq!(counter.count, 5);
     }

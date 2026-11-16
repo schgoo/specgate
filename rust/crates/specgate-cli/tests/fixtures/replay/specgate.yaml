@@ -2,6 +2,13 @@
 # The replay lane owns this copy of fixture.cli.replay so that it never leases
 # the packages that the other local check lanes build at the same time.
 components:
+  fixture.cli.setup:
+    implementations:
+      rust:
+        language: rust
+        sources: rust
+        tests:
+          projects: [rust/Cargo.toml]
   fixture.cli.replay:
     implementations:
       rust:

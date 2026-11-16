@@ -215,6 +215,7 @@ pub(crate) struct Setup {
 /// A native argument supplied by a recorded input or a setup result.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum Parameter {
+    Ignored,
     Input(usize),
     Properties {
         rust_type: String,

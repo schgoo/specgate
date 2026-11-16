@@ -19,6 +19,13 @@ participate. Existing semantic field names resolve naming differences.
 Duplicate folded input names are rejected, never prefixed or overwritten.
 Explicit producers take precedence for the parameters they fill.
 
+The [ignored-parameter rule](value-decomposition.md#annotations) now applies
+to Rust operations and synchronous setup producers as well as C# parameters.
+Ignored parameters are excluded before setup matching, property decomposition,
+and provenance comparison; an explicit fill of an ignored-only target rejects
+as unknown. Rust replay supplies native `Default` values only at invocation.
+This does not extend property-setup omission rules to ignored `SpecEvent` fields.
+
 For C#, the owner-approved [inherited-member rule](value-decomposition.md#inherited-member-selection-127-owner-approved-2026-11-12)
 selects effective public instance members across the hierarchy before applying
 the annotation/default rule above. Overrides and `new` members replace the

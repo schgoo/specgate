@@ -4,6 +4,81 @@ use specgate::{SpecEvent, ToNativeValue, Value, spec_component, spec_operation, 
 
 spec_component!("fixture.macro_default");
 
+struct IgnoredContext<'a>(&'a std::cell::Cell<i32>);
+
+impl Default for IgnoredContext<'_> {
+    fn default() -> Self {
+        panic!("capture must never default an ignored context")
+    }
+}
+
+#[spec_operation("ignored_context")]
+async fn ignored_context(
+    #[spec_input("value", ignore)] first: IgnoredContext<'_>,
+    #[spec_input("value")] actual: i32,
+    #[spec_input(ignore)] middle: IgnoredContext<'_>,
+    tail: i32,
+) -> i32 {
+    PendingOnce::default().await;
+    first.0.set(first.0.get() + actual);
+    middle.0.set(middle.0.get() + tail);
+    first.0.get() + middle.0.get()
+}
+
+#[spec_operation("all_ignored")]
+fn all_ignored(#[spec_input(ignore)] context: IgnoredContext<'_>) -> i32 {
+    context.0.get()
+}
+
+#[derive(Default)]
+struct IgnoredGuard<'a>(Option<&'a std::cell::Cell<bool>>);
+
+impl Drop for IgnoredGuard<'_> {
+    fn drop(&mut self) {
+        if let Some(dropped) = self.0 {
+            dropped.set(true);
+        }
+    }
+}
+
+#[spec_operation("unused_ignored_guard")]
+async fn unused_ignored_guard(#[spec_input(ignore)] _guard: IgnoredGuard<'_>) {
+    PendingOnce::default().await;
+}
+
+#[test]
+fn unused_ignored_async_arguments_are_retained_before_poll_and_while_pending() {
+    let dropped = std::cell::Cell::new(false);
+    specgate::__rt::start(config(&[])).unwrap();
+    let mut future = Box::pin(unused_ignored_guard(IgnoredGuard(Some(&dropped))));
+    assert!(!dropped.get(), "async arguments must not drop at future construction");
+    let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+    assert!(future.as_mut().poll(&mut context).is_pending());
+    assert!(!dropped.get(), "unused context must survive suspension");
+    assert!(future.as_mut().poll(&mut context).is_ready());
+    drop(future);
+    assert!(dropped.get());
+    let capture = specgate::__rt::finish().unwrap();
+    assert!(capture.operations[0].inputs.is_empty());
+}
+
+#[test]
+fn ignored_parameters_preserve_borrowed_context_across_suspension_without_projection_or_default() {
+    let first = std::cell::Cell::new(10);
+    let middle = std::cell::Cell::new(20);
+    specgate::__rt::start(config(&[])).unwrap();
+    assert_eq!(block_on(ignored_context(IgnoredContext(&first), 2, IgnoredContext(&middle), 3)), 35);
+    assert_eq!(all_ignored(IgnoredContext(&first)), 12);
+    let capture = specgate::__rt::finish().unwrap();
+    assert_eq!(
+        capture.operations[0].inputs,
+        [("value".to_string(), Value::Integer(2)), ("tail".to_string(), Value::Integer(3))]
+            .into_iter()
+            .collect()
+    );
+    assert!(capture.operations[1].inputs.is_empty());
+}
+
 #[spec_operation("inner", spec = "fixture.macro_override")]
 fn inner(value: i32) -> i32 {
     spec_trace!("seen", value);

@@ -77,7 +77,7 @@ sources, so a search for it finds the code that raises it.
 | `was still open when the capture ended` | An operation never completed, such as a dropped top-level future. | Await it or enclose it in an operation that completes ([`async-capture.md`](async-capture.md)). |
 | `native capture cannot instrument an async setup` | An `async` `#[spec_setup]`. | Make the setup synchronous. |
 | `capture needs runtime state that const evaluation` | A `const fn` has `#[spec_operation]` or `#[spec_setup]`; the build fails. | Annotate a non-const wrapper and call it from tests ([Rust guide](instrument-rust-crate.md#8-const-fn-operations)). |
-| `ran twice in one capture with different inputs` | A setup ran twice with different inputs in one test. | Construct the receiver once per test. |
+| `ran twice in one capture with different inputs` | A setup ran twice with different semantic inputs in one test. Ignored context does not participate in provenance. | Construct the receiver once per test. |
 | `cannot fold its #[spec_setup] declarations` | Overlapping setups for one operation. | Give each receiver or parameter one setup. |
 | `produces duplicate input name` | Two flattened property-setup leaves, producer inputs, or parameters of one operation share a semantic name; nested paths are not prefixed. | Rename one field with `#[spec_event(name = "...")]`. |
 | `recursive property setup type` | An opted-in property-setup type reaches itself through opted-in record fields. | Remove the setup opt-in from one record in the cycle; that field is then recorded whole and cannot be replayed. |

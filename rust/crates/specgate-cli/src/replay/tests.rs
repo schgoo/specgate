@@ -226,6 +226,8 @@ mod cases {
         let capture_dir = output_dir("capture");
         let first_output = output_dir("first").join("candidate.otlp.json");
         let second_output = output_dir("second").join("candidate.otlp.json");
+        let setup_capture = output_dir("setup-capture");
+        let setup_output = output_dir("setup-candidate").with_extension("otlp.json");
         let _ = std::fs::remove_dir_all(&capture_dir);
         let _ = std::fs::remove_dir_all(first_output.parent().unwrap());
         let _ = std::fs::remove_dir_all(second_output.parent().unwrap());
@@ -241,9 +243,23 @@ mod cases {
                 .unwrap(),
         );
         assert!(captured.is_ok(), "capture failed: {captured:?}");
+        let _ = std::fs::remove_dir_all(&setup_capture);
+        capture(
+            CaptureRequest::builder(CapturePaths { binding: replay_binding() })
+                .component(ComponentId::from("fixture.cli.setup"))
+                .out(&setup_capture)
+                .implementation("rust")
+                .build()
+                .unwrap(),
+        )
+        .expect("capture the existing setup-backed component");
         let component = specgate_discovery::identity::ComponentId::from("fixture.cli.replay");
-        let candidates = Candidates::discover(replay_binding(), Some(&"rust".into()), std::slice::from_ref(&component))
-            .expect("focused candidate discovery");
+        let candidates = Candidates::discover(
+            replay_binding(),
+            Some(&"rust".into()),
+            &[component.clone(), "fixture.cli.setup".into()],
+        )
+        .expect("focused candidate discovery");
         let package_root = candidates.package_root.clone();
         let system = CommandEnvironment::real();
         assert_eq!(
@@ -264,10 +280,22 @@ mod cases {
         )
         .expect("injected discovery");
         let plan = candidates.plan(&capture_dir).expect("focused replay plan");
+        // Public declarations also exercise the standalone runner, not only
+        // the selected crate-local callbacks supplied by discovery.
+        let mut direct = plan.clone();
+        direct.test_target = None;
+        let mut setup_plan = candidates.plan(&setup_capture).expect("setup-backed replay plan");
+        setup_plan.test_target = None;
         let reports = candidates
-            .execute(&[(plan.clone(), first_output.clone()), (plan, second_output.clone())])
+            .execute(&[
+                (direct, first_output.clone()),
+                (plan, second_output.clone()),
+                (setup_plan, setup_output.clone()),
+            ])
             .expect("focused replay execution");
-        assert_eq!(reports.len(), 2);
+        assert_eq!(reports.len(), 3);
+        let setup_validation = validate_linked(&setup_output, setup_capture.join(registry_file()), &[]);
+        assert!(setup_validation.valid, "{:#?}", setup_validation.issues);
         assert_eq!(
             reports[0],
             Report {
@@ -368,6 +396,8 @@ mod cases {
         let _ = std::fs::remove_dir_all(capture_dir);
         let _ = std::fs::remove_file(first_output);
         let _ = std::fs::remove_file(second_output);
+        let _ = std::fs::remove_dir_all(setup_capture);
+        let _ = std::fs::remove_file(setup_output);
     }
 
     #[test]
@@ -1883,6 +1913,7 @@ mod cases {
             is_public: true,
             return_type: "i32".into(),
             fills: "".into(),
+            ignored_params: Vec::new(),
             params: vec![
                 RawField {
                     name: "a".into(),

@@ -76,6 +76,11 @@ Rust and C# registry output is byte-identical for the stateless, rich-type, and
 setup-folding fixtures. Raw language-specific invocation metadata remains
 separate from the language-neutral CTSC registry.
 
+Rust and C# operation/setup ignored parameters (#133) are supported. Rust uses
+`#[spec_input(ignore)]` with a compile-time `Default` bound; capture preserves
+the actual context and replay defaults it in native order. Ignored `SpecEvent`
+fields remain unsupported in both languages; #133 is not wholly complete.
+
 C# inherited record members (#127) are supported in discovery and capture,
 including property setups and union payloads. Effective public instance members
 are selected base-first by source name, with overrides and `new` members

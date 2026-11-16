@@ -387,7 +387,7 @@ pub(super) fn validate_declared_folding(operations: &[registry::OpMeta]) -> Resu
                         && candidate.fn_name == setup.key.fn_name.as_str()
                 })
                 .expect("planned setup belongs to declaration set");
-            for field in producer.params {
+            for field in producer.params.iter().filter(|field| !field.is_ignored()) {
                 for (field, _) in registry::TypeMeta::input_fields(producer, *field)? {
                     if !names.insert(field.name()) {
                         return Err(CaptureError::setup_collision(
@@ -399,7 +399,11 @@ pub(super) fn validate_declared_folding(operations: &[registry::OpMeta]) -> Resu
                 }
             }
         }
-        for parameter in operation.params.iter().filter(|field| !filled.contains(field.name())) {
+        for parameter in operation
+            .params
+            .iter()
+            .filter(|field| !field.is_ignored() && !filled.contains(field.name()))
+        {
             for (field, _) in registry::TypeMeta::input_fields(operation, *parameter)? {
                 if !names.insert(field.name()) {
                     return Err(CaptureError::setup_collision(
@@ -442,7 +446,7 @@ pub(super) fn plan_declared_setups<'meta>(
     for setup in setups {
         let producer = format!("{}::{}", setup.module_path, setup.fn_name);
         let contribution = if let Some(fills) = setup.fills {
-            if !operation.params.iter().any(|field| field.name() == fills) {
+            if !operation.params.iter().any(|field| !field.is_ignored() && field.name() == fills) {
                 return Err(CaptureError::setup_collision(
                     component_id,
                     operation_name,
@@ -454,7 +458,7 @@ pub(super) fn plan_declared_setups<'meta>(
             let mut candidates = operation
                 .params
                 .iter()
-                .filter(|field| !filled.contains(field.name()) && types_match(field.rust_type(), setup.return_type))
+                .filter(|field| !field.is_ignored() && !filled.contains(field.name()) && types_match(field.rust_type(), setup.return_type))
                 .map(|field| field.name());
             match (candidates.next(), candidates.next()) {
                 (Some(only), None) => SetupContribution::Parameter(only.to_string()),

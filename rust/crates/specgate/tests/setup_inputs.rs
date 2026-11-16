@@ -5,6 +5,47 @@ use std::collections::BTreeMap;
 
 spec_component!("fixture.setup_inputs");
 
+struct IgnoredContext(i32);
+
+impl Default for IgnoredContext {
+    fn default() -> Self {
+        panic!("ordinary setup capture must not construct defaults")
+    }
+}
+
+#[spec_setup("ignored_setup", fills = "value")]
+#[spec_setup("ignored_setup_again", fills = "value")]
+fn ignored_producer(#[spec_input("seed", ignore)] context: IgnoredContext, #[spec_input("seed")] start: i32) -> i32 {
+    assert!(context.0 > 0);
+    start
+}
+
+#[spec_operation("ignored_setup")]
+fn ignored_setup(#[spec_input("value", ignore)] context: IgnoredContext, value: i32) -> i32 {
+    assert!(context.0 > 0);
+    value
+}
+
+#[spec_operation("ignored_setup_again")]
+fn ignored_setup_again(value: i32) -> i32 {
+    value
+}
+
+#[test]
+fn ignored_setup_context_does_not_change_provenance_or_collide_with_visible_aliases() {
+    specgate::__rt::start(config()).unwrap();
+    let value = ignored_producer(IgnoredContext(1), 7);
+    let same = ignored_producer(IgnoredContext(2), 7);
+    assert_eq!(ignored_setup(IgnoredContext(3), value), 7);
+    assert_eq!(ignored_setup_again(same), 7);
+    let capture = specgate::__rt::finish().unwrap();
+    assert_eq!(
+        inputs_of(&capture, "ignored_setup"),
+        BTreeMap::from([("seed".into(), Value::Integer(7))])
+    );
+    assert_eq!(inputs_of(&capture, "ignored_setup_again"), inputs_of(&capture, "ignored_setup"));
+}
+
 /// Mutable receiver used to verify setup construction input folding.
 #[derive(Debug, Clone, Copy, SpecEvent)]
 #[expect(

@@ -198,7 +198,7 @@ fn append_parameter(
 
 fn parameter_fields(op: &Operation, registry: &Registry) -> Result<Vec<Field>, Error> {
     let mut inputs = Vec::new();
-    for parameter in &op.params {
+    for parameter in op.visible_params() {
         append_parameter(op, parameter, registry, &mut Vec::new(), &mut inputs)?;
     }
     Ok(inputs)
@@ -235,7 +235,7 @@ pub(super) fn fold_operation<'a>(op: &Operation, registry: &'a Registry) -> Resu
 
     for setup in setups {
         let target = if setup.fills.is_empty() {
-            let mut candidates = op.params.iter().filter(|parameter| {
+            let mut candidates = op.visible_params().filter(|parameter| {
                 !param_injection.contains_key(parameter.name.as_str()) && normalize(&parameter.ty) == normalize(&setup.return_type)
             });
             let first = candidates.next();
@@ -256,7 +256,7 @@ pub(super) fn fold_operation<'a>(op: &Operation, registry: &'a Registry) -> Resu
                 }
             }
         } else {
-            if !op.params.iter().any(|parameter| parameter.name == setup.fills) {
+            if !op.visible_params().any(|parameter| parameter.name == setup.fills) {
                 return Err(failure(format!(
                     "setup '{}' for '{}::{}' fills unknown parameter '{}'",
                     setup.fn_name, op.component, op.name, setup.fills
@@ -297,15 +297,14 @@ pub(super) fn fold_operation<'a>(op: &Operation, registry: &'a Registry) -> Resu
     }
 
     let input_capacity = receiver_setup.as_ref().map_or(0, |setup| setup.params.len())
-        + op.params
-            .iter()
+        + op.visible_params()
             .map(|parameter| param_injection.get(parameter.name.as_str()).map_or(1, Vec::len))
             .sum::<usize>();
     let mut inputs = Vec::with_capacity(input_capacity);
     if let Some(setup) = receiver_setup {
         inputs.extend(parameter_fields(setup, registry)?);
     }
-    for parameter in &op.params {
+    for parameter in op.visible_params() {
         if let Some(injected) = param_injection.get(parameter.name.as_str()) {
             inputs.extend(injected.iter().cloned());
         } else {

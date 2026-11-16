@@ -71,6 +71,9 @@ The reference may be Rust or C#; the candidate must be Rust.
    and writes it with deterministic ids and timestamps.
 
 Replay does not run your tests; it calls your operations directly.
+Rust operation and synchronous setup parameters marked `#[spec_input(ignore)]`
+consume no reference value: replay supplies `Default::default()` in their
+original native positions. Capture still uses the caller's actual context.
 Annotated synchronous setups reconstruct receiver and injected environments.
 Private/test-only producers remain in their original Cargo target. Equal
 receiver producer/input identities share state within a scenario; scenario
@@ -215,6 +218,11 @@ calls, and explicit generic specializations. Operation and setup construction
 inputs must be primitives, recursively supported collections and optionals, or
 opted-in property setups. The full list is in
 [limitations](${PLUGIN_DIR}/docs/reference/limitations.md).
+
+Nonsemantic parameters can be ignored with C# `SpecInput.Ignore` and Rust
+`#[spec_input(ignore)]`. Rust replay defaults ignored parameters; neither
+language currently supports ignored `SpecEvent` fields. See
+[ignored context inputs](${PLUGIN_DIR}/docs/reference/value-mapping.md#ignored-context-inputs).
 
 The candidate can use `Vec<T>` for C# bags, sets, or ordered sets, and pair
 vectors for ordered/non-string maps. Tuples of arity 2-4 work recursively.

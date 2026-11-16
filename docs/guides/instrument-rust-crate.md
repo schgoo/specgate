@@ -51,6 +51,11 @@ fn adds_two_numbers() {
   rejects annotated private functions.
 - Parameter names become input names. Rename one with
   `#[spec_input("name")]` on the parameter.
+- Omit nonsemantic operation or synchronous setup context with
+  `#[spec_input(ignore)]` or `#[spec_input("context", ignore)]`. The type must
+  implement `Default`, but needs no `ToNativeValue`. Ordinary calls retain the
+  supplied context; only replay constructs its default in the native argument
+  position. This does not support ignored `SpecEvent` fields.
 - The macros resolve your actual `specgate` dependency, so a renamed
   dependency (`sg = { package = "specgate", … }`) works.
 
