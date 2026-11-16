@@ -52,6 +52,7 @@ pub struct OpMeta {
 pub struct FieldMeta {
     name: &'static str,
     rust_type: &'static str,
+    ignored: bool,
 }
 
 impl FieldMeta {
@@ -61,7 +62,21 @@ impl FieldMeta {
         Self {
             name: name.0,
             rust_type: rust_type.0,
+            ignored: false,
         }
+    }
+
+    /// Mark a native parameter as excluded from the semantic input surface.
+    #[must_use]
+    pub const fn ignored(mut self, ignored: bool) -> Self {
+        self.ignored = ignored;
+        self
+    }
+
+    /// Whether this native parameter is excluded from semantic inputs.
+    #[must_use]
+    pub const fn is_ignored(self) -> bool {
+        self.ignored
     }
 
     /// Return the semantic field or parameter name.
@@ -499,7 +514,7 @@ impl TypeMeta {
     }
 
     pub(crate) fn fold_input(operation: &OpMeta, name: &str, mut value: Value) -> Result<Vec<(String, Value)>, CaptureError> {
-        let Some(parameter) = operation.params.iter().find(|field| field.name() == name) else {
+        let Some(parameter) = operation.params.iter().find(|field| !field.is_ignored() && field.name() == name) else {
             return Ok(vec![(name.to_string(), value)]);
         };
         Self::input_fields(operation, *parameter)?
@@ -727,6 +742,16 @@ impl Discovery {
             write_property(&mut out, ",\"component\":", op.component);
             out.push_str(",\"params\":");
             write_fields(&mut out, op.params);
+            out.push_str(",\"ignored_params\":[");
+            let positions = op
+                .params
+                .iter()
+                .enumerate()
+                .filter(|(_, field)| field.is_ignored())
+                .map(|(position, _)| position.to_string())
+                .collect::<Vec<_>>();
+            out.push_str(&positions.join(","));
+            out.push(']');
             out.push('}');
         }
         out.push_str("],\"types\":[");

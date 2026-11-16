@@ -2,6 +2,14 @@ use specgate::{SpecEvent, ToNativeValue, spec_operation};
 
 specgate::spec_component!("fixture.private_replay");
 
+pub struct Context(u8);
+
+impl Default for Context {
+    fn default() -> Self {
+        Self(17)
+    }
+}
+
 mod model {
     use super::*;
 
@@ -37,13 +45,23 @@ pub fn inner() -> NestedItem {
 }
 
 #[spec_operation("outer")]
-pub fn outer() -> bool {
+pub fn outer(#[spec_input(ignore)] context: Context) -> bool {
+    assert_eq!(context.0, 17);
     inner().value == 1
 }
 
 #[cfg(test)]
 mod producer_scopes {
+    use super::Context;
     use specgate::{SpecEvent, spec_operation, spec_setup};
+
+    #[derive(SpecEvent)]
+    #[spec_event(setup)]
+    #[spec_component("fixture.producer_scopes")]
+    struct Seed {
+        #[spec_event]
+        pub value: i32,
+    }
 
     #[derive(SpecEvent)]
     struct ProducerClient {}
@@ -56,7 +74,8 @@ mod producer_scopes {
 
     impl ProducerClient {
         #[spec_operation("read", spec = "fixture.producer_scopes")]
-        pub fn read(&self, offset: ProducerOffset) -> i32 {
+        pub fn read(&self, #[spec_input(ignore)] context: Context, offset: ProducerOffset) -> i32 {
+            assert_eq!(context.0, 17);
             offset.value
         }
     }
@@ -74,13 +93,15 @@ mod producer_scopes {
         use super::*;
 
         #[spec_setup("read", spec = "fixture.producer_scopes")]
-        pub(super) fn make(value: i32) -> ProducerOffset {
-            ProducerOffset { value }
+        pub(super) fn make(#[spec_input("value", ignore)] context: Context, value: Seed) -> ProducerOffset {
+            assert_eq!(context.0, 17);
+            ProducerOffset { value: value.value }
         }
     }
 
     #[spec_setup("text_len", spec = "fixture.producer_scopes", fills = "value")]
-    fn owned_text(value: String) -> String {
+    fn owned_text(#[spec_input(ignore)] values: Context, value: String) -> String {
+        assert_eq!(values.0, 17);
         value
     }
 
@@ -102,8 +123,11 @@ mod producer_scopes {
 
     #[test]
     fn distinct_modules_and_owned_coercion() {
-        assert_eq!(receiver::make().read(parameter::make(7)), 7);
-        let value = owned_text("owned native storage".to_string());
+        assert_eq!(
+            receiver::make().read(Context(17), parameter::make(Context(17), Seed { value: 7 })),
+            7
+        );
+        let value = owned_text(Context(17), "owned native storage".to_string());
         assert_eq!(text_len(&value), 20);
         assert_eq!(unit_input(owned_unit(())), 1);
     }
@@ -165,13 +189,18 @@ mod tests {
     }
 
     mod operations {
-        use super::{Client, Offset};
+        use super::{Client, Context, Offset};
         use crate::Item;
         use specgate::{ToNativeValue, spec_operation};
 
         impl Client {
             #[spec_operation("read", types = "Item")]
-            pub fn read<'a, T: From<i32> + ToNativeValue + 'static>(&mut self, offset: &'a mut Offset) -> Vec<T> {
+            pub fn read<'a, T: From<i32> + ToNativeValue + 'static>(
+                &mut self,
+                #[spec_input("offset", ignore)] context: Context,
+                offset: &'a mut Offset,
+            ) -> Vec<T> {
+                assert_eq!(context.0, 17);
                 self.calls += 1;
                 vec![T::from(offset.value)]
             }
@@ -216,8 +245,8 @@ mod tests {
         assert!(std::env::var_os("SPECGATE_TEST_CAPTURE").is_none());
         let mut client = make_client();
         let mut offset = make_offset(7);
-        assert_eq!(client.read::<crate::Item>(&mut offset)[0].value, 7);
-        assert_eq!(client.read::<crate::Item>(&mut offset)[0].value, 7);
+        assert_eq!(client.read::<crate::Item>(Context(17), &mut offset)[0].value, 7);
+        assert_eq!(client.read::<crate::Item>(Context(17), &mut offset)[0].value, 7);
         assert_eq!(client.read_self::<crate::Item>(&mut offset)[0].value, 7);
         assert_eq!(client.calls(), 3);
         assert_eq!(inferred(make_offset(7)), 7);
@@ -242,7 +271,7 @@ mod tests {
 
     #[test]
     fn nested_outcome() {
-        assert!(outer());
+        assert!(outer(Context(17)));
     }
 
     #[spec_operation("plain", spec = "fixture.test_only")]

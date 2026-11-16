@@ -53,7 +53,8 @@ mapping or projecting its type. Raw C# invocation metadata keeps the full
 signature. `Ignore` does not permit by-reference, pointer, or non-boxable
 parameters such as `Span<T>` and generic parameters with `allows ref struct`;
 the weaver rejects these before emitting capture code.
-Rust ignored inputs and ignored record fields are not yet implemented.
+Rust operation and synchronous setup parameters use `#[spec_input(ignore)]`
+with `Default` for replay. Ignored `SpecEvent` fields remain unsupported in both languages.
 See [ignored context inputs](../reference/value-mapping.md#ignored-context-inputs).
 
 ### 2. Reuse the existing tests

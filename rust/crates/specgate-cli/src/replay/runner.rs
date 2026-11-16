@@ -283,7 +283,9 @@ fn source_in(plan: &Plan, harness: bool) -> String {
                     let values = setup
                         .parameters
                         .iter()
+                        .filter(|parameter| !matches!(parameter, model::Parameter::Ignored))
                         .map(|parameter| match parameter {
+                            model::Parameter::Ignored => unreachable!("ignored parameters carry no wire value"),
                             model::Parameter::Input(index) => {
                                 format!("__specgate::ToNativeValue::to_native_value(&({}))", rendered_inputs[*index])
                             }
@@ -324,7 +326,7 @@ fn source_in(plan: &Plan, harness: bool) -> String {
                     .iter()
                     .filter_map(|parameter| match parameter {
                         model::Parameter::Setup { index, .. } => Some(setup_locals[*index].as_str()),
-                        model::Parameter::Input(_) | model::Parameter::Properties { .. } => None,
+                        model::Parameter::Ignored | model::Parameter::Input(_) | model::Parameter::Properties { .. } => None,
                     })
                     .collect::<Vec<_>>()
                     .join(", ");
@@ -433,6 +435,7 @@ fn source_in(plan: &Plan, harness: bool) -> String {
 
 fn native_argument(parameter: &model::Parameter, inputs: &[String], crate_name: &str) -> String {
     match parameter {
+        model::Parameter::Ignored => "::core::default::Default::default()".to_string(),
         model::Parameter::Input(index) => inputs[*index].clone(),
         model::Parameter::Properties { rust_type, borrow, fields } => {
             let mut ty: syn::Type = syn::parse_str(rust_type).expect("validated property setup type");

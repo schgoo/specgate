@@ -27,6 +27,11 @@ inputs must be primitives, recursively supported collections and optionals, or
 opted-in property setups. The full list is in
 [limitations](../reference/limitations.md).
 
+Nonsemantic parameters can be ignored with C# `SpecInput.Ignore` and Rust
+`#[spec_input(ignore)]`. Rust replay defaults ignored parameters; neither
+language currently supports ignored `SpecEvent` fields. See
+[ignored context inputs](../reference/value-mapping.md#ignored-context-inputs).
+
 The candidate can use `Vec<T>` for C# bags, sets, or ordered sets, and pair
 vectors for ordered/non-string maps. Tuples of arity 2-4 work recursively.
 Keyed lookups map to maps of bags; groupings map to fixed `key`/`items` record

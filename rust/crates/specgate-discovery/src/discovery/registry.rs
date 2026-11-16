@@ -109,6 +109,8 @@ pub struct Operation {
     pub fills: FieldName,
     /// Raw parameter names and types.
     pub params: Vec<Field>,
+    /// Native parameter positions excluded from semantic discovery and capture.
+    pub ignored_params: Vec<usize>,
     /// Owning component identifier.
     pub component: ComponentId,
     /// C# declaring type, preserved exactly for future candidate replay.
@@ -193,6 +195,7 @@ impl Operation {
                 return_type: String::new().into(),
                 fills: String::new().into(),
                 params: Vec::new(),
+                ignored_params: Vec::new(),
                 cs_class: None,
                 cs_method_of: None,
                 cs_method: None,
@@ -203,9 +206,22 @@ impl Operation {
             },
         }
     }
+    /// Iterate only parameters that participate in the semantic input surface.
+    pub fn visible_params(&self) -> impl Iterator<Item = &Field> {
+        self.params
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !self.ignored_params.contains(index))
+            .map(|(_, field)| field)
+    }
 }
 
 impl OperationBuilder {
+    /// Exclude native parameter positions from the semantic surface.
+    pub fn ignored_params(mut self, positions: Vec<usize>) -> Self {
+        self.operation.ignored_params = positions;
+        self
+    }
     /// Set the native module path.
     pub fn module_path(mut self, value: impl Into<ModulePath>) -> Self {
         self.operation.module_path = value.into();
@@ -552,6 +568,8 @@ struct WireOperation {
     #[serde(default)]
     params: Vec<(String, String)>,
     #[serde(default)]
+    ignored_params: Vec<usize>,
+    #[serde(default)]
     cs_class: Option<String>,
     #[serde(default)]
     cs_method_of: Option<String>,
@@ -589,6 +607,7 @@ impl From<WireOperation> for Operation {
             return_type: wire.return_type.into(),
             fills: wire.fills.into(),
             params: wire.params.into_iter().map(Field::from).collect(),
+            ignored_params: wire.ignored_params,
             component: wire.component.into(),
             cs_class: wire.cs_class.map(Into::into),
             cs_method_of: wire.cs_method_of.map(Into::into),

@@ -67,6 +67,11 @@ fn adds_two_numbers() {
   rejects annotated private functions.
 - Parameter names become input names. Rename one with
   `#[spec_input("name")]` on the parameter.
+- Omit nonsemantic operation or synchronous setup context with
+  `#[spec_input(ignore)]` or `#[spec_input("context", ignore)]`. The type must
+  implement `Default`, but needs no `ToNativeValue`. Ordinary calls retain the
+  supplied context; only replay constructs its default in the native argument
+  position. This does not support ignored `SpecEvent` fields.
 - The macros resolve your actual `specgate` dependency, so a renamed
   dependency (`sg = { package = "specgate", … }`) works.
 
@@ -314,6 +319,9 @@ value as its result.
 | Rejected | Async setups | Async setups, `async void`, async iterators, `async` methods returning other awaitables |
 | Replay | Directly awaited free functions and setup-backed methods use the candidate's Arty, Smol, Tokio, or custom execution wrapper | Captured C# stimuli can replay against Rust async candidates; C# candidate replay is unsupported |
 
+Rust async operations can omit context parameters with `#[spec_input(ignore)]`.
+Their types must implement `Default`; capture never constructs that default and
+preserves the supplied context across suspension. Replay defaults it at invocation.
 C# async operations can omit context parameters with
 `[SpecInput("context", Ignore = true)]`. The original argument still reaches
 the body. Ignoring a token does not change cancellation recording or explain

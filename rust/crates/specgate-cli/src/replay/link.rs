@@ -350,14 +350,25 @@ pub(super) fn link_operation(reference: &specgate_ctsc::replay::model::RegistryO
             parameters: producer
                 .params
                 .iter()
-                .map(|parameter| native_parameter(producer, parameter, &candidate.metadata().raw_registry, &inputs))
+                .enumerate()
+                .map(|(position, parameter)| {
+                    if producer.ignored_params.contains(&position) {
+                        Ok(super::model::Parameter::Ignored)
+                    } else {
+                        native_parameter(producer, parameter, &candidate.metadata().raw_registry, &inputs)
+                    }
+                })
                 .collect::<Result<_, _>>()?,
         });
     }
     let parameters = raw
         .params
         .iter()
-        .map(|parameter| {
+        .enumerate()
+        .map(|(position, parameter)| {
+            if raw.ignored_params.contains(&position) {
+                return Ok(super::model::Parameter::Ignored);
+            }
             if let Some(index) = setups.iter().position(|setup| setup.fills == parameter.name.as_str()) {
                 let native = syn::parse_str::<syn::Type>(parameter.ty.as_str())
                     .map_err(|error| Error::from(format!("invalid candidate parameter type '{}': {error}", parameter.ty)))?;
@@ -436,7 +447,9 @@ fn native_parameter(
                 let value = match native_parameter(&scoped, field, registry, inputs)? {
                     super::model::Parameter::Input(index) => super::model::PropertyValue::Input(index),
                     super::model::Parameter::Properties { fields, .. } => super::model::PropertyValue::Properties(fields),
-                    super::model::Parameter::Setup { .. } => unreachable!("property fields do not select explicit producers"),
+                    super::model::Parameter::Ignored | super::model::Parameter::Setup { .. } => {
+                        unreachable!("property fields do not select native-only arguments")
+                    }
                 };
                 Ok((field.name.to_string(), value))
             })

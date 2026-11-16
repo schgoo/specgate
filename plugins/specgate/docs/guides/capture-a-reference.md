@@ -50,7 +50,8 @@ the component's registry plus a reference trace of what the tests did.
   diagnostic (see [`async-capture.md`](async-capture.md)).
 
 Collection capture uses the declared contract, not the observed contents.
-C# parameters marked `[SpecInput("context", Ignore = true)]` are omitted from
+Rust parameters marked `#[spec_input(ignore)]` and C# parameters marked
+`[SpecInput("context", Ignore = true)]` are omitted from
 the registry and trace, not from ordinary method execution; see
 [ignored context inputs](../reference/value-mapping.md#ignored-context-inputs).
 C# lookups retain keys as maps of bags, and groupings retain `key` and `items`

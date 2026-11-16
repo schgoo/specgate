@@ -39,6 +39,18 @@ pub fn __specgate_test_harness(_input: TokenStream) -> TokenStream {
 /// overrides the surrounding [`specgate::spec_component!`] declaration. Inputs and
 /// return values must implement `SpecGate` native projection. Malformed attributes,
 /// unsupported patterns, and unsupported return shapes are compile-time errors.
+/// `#[spec_input(ignore)]` (or `#[spec_input("name", ignore)]`) excludes a
+/// parameter from semantic inputs. Its type needs only `Default`, not native
+/// projection; replay constructs that default in the original argument position.
+/// Ordinary calls, including capture, retain the supplied value without defaulting.
+///
+/// Ignored parameters must implement `Default`:
+///
+/// ```compile_fail
+/// struct Context;
+/// #[specgate::spec_operation("run", spec = "example.context")]
+/// fn run(#[spec_input(ignore)] context: Context) { let _ = context; }
+/// ```
 ///
 /// # Examples
 ///
@@ -75,6 +87,8 @@ pub fn spec_operation(attribute: TokenStream, item: TokenStream) -> TokenStream 
 /// The operation name is required; `fills = "parameter"` and `spec = "component"`
 /// select the filled input and owner. Unsupported declarations, including `const fn`,
 /// are compile-time errors.
+/// Synchronous producer parameters support the same `#[spec_input(ignore)]`
+/// and compile-time `Default` requirement as [`spec_operation`].
 ///
 /// # Examples
 ///

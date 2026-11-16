@@ -149,7 +149,7 @@ fn is_mut_ref(ty: &Type) -> bool {
     matches!(ty, Type::Reference(reference) if reference.mutability.is_some())
 }
 
-fn parameters(function: &mut ItemFn) -> Vec<(Ident, Type, String)> {
+fn parameters(function: &mut ItemFn) -> syn::Result<Vec<(Ident, Type, String, bool)>> {
     collect_parameters(function, true)
 }
 
@@ -158,7 +158,7 @@ fn parameters(function: &mut ItemFn) -> Vec<(Ident, Type, String)> {
 /// `strip` removes the `#[spec_input]` markers once nothing else needs them.
 /// Stacked `#[spec_setup]` annotations expand one attribute at a time, so every
 /// expansion but the last must leave the markers in place for the next one.
-fn collect_parameters(function: &mut ItemFn, strip: bool) -> Vec<(Ident, Type, String)> {
+fn collect_parameters(function: &mut ItemFn, strip: bool) -> syn::Result<Vec<(Ident, Type, String, bool)>> {
     let mut result = Vec::with_capacity(function.sig.inputs.len());
     for input in &mut function.sig.inputs {
         let FnArg::Typed(parameter) = input else {
@@ -168,18 +168,33 @@ fn collect_parameters(function: &mut ItemFn, strip: bool) -> Vec<(Ident, Type, S
             continue;
         };
         let mut semantic_name = pattern.ident.to_string();
-        parameter.attrs.retain(|attribute| {
+        let mut ignored = false;
+        for attribute in &parameter.attrs {
             if !attribute.path().is_ident("spec_input") {
-                return true;
+                continue;
             }
-            if let Ok(name) = attribute.parse_args::<LitStr>() {
-                semantic_name = name.value();
-            }
-            !strip
-        });
-        result.push((pattern.ident.clone(), (*parameter.ty).clone(), semantic_name));
+            attribute.parse_args_with(|input: ParseStream| {
+                if input.peek(LitStr) {
+                    semantic_name = input.parse::<LitStr>()?.value();
+                    if input.is_empty() {
+                        return Ok(());
+                    }
+                    input.parse::<Token![,]>()?;
+                }
+                let marker = input.parse::<Ident>()?;
+                if marker != "ignore" || ignored {
+                    return Err(syn::Error::new(marker.span(), "expected a single `ignore` marker"));
+                }
+                ignored = true;
+                Ok(())
+            })?;
+        }
+        if strip {
+            parameter.attrs.retain(|attribute| !attribute.path().is_ident("spec_input"));
+        }
+        result.push((pattern.ident.clone(), (*parameter.ty).clone(), semantic_name, ignored));
     }
-    result
+    Ok(result)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

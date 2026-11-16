@@ -66,6 +66,9 @@ value as its result.
 | Rejected | Async setups | Async setups, `async void`, async iterators, `async` methods returning other awaitables |
 | Replay | Directly awaited free functions and setup-backed methods use the candidate's Arty, Smol, Tokio, or custom execution wrapper | Captured C# stimuli can replay against Rust async candidates; C# candidate replay is unsupported |
 
+Rust async operations can omit context parameters with `#[spec_input(ignore)]`.
+Their types must implement `Default`; capture never constructs that default and
+preserves the supplied context across suspension. Replay defaults it at invocation.
 C# async operations can omit context parameters with
 `[SpecInput("context", Ignore = true)]`. The original argument still reaches
 the body. Ignoring a token does not change cancellation recording or explain

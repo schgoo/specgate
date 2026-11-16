@@ -53,6 +53,38 @@ fn ambiguous_setups() {
 }
 
 #[test]
+fn ignored_native_positions_are_filtered_before_type_mapping_and_setup_selection() {
+    let mut raw = registry(
+        serde_json::json!({
+            "operations": [{
+                "name": "run", "module_path": "fixture", "fn_name": "run", "component": "demo",
+                "return_type": "i32", "params": [["value", "impl Opaque + 'a"], ["value", "i32"]],
+                "ignored_params": [0]
+            }, {
+                "name": "run", "module_path": "fixture", "fn_name": "make", "component": "demo",
+                "is_setup": true, "return_type": "i32",
+                "params": [["seed", "impl Opaque"], ["seed", "i32"]], "ignored_params": [0]
+            }], "types": []
+        })
+        .to_string(),
+    );
+    normalize_registry(&raw, crate::binding::Language::Rust, "demo").unwrap();
+    assert_eq!(raw.ops[0].params.len(), 2, "native argument order is retained");
+    let inputs = raw_inputs(&raw.ops[0], &raw).unwrap();
+    assert_eq!(inputs.len(), 1);
+    assert_eq!(inputs[0].name, "seed");
+    raw.ops[0].params[0].ty = "i32".into();
+    assert_eq!(
+        raw_inputs(&raw.ops[0], &raw).unwrap(),
+        inputs,
+        "ignored native type matches must not introduce ambiguity"
+    );
+    raw.ops[0].ignored_params.push(1);
+    raw.ops[1].fills = "value".into();
+    assert!(raw_inputs(&raw.ops[0], &raw).unwrap_err().contains("fills unknown parameter"));
+}
+
+#[test]
 fn property_setups_use_native_identity_and_flat_semantic_field_names() {
     let document = serde_json::json!({
         "operations": [{

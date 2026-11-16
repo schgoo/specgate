@@ -184,7 +184,7 @@ pub fn expand_operation(attribute: TokenStream2, item: TokenStream2) -> syn::Res
             ));
         }
     }
-    let params = parameters(&mut function);
+    let params = parameters(&mut function)?;
     let body = function.block.clone();
     let rt = runtime();
     let component = component(owner.as_deref());
@@ -208,7 +208,16 @@ pub fn expand_operation(attribute: TokenStream2, item: TokenStream2) -> syn::Res
     let begin_async = begin_fragment(&rt, &component, &name, true);
     let input_records = params
         .iter()
-        .map(|(ident, ty, semantic_name)| {
+        .map(|(ident, ty, semantic_name, ignored)| {
+            if *ignored {
+                // Check the bound without constructing a value. The borrow also
+                // retains unused arguments in an async operation's future.
+                return quote! {
+                    let _ = <#ty as ::core::default::Default>::default;
+                    #[allow(clippy::used_underscore_binding, reason = "generated borrow retains ignored async arguments")]
+                    let _ = &#ident;
+                };
+            }
             let value = if is_mut_ref(ty) { quote!(&*#ident) } else { quote!(&#ident) };
             quote! {
                 if let ::std::result::Result::Err(error) =
@@ -476,14 +485,14 @@ pub fn expand_operation(attribute: TokenStream2, item: TokenStream2) -> syn::Res
             };
             let parameter_metadata = params
                 .iter()
-                .map(|(_ident, ty, name)| {
+                .map(|(_ident, ty, name, ignored)| {
                     let mut ty = ty.clone();
                     syn::visit_mut::VisitMut::visit_type_mut(&mut substitution, &mut ty);
                     let ty = quote!(#ty).to_string();
                     quote!(#rt::FieldMeta::new(
                         #rt::FieldName::new(#name),
                         #rt::RustType::new(#ty),
-                    ))
+                    ).ignored(#ignored))
                 })
                 .collect::<Vec<_>>();
             let return_type = if authored_return_type.is_empty() {

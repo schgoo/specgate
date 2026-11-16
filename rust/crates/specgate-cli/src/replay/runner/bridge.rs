@@ -112,8 +112,13 @@ fn constructor(link: &Link, setup: &model::Setup) -> impl quote::ToTokens {
     let mut bindings = Vec::new();
     let mut arguments = Vec::new();
     for (position, parameter) in setup.parameters.iter().enumerate() {
+        if matches!(parameter, model::Parameter::Ignored) {
+            arguments.push(quote::quote!(::core::default::Default::default()));
+            continue;
+        }
         let local = quote::format_ident!("__sg_argument_{position}");
         let (native, borrow) = match parameter {
+            model::Parameter::Ignored => unreachable!("ignored arguments need no native type mapping"),
             model::Parameter::Input(index) => {
                 let native = &link.inputs[*index].rust_type;
                 if native.replace(' ', "") == "&str" {
@@ -161,6 +166,7 @@ fn invocation(link: &Link) -> impl quote::ToTokens {
     for (position, parameter) in link.parameters.iter().enumerate() {
         let local = quote::format_ident!("__sg_argument_{position}");
         match parameter {
+            model::Parameter::Ignored => arguments.push(quote::quote!(::core::default::Default::default())),
             model::Parameter::Properties { rust_type, borrow, fields } => {
                 let mut native: syn::Type = syn::parse_str(rust_type).expect("validated property setup type");
                 local_type(&mut native, &link.native_module);

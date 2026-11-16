@@ -3,6 +3,14 @@ use specgate::{SpecEvent, ToNativeValue, spec_operation};
 
 specgate::spec_component!("fixture.typed_async");
 
+pub struct Context(pub u8);
+
+impl Default for Context {
+    fn default() -> Self {
+        Self(17)
+    }
+}
+
 #[derive(Debug, Deserialize, SpecEvent)]
 pub struct Item {
     #[spec_event]
@@ -35,12 +43,14 @@ impl Client {
     pub async fn find_by_type_name<T: for<'de> Deserialize<'de> + ToNativeValue + 'static>(
         &mut self,
         #[spec_input("type_name")] name: String,
+        #[spec_input("offset", ignore)] context: Context,
         offset: &Offset,
     ) -> Vec<T> {
         assert_eq!(name, "Item");
         assert_eq!(offset.value, 3);
         // Exercise a reactor-backed future, not just an immediately ready one.
         tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        assert_eq!(context.0, 17);
         self.calls += 1;
         use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
         let mut stream = tokio::net::TcpStream::connect(&self.endpoint)

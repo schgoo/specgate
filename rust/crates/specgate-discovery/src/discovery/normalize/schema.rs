@@ -18,7 +18,7 @@ use crate::error::Error;
 fn validate_syntax(registry: &Registry, type_names: &[&str]) -> Result<(), Error> {
     for operation in &registry.ops {
         map(&operation.return_type, type_names)?;
-        for parameter in &operation.params {
+        for parameter in operation.visible_params() {
             map(&parameter.ty, type_names)?;
         }
     }

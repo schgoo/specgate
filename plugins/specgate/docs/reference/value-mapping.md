@@ -280,6 +280,20 @@ for specialization syntax and completion-channel restrictions.
 
 ## Ignored context inputs
 
+Rust operation and synchronous setup-producer parameters support
+`#[spec_input(ignore)]` and `#[spec_input("context", ignore)]`, preserving the
+existing string-only rename form. The macro checks `T: Default` without
+executing it during ordinary calls or capture. Ignored types need no
+`ToNativeValue`, `Clone`, `Send`/`Sync`, or additional discovery-only `'static`
+bound. The original value, including borrowed context across async suspension,
+reaches the body unchanged. Replay supplies an inferred `Default::default()`
+in each ignored native argument position, consuming no semantic input value.
+Raw Rust metadata keeps all native parameter pairs plus ignored positions;
+semantic type mapping, setup selection, capture/provenance, and comparison omit
+those positions before name lookup. An ignored alias may therefore equal a
+surviving input name. Explicit setup fills of ignored-only targets are unknown
+targets, not a way to restore hidden inputs.
+
 C# operation and setup-producer parameters can use
 `[SpecInput("context", Ignore = true)]`. These parameters do not contribute
 semantic inputs, type declarations, or captured values. Remaining inputs keep
@@ -291,10 +305,10 @@ and generic parameters with `allows ref struct` are rejected by the weaver.
 
 Ignoring context is the author's assertion that it does not affect captured
 behavior. Cancellation causes are not modeled: cancellation can still change
-the recorded outcome. This implements the C# input part of the accepted
+the recorded outcome. This implements the Rust and C# parameter parts of the accepted
 [value-decomposition decision](https://github.com/schgoo/specgate/blob/v0.6.0/docs/decisions/value-decomposition.md#annotations).
-Rust ignored inputs, ignored record fields, and C# candidate replay remain
-unimplemented; this does not add a replay-default mechanism.
+Ignored `SpecEvent` fields in either language and C# candidate replay remain
+unimplemented. This does not implement `has_default` or new comparison policies.
 
 ## Names
 
