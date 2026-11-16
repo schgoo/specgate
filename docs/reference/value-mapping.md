@@ -303,11 +303,35 @@ Ignored parameters are absent from setup matching as well as comparison.
 Ignored contexts must still be boxable: by-value ref structs such as `Span<T>`
 and generic parameters with `allows ref struct` are rejected by the weaver.
 
+### C# ignored record fields and properties
+
+Use `[SpecEvent(Ignore = true)]` on a record field or property to omit it from
+semantic mapping and projection. This applies to inputs, results, nested records,
+union payload members, and explicitly opted-in property setups. Ignored members
+need no supported semantic type; their getters are neither validated nor read.
+The original object and its context still reach the ordinary body unchanged.
+An ignored alias may equal a surviving member's alias; collisions among surviving
+members still reject. An all-ignored record has an empty semantic field list.
+
+Effective source-name replacement happens **before** ignoring: an ignored child
+removes the base slot without restoring the base declaration. Member annotation
+lookup remains non-inheriting; an unannotated replacement does not inherit a
+base member's ignore or rename.
+
+Property setups detect **any** annotation across the full effective scope before
+ignoring members. With no annotations, all eligible members participate; with any
+annotations (even inherited, ignored-only ones), only annotated, non-ignored
+members participate. Thus an ignored-only annotation yields zero semantic fields,
+not all-minus-ignored. Annotate desired surviving members in a mixed setup.
+No C# default construction or general record reconstruction is introduced.
+Type-level and enum-variant ignoring are not supported.
+
 Ignoring context is the author's assertion that it does not affect captured
 behavior. Cancellation causes are not modeled: cancellation can still change
-the recorded outcome. This implements the Rust and C# parameter parts of the accepted
+the recorded outcome. This implements the Rust and C# parameter parts and C#
+record-member part of the accepted
 [value-decomposition decision](../decisions/value-decomposition.md#annotations).
-Ignored `SpecEvent` fields in either language and C# candidate replay remain
+Rust ignored `SpecEvent` fields and C# candidate replay remain
 unimplemented. This does not implement `has_default` or new comparison policies.
 
 ## Names

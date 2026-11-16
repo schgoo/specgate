@@ -277,11 +277,13 @@ internal sealed class ComponentDocument
         var members = new List<string[]>();
         IReadOnlyList<MemberInfo> effective = RecordMembers.Effective(type);
         bool setup = Annotations.PropertySetup(type);
+        // Even ignored annotations disable setup inference; filter only after slot replacement.
         bool all = setup && !effective.Any(member => Annotations.Has(member, Annotations.Event, inherit: false));
         HashSet<string> names = [];
 
         foreach (MemberInfo member in effective)
         {
+            if (Annotations.EventIgnored(member)) continue;
             if (!all && !Annotations.Has(member, Annotations.Event, inherit: false)) continue;
             if (member is PropertyInfo property)
             {

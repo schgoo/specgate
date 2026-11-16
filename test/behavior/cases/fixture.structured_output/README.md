@@ -7,3 +7,6 @@ Shared native scenarios (ordinary tests, not separately enumerated helpers):
 The C# `EntityType` inherits its first annotated property (`entity_name`) from
 an unannotated base class. Its remaining member order, registry, scenario
 identity, and replay surface against the unchanged Rust candidate stay the same.
+The base also declares an ignored opaque, throwing `Context` getter, proving
+native CLI capture omits context before mapping or evaluation without changing
+any semantic fields or golden bytes.

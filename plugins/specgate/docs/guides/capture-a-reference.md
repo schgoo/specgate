@@ -54,6 +54,9 @@ Rust parameters marked `#[spec_input(ignore)]` and C# parameters marked
 `[SpecInput("context", Ignore = true)]` are omitted from
 the registry and trace, not from ordinary method execution; see
 [ignored context inputs](../reference/value-mapping.md#ignored-context-inputs).
+C# record fields/properties marked `[SpecEvent(Ignore = true)]` are likewise
+absent from semantic types and values, including nested records and union
+payloads; capture never evaluates ignored getters. Native objects are unchanged.
 C# lookups retain keys as maps of bags, and groupings retain `key` and `items`
 fields. Enumeration is fresh and non-consuming; it can execute user code.
 See [collection mappings](../reference/value-mapping.md#c-collection-contracts).

@@ -24,13 +24,22 @@ to Rust operations and synchronous setup producers as well as C# parameters.
 Ignored parameters are excluded before setup matching, property decomposition,
 and provenance comparison; an explicit fill of an ignored-only target rejects
 as unknown. Rust replay supplies native `Default` values only at invocation.
-This does not extend property-setup omission rules to ignored `SpecEvent` fields.
+Rust ignored `SpecEvent` fields remain unsupported; the C# member slice below
+does not add reconstruction or defaulting.
 
 For C#, the owner-approved [inherited-member rule](value-decomposition.md#inherited-member-selection-127-owner-approved-2026-11-12)
 selects effective public instance members across the hierarchy before applying
 the annotation/default rule above. Overrides and `new` members replace the
 original base-first source-name slot; annotation detection uses that same
 effective scope, so inherited explicit annotations prevent all-member inference.
+
+C# `[SpecEvent(Ignore = true)]` excludes effective record fields/properties
+before semantic mapping, getter validation, or projection. Annotation-presence
+detection still runs on the full effective scope first, including ignored
+annotations. Therefore a setup with only an ignored annotation has zero selected
+semantic fields; it is not all-minus-ignored. Mixed setups must annotate desired
+surviving members. An ignored child replaces and removes its base source-name
+slot without falling back to the base declaration.
 
 Capture decomposes property-setup arguments at operation entry, after object
 initializers and any other caller-side mutation. Discovery and capture publish

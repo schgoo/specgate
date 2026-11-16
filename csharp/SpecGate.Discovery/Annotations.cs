@@ -88,6 +88,12 @@ internal static class Annotations
         return attribute?.GetType().GetProperty("Ignore")?.GetValue(attribute) is true;
     }
 
+    internal static bool EventIgnored(MemberInfo member)
+    {
+        object? attribute = FirstOn(member, Event, inherit: false);
+        return attribute?.GetType().GetProperty("Ignore")?.GetValue(attribute) is true;
+    }
+
     internal static bool PropertySetup(Type type)
     {
         object? attribute = FirstOn(type, Event, inherit: false);

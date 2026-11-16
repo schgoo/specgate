@@ -81,6 +81,95 @@ public sealed class ExplodingAttribute : Attribute
 public class DiscoveryRunnerTests
 {
     [Fact]
+    public void EventAnnotationsFromOlderAssembliesWithoutIgnoreRemainSelected()
+    {
+        AssemblyBuilder assembly = AssemblyBuilder.DefineDynamicAssembly(new AssemblyName("OldEvents"), AssemblyBuilderAccess.Run);
+        ModuleBuilder module = assembly.DefineDynamicModule("fixture");
+        TypeBuilder annotation = module.DefineType("SpecGate.Annotations.SpecEventAttribute", TypeAttributes.Public, typeof(Attribute));
+        annotation.DefineDefaultConstructor(MethodAttributes.Public);
+        Type attributeType = annotation.CreateType()!;
+        TypeBuilder record = module.DefineType("OldRecord", TypeAttributes.Public);
+        record.DefineField("Value", typeof(int), FieldAttributes.Public).SetCustomAttribute(
+            new CustomAttributeBuilder(attributeType.GetConstructor(Type.EmptyTypes)!, []));
+        FieldInfo field = record.CreateType()!.GetField("Value")!;
+        Assert.True(Annotations.Has(field, Annotations.Event, inherit: false));
+        Assert.False(Annotations.EventIgnored(field));
+    }
+
+    [Theory]
+    [InlineData(typeof(IgnoredRecord), false)]
+    [InlineData(typeof(IgnoredBase), true)]
+    public void IgnoredMembersAreRemovedAfterHidingAndBeforeMappingOrNameCollisions(Type type, bool union)
+    {
+        JsonElement record = InheritedDocument(type).GetProperty("types")[0];
+        JsonElement fields = union ? Assert.Single(record.GetProperty("variants").EnumerateArray()).GetProperty("fields")
+            : record.GetProperty("fields");
+        Assert.Equal(["Visible:i32", "Nested:IgnoredEmpty"], fields.EnumerateArray()
+            .Select(field => $"{field[0].GetString()}:{field[1].GetString()}"));
+        JsonElement empty = InheritedDocument(typeof(IgnoredEmpty)).GetProperty("types")[0];
+        Assert.Empty(empty.GetProperty("fields").EnumerateArray());
+    }
+
+    [Theory]
+    [InlineData(typeof(IgnoredOnlySetup), new string[0])]
+    [InlineData(typeof(IgnoredMixedSetup), new[] { "chosen" })]
+    [InlineData(typeof(IgnoredReplacedSetup), new[] { "Context" })]
+    public void IgnoredAnnotationsStillDisableSetupAllMemberInference(Type type, string[] expected)
+    {
+        JsonElement record = InheritedDocument(type).GetProperty("types")[0];
+        Assert.True(record.GetProperty("property_setup").GetBoolean());
+        Assert.Equal(expected, record.GetProperty("fields").EnumerateArray().Select(field => field[0].GetString()));
+    }
+
+    [SpecEvent]
+    private abstract class IgnoredBase
+    {
+        [SpecEvent] public int Removed { get; set; } = 1;
+        [SpecEvent] public int Visible { get; set; } = 7;
+        [SpecEvent(Ignore = true)] public virtual int Unannotated => 2;
+    }
+
+    [SpecEvent]
+    private sealed class IgnoredRecord : IgnoredBase
+    {
+        [SpecEvent(Ignore = true)] public new Action Removed => throw new InvalidOperationException(GetType().Name);
+        public override int Unannotated => throw new InvalidOperationException();
+        [SpecEvent("Visible", Ignore = true)] public Action Context = null!;
+        [SpecEvent(Ignore = true)] public int Explodes => throw new InvalidOperationException(GetType().Name);
+        [SpecEvent] public IgnoredEmpty Nested { get; set; } = new();
+    }
+
+    [SpecEvent]
+    private sealed class IgnoredEmpty
+    {
+        [SpecEvent(Ignore = true)] public Action Context { get; set; } = null!;
+    }
+
+    private class IgnoredSetupBase
+    {
+        [SpecEvent(Ignore = true)] public Action Context { private get; set; } = null!;
+    }
+
+    [SpecEvent(Setup = true)]
+    private sealed class IgnoredOnlySetup : IgnoredSetupBase
+    {
+        public Action Extra => throw new InvalidOperationException(GetType().Name);
+    }
+
+    [SpecEvent(Setup = true)]
+    private sealed class IgnoredMixedSetup : IgnoredSetupBase
+    {
+        [SpecEvent("chosen")] public int Selected { get; set; } = 9;
+        public Action Extra => throw new InvalidOperationException(GetType().Name);
+    }
+
+    [SpecEvent(Setup = true)]
+    private sealed class IgnoredReplacedSetup : IgnoredSetupBase
+    {
+        public new int Context { get; set; } = 11;
+    }
+
+    [Fact]
     public void IgnoreOnAnIntermediateOverrideIsInheritedWithoutLosingTheNativeSignature()
     {
         MethodInfo method = typeof(IgnoredLeaf).GetMethod(nameof(IgnoredLeaf.Read))!;
@@ -296,7 +385,7 @@ public class DiscoveryRunnerTests
     {
         MethodInfo method = typeof(GenericFixture).GetMethod(nameof(GenericFixture.Items))!;
         ComponentDocument document = new("fixtures.inherited",
-            [typeof(InheritedRecord), typeof(Fixtures.Reading), typeof(Fixtures.Phase)],
+            [typeof(InheritedRecord), typeof(IgnoredRecord), typeof(Fixtures.Reading), typeof(Fixtures.Phase)],
             [new AnnotatedMethod(method,
                 [new SpecOperationAttribute("read") { Spec = "fixtures.inherited", TypeArguments = [type] }], [])],
             new NullabilityInfoContext());
@@ -396,6 +485,8 @@ public class DiscoveryRunnerTests
     {
         [SpecEvent("selected")]
         public int Different { get; set; }
+        [SpecEvent("selected", Ignore = true)]
+        public Action Context { get; set; } = null!;
     }
 
     [SpecEvent]

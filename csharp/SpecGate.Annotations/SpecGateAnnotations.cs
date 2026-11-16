@@ -67,6 +67,9 @@ public sealed class SpecEventAttribute : Attribute
 
     /// <summary>Gets or sets whether operation arguments are decomposed into setup inputs.</summary>
     public bool Setup { get; set; }
+
+    /// <summary>Gets or sets whether this record field or property is omitted from semantic discovery and capture.</summary>
+    public bool Ignore { get; set; }
 }
 
 /// <summary>Declares exception types mapped to a semantic error outcome.</summary>
