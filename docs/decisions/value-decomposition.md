@@ -9,11 +9,17 @@ The owner accepted this design on 2026-11-12, including the specified CTSC,
 CLI, replay, and golden-matrix changes. Implementation follows the bounded
 slices in the [value-model roadmap](../contributor/roadmap.md#value-model).
 This acceptance does not claim that the behavior is already implemented.
-The inherited-member slice (#127) is now implemented; the other value-model
-slices, including type aliases (#122), remain pending.
+The inherited-member slice (#127) is now implemented. A diagnostic-only part of
+#131/#126 reads existing linked optional values after canonical inequality,
+including `none`, unit, innermost `Some` elision, and adjacent `.some` paths.
+It preserves canonical tree equality and atomic container diagnostics; it does
+not implement signature compatibility, new wrappers, or the rest of #131.
+See the [implementation note](../ctsc/comparison.md#specgate-implementation-note-optional-diagnostic-readings).
+The other value-model slices, including type aliases (#122), remain pending.
 For the future coordinated wrapper slice, the owner approved a joint cutover to
 CTSC `0.5.0` and `ctsc.strict/0.3.0`, requiring recapture with no legacy reader.
-The inheritance-only slice leaves current contract and policy versions unchanged.
+The inheritance and optional-diagnostic slices leave current contract and policy
+versions unchanged.
 
 ## Context
 
@@ -74,8 +80,9 @@ also holds `none` and the outcome channels. Path rules, such as the elided
 The nested typed tree is authoritative; there is no wire flattening. Shortened
 display labels must never merge distinct states. Ambiguous literal names use
 quoted bracket notation: a real field `["err"]` differs from the synthetic
-`.err` segment. These are owner-approved requirements for the future wrapper
-slice, not changes delivered by #127.
+`.err` segment. The existing optional diagnostic subset is implemented as noted
+above; the
+broader wrapper requirements remain future work, not changes delivered by #127.
 
 ### Slot properties
 

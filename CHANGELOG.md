@@ -7,6 +7,9 @@ under `docs/decisions/`, or `docs/contributor/roadmap.md`. Generate with `just c
 
 ### Added
 
+- Linked comparison explains unequal existing optional values with `none`,
+  unit, and nested `.some` diagnostic readings without changing strict equality
+  or trace formats (partial #131/#126).
 - Rust replay accepts recursive list, set, string-keyed map, and optional
   inputs. Property setups (`#[spec_event(setup)]`, `[SpecEvent(Setup = true)]`)
   fold a parameter object's selected fields into flat inputs and rebuild the

@@ -61,6 +61,15 @@ root registry imports others.
 
 Pass `--registry` whenever you have one.
 
+For unequal linked optional values, diagnostics read `None` as `none`,
+`Some(())` as `()`, and `Some(5)` as `5`. Adjacent nested optionals retain
+`.some`: `Some(None)` reads `x.some: none`, distinct from `x: none`.
+Record fields and union variants use escaped literal paths; containers stay
+atomic, preserving their ordering and occurrence counts. These labels only
+explain a mismatch already established by typed tree comparison; they never
+make required and optional values equivalent. See the
+[implementation note](https://github.com/schgoo/specgate/blob/v0.6.0/docs/ctsc/comparison.md#specgate-implementation-note-optional-diagnostic-readings).
+
 ## Expected output
 
 Lines are not yet a stable contract

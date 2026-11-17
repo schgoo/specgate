@@ -121,7 +121,28 @@ Thus literal `["a.b"]` differs from nested `.a.b`, `["0"]` from tuple index
 `[0]`, and an ordinary union's `["Some"]` from optional `.Some`.
 This is diagnostic escaping only: allowed names, wire values, equality, and
 `ctsc.strict/0.2.0` are unchanged. The comparator uses the same escaping for its
-input-name mismatch locations; this does not add recursive comparator paths.
+input-name mismatch locations.
+
+### SpecGate implementation note: optional diagnostic readings
+
+For valid linked traces, after canonical typed values have already compared
+unequal, SpecGate can explain existing `optional` values with recursive paths.
+At a slot `x`, `None` reads `x: none`, `Some(())` reads `x: ()`, and `Some(5)`
+reads `x: 5`. For `optional<optional<T>>`, the three states read `x: none`,
+`x.some: none`, and `x.some: 5`; only the innermost `Some` is elided.
+Records, tuples, and ordinary union payloads supply their literal field,
+index, and variant paths. A literal variant `Some` remains `["Some"]`,
+not an optional wrapper. Named types resolve in their owning component and
+registry, including imports.
+
+Readings preserve ordered occurrences, not a path-keyed equality map.
+Collections and maps stop decomposition and keep their canonical atomic
+rendering; no new element pairing is inferred. When paths differ, the
+enclosing mismatch displays both path readings. If readings cannot distinguish
+unequal values, the canonical enclosing mismatch is retained.
+This is diagnostic presentation only, not a new equivalence rule: the nested
+canonical tree remains authoritative. Trace Core comparison without a registry,
+linked validation, wire formats, CTSC `0.4.0`, and Strict `0.2.0` are unchanged.
 
 ## 7. CTSC Strict reference policy
 

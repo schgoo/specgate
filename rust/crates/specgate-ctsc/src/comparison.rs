@@ -22,6 +22,7 @@
 
 mod engine;
 mod loading;
+mod reading;
 mod report;
 
 pub use engine::compare_with;
