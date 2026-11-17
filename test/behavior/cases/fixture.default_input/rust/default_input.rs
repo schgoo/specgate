@@ -1,6 +1,6 @@
 use specgate::{SpecEvent, spec_operation};
 
-#[spec_operation("scale", spec = "fixture.default_input")]
+#[spec_operation("scale", component = "fixture.default_input")]
 pub fn scale(value: i32, factor: i32) -> i32 {
     value * factor
 }
@@ -14,7 +14,7 @@ pub struct Offset {
     pub dy: i32,
 }
 
-#[spec_operation("shift", spec = "fixture.default_input")]
+#[spec_operation("shift", component = "fixture.default_input")]
 pub fn shift(base: i32, by: Offset) -> i32 {
     base + by.dx + by.dy
 }

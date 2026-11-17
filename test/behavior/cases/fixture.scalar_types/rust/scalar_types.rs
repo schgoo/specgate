@@ -7,7 +7,7 @@ pub enum ScalarValue {
     Boolean(bool),
 }
 
-#[spec_operation("classify", spec = "fixture.scalar_types")]
+#[spec_operation("classify", component = "fixture.scalar_types")]
 pub fn classify(id: i64, active: bool) -> ScalarValue {
     if active {
         ScalarValue::Integer(id)

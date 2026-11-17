@@ -74,7 +74,7 @@ sources, so a search for it finds the code that raises it.
 
 | Message fragment | Cause | Fix |
 | --- | --- | --- |
-| `__specgate_requires_crate_root_spec_component` | An annotated operation or setup is in a target without its own hook declaration. | Add `specgate::spec_component!("component.id");` at that library, binary, or integration-test crate root, even if its annotations use explicit `spec` values. |
+| `__specgate_requires_crate_root_spec_component` | An annotated operation or setup is in a target without its own hook declaration. | Add `specgate::spec_component!("component.id");` at that library, binary, or integration-test crate root, even if its annotations use explicit `component` values. |
 | `is not a Rust package` | `sources` has no `Cargo.toml`. | Point `sources` at the package directory. |
 | `capture test build failed` | `cargo test --no-run` failed in `sources`. | Fix the build; the message includes Cargo's output. |
 | `capture test build produced no libtest binaries` | The package has no test targets. | Add `#[test]` functions. |

@@ -1,11 +1,11 @@
 use specgate::spec_operation;
 
-#[spec_operation("lookup_user", spec = "fixture.mock_not_found")]
+#[spec_operation("lookup_user", component = "fixture.mock_not_found")]
 pub fn lookup_user(id: &str) -> Option<String> {
     (id == "known").then(|| "Known User".to_string())
 }
 
-#[spec_operation("get_user", spec = "fixture.mock_not_found")]
+#[spec_operation("get_user", component = "fixture.mock_not_found")]
 pub fn get_user(id: &str) -> Result<String, String> {
     lookup_user(id).ok_or_else(|| format!("user {id} not found"))
 }

@@ -122,13 +122,13 @@ The Rust candidate (`rust/setup_with_params.rs`) declares the same setup,
 operation, and input names:
 
 ```rust
-#[spec_setup("increment", spec = "fixture.setup_with_params")]
+#[spec_setup("increment", component = "fixture.setup_with_params")]
 pub fn make_counter(initial: i32) -> Counter {
     Counter { count: initial }
 }
 
 impl Counter {
-    #[spec_operation("increment", spec = "fixture.setup_with_params")]
+    #[spec_operation("increment", component = "fixture.setup_with_params")]
     pub fn increment(&mut self) {
         self.count += 1;
         observe_count(self.count);

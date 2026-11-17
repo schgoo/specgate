@@ -9,7 +9,7 @@ pub struct Account {
     pub transaction_count: i32,
 }
 
-#[spec_setup("withdraw", spec = "fixture.multi_field_capture")]
+#[spec_setup("withdraw", component = "fixture.multi_field_capture")]
 pub fn make_account() -> Account {
     Account {
         balance: 100,
@@ -18,7 +18,7 @@ pub fn make_account() -> Account {
 }
 
 impl Account {
-    #[spec_operation("withdraw", spec = "fixture.multi_field_capture")]
+    #[spec_operation("withdraw", component = "fixture.multi_field_capture")]
     pub fn withdraw(&mut self, amount: i32) {
         self.balance -= amount;
         self.transaction_count += 1;
@@ -26,7 +26,7 @@ impl Account {
     }
 }
 
-#[spec_operation("observe_account", spec = "fixture.multi_field_capture")]
+#[spec_operation("observe_account", component = "fixture.multi_field_capture")]
 pub fn observe_account(account: &Account) -> Account {
     account.clone()
 }

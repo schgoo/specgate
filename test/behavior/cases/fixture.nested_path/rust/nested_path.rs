@@ -1,6 +1,6 @@
 use specgate::spec_operation;
 
-#[spec_operation("add", spec = "fixture.nested_path")]
+#[spec_operation("add", component = "fixture.nested_path")]
 pub fn add(a: i32, b: i32) -> i32 {
     a + b
 }

@@ -1,6 +1,6 @@
 use specgate::spec_operation;
 
-#[spec_operation("run", spec = "fixture.keyword_collision")]
+#[spec_operation("run", component = "fixture.keyword_collision")]
 pub fn run(input: &str) -> String {
     format!("executed: {input}")
 }

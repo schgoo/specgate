@@ -104,7 +104,7 @@ fn async_completion(rt: &TokenStream2, kind: ReturnKind) -> TokenStream2 {
 /// # Examples
 ///
 /// ```
-/// let attribute = quote::quote!("add", spec = "example.math");
+/// let attribute = quote::quote!("add", component = "example.math");
 /// let item = quote::quote!(fn add(left: i32, right: i32) -> i32 { left + right });
 /// let expanded = specgate_annotations_macros_impl::operation::expand_operation(attribute, item)?;
 /// assert!(!expanded.is_empty());
@@ -628,7 +628,7 @@ mod tests {
     fn duplicate_specialization_options_are_rejected() {
         for (attribute, diagnostic) in [
             (quote::quote!("find", types = "i32", types = "String"), "duplicate `types`"),
-            (quote::quote!("find", spec = "one", spec = "two"), "duplicate `spec`"),
+            (quote::quote!("find", component = "one", component = "two"), "duplicate `component`"),
         ] {
             let error = super::expand_operation(
                 attribute,

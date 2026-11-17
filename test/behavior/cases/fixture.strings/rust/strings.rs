@@ -3,7 +3,7 @@ use specgate::spec_operation;
 pub const SPECIAL: &str =
     "nul:\0 backspace:\u{8} formfeed:\u{c} quote:\" slash:\\ cr:\r lf:\n tab:\t unicode:雪🙂";
 
-#[spec_operation("echo", spec = "fixture.strings")]
+#[spec_operation("echo", component = "fixture.strings")]
 pub fn echo(value: String) -> String {
     value
 }

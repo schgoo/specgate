@@ -20,14 +20,14 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 /// Never resolves, so the only way out of this operation is to be dropped.
-#[spec_operation("work", spec = "fixture.async_abandon")]
+#[spec_operation("work", component = "fixture.async_abandon")]
 pub async fn work(value: i32) -> i32 {
     Suspend.await;
     value * 2
 }
 
 /// Polls `work` exactly once, observes `Pending`, and drops it.
-#[spec_operation("abandon", spec = "fixture.async_abandon")]
+#[spec_operation("abandon", component = "fixture.async_abandon")]
 pub async fn abandon(value: i32) -> i32 {
     let mut context = Context::from_waker(std::task::Waker::noop());
     let mut abandoned = Box::pin(work(value));

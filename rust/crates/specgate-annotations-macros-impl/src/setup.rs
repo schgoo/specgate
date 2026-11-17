@@ -20,7 +20,7 @@ use super::{
 /// ```
 /// use quote::quote;
 /// let expanded = specgate_annotations_macros_impl::setup::expand_setup(
-///     quote!("increment", spec = "example.counter"),
+///     quote!("increment", component = "example.counter"),
 ///     quote!(pub fn counter(start: i32) -> i32 { start }),
 /// )?;
 /// let expanded = expanded.to_string();

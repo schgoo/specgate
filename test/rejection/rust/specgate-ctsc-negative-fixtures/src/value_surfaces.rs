@@ -18,7 +18,7 @@ pub struct Record {
     pub note: Option<Value>,
 }
 
-#[spec_operation("snapshot", spec = "fixture.value")]
+#[spec_operation("snapshot", component = "fixture.value")]
 pub fn snapshot() -> Record {
     Record {
         id: 1,
@@ -30,7 +30,7 @@ pub fn snapshot() -> Record {
     }
 }
 
-#[spec_operation("echo", spec = "fixture.value")]
+#[spec_operation("echo", component = "fixture.value")]
 pub fn echo(input: i32) -> Value {
     Value::Integer(i64::from(input))
 }

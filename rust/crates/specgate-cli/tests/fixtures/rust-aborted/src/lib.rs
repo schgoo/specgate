@@ -22,7 +22,7 @@ specgate::spec_component!("fixture.cli");
 /// Ends the process from inside its own open operation scope.
 ///
 /// Mirrors `specgate_cli_fixtures::abort_inside_operation`.
-#[spec_operation("abort", spec = "fixture.cli.aborted")]
+#[spec_operation("abort", component = "fixture.cli.aborted")]
 pub fn abort_inside_operation(value: i32) -> i32 {
     if value >= 0 {
         std::process::exit(0);
@@ -31,7 +31,7 @@ pub fn abort_inside_operation(value: i32) -> i32 {
 }
 
 /// Completes ordinarily, in the same execution pass as [`abort_inside_operation`].
-#[spec_operation("survive", spec = "fixture.cli.survivor")]
+#[spec_operation("survive", component = "fixture.cli.survivor")]
 pub fn survive(value: i32) -> i32 {
     value * 2
 }

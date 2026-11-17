@@ -1,7 +1,7 @@
 use specgate::spec_operation;
 use std::collections::BTreeMap;
 
-#[spec_operation("get_entity_values", spec = "fixture.structured_map")]
+#[spec_operation("get_entity_values", component = "fixture.structured_map")]
 pub fn get_entity_values(id: i32) -> BTreeMap<String, String> {
     BTreeMap::from([
         ("ID".to_string(), id.to_string()),

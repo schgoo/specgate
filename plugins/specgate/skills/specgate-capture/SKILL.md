@@ -28,7 +28,7 @@ component lives and how to run its tests.
 - An instrumented implementation
   ([Rust](${PLUGIN_DIR}/docs/guides/instrument-rust-crate.md) or [C#](${PLUGIN_DIR}/docs/guides/instrument-csharp-assembly.md)).
 - Its component id: the string in `spec_component!("…")` /
-  `#[spec_operation(…, spec = "…")]` or `[SpecOperation(…, Spec = "…")]`.
+  `#[spec_operation(…, component = "…")]` or `[SpecOperation(…, Spec = "…")]`.
 
 ### Steps
 

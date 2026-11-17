@@ -14,7 +14,7 @@ pub struct Product {
     pub attributes: BTreeMap<String, String>,
 }
 
-#[spec_operation("get_product", spec = "fixture.operators")]
+#[spec_operation("get_product", component = "fixture.operators")]
 pub fn get_product() -> Product {
     Product {
         name: "Milk".to_string(),

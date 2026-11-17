@@ -4,14 +4,14 @@ use specgate::spec_setup;
 mod http;
 use http::HttpEnvironment;
 
-#[spec_setup("find_items", spec = "fixture.typed_async")]
-#[spec_setup("calls", spec = "fixture.typed_async")]
+#[spec_setup("find_items", component = "fixture.typed_async")]
+#[spec_setup("calls", component = "fixture.typed_async")]
 fn make_client(#[spec_input("response")] body: String) -> Client {
     let environment = HttpEnvironment::new(body);
     Client::new(environment.endpoint.clone(), Box::new(environment))
 }
 
-#[spec_setup("find_items", fills = "offset", spec = "fixture.typed_async")]
+#[spec_setup("find_items", fills = "offset", component = "fixture.typed_async")]
 fn make_offset(#[spec_input("initial")] seed: i32) -> Offset {
     Offset { value: seed }
 }

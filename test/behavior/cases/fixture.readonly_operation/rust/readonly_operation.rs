@@ -7,13 +7,13 @@ pub struct Counter {
     pub count: i32,
 }
 
-#[spec_setup("get_count", spec = "fixture.readonly_operation")]
+#[spec_setup("get_count", component = "fixture.readonly_operation")]
 pub fn make_counter() -> Counter {
     Counter { count: 42 }
 }
 
 impl Counter {
-    #[spec_operation("get_count", spec = "fixture.readonly_operation")]
+    #[spec_operation("get_count", component = "fixture.readonly_operation")]
     pub fn get_count(&self) -> i32 {
         self.count
     }

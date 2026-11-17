@@ -9,13 +9,13 @@ mod support;
 pub struct Associated;
 
 impl Associated {
-    #[specgate::spec_operation("identity", spec = "fixture.operation_only")]
+    #[specgate::spec_operation("identity", component = "fixture.operation_only")]
     pub fn identity(value: i32) -> i32 {
         value
     }
 }
 
-#[specgate::spec_operation("increment", spec = "fixture.operation_only")]
+#[specgate::spec_operation("increment", component = "fixture.operation_only")]
 pub fn increment(value: i32) -> i32 {
     assert!(file!().ends_with("operation_only.rs"));
     value + support::delta()

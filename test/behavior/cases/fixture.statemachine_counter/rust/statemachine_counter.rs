@@ -7,20 +7,20 @@ pub struct Counter {
     pub count: i32,
 }
 
-#[spec_setup("increment", spec = "fixture.statemachine_counter")]
+#[spec_setup("increment", component = "fixture.statemachine_counter")]
 pub fn make_counter() -> Counter {
     Counter { count: 0 }
 }
 
 impl Counter {
-    #[spec_operation("increment", spec = "fixture.statemachine_counter")]
+    #[spec_operation("increment", component = "fixture.statemachine_counter")]
     pub fn increment(&mut self) {
         self.count += 1;
         observe_state(self);
     }
 }
 
-#[spec_operation("observe_state", spec = "fixture.statemachine_counter")]
+#[spec_operation("observe_state", component = "fixture.statemachine_counter")]
 pub fn observe_state(counter: &Counter) -> Counter {
     counter.clone()
 }

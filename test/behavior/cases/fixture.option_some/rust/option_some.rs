@@ -1,6 +1,6 @@
 use specgate::spec_operation;
 
-#[spec_operation("find", spec = "fixture.option_some")]
+#[spec_operation("find", component = "fixture.option_some")]
 pub fn find(items: Vec<i32>, target: i32) -> Option<i32> {
     items
         .iter()

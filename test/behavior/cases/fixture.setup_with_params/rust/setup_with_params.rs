@@ -7,20 +7,20 @@ pub struct Counter {
     pub count: i32,
 }
 
-#[spec_setup("increment", spec = "fixture.setup_with_params")]
+#[spec_setup("increment", component = "fixture.setup_with_params")]
 pub fn make_counter(initial: i32) -> Counter {
     Counter { count: initial }
 }
 
 impl Counter {
-    #[spec_operation("increment", spec = "fixture.setup_with_params")]
+    #[spec_operation("increment", component = "fixture.setup_with_params")]
     pub fn increment(&mut self) {
         self.count += 1;
         observe_count(self.count);
     }
 }
 
-#[spec_operation("observe_count", spec = "fixture.setup_with_params")]
+#[spec_operation("observe_count", component = "fixture.setup_with_params")]
 pub fn observe_count(count: i32) -> i32 {
     count
 }

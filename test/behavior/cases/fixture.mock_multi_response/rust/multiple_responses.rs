@@ -1,6 +1,6 @@
 use specgate::spec_operation;
 
-#[spec_operation("lookup_user", spec = "fixture.mock_multi_response")]
+#[spec_operation("lookup_user", component = "fixture.mock_multi_response")]
 pub fn lookup_user(id: &str) -> Option<String> {
     match id {
         "1" => Some("Ada".to_string()),
@@ -9,7 +9,7 @@ pub fn lookup_user(id: &str) -> Option<String> {
     }
 }
 
-#[spec_operation("get_users", spec = "fixture.mock_multi_response")]
+#[spec_operation("get_users", component = "fixture.mock_multi_response")]
 pub fn get_two_users(id_a: &str, id_b: &str) -> Result<String, String> {
     let a = lookup_user(id_a).ok_or_else(|| format!("user {id_a} not found"))?;
     let b = lookup_user(id_b).ok_or_else(|| format!("user {id_b} not found"))?;

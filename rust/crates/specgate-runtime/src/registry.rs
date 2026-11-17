@@ -37,7 +37,7 @@ pub struct OpMeta {
     /// For setups: the operation parameter this setup fills, when explicitly selected.
     /// Used to disambiguate when several params share the setup's output type.
     pub(crate) fills: Option<&'static str>,
-    /// The component (declared via `spec_component!` or a per-item `spec = "..."`
+    /// The component (declared via `spec_component!` or a per-item `component = "..."`
     /// override) that owns this operation. Extraction groups by component and
     /// derives cross-component `depends_on` from it.
     pub(crate) component: &'static str,

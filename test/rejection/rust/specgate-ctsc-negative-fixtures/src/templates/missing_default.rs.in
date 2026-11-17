@@ -7,7 +7,7 @@ pub struct Query {
     pub omitted: String,
 }
 
-#[specgate::spec_operation("read", spec = "fixture.missing_default")]
+#[specgate::spec_operation("read", component = "fixture.missing_default")]
 pub fn read(query: Query) -> i32 {
     query.value
 }

@@ -104,7 +104,7 @@ fn check_component_hook(crate_types: &[&str]) {
         #![doc = include_str!(\"value.txt\")]\n\
         sg::spec_component!(\"fixture.unused_hook_default\");\n\
         #[path = \"support.rs\"] mod support;\n\
-        #[sg::spec_operation(\"value\", spec = \"fixture.component_hook\")]\n\
+        #[sg::spec_operation(\"value\", component = \"fixture.component_hook\")]\n\
         pub fn value() -> i32 {\n\
             assert!(file!().ends_with(\"src/lib.rs\") || file!().ends_with(\"src\\\\lib.rs\"));\n\
             support::value()\n\
@@ -313,8 +313,8 @@ fn generated_test_targets_require_local_components_even_with_explicit_specs() {
     fs::write(package.join("Cargo.toml"), toml::to_string(&manifest).unwrap()).unwrap();
     let entry = cache.path().join("entry.rs");
     fs::write(&entry, "{}").unwrap();
-    let operation = "#[sg::spec_operation(\"value\", spec = \"fixture.explicit\")]\npub fn value() -> i32 { 7 }\n";
-    let setup = "#[sg::spec_setup(\"value\", spec = \"fixture.explicit\", fills = \"initial\")]\nfn initial() -> i32 { 7 }\n";
+    let operation = "#[sg::spec_operation(\"value\", component = \"fixture.explicit\")]\npub fn value() -> i32 { 7 }\n";
+    let setup = "#[sg::spec_setup(\"value\", component = \"fixture.explicit\", fills = \"initial\")]\nfn initial() -> i32 { 7 }\n";
     for (target, path, source) in [
         ("--lib", package.join("src").join("lib.rs"), operation.to_string()),
         (

@@ -7,17 +7,17 @@ pub struct Account {
     pub balance: i32,
 }
 
-#[spec_setup("transfer", fills = "source", spec = "fixture.multi_setup")]
+#[spec_setup("transfer", fills = "source", component = "fixture.multi_setup")]
 pub fn make_source() -> Account {
     Account { balance: 100 }
 }
 
-#[spec_setup("transfer", fills = "target", spec = "fixture.multi_setup")]
+#[spec_setup("transfer", fills = "target", component = "fixture.multi_setup")]
 pub fn make_target() -> Account {
     Account { balance: 0 }
 }
 
-#[spec_operation("transfer", spec = "fixture.multi_setup")]
+#[spec_operation("transfer", component = "fixture.multi_setup")]
 pub fn transfer(source: &mut Account, target: &mut Account, amount: i32) {
     source.balance -= amount;
     target.balance += amount;
@@ -25,7 +25,7 @@ pub fn transfer(source: &mut Account, target: &mut Account, amount: i32) {
     observe_balance("target", target);
 }
 
-#[spec_operation("observe_balance", spec = "fixture.multi_setup")]
+#[spec_operation("observe_balance", component = "fixture.multi_setup")]
 pub fn observe_balance(role: &str, account: &Account) -> i32 {
     assert!(matches!(role, "source" | "target"));
     account.balance

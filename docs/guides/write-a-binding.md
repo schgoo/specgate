@@ -10,7 +10,7 @@ component lives and how to run its tests.
 - An instrumented implementation
   ([Rust](instrument-rust-crate.md) or [C#](instrument-csharp-assembly.md)).
 - Its component id: the string in `spec_component!("…")` /
-  `#[spec_operation(…, spec = "…")]` or `[SpecOperation(…, Spec = "…")]`.
+  `#[spec_operation(…, component = "…")]` or `[SpecOperation(…, Spec = "…")]`.
 
 ## Steps
 
