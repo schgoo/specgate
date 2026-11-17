@@ -7,25 +7,25 @@ pub struct BoxVal {
     pub value: i32,
 }
 
-#[spec_setup("combine", fills = "left", spec = "fixture.shared_setup")]
-#[spec_setup("combine", fills = "right", spec = "fixture.shared_setup")]
+#[spec_setup("combine", fills = "left", component = "fixture.shared_setup")]
+#[spec_setup("combine", fills = "right", component = "fixture.shared_setup")]
 pub fn make_box() -> BoxVal {
     BoxVal { value: 2 }
 }
 
-#[spec_operation("combine", spec = "fixture.shared_setup")]
+#[spec_operation("combine", component = "fixture.shared_setup")]
 pub fn combine(left: &BoxVal, right: &BoxVal) -> i32 {
     left.value + right.value
 }
 
-#[spec_setup("combine_three", fills = "a", spec = "fixture.shared_setup")]
-#[spec_setup("combine_three", fills = "b", spec = "fixture.shared_setup")]
-#[spec_setup("combine_three", fills = "c", spec = "fixture.shared_setup")]
+#[spec_setup("combine_three", fills = "a", component = "fixture.shared_setup")]
+#[spec_setup("combine_three", fills = "b", component = "fixture.shared_setup")]
+#[spec_setup("combine_three", fills = "c", component = "fixture.shared_setup")]
 pub fn make_unit() -> BoxVal {
     BoxVal { value: 1 }
 }
 
-#[spec_operation("combine_three", spec = "fixture.shared_setup")]
+#[spec_operation("combine_three", component = "fixture.shared_setup")]
 pub fn combine_three(a: &BoxVal, b: &BoxVal, c: &BoxVal) -> i32 {
     a.value + b.value + c.value
 }

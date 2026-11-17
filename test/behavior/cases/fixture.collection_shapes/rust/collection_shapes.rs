@@ -26,7 +26,7 @@ pub struct OptionalGrouping {
     pub items: Vec<i32>,
 }
 
-#[spec_operation("items", spec = "fixture.collection_shapes")]
+#[spec_operation("items", component = "fixture.collection_shapes")]
 pub fn items() -> Vec<CollectionItem> {
     vec![
         CollectionItem { value: 2 },
@@ -35,27 +35,27 @@ pub fn items() -> Vec<CollectionItem> {
     ]
 }
 
-#[spec_operation("ordered_items", spec = "fixture.collection_shapes")]
+#[spec_operation("ordered_items", component = "fixture.collection_shapes")]
 pub fn ordered_items() -> Vec<i32> {
     vec![1, 2, 2]
 }
 
-#[spec_operation("ordered_map", spec = "fixture.collection_shapes")]
+#[spec_operation("ordered_map", component = "fixture.collection_shapes")]
 pub fn ordered_map() -> Vec<(String, i32)> {
     vec![("b".to_string(), 2), ("a".to_string(), 1)]
 }
 
-#[spec_operation("priorities", spec = "fixture.collection_shapes")]
+#[spec_operation("priorities", component = "fixture.collection_shapes")]
 pub fn priorities() -> Vec<(String, i32)> {
     vec![("later".to_string(), 7), ("first".to_string(), 1)]
 }
 
-#[spec_operation("lookup", spec = "fixture.collection_shapes")]
+#[spec_operation("lookup", component = "fixture.collection_shapes")]
 pub fn lookup() -> BTreeMap<String, Vec<i32>> {
     BTreeMap::from([("b".to_string(), vec![2, 2]), ("a".to_string(), vec![1])])
 }
 
-#[spec_operation("number_lookup", spec = "fixture.collection_shapes")]
+#[spec_operation("number_lookup", component = "fixture.collection_shapes")]
 pub fn number_lookup() -> Vec<(i32, Vec<String>)> {
     vec![
         (2, vec!["two".to_string(), "two".to_string()]),
@@ -63,12 +63,12 @@ pub fn number_lookup() -> Vec<(i32, Vec<String>)> {
     ]
 }
 
-#[spec_operation("optional_lookup", spec = "fixture.collection_shapes")]
+#[spec_operation("optional_lookup", component = "fixture.collection_shapes")]
 pub fn optional_lookup() -> Vec<(Option<String>, Vec<i32>)> {
     vec![(None, vec![2, 2]), (Some("a".to_string()), vec![1])]
 }
 
-#[spec_operation("grouping", spec = "fixture.collection_shapes")]
+#[spec_operation("grouping", component = "fixture.collection_shapes")]
 pub fn grouping() -> Grouping {
     Grouping {
         key: "group".to_string(),
@@ -76,7 +76,7 @@ pub fn grouping() -> Grouping {
     }
 }
 
-#[spec_operation("optional_grouping", spec = "fixture.collection_shapes")]
+#[spec_operation("optional_grouping", component = "fixture.collection_shapes")]
 pub fn optional_grouping() -> OptionalGrouping {
     OptionalGrouping {
         key: None,
@@ -84,17 +84,17 @@ pub fn optional_grouping() -> OptionalGrouping {
     }
 }
 
-#[spec_operation("bag_input", spec = "fixture.collection_shapes")]
+#[spec_operation("bag_input", component = "fixture.collection_shapes")]
 pub fn bag_input(values: Vec<i32>) -> i32 {
     values.iter().sum()
 }
 
-#[spec_operation("set_input", spec = "fixture.collection_shapes")]
+#[spec_operation("set_input", component = "fixture.collection_shapes")]
 pub fn set_input(values: Vec<i32>) -> i32 {
     values.iter().sum()
 }
 
-#[spec_operation("ordered_map_input", spec = "fixture.collection_shapes")]
+#[spec_operation("ordered_map_input", component = "fixture.collection_shapes")]
 pub fn ordered_map_input(values: Vec<(String, i32)>) -> String {
     values
         .iter()
@@ -103,17 +103,17 @@ pub fn ordered_map_input(values: Vec<(String, i32)>) -> String {
         .join(",")
 }
 
-#[spec_operation("number_map_input", spec = "fixture.collection_shapes")]
+#[spec_operation("number_map_input", component = "fixture.collection_shapes")]
 pub fn number_map_input(values: Vec<(i32, String)>) -> i32 {
     values.iter().map(|(key, _)| key).sum()
 }
 
-#[spec_operation("tuple_input", spec = "fixture.collection_shapes")]
+#[spec_operation("tuple_input", component = "fixture.collection_shapes")]
 pub fn tuple_input(value: (String, i32)) -> String {
     format!("{}{}", value.0, value.1)
 }
 
-#[spec_operation("nested_input", spec = "fixture.collection_shapes")]
+#[spec_operation("nested_input", component = "fixture.collection_shapes")]
 pub fn nested_input(values: BTreeMap<String, Vec<(i32, i32)>>) -> i32 {
     values
         .values()

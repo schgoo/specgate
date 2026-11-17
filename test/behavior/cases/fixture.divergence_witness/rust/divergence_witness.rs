@@ -9,7 +9,7 @@ pub struct EngineInfo {
     pub engine: String,
 }
 
-#[spec_operation("engine_info", spec = "fixture.divergence_witness")]
+#[spec_operation("engine_info", component = "fixture.divergence_witness")]
 pub fn engine_info() -> EngineInfo {
     EngineInfo {
         value: 10,

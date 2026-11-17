@@ -1,6 +1,6 @@
 use specgate::spec_operation;
 
-#[spec_operation("fetch", spec = "fixture.async_fetch")]
+#[spec_operation("fetch", component = "fixture.async_fetch")]
 pub async fn fetch(url: &str) -> String {
     std::future::ready(format!("response from {url}")).await
 }

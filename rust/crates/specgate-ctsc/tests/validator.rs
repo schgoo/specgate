@@ -99,7 +99,7 @@ pub fn emit_tuple_variant(multiple: bool) -> TupleVariant {
 }
 
 /// Emit one macro-hygiene variant for native validation coverage.
-#[spec_operation("emit_hygienic_variant", spec = "fixture.macro_hygiene")]
+#[spec_operation("emit_hygienic_variant", component = "fixture.macro_hygiene")]
 pub fn emit_hygienic_variant(named: bool) -> HygienicVariant {
     if named {
         HygienicVariant::Named {
@@ -624,7 +624,7 @@ fn abandoned_capture(label: &str) -> Capture {
     finish().unwrap()
 }
 
-#[spec_operation("query", spec = "fixture.abandon")]
+#[spec_operation("query", component = "fixture.abandon")]
 async fn abandonable_query(value: i32) -> i32 {
     SuspendForever.await
 }

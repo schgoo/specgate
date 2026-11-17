@@ -13,7 +13,7 @@ impl ToNativeValue for Gadget {
     }
 }
 
-#[spec_operation("build", spec = "fixture.unresolved_type")]
+#[spec_operation("build", component = "fixture.unresolved_type")]
 pub fn build() -> Gadget {
     Gadget { value: 7 }
 }

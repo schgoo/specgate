@@ -7,32 +7,32 @@ pub struct Account {
     pub balance: i32,
 }
 
-#[spec_setup("transfer", spec = "fixture.nested_operations")]
-#[spec_setup("withdraw", spec = "fixture.nested_operations")]
-#[spec_setup("deposit", spec = "fixture.nested_operations")]
+#[spec_setup("transfer", component = "fixture.nested_operations")]
+#[spec_setup("withdraw", component = "fixture.nested_operations")]
+#[spec_setup("deposit", component = "fixture.nested_operations")]
 pub fn make_account() -> Account {
     Account { balance: 100 }
 }
 
 impl Account {
-    #[spec_operation("transfer", spec = "fixture.nested_operations")]
+    #[spec_operation("transfer", component = "fixture.nested_operations")]
     pub fn transfer(&mut self, amount: i32) {
         self.withdraw(amount);
         self.deposit(amount);
         Self::observe_balance(self.balance);
     }
 
-    #[spec_operation("observe_balance", spec = "fixture.nested_operations")]
+    #[spec_operation("observe_balance", component = "fixture.nested_operations")]
     pub fn observe_balance(balance: i32) -> i32 {
         balance
     }
 
-    #[spec_operation("withdraw", spec = "fixture.nested_operations")]
+    #[spec_operation("withdraw", component = "fixture.nested_operations")]
     pub fn withdraw(&mut self, amount: i32) {
         self.balance -= amount;
     }
 
-    #[spec_operation("deposit", spec = "fixture.nested_operations")]
+    #[spec_operation("deposit", component = "fixture.nested_operations")]
     pub fn deposit(&mut self, amount: i32) {
         self.balance += amount;
     }

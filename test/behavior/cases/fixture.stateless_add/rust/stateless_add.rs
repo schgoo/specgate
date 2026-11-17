@@ -8,7 +8,7 @@ impl Default for Context {
     }
 }
 
-#[spec_operation("add", spec = "fixture.stateless_add")]
+#[spec_operation("add", component = "fixture.stateless_add")]
 pub fn add(
     #[spec_input("a", ignore)] first: Context,
     a: i32,

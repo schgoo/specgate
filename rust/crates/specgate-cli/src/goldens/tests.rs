@@ -491,7 +491,9 @@ mod cases {
         generate_rust(scratch.path(), &matrix, &generated, &work, &[&matrix.rows[0]]).unwrap();
         write_bytes(
             fixture.join("src/lib.rs"),
-            format!("{original}\n#[specgate::spec_operation(\"extra\", spec = \"fixture.undeclared\")]\npub fn extra() -> i32 {{ 9 }}\n"),
+            format!(
+                "{original}\n#[specgate::spec_operation(\"extra\", component = \"fixture.undeclared\")]\npub fn extra() -> i32 {{ 9 }}\n"
+            ),
         )
         .unwrap();
         // Textual source accounting alone still accepts this already-covered

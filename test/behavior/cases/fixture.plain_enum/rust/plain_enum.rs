@@ -11,7 +11,7 @@ pub enum Level {
     High = 20,
 }
 
-#[spec_operation("level_for", spec = "fixture.plain_enum")]
+#[spec_operation("level_for", component = "fixture.plain_enum")]
 pub fn level_for(score: i32) -> Level {
     if score < 10 {
         Level::Low

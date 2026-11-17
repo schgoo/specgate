@@ -1,7 +1,7 @@
 use specgate::spec_operation;
 use std::collections::BTreeSet;
 
-#[spec_operation("get_navigation_properties", spec = "fixture.structured_set")]
+#[spec_operation("get_navigation_properties", component = "fixture.structured_set")]
 pub fn get_navigation_properties() -> BTreeSet<String> {
     BTreeSet::from([
         "Orders".to_string(),

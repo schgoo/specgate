@@ -1,6 +1,6 @@
 use specgate::spec_operation;
 
-#[spec_operation("try_divide", spec = "fixture.result_err")]
+#[spec_operation("try_divide", component = "fixture.result_err")]
 pub fn divide(a: i32, b: i32) -> Result<i32, String> {
     if b == 0 {
         Err("division by zero".to_string())

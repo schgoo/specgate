@@ -43,11 +43,16 @@ impl Parse for OperationArg {
             let key = input.parse::<Ident>()?;
             input.parse::<Token![=]>()?;
             let value = input.parse::<LitStr>()?.value();
-            if key == "spec" {
+            if key == "component" {
                 if component.is_some() {
-                    return Err(syn::Error::new(key.span(), "duplicate `spec` argument"));
+                    return Err(syn::Error::new(key.span(), "duplicate `component` argument"));
                 }
                 component = Some(value);
+            } else if key == "spec" {
+                return Err(syn::Error::new(
+                    key.span(),
+                    "`spec` is no longer supported; use `component` instead",
+                ));
             } else if key == "types" {
                 if has_types {
                     return Err(syn::Error::new(key.span(), "duplicate `types` argument"));
@@ -58,7 +63,7 @@ impl Parse for OperationArg {
                     .into_iter()
                     .collect();
             } else {
-                return Err(syn::Error::new(key.span(), "expected `spec` or `types`"));
+                return Err(syn::Error::new(key.span(), "expected `component` or `types`"));
             }
         }
         Ok(Self { name, component, types })
@@ -86,10 +91,18 @@ impl Parse for SetupArg {
             let value = input.parse::<LitStr>()?.value();
             if key == "fills" {
                 fills = Some(value);
-            } else if key == "spec" {
+            } else if key == "component" {
+                if component.is_some() {
+                    return Err(syn::Error::new(key.span(), "duplicate `component` argument"));
+                }
                 component = Some(value);
+            } else if key == "spec" {
+                return Err(syn::Error::new(
+                    key.span(),
+                    "`spec` is no longer supported; use `component` instead",
+                ));
             } else {
-                return Err(syn::Error::new(key.span(), "expected `fills` or `spec`"));
+                return Err(syn::Error::new(key.span(), "expected `fills` or `component`"));
             }
         }
         Ok(Self {
@@ -249,3 +262,56 @@ pub mod event;
 pub mod operation;
 /// Setup attribute expansion with registration examples.
 pub mod setup;
+
+#[cfg(test)]
+mod tests {
+    use quote::quote;
+
+    #[test]
+    fn component_selectors_preserve_other_options_and_crate_defaults() {
+        let operation: super::OperationArg = syn::parse2(quote!("find", component = "example.math", types = "i32")).unwrap();
+        assert_eq!(operation.component.as_deref(), Some("example.math"));
+        assert_eq!(operation.types.len(), 1);
+        let setup: super::SetupArg = syn::parse2(quote!("find", fills = "value", component = "example.math")).unwrap();
+        assert_eq!(setup.component.as_deref(), Some("example.math"));
+        assert_eq!(setup.fills.as_deref(), Some("value"));
+
+        let operation: super::OperationArg = syn::parse2(quote!("find")).unwrap();
+        let setup: super::SetupArg = syn::parse2(quote!("find")).unwrap();
+        assert!(operation.component.is_none());
+        assert!(setup.component.is_none());
+    }
+
+    #[test]
+    fn duplicate_component_selectors_and_legacy_spellings_are_rejected() {
+        for (attribute, diagnostic) in [
+            (
+                quote!("find", component = "one", component = "one"),
+                "duplicate `component` argument",
+            ),
+            (
+                quote!("find", component = "one", component = "two"),
+                "duplicate `component` argument",
+            ),
+            (
+                quote!("find", spec = "one"),
+                "`spec` is no longer supported; use `component` instead",
+            ),
+            (
+                quote!("find", spec = "one", component = "two"),
+                "`spec` is no longer supported; use `component` instead",
+            ),
+            (
+                quote!("find", component = "one", spec = "two"),
+                "`spec` is no longer supported; use `component` instead",
+            ),
+        ] {
+            let operation = syn::parse2::<super::OperationArg>(attribute.clone())
+                .err()
+                .expect("invalid operation selector");
+            let setup = syn::parse2::<super::SetupArg>(attribute).err().expect("invalid setup selector");
+            assert_eq!(operation.to_string(), diagnostic);
+            assert_eq!(setup.to_string(), diagnostic);
+        }
+    }
+}

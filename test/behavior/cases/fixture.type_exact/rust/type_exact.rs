@@ -11,7 +11,7 @@ pub struct Scalars {
     pub code: String,
 }
 
-#[spec_operation("get_scalars", spec = "fixture.type_exact")]
+#[spec_operation("get_scalars", component = "fixture.type_exact")]
 pub fn get_scalars() -> Scalars {
     Scalars {
         count: 5,

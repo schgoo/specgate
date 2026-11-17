@@ -1,7 +1,7 @@
 use specgate::spec_operation;
 use std::collections::BTreeMap;
 
-#[spec_operation("get_properties", spec = "fixture.nested_structured")]
+#[spec_operation("get_properties", component = "fixture.nested_structured")]
 pub fn get_properties() -> Vec<BTreeMap<String, String>> {
     vec![
         BTreeMap::from([

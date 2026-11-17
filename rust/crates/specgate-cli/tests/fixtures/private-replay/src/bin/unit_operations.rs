@@ -4,7 +4,7 @@ fn main() {}
 
 #[cfg(test)]
 mod tests {
-    #[specgate::spec_operation("increment", spec = "fixture.binary_unit")]
+    #[specgate::spec_operation("increment", component = "fixture.binary_unit")]
     pub fn increment(value: i32) -> i32 {
         value + 1
     }

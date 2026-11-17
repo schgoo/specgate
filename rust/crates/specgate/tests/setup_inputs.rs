@@ -110,13 +110,13 @@ pub struct Factor {
 }
 
 /// Construct a factor from a renamed setup input.
-#[spec_setup("scale", fills = "factor")]
+#[spec_setup("scale", fills = "factor", component = "fixture.setup_inputs.other")]
 pub fn make_factor(#[spec_input("factor_seed")] seed: i32) -> Factor {
     Factor { factor: seed }
 }
 
 /// Multiply an ordinary input by a setup-filled factor.
-#[spec_operation("scale")]
+#[spec_operation("scale", component = "fixture.setup_inputs.other")]
 pub fn scale(factor: &Factor, value: i32) -> i32 {
     factor.factor * value
 }
@@ -197,7 +197,7 @@ impl State {
 }
 
 /// Increment an input in a different component.
-#[spec_operation("increment", spec = "fixture.setup_inputs.other")]
+#[spec_operation("increment", component = "fixture.setup_inputs.other")]
 pub fn other_increment(amount: i32) -> i32 {
     amount + 1
 }
@@ -274,6 +274,7 @@ fn receiver_setup_construction_inputs_become_operation_inputs() {
     let capture = specgate::__rt::finish().unwrap();
 
     assert_eq!(counter.count, 5);
+    assert_eq!(capture.operations[0].component_id, "fixture.setup_inputs");
     assert_eq!(
         inputs_of(&capture, "increment"),
         BTreeMap::from([("initial".to_string(), Value::Integer(4))])
@@ -302,6 +303,7 @@ fn explicit_fills_replaces_its_parameter_with_the_setup_inputs() {
     assert_eq!(scale(&factor, 7), 21);
     let capture = specgate::__rt::finish().unwrap();
 
+    assert_eq!(capture.operations[0].component_id, "fixture.setup_inputs.other");
     assert_eq!(
         inputs_of(&capture, "scale"),
         BTreeMap::from([

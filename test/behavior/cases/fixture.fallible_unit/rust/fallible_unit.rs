@@ -7,13 +7,13 @@ pub struct UnitCounter {
     pub count: i32,
 }
 
-#[spec_setup("advance", spec = "fixture.fallible_unit")]
+#[spec_setup("advance", component = "fixture.fallible_unit")]
 pub fn make_counter(initial: i32) -> UnitCounter {
     UnitCounter { count: initial }
 }
 
 impl UnitCounter {
-    #[spec_operation("advance", spec = "fixture.fallible_unit")]
+    #[spec_operation("advance", component = "fixture.fallible_unit")]
     pub fn advance(&mut self) {
         self.count += 1;
         spec_trace!("count", self.count);
@@ -23,7 +23,7 @@ impl UnitCounter {
 #[path = "../../fixture.strings/rust/strings.rs"]
 pub mod strings;
 
-#[spec_operation("fallible_void", spec = "fixture.fallible_unit")]
+#[spec_operation("fallible_void", component = "fixture.fallible_unit")]
 pub fn fallible_void(fail: bool) -> Result<(), String> {
     if fail {
         Err("failed".to_string())
@@ -32,7 +32,7 @@ pub fn fallible_void(fail: bool) -> Result<(), String> {
     }
 }
 
-#[spec_operation("fallible_task", spec = "fixture.fallible_unit")]
+#[spec_operation("fallible_task", component = "fixture.fallible_unit")]
 pub async fn fallible_task(fail: bool) -> Result<(), String> {
     fallible_void(fail)
 }

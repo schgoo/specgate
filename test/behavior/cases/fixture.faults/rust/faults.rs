@@ -1,6 +1,6 @@
 use specgate::spec_operation;
 
-#[spec_operation("explode", spec = "fixture.faults")]
+#[spec_operation("explode", component = "fixture.faults")]
 pub fn explode() -> i32 {
     panic!("fixture fault")
 }

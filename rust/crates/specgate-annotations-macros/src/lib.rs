@@ -35,7 +35,7 @@ pub fn __specgate_test_harness(_input: TokenStream) -> TokenStream {
 
 /// Mark a function or method as a native CTSC operation boundary.
 ///
-/// The first argument is the registry operation name; optional `spec = "component"`
+/// The first argument is the registry operation name; optional `component = "component"`
 /// overrides the surrounding [`specgate::spec_component!`] declaration. Inputs and
 /// return values must implement `SpecGate` native projection. Malformed attributes,
 /// unsupported patterns, and unsupported return shapes are compile-time errors.
@@ -43,26 +43,27 @@ pub fn __specgate_test_harness(_input: TokenStream) -> TokenStream {
 /// parameter from semantic inputs. Its type needs only `Default`, not native
 /// projection; replay constructs that default in the original argument position.
 /// Ordinary calls, including capture, retain the supplied value without defaulting.
+/// The old `spec = "..."` spelling is rejected; use `component = "..."` instead.
 ///
 /// Ignored parameters must implement `Default`:
 ///
 /// ```compile_fail
 /// struct Context;
-/// #[specgate::spec_operation("run", spec = "example.context")]
+/// #[specgate::spec_operation("run", component = "example.context")]
 /// fn run(#[spec_input(ignore)] context: Context) { let _ = context; }
 /// ```
 ///
 /// # Examples
 ///
 /// ```
-/// #[specgate::spec_operation("add", spec = "example.math")]
+/// #[specgate::spec_operation("add", component = "example.math")]
 /// fn add(left: i32, right: i32) -> i32 { left + right }
 /// ```
 ///
 /// A `const fn` is rejected because capture needs runtime state:
 ///
 /// ```compile_fail
-/// #[specgate::spec_operation("add", spec = "example.math")]
+/// #[specgate::spec_operation("add", component = "example.math")]
 /// const fn add(left: i32, right: i32) -> i32 { left + right }
 /// ```
 ///
@@ -71,7 +72,7 @@ pub fn __specgate_test_harness(_input: TokenStream) -> TokenStream {
 /// ```
 /// const fn add(left: i32, right: i32) -> i32 { left + right }
 ///
-/// #[specgate::spec_operation("add", spec = "example.math")]
+/// #[specgate::spec_operation("add", component = "example.math")]
 /// fn checked_add(left: i32, right: i32) -> i32 { add(left, right) }
 /// ```
 #[proc_macro_attribute]
@@ -84,16 +85,18 @@ pub fn spec_operation(attribute: TokenStream, item: TokenStream) -> TokenStream 
 
 /// Register a deterministic setup producer without modifying its behavior.
 ///
-/// The operation name is required; `fills = "parameter"` and `spec = "component"`
+/// The operation name is required; `fills = "parameter"` and `component = "component"`
 /// select the filled input and owner. Unsupported declarations, including `const fn`,
 /// are compile-time errors.
 /// Synchronous producer parameters support the same `#[spec_input(ignore)]`
 /// and compile-time `Default` requirement as [`spec_operation`].
+/// Omitting `component` uses the crate's `spec_component!` declaration.
+/// The old `spec = "..."` spelling is rejected; use `component = "..."` instead.
 ///
 /// # Examples
 ///
 /// ```
-/// #[specgate::spec_setup("add", fills = "left", spec = "example.math")]
+/// #[specgate::spec_setup("add", fills = "left", component = "example.math")]
 /// fn default_left() -> i32 { 1 }
 /// ```
 #[proc_macro_attribute]

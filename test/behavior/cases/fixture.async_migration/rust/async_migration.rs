@@ -14,13 +14,13 @@
 
 use specgate::spec_operation;
 
-#[spec_operation("fetch", spec = "fixture.async_migration")]
+#[spec_operation("fetch", component = "fixture.async_migration")]
 pub async fn fetch(url: String) -> String {
     std::future::ready(()).await;
     format!("response from {url}")
 }
 
-#[spec_operation("migrate", spec = "fixture.async_migration")]
+#[spec_operation("migrate", component = "fixture.async_migration")]
 pub async fn migrate(url: String) -> String {
     let migrating = fetch(url);
     let worker = std::thread::spawn(move || smol::block_on(migrating));

@@ -35,11 +35,17 @@ fn adds_two_numbers() {
 ```
 
 - Declare `spec_component!("…")` once at the crate root; it sets the crate-wide
-  default component. Override it per item with `spec = "…"`, for example
-  `#[spec_operation("add", spec = "example.math")]`.
+  default component. Override it per item with `component = "…"`, for example
+  `#[spec_operation("add", component = "example.math")]`.
+- Both `#[spec_operation]` and `#[spec_setup]` use `component = "…"` for an
+  explicit component. The old `spec = "…"` spelling is rejected, not retained as
+  an alias. Replace it with `component = "…"`; component identities and captured
+  CTSC values do not change. Duplicate `component` arguments are rejected, even
+  when their values match
+  ([compatibility decision](https://github.com/schgoo/specgate/blob/v0.6.0/docs/decisions/rust-component-selector.md)).
 - Each library, binary, or integration-test target needing discovery/replay
   hooks must have its own crate-root declaration, even if every operation uses
-  an explicit `spec`. A library's declaration does not cover separate Cargo
+  an explicit `component`. A library's declaration does not cover separate Cargo
   targets. No generated test is added during ordinary `cargo test` runs.
   A generated-build error naming
   `__specgate_requires_crate_root_spec_component` means this declaration is
@@ -74,7 +80,7 @@ pub struct Widget {
     pub label: String,
 }
 
-#[spec_operation("make_widget", spec = "comp.core")]
+#[spec_operation("make_widget", component = "comp.core")]
 pub fn make_widget() -> Widget {
     Widget { id: 1, label: "widget".to_string() }
 }
@@ -105,13 +111,13 @@ pub struct Counter {
     pub count: i32,
 }
 
-#[spec_setup("increment", spec = "fixture.setup")]
+#[spec_setup("increment", component = "fixture.setup")]
 pub fn make_counter(initial: i32) -> Counter {
     Counter { count: initial }
 }
 
 impl Counter {
-    #[spec_operation("increment", spec = "fixture.setup")]
+    #[spec_operation("increment", component = "fixture.setup")]
     pub fn increment(&mut self) {
         self.count += 1;
     }

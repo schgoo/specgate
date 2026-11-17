@@ -1,4 +1,4 @@
-#[spec_operation("assemble", spec = "comp.app")]
+#[spec_operation("assemble", component = "comp.app")]
 pub fn assemble() -> Widget {
     Widget {
         id: 2,

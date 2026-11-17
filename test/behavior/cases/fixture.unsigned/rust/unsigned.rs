@@ -1,11 +1,11 @@
 use specgate::spec_operation;
 
-#[spec_operation("echo_u32", spec = "fixture.unsigned")]
+#[spec_operation("echo_u32", component = "fixture.unsigned")]
 pub fn echo_u32(value: u32) -> u32 {
     value
 }
 
-#[spec_operation("echo_u64", spec = "fixture.unsigned")]
+#[spec_operation("echo_u64", component = "fixture.unsigned")]
 pub fn echo_u64(value: u64) -> u64 {
     value
 }

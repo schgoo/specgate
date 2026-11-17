@@ -45,7 +45,7 @@ pub mod nested {
     }
 }
 
-#[spec_operation("nested_fields", spec = "fixture.property_setup")]
+#[spec_operation("nested_fields", component = "fixture.property_setup")]
 pub fn nested_fields(query: &mut self::nested::Request) -> String {
     let result = format!(
         "{}:{}",
@@ -55,7 +55,7 @@ pub fn nested_fields(query: &mut self::nested::Request) -> String {
     result
 }
 
-#[spec_operation("zero_inputs", spec = "fixture.property_setup")]
+#[spec_operation("zero_inputs", component = "fixture.property_setup")]
 pub fn zero_inputs(_query: Empty) -> i32 {
     3
 }
@@ -63,7 +63,7 @@ pub fn zero_inputs(_query: Empty) -> i32 {
 #[spec_setup(
     "producer_precedence",
     fills = "query",
-    spec = "fixture.property_setup"
+    component = "fixture.property_setup"
 )]
 pub fn produce(filter: String) -> Query {
     Query {
@@ -75,7 +75,7 @@ pub fn produce(filter: String) -> Query {
     }
 }
 
-#[spec_operation("producer_precedence", spec = "fixture.property_setup")]
+#[spec_operation("producer_precedence", component = "fixture.property_setup")]
 pub fn producer_precedence(query: Query) -> String {
     query.filter
 }
@@ -87,17 +87,21 @@ pub struct Constructed {
     pub filter: String,
 }
 
-#[spec_setup("constructor", fills = "query", spec = "fixture.property_setup")]
+#[spec_setup("constructor", fills = "query", component = "fixture.property_setup")]
 pub fn construct(filter: String) -> Constructed {
     Constructed { filter }
 }
 
-#[spec_operation("constructor", spec = "fixture.property_setup")]
+#[spec_operation("constructor", component = "fixture.property_setup")]
 pub fn constructor(query: Constructed) -> String {
     query.filter
 }
 
-#[spec_setup("nested_constructor", fills = "query", spec = "fixture.property_setup")]
+#[spec_setup(
+    "nested_constructor",
+    fills = "query",
+    component = "fixture.property_setup"
+)]
 pub fn construct_nested(options: self::nested::Request) -> Constructed {
     Constructed {
         filter: format!(
@@ -107,7 +111,7 @@ pub fn construct_nested(options: self::nested::Request) -> Constructed {
     }
 }
 
-#[spec_operation("nested_constructor", spec = "fixture.property_setup")]
+#[spec_operation("nested_constructor", component = "fixture.property_setup")]
 pub fn nested_constructor(query: Constructed) -> String {
     query.filter
 }
@@ -119,7 +123,7 @@ pub struct NestedCounter {
     pub count: u32,
 }
 
-#[spec_setup("nested_increment", spec = "fixture.property_setup")]
+#[spec_setup("nested_increment", component = "fixture.property_setup")]
 pub fn nested_counter(options: &mut self::nested::Request) -> NestedCounter {
     let count = options.fields.subset.selected;
     options.fields.subset.selected += 1;
@@ -127,14 +131,14 @@ pub fn nested_counter(options: &mut self::nested::Request) -> NestedCounter {
 }
 
 impl NestedCounter {
-    #[spec_operation("nested_increment", spec = "fixture.property_setup")]
+    #[spec_operation("nested_increment", component = "fixture.property_setup")]
     pub fn increment(&mut self) -> u32 {
         self.count += 1;
         self.count
     }
 }
 
-#[spec_operation("all_fields", spec = "fixture.property_setup")]
+#[spec_operation("all_fields", component = "fixture.property_setup")]
 pub fn all_fields(query: self::Query) -> String {
     format!(
         "{}:{}:{}:{}:{}",
@@ -146,7 +150,7 @@ pub fn all_fields(query: self::Query) -> String {
     )
 }
 
-#[spec_operation("subset_renamed", spec = "fixture.property_setup")]
+#[spec_operation("subset_renamed", component = "fixture.property_setup")]
 pub fn subset_renamed(query: &mut self::Subset, selected: u32) -> u32 {
     let result = query.selected + selected;
     query.selected += 1;
@@ -155,7 +159,7 @@ pub fn subset_renamed(query: &mut self::Subset, selected: u32) -> u32 {
 
 pub mod relative {
     pub mod operations {
-        #[specgate::spec_operation("module_relative", spec = "fixture.property_setup")]
+        #[specgate::spec_operation("module_relative", component = "fixture.property_setup")]
         pub fn read(query: &super::super::Query) -> String {
             query.filter.clone()
         }

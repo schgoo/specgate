@@ -12,13 +12,13 @@ impl Default for Context {
     }
 }
 
-#[spec_operation("add", spec = "fixture.cli.replay")]
+#[spec_operation("add", component = "fixture.cli.replay")]
 pub fn add(#[spec_input("a", ignore)] first: Context, a: i32, #[spec_input(ignore)] middle: Context, b: i32) -> i32 {
     assert_eq!((first.0, middle.0), (17, 17));
     a + b
 }
 
-#[spec_operation("echo", spec = "fixture.cli.replay")]
+#[spec_operation("echo", component = "fixture.cli.replay")]
 pub fn echo(value: String) -> String {
     value
 }
@@ -30,45 +30,45 @@ pub struct Counter {
     pub count: i32,
 }
 
-#[spec_setup("increment", spec = "fixture.cli.setup")]
+#[spec_setup("increment", component = "fixture.cli.setup")]
 pub fn make_counter(#[spec_input("initial", ignore)] context: Context, initial: i32) -> Counter {
     assert_eq!(context.0, 17);
     Counter { count: initial }
 }
 
 impl Counter {
-    #[spec_operation("increment", spec = "fixture.cli.setup")]
+    #[spec_operation("increment", component = "fixture.cli.setup")]
     pub fn increment(&mut self) {
         self.count += 1;
     }
 }
 
-#[spec_operation("used", spec = "fixture.cli.multiple")]
+#[spec_operation("used", component = "fixture.cli.multiple")]
 pub fn used(value: i32) -> i32 {
     value + 1
 }
 
-#[spec_operation("unexercised", spec = "fixture.cli.multiple")]
+#[spec_operation("unexercised", component = "fixture.cli.multiple")]
 pub fn unexercised(value: i32) -> i32 {
     value - 1
 }
 
-#[spec_operation("never_called", spec = "fixture.cli.unused")]
+#[spec_operation("never_called", component = "fixture.cli.unused")]
 pub fn never_called(value: i32) -> i32 {
     value
 }
 
-#[spec_operation("root", spec = "fixture.cli.nested_root")]
+#[spec_operation("root", component = "fixture.cli.nested_root")]
 pub fn nested_root(value: i32) -> i32 {
     nested_bridge(value + 1)
 }
 
-#[spec_operation("bridge", spec = "fixture.cli.nested_bridge")]
+#[spec_operation("bridge", component = "fixture.cli.nested_bridge")]
 pub fn nested_bridge(value: i32) -> i32 {
     nested_leaf(value + 1)
 }
 
-#[spec_operation("leaf", spec = "fixture.cli.nested_leaf")]
+#[spec_operation("leaf", component = "fixture.cli.nested_leaf")]
 pub fn nested_leaf(value: i32) -> i32 {
     value + 1
 }
@@ -77,7 +77,7 @@ pub fn nested_leaf(value: i32) -> i32 {
 ///
 /// Component capture of `fixture.cli.nested_root` must drop this whole
 /// subtree, including its nested `leaf`, while leaving the root subtree intact.
-#[spec_operation("sibling", spec = "fixture.cli.nested_sibling")]
+#[spec_operation("sibling", component = "fixture.cli.nested_sibling")]
 pub fn nested_sibling(value: i32) -> i32 {
     nested_leaf(value + 10)
 }
@@ -103,7 +103,7 @@ pub fn nested_sibling(value: i32) -> i32 {
 /// fixture corpus.
 ///
 /// It has its own component so it cannot perturb any other capture scenario.
-#[spec_operation("abort", spec = "fixture.cli.aborted")]
+#[spec_operation("abort", component = "fixture.cli.aborted")]
 pub fn abort_inside_operation(value: i32) -> i32 {
     if value >= 0 {
         std::process::exit(0);

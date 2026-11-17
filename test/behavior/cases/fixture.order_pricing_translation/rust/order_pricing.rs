@@ -55,7 +55,7 @@ fn checked(value: Option<i64>) -> i64 {
     value.unwrap_or_else(|| panic!("order price overflow"))
 }
 
-#[spec_operation("price_order", spec = "fixture.order_pricing_translation")]
+#[spec_operation("price_order", component = "fixture.order_pricing_translation")]
 pub fn price_order(
     lines: Vec<OrderLine>,
     customer_tier: CustomerTier,

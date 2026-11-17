@@ -9,7 +9,7 @@ pub struct Widget {
     pub label: String,
 }
 
-#[spec_operation("make_widget", spec = "comp.core")]
+#[spec_operation("make_widget", component = "comp.core")]
 pub fn make_widget() -> Widget {
     Widget {
         id: 1,

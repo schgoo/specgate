@@ -73,7 +73,7 @@ mod producer_scopes {
     }
 
     impl ProducerClient {
-        #[spec_operation("read", spec = "fixture.producer_scopes")]
+        #[spec_operation("read", component = "fixture.producer_scopes")]
         pub fn read(&self, #[spec_input(ignore)] context: Context, offset: ProducerOffset) -> i32 {
             assert_eq!(context.0, 17);
             offset.value
@@ -83,7 +83,7 @@ mod producer_scopes {
     mod receiver {
         use super::*;
 
-        #[spec_setup("read", spec = "fixture.producer_scopes")]
+        #[spec_setup("read", component = "fixture.producer_scopes")]
         pub(super) fn make() -> ProducerClient {
             ProducerClient {}
         }
@@ -92,30 +92,30 @@ mod producer_scopes {
     mod parameter {
         use super::*;
 
-        #[spec_setup("read", spec = "fixture.producer_scopes")]
+        #[spec_setup("read", component = "fixture.producer_scopes")]
         pub(super) fn make(#[spec_input("value", ignore)] context: Context, value: Seed) -> ProducerOffset {
             assert_eq!(context.0, 17);
             ProducerOffset { value: value.value }
         }
     }
 
-    #[spec_setup("text_len", spec = "fixture.producer_scopes", fills = "value")]
+    #[spec_setup("text_len", component = "fixture.producer_scopes", fills = "value")]
     fn owned_text(#[spec_input(ignore)] values: Context, value: String) -> String {
         assert_eq!(values.0, 17);
         value
     }
 
-    #[spec_operation("text_len", spec = "fixture.producer_scopes")]
+    #[spec_operation("text_len", component = "fixture.producer_scopes")]
     pub fn text_len(value: &str) -> i32 {
         value.len() as i32
     }
 
-    #[spec_setup("unit_input", spec = "fixture.producer_scopes", fills = "value")]
+    #[spec_setup("unit_input", component = "fixture.producer_scopes", fills = "value")]
     fn owned_unit(seed: ()) -> () {
         seed
     }
 
-    #[spec_operation("unit_input", spec = "fixture.producer_scopes")]
+    #[spec_operation("unit_input", component = "fixture.producer_scopes")]
     pub fn unit_input(value: ()) -> i32 {
         let () = value;
         1
@@ -144,13 +144,13 @@ mod consuming {
     }
 
     impl ConsumingClient {
-        #[spec_operation("finish", spec = "fixture.consuming")]
+        #[spec_operation("finish", component = "fixture.consuming")]
         pub fn finish(self) -> String {
             self.value
         }
     }
 
-    #[spec_setup("finish", spec = "fixture.consuming")]
+    #[spec_setup("finish", component = "fixture.consuming")]
     fn make(value: String) -> ConsumingClient {
         ConsumingClient { value }
     }
@@ -274,7 +274,7 @@ mod tests {
         assert!(outer(Context(17)));
     }
 
-    #[spec_operation("plain", spec = "fixture.test_only")]
+    #[spec_operation("plain", component = "fixture.test_only")]
     pub fn plain(value: i32) -> i32 {
         value + 1
     }

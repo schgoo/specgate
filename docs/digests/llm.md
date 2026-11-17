@@ -227,7 +227,7 @@ architecture and status are in `docs/status.md`. Important current boundaries in
   Cargo test targets; generated replay hooks run instead of ordinary tests.
   Each target declares `spec_component!` at its own crate root; the declaration
   emits the CLI-owned hook without SpecGate compiler wrappers or source copying/writes.
-  Generated builds diagnose missing declarations even with explicit `spec` values;
+  Generated builds diagnose missing declarations even with explicit `component` values;
   a hook-only default does not register an unused component.
   Configured compiler wrappers remain under normal Cargo handling.
   Construction inputs support primitives, tuples of arity 2-4, and recursive

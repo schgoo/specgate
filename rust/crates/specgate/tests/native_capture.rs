@@ -79,7 +79,7 @@ fn ignored_parameters_preserve_borrowed_context_across_suspension_without_projec
     assert!(capture.operations[1].inputs.is_empty());
 }
 
-#[spec_operation("inner", spec = "fixture.macro_override")]
+#[spec_operation("inner", component = "fixture.macro_override")]
 fn inner(value: i32) -> i32 {
     spec_trace!("seen", value);
     value * 2

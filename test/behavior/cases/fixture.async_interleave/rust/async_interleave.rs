@@ -18,7 +18,7 @@ use specgate::spec_operation;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-#[spec_operation("double", spec = "fixture.async_interleave")]
+#[spec_operation("double", component = "fixture.async_interleave")]
 pub async fn double(value: i32) -> i32 {
     YieldOnce::default().await;
     value * 2
@@ -29,7 +29,7 @@ pub async fn double(value: i32) -> i32 {
 /// The schedule is written out rather than handed to an executor, so operation
 /// open order — and therefore the synthesized span IDs and the logical clock —
 /// is deterministic. A worker pool would make the golden flaky.
-#[spec_operation("interleave", spec = "fixture.async_interleave")]
+#[spec_operation("interleave", component = "fixture.async_interleave")]
 pub async fn interleave(value: i32) -> i32 {
     let mut context = Context::from_waker(std::task::Waker::noop());
     let mut first = Box::pin(double(value));

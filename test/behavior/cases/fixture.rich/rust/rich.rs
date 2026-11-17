@@ -35,13 +35,13 @@ pub enum Shape {
     Point,
 }
 
-#[spec_operation("describe", spec = "fixture.rich")]
+#[spec_operation("describe", component = "fixture.rich")]
 pub fn describe(person: Person, fallback: Option<Shape>) -> Option<String> {
     tag_count(person.tags.clone());
     fallback.map(|shape| format!("{}:{shape:?}", person.name))
 }
 
-#[spec_operation("tag_count", spec = "fixture.rich")]
+#[spec_operation("tag_count", component = "fixture.rich")]
 pub fn tag_count(tags: Vec<String>) -> i32 {
     i32::try_from(tags.len()).unwrap_or(i32::MAX)
 }

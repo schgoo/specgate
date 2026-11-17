@@ -7,27 +7,27 @@ pub struct Counter {
     pub count: i32,
 }
 
-#[spec_setup("increment", spec = "fixture.multi_step")]
-#[spec_setup("decrement", spec = "fixture.multi_step")]
+#[spec_setup("increment", component = "fixture.multi_step")]
+#[spec_setup("decrement", component = "fixture.multi_step")]
 pub fn make_counter() -> Counter {
     Counter { count: 0 }
 }
 
 impl Counter {
-    #[spec_operation("increment", spec = "fixture.multi_step")]
+    #[spec_operation("increment", component = "fixture.multi_step")]
     pub fn increment(&mut self) {
         self.count += 1;
         observe_count("increment", self.count);
     }
 
-    #[spec_operation("decrement", spec = "fixture.multi_step")]
+    #[spec_operation("decrement", component = "fixture.multi_step")]
     pub fn decrement(&mut self) {
         self.count -= 1;
         observe_count("decrement", self.count);
     }
 }
 
-#[spec_operation("observe_count", spec = "fixture.multi_step")]
+#[spec_operation("observe_count", component = "fixture.multi_step")]
 pub fn observe_count(operation: &str, count: i32) -> i32 {
     assert!(matches!(operation, "increment" | "decrement"));
     count

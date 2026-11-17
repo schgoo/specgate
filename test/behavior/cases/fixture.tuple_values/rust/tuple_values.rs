@@ -6,7 +6,7 @@ pub enum TupleValue {
     Values(i32, String, bool),
 }
 
-#[spec_operation("summarize", spec = "fixture.tuple_values")]
+#[spec_operation("summarize", component = "fixture.tuple_values")]
 pub fn summarize(count: i32, label: String, active: bool) -> TupleValue {
     TupleValue::Values(count, label, active)
 }

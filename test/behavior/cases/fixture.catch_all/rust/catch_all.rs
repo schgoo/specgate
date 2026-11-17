@@ -1,6 +1,6 @@
 use specgate::spec_operation;
 
-#[spec_operation("require_in_range", spec = "fixture.catch_all")]
+#[spec_operation("require_in_range", component = "fixture.catch_all")]
 pub fn require_in_range(x: i32) -> Result<i32, String> {
     if x < 0 {
         Err("too small".to_string())

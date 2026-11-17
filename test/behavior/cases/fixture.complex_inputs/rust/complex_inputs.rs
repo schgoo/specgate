@@ -58,26 +58,26 @@ pub struct Person {
     pub address: Address,
 }
 
-#[spec_operation("create_enum_type", spec = "fixture.complex_inputs")]
+#[spec_operation("create_enum_type", component = "fixture.complex_inputs")]
 pub fn create_enum_type(name: &str, members: Vec<EnumMemberInput>) -> String {
     member_count(&members);
     first_member(&members);
     name.to_string()
 }
 
-#[spec_operation("member_count", spec = "fixture.complex_inputs")]
+#[spec_operation("member_count", component = "fixture.complex_inputs")]
 pub fn member_count(members: &[EnumMemberInput]) -> i32 {
     i32::try_from(members.len()).unwrap_or(i32::MAX)
 }
 
-#[spec_operation("first_member", spec = "fixture.complex_inputs")]
+#[spec_operation("first_member", component = "fixture.complex_inputs")]
 pub fn first_member(members: &[EnumMemberInput]) -> String {
     members
         .first()
         .map_or_else(String::new, |member| member.name.clone())
 }
 
-#[spec_operation("sum_points", spec = "fixture.complex_inputs")]
+#[spec_operation("sum_points", component = "fixture.complex_inputs")]
 pub fn sum_points(points: Vec<Point>) -> Point {
     Point {
         x: points.iter().map(|point| point.x).sum(),
@@ -85,12 +85,12 @@ pub fn sum_points(points: Vec<Point>) -> Point {
     }
 }
 
-#[spec_operation("describe_config", spec = "fixture.complex_inputs")]
+#[spec_operation("describe_config", component = "fixture.complex_inputs")]
 pub fn describe_config(config: AppConfig) -> String {
     config.name
 }
 
-#[spec_operation("area_of_shape", spec = "fixture.complex_inputs")]
+#[spec_operation("area_of_shape", component = "fixture.complex_inputs")]
 pub fn area_of_shape(shape: Shape) -> i32 {
     match shape {
         Shape::Circle { radius } => (std::f64::consts::PI * f64::from(radius * radius)) as i32,
@@ -99,7 +99,7 @@ pub fn area_of_shape(shape: Shape) -> i32 {
     }
 }
 
-#[spec_operation("classify", spec = "fixture.complex_inputs")]
+#[spec_operation("classify", component = "fixture.complex_inputs")]
 pub fn classify(sides: i32) -> Shape {
     match sides {
         4 => Shape::Rectangle {
@@ -111,19 +111,19 @@ pub fn classify(sides: i32) -> Shape {
     }
 }
 
-#[spec_operation("get_points_on_line", spec = "fixture.complex_inputs")]
+#[spec_operation("get_points_on_line", component = "fixture.complex_inputs")]
 pub fn get_points_on_line(count: i32) -> Vec<Point> {
     (0..count)
         .map(|value| Point { x: value, y: value })
         .collect()
 }
 
-#[spec_operation("lookup", spec = "fixture.complex_inputs")]
+#[spec_operation("lookup", component = "fixture.complex_inputs")]
 pub fn lookup(table: BTreeMap<String, i32>, key: &str) -> i32 {
     table.get(key).copied().unwrap_or(0)
 }
 
-#[spec_operation("invert_map", spec = "fixture.complex_inputs")]
+#[spec_operation("invert_map", component = "fixture.complex_inputs")]
 pub fn invert_map(table: BTreeMap<String, i32>) -> BTreeMap<String, String> {
     table
         .into_iter()
@@ -131,7 +131,7 @@ pub fn invert_map(table: BTreeMap<String, i32>) -> BTreeMap<String, String> {
         .collect()
 }
 
-#[spec_operation("greet_optional", spec = "fixture.complex_inputs")]
+#[spec_operation("greet_optional", component = "fixture.complex_inputs")]
 pub fn greet_optional(name: Option<String>) -> String {
     name.map_or_else(
         || "Hello, stranger!".to_string(),
@@ -139,12 +139,12 @@ pub fn greet_optional(name: Option<String>) -> String {
     )
 }
 
-#[spec_operation("find_point", spec = "fixture.complex_inputs")]
+#[spec_operation("find_point", component = "fixture.complex_inputs")]
 pub fn find_point(points: Vec<Point>, target_x: i32) -> Option<Point> {
     points.into_iter().find(|point| point.x == target_x)
 }
 
-#[spec_operation("find_shape", spec = "fixture.complex_inputs")]
+#[spec_operation("find_shape", component = "fixture.complex_inputs")]
 pub fn find_shape(sides: i32) -> Option<Shape> {
     match sides {
         1 => Some(Shape::Circle { radius: 5 }),
@@ -153,12 +153,12 @@ pub fn find_shape(sides: i32) -> Option<Shape> {
     }
 }
 
-#[spec_operation("describe_person", spec = "fixture.complex_inputs")]
+#[spec_operation("describe_person", component = "fixture.complex_inputs")]
 pub fn describe_person(person: Person) -> String {
     format!("{}, age {}", person.name, person.age)
 }
 
-#[spec_operation("create_person", spec = "fixture.complex_inputs")]
+#[spec_operation("create_person", component = "fixture.complex_inputs")]
 pub fn create_person(name: &str, age: i32, street: &str, city: &str) -> Person {
     Person {
         name: name.to_string(),
