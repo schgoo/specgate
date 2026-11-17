@@ -236,10 +236,10 @@ Use the existing annotations. No new attribute is added.
   captured behavior. Cancellation is not modeled: if a test cancels an ignored
   token, the comparator reports a behavior difference with no further cause.
   In Rust, ignored parameters require `T: Default`; the macro enforces this at
-  compile time. For ignored SpecEvent fields, the accepted design requires
+  compile time. For ignored SpecEvent fields, reconstruction requires
   `T: Default` only when reconstruction uses the field-type default, not when
   a producer or whole-struct default supplies the value. Rust ignored fields
-  remain unimplemented.
+  are supported in structs and named/tuple enum payloads.
 
 ### Inputs with defaults
 

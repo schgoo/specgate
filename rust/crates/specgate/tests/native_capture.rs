@@ -4,6 +4,92 @@ use specgate::{SpecEvent, ToNativeValue, Value, spec_component, spec_operation, 
 
 spec_component!("fixture.macro_default");
 
+struct OpaqueField<'a>(&'a std::cell::Cell<i32>);
+
+#[derive(SpecEvent)]
+struct IgnoredRecord<'a> {
+    #[spec_event]
+    value: i32,
+    #[spec_event(ignore, path)]
+    context: OpaqueField<'a>,
+}
+
+#[derive(SpecEvent)]
+enum IgnoredPayload<'a> {
+    Named {
+        nested: IgnoredRecord<'a>,
+        #[spec_event(ignore)]
+        context: OpaqueField<'a>,
+    },
+    Tuple(
+        #[spec_event(ignore)] OpaqueField<'a>,
+        i32,
+        #[spec_event(ignore)] OpaqueField<'a>,
+        bool,
+    ),
+    Empty(#[spec_event(ignore)] OpaqueField<'a>),
+    EmptyNamed {
+        #[spec_event(ignore)]
+        context: OpaqueField<'a>,
+    },
+}
+
+#[spec_operation("ignored_fields")]
+fn ignored_fields(value: &IgnoredPayload<'_>) -> i32 {
+    match value {
+        IgnoredPayload::Named { nested, context } => nested.value + nested.context.0.get() + context.0.get(),
+        IgnoredPayload::Tuple(first, value, last, _) => first.0.get() + value + last.0.get(),
+        IgnoredPayload::Empty(context) | IgnoredPayload::EmptyNamed { context } => context.0.get(),
+    }
+}
+
+#[test]
+fn ignored_fields_are_absent_from_native_capture_and_type_metadata() {
+    let context = std::cell::Cell::new(10);
+    specgate::__rt::start(config(&[])).unwrap();
+    assert_eq!(
+        ignored_fields(&IgnoredPayload::Named {
+            nested: IgnoredRecord {
+                value: 7,
+                context: OpaqueField(&context)
+            },
+            context: OpaqueField(&context),
+        }),
+        27
+    );
+    assert_eq!(
+        ignored_fields(&IgnoredPayload::Tuple(OpaqueField(&context), 8, OpaqueField(&context), true)),
+        28
+    );
+    assert_eq!(ignored_fields(&IgnoredPayload::Empty(OpaqueField(&context))), 10);
+    assert_eq!(
+        ignored_fields(&IgnoredPayload::EmptyNamed {
+            context: OpaqueField(&context)
+        }),
+        10
+    );
+    let capture = specgate::__rt::finish().unwrap();
+    let map = |name: &str, value| Value::Map([(name.to_string(), value)].into_iter().collect());
+    assert_eq!(
+        capture.operations[0].inputs["value"],
+        map("Named", map("nested", map("value", Value::Integer(7))))
+    );
+    assert_eq!(
+        capture.operations[1].inputs["value"],
+        map("Tuple", Value::List(vec![Value::Integer(8), Value::Bool(true)]))
+    );
+    assert_eq!(capture.operations[2].inputs["value"], map("Empty", Value::List(vec![])));
+    assert_eq!(
+        capture.operations[3].inputs["value"],
+        map("EmptyNamed", Value::Map(std::collections::BTreeMap::new()))
+    );
+    let discovery = specgate::__rt::discovery().json();
+    assert!(!discovery.contains("OpaqueField"));
+    assert!(discovery.contains("\"tuple\":[\"i32\",\"bool\"]"));
+    assert!(discovery.contains("\"name\":\"Empty\",\"fields\":[],\"tuple\":[]"));
+    assert!(discovery.contains("\"name\":\"EmptyNamed\",\"fields\":[],\"tuple\":null"));
+}
+
 struct IgnoredContext<'a>(&'a std::cell::Cell<i32>);
 
 impl Default for IgnoredContext<'_> {

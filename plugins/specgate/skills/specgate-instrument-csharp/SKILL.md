@@ -71,7 +71,7 @@ parameters such as `Span<T>` and generic parameters with `allows ref struct`;
 the weaver rejects these before emitting capture code.
 Rust operation and synchronous setup parameters use `#[spec_input(ignore)]`
 with `Default` for replay. C# record members use `SpecEvent.Ignore` (below);
-Rust ignored `SpecEvent` fields remain unsupported.
+Rust record and enum payload fields use `#[spec_event(ignore)]`.
 See [ignored context inputs](${PLUGIN_DIR}/docs/reference/value-mapping.md#ignored-context-inputs).
 
 #### 2. Reuse the existing tests
@@ -343,6 +343,8 @@ the body. Ignoring a token does not change cancellation recording or explain
 why cancellation occurred; see [value mapping](${PLUGIN_DIR}/docs/reference/value-mapping.md#ignored-context-inputs).
 C# record members marked `[SpecEvent(Ignore = true)]` are also omitted from
 async inputs and awaited results, using the same projection as synchronous calls.
+Rust `#[spec_event(ignore)]` likewise omits record and enum payload fields;
+capture preserves the original context without constructing defaults.
 
 Wrap a future you intend to abandon inside an enclosing annotated operation
 that completes; the abandonment is then recorded on the inner span

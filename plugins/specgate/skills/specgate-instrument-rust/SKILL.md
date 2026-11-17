@@ -71,8 +71,8 @@ fn adds_two_numbers() {
   `#[spec_input(ignore)]` or `#[spec_input("context", ignore)]`. The type must
   implement `Default`, but needs no `ToNativeValue`. Ordinary calls retain the
   supplied context; only replay constructs its default in the native argument
-  position. Rust ignored `SpecEvent` fields remain unsupported; C# reference
-  record fields/properties can use `[SpecEvent(Ignore = true)]`.
+  position. For record or enum payload context, use `#[spec_event(ignore)]`;
+  C# reference record fields/properties use `[SpecEvent(Ignore = true)]`.
 - The macros resolve your actual `specgate` dependency, so a renamed
   dependency (`sg = { package = "specgate", … }`) works.
 
@@ -100,7 +100,10 @@ pub fn make_widget() -> Widget {
 
 - On a struct, only fields marked `#[spec_event]` are recorded. Rename one with
   `#[spec_event(name = "…")]`. Structs must use named fields.
-- On an enum, each variant is recorded with all of its fields.
+- On an enum, each variant is recorded with all non-ignored fields.
+- `#[spec_event(ignore)]` excludes a field before projection or type mapping.
+  Ignored tuple positions are compacted; an all-ignored tuple stays an empty
+  tuple payload, not a unit variant. Ignored types need no projection bounds.
 - See [`../reference/value-mapping.md`](${PLUGIN_DIR}/docs/reference/value-mapping.md) for
   supported types.
 
@@ -144,9 +147,15 @@ Cargo test target ([limitations](${PLUGIN_DIR}/docs/reference/limitations.md)).
 
 For simple parameter objects, add `#[spec_event(setup)]` beside
 `#[derive(SpecEvent)]`. Without member annotations, every field is selected;
-otherwise only annotated fields are selected. Selected fields must be public
+otherwise only annotated, non-ignored fields are selected. Ignored-only
+annotations select zero fields, not all-minus-ignored. Selected fields must be public
 and become flat operation inputs. Replay decodes them into a struct literal,
-using `..Default::default()` for omitted fields. The opt-in promises that those
+using the whole struct's `Default` for omitted fields when available. If only
+explicitly ignored fields are omitted and the struct has no `Default`, their
+field-type defaults are the fallback. Other unannotated omissions still require
+the whole-struct default. An explicit producer owns its output and replay never
+resets ignored fields afterward. Selected inputs decode before any default.
+The opt-in promises that those
 defaults preserve the contract; use an explicit producer for construction
 invariants. Supported field inputs include recursive `Vec`, `Option`, sets, and
 string-keyed maps. A field whose type is itself `#[spec_event(setup)]` is
@@ -329,6 +338,8 @@ the body. Ignoring a token does not change cancellation recording or explain
 why cancellation occurred; see [value mapping](${PLUGIN_DIR}/docs/reference/value-mapping.md#ignored-context-inputs).
 C# record members marked `[SpecEvent(Ignore = true)]` are also omitted from
 async inputs and awaited results, using the same projection as synchronous calls.
+Rust `#[spec_event(ignore)]` likewise omits record and enum payload fields;
+capture preserves the original context without constructing defaults.
 
 Wrap a future you intend to abandon inside an enclosing annotated operation
 that completes; the abandonment is then recorded on the inner span

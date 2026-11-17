@@ -53,7 +53,7 @@ parameters such as `Span<T>` and generic parameters with `allows ref struct`;
 the weaver rejects these before emitting capture code.
 Rust operation and synchronous setup parameters use `#[spec_input(ignore)]`
 with `Default` for replay. C# record members use `SpecEvent.Ignore` (below);
-Rust ignored `SpecEvent` fields remain unsupported.
+Rust record and enum payload fields use `#[spec_event(ignore)]`.
 See [ignored context inputs](../reference/value-mapping.md#ignored-context-inputs).
 
 ### 2. Reuse the existing tests

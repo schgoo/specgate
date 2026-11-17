@@ -41,10 +41,12 @@ pub fn expand_event(input: TokenStream2) -> syn::Result<TokenStream2> {
         .map(|literal| literal.value());
     let component = component(owner.as_deref());
     let (impl_generics, type_generics, where_clause) = input.generics.split_for_impl();
-    let mut type_name = event_name(&input.attrs, name.to_string()).unwrap_or_else(|| name.to_string());
+    let mut type_name = name.to_string();
     let mut property_setup = false;
     for attribute in input.attrs.iter().filter(|attribute| attribute.path().is_ident("spec_event")) {
-        if attribute.meta.require_list().is_ok() && attribute.parse_args::<LitStr>().is_err() {
+        if let Ok(literal) = attribute.parse_args::<LitStr>() {
+            type_name = literal.value();
+        } else if attribute.meta.require_list().is_ok() {
             attribute.parse_nested_meta(|meta| {
                 if meta.path.is_ident("setup") {
                     property_setup = true;
@@ -70,23 +72,22 @@ pub fn expand_event(input: TokenStream2) -> syn::Result<TokenStream2> {
             let Fields::Named(named) = &data.fields else {
                 return Err(syn::Error::new_spanned(name, "SpecEvent structs must use named fields"));
             };
-            let selected = named
+            let annotated = named
                 .named
                 .iter()
-                .filter_map(|field| {
-                    let ident = field.ident.as_ref()?;
-                    event_field(&field.attrs, ident.to_string())
-                        .or_else(|| {
-                            (property_setup
-                                && !named
-                                    .named
-                                    .iter()
-                                    .any(|field| field.attrs.iter().any(|attribute| attribute.path().is_ident("spec_event"))))
-                            .then(|| (ident.to_string(), false))
-                        })
-                        .map(|(semantic_name, path_projection)| (ident, &field.ty, semantic_name, path_projection))
-                })
-                .collect::<Vec<_>>();
+                .any(|field| field.attrs.iter().any(|attribute| attribute.path().is_ident("spec_event")));
+            let mut selected = Vec::new();
+            let mut ignored = Vec::new();
+            for field in &named.named {
+                let Some(ident) = field.ident.as_ref() else { continue };
+                let options = event_field(&field.attrs, ident.to_string())?;
+                if options.as_ref().is_some_and(|options| options.ignored) {
+                    ignored.push(field);
+                } else if let Some(options) = options.or_else(|| (property_setup && !annotated).then(|| EventField::new(ident.to_string())))
+                {
+                    selected.push((ident, &field.ty, options.name, options.path));
+                }
+            }
             if property_setup {
                 let mut semantic_names = std::collections::BTreeSet::new();
                 for (ident, _, semantic_name, path_projection) in &selected {
@@ -111,27 +112,44 @@ pub fn expand_event(input: TokenStream2) -> syn::Result<TokenStream2> {
                         ));
                     }
                 }
-                let fields = selected.iter().map(|(ident, ty, semantic_name, _)| {
+                let locals = selected
+                    .iter()
+                    .enumerate()
+                    .map(|(index, _)| hygienic_ident(format!("__specgate_input_{index}")))
+                    .collect::<Vec<_>>();
+                let decode = selected.iter().zip(&locals).map(|((_ident, ty, semantic_name, _), local)| {
                     quote! {
-                        #ident: <#ty as #rt::harness::Input>::decode(
+                        let #local = <#ty as #rt::harness::Input>::decode(
                             values.remove(#semantic_name).ok_or_else(|| #rt::harness::error(
                                 concat!("missing property setup input '", #semantic_name, "'")
                             ))?
-                        )?
+                        )?;
                     }
                 });
-                let omitted = (selected.len() != named.named.len()).then(|| quote!(..::core::default::Default::default()));
+                let bindings = selected
+                    .iter()
+                    .zip(&locals)
+                    .map(|((ident, _, _, _), local)| (*ident, local))
+                    .collect::<Vec<_>>();
+                let fields = bindings.iter().map(|(ident, local)| quote!(#ident: #local)).collect::<Vec<_>>();
+                let construction = if selected.len() == named.named.len() {
+                    quote!(Self { #(#fields,)* })
+                } else if selected.len() + ignored.len() == named.named.len() {
+                    ignored_defaults(&ignored, &bindings)
+                } else {
+                    quote!(Self { #(#fields,)* ..::core::default::Default::default() })
+                };
                 reconstruction = quote! {
                     impl #rt::harness::Input for #name {
                         fn decode(value: #rt::Value) -> ::core::result::Result<Self, #rt::CaptureError> {
                             let #rt::Value::Map(mut values) = value else {
                                 return ::core::result::Result::Err(#rt::harness::error("expected property setup inputs"));
                             };
-                            let result = Self { #(#fields,)* #omitted };
+                            #(#decode)*
                             if !values.is_empty() {
                                 return ::core::result::Result::Err(#rt::harness::error("unexpected property setup inputs"));
                             }
-                            ::core::result::Result::Ok(result)
+                            ::core::result::Result::Ok(#construction)
                         }
                     }
                 };
@@ -190,20 +208,20 @@ pub fn expand_event(input: TokenStream2) -> syn::Result<TokenStream2> {
                         }));
                     }
                     Fields::Named(named) => {
-                        let selected = named
-                            .named
-                            .iter()
-                            .enumerate()
-                            .filter_map(|(field_index, field)| {
-                                let ident = field.ident.as_ref()?;
-                                Some((
+                        let mut selected = Vec::new();
+                        for (field_index, field) in named.named.iter().enumerate() {
+                            let Some(ident) = field.ident.as_ref() else { continue };
+                            let options =
+                                event_field(&field.attrs, ident.to_string())?.unwrap_or_else(|| EventField::new(ident.to_string()));
+                            if !options.ignored {
+                                selected.push((
                                     ident,
                                     hygienic_ident(format!("__specgate_variant_{variant_index}_field_{field_index}")),
                                     &field.ty,
-                                    event_name(&field.attrs, ident.to_string()).unwrap_or_else(|| ident.to_string()),
-                                ))
-                            })
-                            .collect::<Vec<_>>();
+                                    options.name,
+                                ));
+                            }
+                        }
                         let payload_ident = hygienic_ident(format!("__specgate_variant_{variant_index}_payload"));
                         let patterns = selected.iter().map(|(ident, binding, _ty, _name)| quote!(#ident: #binding));
                         let inserts = selected.iter().map(|(_ident, binding, _ty, semantic_name)| {
@@ -222,7 +240,7 @@ pub fn expand_event(input: TokenStream2) -> syn::Result<TokenStream2> {
                             ))
                         });
                         arms.push(quote! {
-                            Self::#variant_ident { #(#patterns),*, .. } => {
+                            Self::#variant_ident { #(#patterns,)* .. } => {
                                 let mut #payload_ident = ::std::collections::BTreeMap::new();
                                 #(#inserts)*
                                 #rt::Value::Map(::std::collections::BTreeMap::from([(
@@ -250,14 +268,36 @@ pub fn expand_event(input: TokenStream2) -> syn::Result<TokenStream2> {
                                 hygienic_ident(&identifier)
                             })
                             .collect::<Vec<_>>();
-                        let values = bindings.iter().map(|binding| quote!(#rt::ToNativeValue::to_native_value(#binding)));
-                        let tuple = unnamed.unnamed.iter().map(|field| {
-                            let ty = &field.ty;
-                            let ty = quote!(#ty).to_string();
-                            quote!(#rt::RustType::new(#ty))
-                        });
+                        let options = unnamed
+                            .unnamed
+                            .iter()
+                            .map(|field| event_field(&field.attrs, ""))
+                            .collect::<syn::Result<Vec<_>>>()?;
+                        let selected = options
+                            .iter()
+                            .map(|options| !options.as_ref().is_some_and(|options| options.ignored))
+                            .collect::<Vec<_>>();
+                        let patterns = bindings
+                            .iter()
+                            .zip(&selected)
+                            .map(|(binding, selected)| if *selected { quote!(#binding) } else { quote!(_) });
+                        let values = bindings
+                            .iter()
+                            .zip(&selected)
+                            .filter(|(_, selected)| **selected)
+                            .map(|(binding, _)| quote!(#rt::ToNativeValue::to_native_value(#binding)));
+                        let tuple = unnamed
+                            .unnamed
+                            .iter()
+                            .zip(&selected)
+                            .filter(|(_, selected)| **selected)
+                            .map(|(field, _)| {
+                                let ty = &field.ty;
+                                let ty = quote!(#ty).to_string();
+                                quote!(#rt::RustType::new(#ty))
+                            });
                         arms.push(quote! {
-                            Self::#variant_ident(#(#bindings),*) => #rt::Value::Map(::std::collections::BTreeMap::from([(
+                            Self::#variant_ident(#(#patterns),*) => #rt::Value::Map(::std::collections::BTreeMap::from([(
                                 #variant_name.to_string(),
                                 #rt::Value::List(vec![#(#values),*]),
                             )]))
@@ -311,34 +351,87 @@ pub fn expand_event(input: TokenStream2) -> syn::Result<TokenStream2> {
     Ok(expanded)
 }
 
-fn event_field(attributes: impl AsRef<[syn::Attribute]>, default: impl AsRef<str>) -> Option<(String, bool)> {
-    let attributes = attributes.as_ref();
-    let default = default.as_ref();
-    let attribute = attributes.iter().find(|attribute| attribute.path().is_ident("spec_event"))?;
-    if attribute.meta.require_list().is_err() {
-        return Some((default.to_string(), false));
+// Concrete method resolution prefers &Probe (whole Self) and only autoref
+// falls back to &&Probe (ignored fields). Neither impl overlaps the other.
+fn ignored_defaults(ignored: &[&syn::Field], selected: &[(&Ident, &Ident)]) -> TokenStream2 {
+    let probe = hygienic_ident("__SpecgateDefaultProbe");
+    let defaults = hygienic_ident("__SpecgateDefaults");
+    let supply = hygienic_ident("__SpecgateSupply");
+    let method = hygienic_ident("__specgate_supply_defaults");
+    let whole = hygienic_ident("__specgate_whole_default");
+    let whole_pattern = if selected.is_empty() { quote!(#whole) } else { quote!(mut #whole) };
+    let replacements = selected.iter().map(|(ident, local)| quote!(#whole.#ident = #local;));
+    let fields = selected.iter().map(|(ident, local)| quote!(#ident: #local));
+    let mut tuple = quote!(());
+    let mut pattern = quote!(());
+    let mut initializers = Vec::new();
+    for (index, field) in ignored.iter().enumerate().rev() {
+        let ty = &field.ty;
+        let ident = &field.ident;
+        let local = hygienic_ident(format!("__specgate_ignored_{index}"));
+        tuple = quote!((#ty, #tuple));
+        pattern = quote!((#local, #pattern));
+        initializers.push(quote!(#ident: #local));
     }
-    if let Ok(literal) = attribute.parse_args::<LitStr>() {
-        return Some((literal.value(), false));
-    }
-    let mut name = None;
-    let mut path_projection = false;
-    let _ = attribute.parse_nested_meta(|meta| {
-        if meta.path.is_ident("name") {
-            name = Some(meta.value()?.parse::<LitStr>()?.value());
-            Ok(())
-        } else if meta.path.is_ident("path") {
-            path_projection = true;
-            Ok(())
-        } else {
-            Err(meta.error("expected `name` or `path`"))
+    quote!({
+        struct #probe<S, F>(::core::marker::PhantomData<(S, F)>);
+        enum #defaults<S, F> { Whole(S), Fields(F) }
+        trait #supply<S, F> { fn #method(self) -> #defaults<S, F>; }
+        impl<S: ::core::default::Default, F> #supply<S, F> for &#probe<S, F> {
+            fn #method(self) -> #defaults<S, F> { #defaults::Whole(S::default()) }
         }
-    });
-    Some((name.unwrap_or_else(|| default.to_string()), path_projection))
+        impl<S, F: ::core::default::Default> #supply<S, F> for &&#probe<S, F> {
+            fn #method(self) -> #defaults<S, F> { #defaults::Fields(F::default()) }
+        }
+        match (&#probe::<Self, #tuple>(::core::marker::PhantomData)).#method() {
+            #defaults::Whole(#whole_pattern) => { #(#replacements)* #whole },
+            #defaults::Fields(#pattern) => Self { #(#fields,)* #(#initializers,)* },
+        }
+    })
 }
 
-fn event_name(attributes: impl AsRef<[syn::Attribute]>, default: impl AsRef<str>) -> Option<String> {
-    event_field(attributes, default).map(|(name, _path_projection)| name)
+struct EventField {
+    name: String,
+    path: bool,
+    ignored: bool,
+}
+
+impl EventField {
+    fn new(name: String) -> Self {
+        Self {
+            name,
+            path: false,
+            ignored: false,
+        }
+    }
+}
+
+fn event_field(attributes: &[syn::Attribute], default: impl Into<String>) -> syn::Result<Option<EventField>> {
+    let mut options = EventField::new(default.into());
+    let mut annotated = false;
+    for attribute in attributes.iter().filter(|attribute| attribute.path().is_ident("spec_event")) {
+        annotated = true;
+        if matches!(attribute.meta, syn::Meta::Path(_)) {
+            continue;
+        }
+        if let Ok(literal) = attribute.parse_args::<LitStr>() {
+            options.name = literal.value();
+            continue;
+        }
+        attribute.parse_nested_meta(|meta| {
+            if meta.path.is_ident("name") {
+                options.name = meta.value()?.parse::<LitStr>()?.value();
+            } else if meta.path.is_ident("path") {
+                options.path = true;
+            } else if meta.path.is_ident("ignore") {
+                options.ignored = true;
+            } else {
+                return Err(meta.error("expected `name`, `path`, or `ignore`"));
+            }
+            Ok(())
+        })?;
+    }
+    Ok(annotated.then_some(options))
 }
 
 fn hygienic_ident(value: impl AsRef<str>) -> Ident {
@@ -348,6 +441,23 @@ fn hygienic_ident(value: impl AsRef<str>) -> Ident {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn malformed_ignore_metadata_rejects_in_every_payload_shape() {
+        for field in [
+            quote!(#[spec_event(ignore = true)]),
+            quote!(#[spec_event(ignore(no))]),
+            quote!(#[spec_event(ignroe)]),
+        ] {
+            for input in [
+                quote!(struct Record { #field value: i32 }),
+                quote!(enum Named { Case { #field value: i32 } }),
+                quote!(enum Tuple { Case(#field i32) }),
+            ] {
+                expand_event(input).unwrap_err();
+            }
+        }
+    }
 
     #[test]
     fn property_setup_name_is_independent_of_attribute_order() {

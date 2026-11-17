@@ -113,6 +113,40 @@ pub fn spec_setup(attribute: TokenStream, item: TokenStream) -> TokenStream {
 /// #[spec_component("example.point")]
 /// struct Point { x: i32, y: i32 }
 /// ```
+///
+/// Fields marked `#[spec_event(ignore)]` are absent from projection and type
+/// metadata, including enum payload fields. Ignored tuple positions are compacted.
+/// For `#[spec_event(setup)]`, replay decodes selected fields first, then uses
+/// the whole struct's `Default` for omissions. Only explicitly ignored omissions
+/// may fall back to their field types' `Default` when the struct has none.
+/// Producers own their output; projection alone does not enable reconstruction.
+///
+/// Neither default source is available here:
+///
+/// ```compile_fail
+/// specgate::spec_component!("example.no_default");
+/// struct Opaque;
+/// #[derive(specgate::SpecEvent)]
+/// #[spec_event(setup)]
+/// struct Inputs {
+///     #[spec_event] pub value: i32,
+///     #[spec_event(ignore)] context: Opaque,
+/// }
+/// ```
+///
+/// Unannotated omissions still require a whole-struct default, even if each
+/// omitted field has a default:
+///
+/// ```compile_fail
+/// specgate::spec_component!("example.unannotated");
+/// #[derive(specgate::SpecEvent)]
+/// #[spec_event(setup)]
+/// struct Inputs {
+///     #[spec_event] pub value: i32,
+///     #[spec_event(ignore)] context: i32,
+///     internal: i32,
+/// }
+/// ```
 #[proc_macro_derive(SpecEvent, attributes(spec_event, spec_component))]
 pub fn spec_event(input: TokenStream) -> TokenStream {
     finish(specgate_annotations_macros_impl::event::expand_event(input.into()))

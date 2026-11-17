@@ -240,8 +240,9 @@ recursing through fields that are themselves opted-in records, including
 arguments to explicit setup producers. Leaves become flat inputs under their
 semantic names in depth-first declaration order; each leaf must be a primitive,
 collection, tuple, or optional. Duplicate leaf names and cyclic property-setup types
-are rejected. Replay rebuilds the nested Rust value with `Default` for omitted
-fields.
+are rejected. Replay rebuilds the nested Rust value with whole-struct `Default`
+for omissions, falling back to field defaults only for explicitly ignored
+omissions when the struct has no default.
 Structured results and declared errors, including lists of annotated records,
 are supported. Reachable named declarations retain component/type identity,
 including those reached only by nested observed operations. Nested fields use
@@ -303,6 +304,24 @@ Ignored parameters are absent from setup matching as well as comparison.
 Ignored contexts must still be boxable: by-value ref structs such as `Span<T>`
 and generic parameters with `allows ref struct` are rejected by the weaver.
 
+### Rust ignored record and enum payload fields
+
+`#[spec_event(ignore)]` removes fields before semantic mapping and projection,
+including nested records and named/tuple enum payloads. Ignored fields need no
+`ToNativeValue`, `Clone`, `Send`, or `'static` bound. Surviving tuple positions
+are compacted in both metadata and values; an all-ignored tuple payload stays
+a tuple with zero items, distinct from a unit variant.
+
+Property setups detect annotation presence before filtering: ignored-only
+annotations select zero fields. Selected captured values remain authoritative.
+Explicit producers initialize the whole value without any post-construction
+reset or ignored-field default bound. Otherwise, opted-in property setup replay
+prefers whole-struct `Default` (preserving custom defaults such as `42`), then
+uses ignored-field defaults only if the struct has none. Other unannotated
+omissions still require whole-struct `Default`. Required inputs decode before
+defaults; missing or malformed inputs are errors, never defaulted. Projection
+alone does not opt a record into reconstruction.
+
 ### C# ignored record fields and properties
 
 Use `[SpecEvent(Ignore = true)]` on a record field or property to omit it from
@@ -328,11 +347,10 @@ Type-level and enum-variant ignoring are not supported.
 
 Ignoring context is the author's assertion that it does not affect captured
 behavior. Cancellation causes are not modeled: cancellation can still change
-the recorded outcome. This implements the Rust and C# parameter parts and C#
-record-member part of the accepted
+the recorded outcome. This implements the parameter and record-member parts of the accepted
 [value-decomposition decision](../decisions/value-decomposition.md#annotations).
-Rust ignored `SpecEvent` fields and C# candidate replay remain
-unimplemented. This does not implement `has_default` or new comparison policies.
+C# candidate replay remains unimplemented. This does not implement `has_default`
+or new comparison policies.
 
 ## Names
 

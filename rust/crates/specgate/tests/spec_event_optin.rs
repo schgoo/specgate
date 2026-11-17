@@ -4,7 +4,7 @@
 //! ONLY when tagged `#[spec_event]`. Untagged fields are internal and are
 //! excluded. This unifies `to_spec_value` with `emit_fields`, which is already
 //! opt-in. Enum variant payloads are intrinsic to the variant and are always
-//! included regardless of tagging.
+//! included unless explicitly ignored.
 
 use specgate::{SpecEvent, ToNativeValue, Value};
 use std::collections::BTreeMap;
@@ -28,6 +28,28 @@ enum Shape {
 struct Renamed {
     #[spec_event(name = "spec_key")]
     field_ident: i32,
+}
+
+#[derive(SpecEvent)]
+struct GenericIgnored<T> {
+    #[spec_event]
+    value: i32,
+    #[spec_event(ignore)]
+    context: fn() -> T,
+}
+
+#[test]
+fn generic_ignored_fields_need_no_projection_or_default_bound() {
+    struct Opaque;
+    let value = GenericIgnored {
+        value: 7,
+        context: || Opaque,
+    };
+    let _ = (value.context)();
+    assert_eq!(
+        as_map(value.to_native_value()),
+        BTreeMap::from([("value".into(), Value::Integer(7))])
+    );
 }
 
 fn as_map(v: Value) -> BTreeMap<String, Value> {
