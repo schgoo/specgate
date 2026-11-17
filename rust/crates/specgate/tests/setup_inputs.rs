@@ -5,6 +5,113 @@ use std::collections::BTreeMap;
 
 spec_component!("fixture.setup_inputs");
 
+thread_local! {
+    static FIELD_DEFAULTS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    static WHOLE_DROPS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+struct OpaqueField;
+
+trait UserSupply {
+    fn supply(self);
+}
+impl<T> UserSupply for T {
+    fn supply(self) {}
+}
+
+#[derive(SpecEvent)]
+#[spec_event(setup)]
+struct WholeDefault {
+    #[spec_event("selected")]
+    pub value: i32,
+    #[spec_event(ignore)]
+    opaque: OpaqueField,
+    #[spec_event(ignore)]
+    context: i32,
+}
+
+impl Default for WholeDefault {
+    fn default() -> Self {
+        FIELD_DEFAULTS.with(|count| count.set(count.get() + 1));
+        Self {
+            value: -1,
+            opaque: OpaqueField,
+            context: 42,
+        }
+    }
+}
+
+impl Drop for WholeDefault {
+    fn drop(&mut self) {
+        WHOLE_DROPS.with(|count| count.set(count.get() + 1));
+    }
+}
+
+#[derive(SpecEvent)]
+#[spec_event(setup)]
+struct FieldDefault {
+    #[spec_event]
+    pub value: i32,
+    #[spec_event(ignore)]
+    context: i32,
+}
+
+#[derive(Default, SpecEvent)]
+#[spec_event(setup)]
+struct IgnoredOnly {
+    #[spec_event(ignore)]
+    context: i32,
+    internal: i32,
+}
+
+#[spec_operation("field_defaults")]
+fn field_defaults(value: &WholeDefault) -> i32 {
+    value.value
+}
+
+#[test]
+fn ignored_fields_default_only_after_required_inputs_decode() {
+    use specgate::__rt::harness::Input as _;
+
+    ().supply();
+    FIELD_DEFAULTS.with(|count| count.set(0));
+    WHOLE_DROPS.with(|count| count.set(0));
+    specgate::__rt::start(config()).unwrap();
+    assert_eq!(
+        field_defaults(&WholeDefault {
+            value: 9,
+            opaque: OpaqueField,
+            context: 42
+        }),
+        9
+    );
+    let capture = specgate::__rt::finish().unwrap();
+    assert_eq!(
+        inputs_of(&capture, "field_defaults"),
+        BTreeMap::from([("selected".into(), Value::Integer(9))])
+    );
+    for input in [
+        Value::Map(BTreeMap::new()),
+        Value::Map(BTreeMap::from([("selected".into(), Value::String("bad".into()))])),
+    ] {
+        let Err(_) = WholeDefault::decode(input) else {
+            panic!("required input must not default")
+        };
+    }
+    FIELD_DEFAULTS.with(|count| assert_eq!(count.get(), 0));
+    let whole = WholeDefault::decode(Value::Map(BTreeMap::from([("selected".into(), Value::Integer(7))]))).unwrap();
+    assert_eq!((whole.value, whole.context), (7, 42));
+    let _ = &whole.opaque;
+    FIELD_DEFAULTS.with(|count| assert_eq!(count.get(), 1));
+    drop(whole);
+    WHOLE_DROPS.with(|count| assert_eq!(count.get(), 2));
+    let fields = FieldDefault::decode(Value::Map(BTreeMap::from([("value".into(), Value::Integer(8))]))).unwrap();
+    assert_eq!((fields.value, fields.context), (8, 0));
+    let only = IgnoredOnly::decode(Value::Map(BTreeMap::new())).unwrap();
+    assert_eq!((only.context, only.internal), (0, 0));
+    assert_eq!(specgate::ToNativeValue::to_native_value(&only), Value::Map(BTreeMap::new()));
+}
+
 struct IgnoredContext(i32);
 
 impl Default for IgnoredContext {

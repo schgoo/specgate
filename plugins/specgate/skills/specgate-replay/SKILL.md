@@ -74,6 +74,9 @@ Replay does not run your tests; it calls your operations directly.
 Rust operation and synchronous setup parameters marked `#[spec_input(ignore)]`
 consume no reference value: replay supplies `Default::default()` in their
 original native positions. Capture still uses the caller's actual context.
+Fields marked `#[spec_event(ignore)]` instead retain producer-supplied values,
+or use whole-struct defaults before field defaults in opted-in property setups.
+See [ignored fields](${PLUGIN_DIR}/docs/reference/value-mapping.md#rust-ignored-record-and-enum-payload-fields).
 Annotated synchronous setups reconstruct receiver and injected environments.
 Private/test-only producers remain in their original Cargo target. Equal
 receiver producer/input identities share state within a scenario; scenario
@@ -221,8 +224,8 @@ opted-in property setups. The full list is in
 
 Nonsemantic parameters can be ignored with C# `SpecInput.Ignore` and Rust
 `#[spec_input(ignore)]`. Rust replay defaults ignored parameters. C# reference
-record fields/properties can use `SpecEvent.Ignore`; Rust ignored `SpecEvent`
-fields remain unsupported. Match the reference's surviving semantic fields. See
+record fields/properties can use `SpecEvent.Ignore`; Rust record and enum payload
+fields use `#[spec_event(ignore)]`. Match the reference's surviving semantic fields. See
 [ignored context inputs](${PLUGIN_DIR}/docs/reference/value-mapping.md#ignored-context-inputs).
 
 The candidate can use `Vec<T>` for C# bags, sets, or ordered sets, and pair

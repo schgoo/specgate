@@ -82,8 +82,11 @@ the actual context and replay defaults it in native order. C# record fields and
 properties support `SpecEvent.Ignore` in discovery/capture, including nested
 records, inherited members, union payloads, and property setups. Effective slots
 and setup annotation presence are resolved before ignore filtering; ignored-only
-setup annotations yield zero semantic fields. Rust ignored `SpecEvent` fields
-remain unsupported; #133 is not wholly complete.
+setup annotations yield zero semantic fields. Rust `#[spec_event(ignore)]`
+supports records and named/tuple enum payloads. Property setup replay prefers
+whole-struct defaults, falling back to ignored-field defaults only when needed;
+explicit producers remain authoritative. See
+[reconstruction precedence](decisions/constructor-and-property-setups.md#ignored-field-reconstruction-owner-approved-2026-11-17).
 
 C# inherited record members (#127) are supported in discovery and capture,
 including property setups and union payloads. Effective public instance members
@@ -139,7 +142,8 @@ specializations. Operation and setup construction inputs support lossless
 primitives, tuples of arity 2-4, and recursively supported collections, maps, and optionals.
 Explicit property setups recursively fold nested opted-in records into flat
 semantic leaves, including setup-producer arguments, and reconstruct Rust values;
-omitted fields require `Default`. Duplicate leaf names and cyclic expansions are
+omitted fields require whole-struct `Default`, except for the ignored-field
+fallback above. Duplicate leaf names and cyclic expansions are
 rejected. Records inside containers are not decomposed. C# constructors may declare setups.
 Structured results and declared errors, including collections of
 annotated records, use the existing CTSC projection and linked validators.

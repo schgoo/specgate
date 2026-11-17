@@ -24,8 +24,8 @@ to Rust operations and synchronous setup producers as well as C# parameters.
 Ignored parameters are excluded before setup matching, property decomposition,
 and provenance comparison; an explicit fill of an ignored-only target rejects
 as unknown. Rust replay supplies native `Default` values only at invocation.
-Rust ignored `SpecEvent` fields remain unsupported; the C# member slice below
-does not add reconstruction or defaulting.
+Rust ignored `SpecEvent` fields follow the reconstruction precedence below;
+the C# member slice does not add reconstruction or defaulting.
 
 For C#, the owner-approved [inherited-member rule](value-decomposition.md#inherited-member-selection-127-owner-approved-2026-11-12)
 selects effective public instance members across the hierarchy before applying
@@ -50,8 +50,9 @@ fields must be accessible to the generated invocation.
 The property-setup opt-in is an author promise that omitted fields may safely
 use `Default::default()`. Omission from recording alone is not evidence of
 irrelevance and does not authorize reconstruction. The current implementation
-requires the Rust type to implement `Default` for a subset; failure is a
-compile-time error. Zero-input
+requires the Rust type to implement `Default` for unannotated omissions;
+explicitly ignored omissions may use the field-default fallback below. Failure
+to provide a required default is a compile-time error. Zero-input
 property setups may reconstruct an entirely default value. Types with
 construction invariants must use an explicit producer instead.
 
@@ -89,7 +90,7 @@ maps to `optional`, the same as Rust `Option<T>`, and is not decomposed.
 
 ### Ignored-field reconstruction (owner-approved 2026-11-17)
 
-For the planned Rust ignored-field support, construction uses this precedence:
+Rust ignored-field support uses this precedence:
 
 1. Use captured semantic values for selected fields or setup-producer inputs.
    Defaults do not replace recorded values. An explicitly ignored field has no
@@ -118,11 +119,12 @@ whole-struct-only restriction for property setups whose only omissions are
 ignored fields. Ignored operation and producer parameters keep their existing
 `Default` requirement.
 
-This is an accepted design, not an implementation claim. Rust ignored fields
-and automatic whole-struct-versus-field default selection remain unimplemented.
-The derive macro cannot inspect resolved trait implementations; the selection
-mechanism still needs a bounded implementation design. No new annotation or
-trait API is selected by this decision.
+This is implemented with private helpers local to the generated input decoder.
+Non-overlapping reference receiver implementations select the whole-struct
+default before falling back to a nested tuple of ignored-field defaults.
+All selected inputs decode successfully before any default is invoked.
+Property setups remain nongeneric named-field structs; no public trait or new
+annotation is introduced.
 
 Property-setup opt-in remains required. This does not enable general record
 reconstruction, default a missing or malformed required reference input, or

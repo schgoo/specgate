@@ -764,6 +764,123 @@ mod cases {
     }
 
     #[test]
+    fn ignored_fields_capture_replay_preserves_construction_precedence() {
+        let (cache, binding) = configured_candidate("ignored-fields");
+        std::fs::write(
+            cache.path().join("candidate/src/lib.rs"),
+            r#"
+use specgate::{SpecEvent, spec_operation, spec_setup};
+specgate::spec_component!("fixture.configured");
+pub struct Opaque;
+#[derive(SpecEvent)]
+#[spec_event(setup)]
+pub struct Whole {
+    #[spec_event] pub value: i32,
+    #[spec_event(ignore)] pub context: Opaque,
+    #[spec_event(ignore)] pub number: i32,
+}
+impl Default for Whole {
+    fn default() -> Self { Self { value: -1, context: Opaque, number: 42 } }
+}
+#[derive(SpecEvent)]
+#[spec_event(setup)]
+pub struct Fields {
+    #[spec_event("other")] pub value: i32,
+    #[spec_event(ignore)] pub number: i32,
+}
+#[derive(SpecEvent)]
+#[spec_event(setup)]
+pub struct Nested {
+    #[spec_event] pub whole: Whole,
+    #[spec_event(ignore)] pub number: i32,
+}
+impl Default for Nested {
+    fn default() -> Self { Self { whole: Whole::default(), number: 42 } }
+}
+#[derive(SpecEvent)]
+pub struct Produced {
+    #[spec_event] pub value: i32,
+    #[spec_event(ignore)] pub context: Opaque,
+    #[spec_event(ignore)] pub number: i32,
+}
+#[spec_setup("run", fills = "produced")]
+pub fn produce(seed: i32) -> Produced {
+    Produced { value: seed, context: Opaque, number: 99 }
+}
+#[spec_operation("run")]
+pub fn run(nested: Nested, fields: Fields, produced: Produced) -> i32 {
+    assert_eq!((nested.whole.number, nested.number, fields.number, produced.number), (42, 42, 0, 99));
+    nested.whole.value + fields.value + produced.value
+}
+#[derive(SpecEvent)]
+pub enum Output {
+    Named { value: i32, #[spec_event(ignore)] context: Opaque },
+    Tuple(#[spec_event(ignore)] Opaque, i32, #[spec_event(ignore)] Opaque, bool),
+    Empty(#[spec_event(ignore)] Opaque),
+    EmptyNamed { #[spec_event(ignore)] context: Opaque },
+}
+#[spec_operation("output")]
+pub fn output(which: i32) -> Output {
+    match which {
+        0 => Output::Named { value: 7, context: Opaque },
+        1 => Output::Tuple(Opaque, 8, Opaque, true),
+        2 => Output::Empty(Opaque),
+        _ => Output::EmptyNamed { context: Opaque },
+    }
+}
+#[test]
+fn captures() {
+    assert_eq!(run(
+        Nested { whole: Whole { value: 7, context: Opaque, number: 42 }, number: 42 },
+        Fields { value: 8, number: 0 }, produce(9)
+    ), 24);
+    for which in 0..4 { let _ = output(which); }
+}
+"#,
+        )
+        .unwrap();
+        let capture_dir = cache.path().join("capture");
+        capture(
+            CaptureRequest::builder(CapturePaths { binding: binding.clone() })
+                .component(ComponentId::from("fixture.configured"))
+                .out(&capture_dir)
+                .build()
+                .unwrap(),
+        )
+        .expect("capture ignores opaque fields before mapping");
+        let registry: serde_json::Value = serde_json::from_slice(&std::fs::read(capture_dir.join(registry_file())).unwrap()).unwrap();
+        let output = registry["components"][0]["types"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|ty| ty["name"] == "Output")
+            .unwrap();
+        assert_eq!(
+            output["variants"][2],
+            serde_json::json!({"name": "Empty", "payload": {"kind": "tuple", "items": []}})
+        );
+        assert_eq!(output["variants"][3], serde_json::json!({"name": "EmptyNamed"}));
+        let report = replay(
+            Request::builder(Paths::new(&capture_dir, &binding))
+                .out(cache.path().join("candidate.otlp.json"))
+                .build()
+                .unwrap(),
+        )
+        .expect("replay uses whole default, then field defaults, without resetting producer output");
+        assert_eq!(report.operations, 5);
+        let validation = validate_linked(&report.output_path, capture_dir.join(registry_file()), &[]);
+        assert!(validation.valid, "{:#?}", validation.issues);
+        let compared = specgate_ctsc::comparison::compare_with(
+            capture_dir.join(reference_file()),
+            &report.output_path,
+            Some(capture_dir.join(registry_file())),
+            [],
+            &specgate_ctsc::comparison::SystemReader::system(),
+        );
+        assert!(compared.equivalent, "{compared:#?}");
+    }
+
+    #[test]
     fn distinct_roots() {
         let system = CommandEnvironment::fake();
         let first = runner::scratch(&system).unwrap();

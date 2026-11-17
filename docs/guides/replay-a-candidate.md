@@ -56,6 +56,9 @@ Replay does not run your tests; it calls your operations directly.
 Rust operation and synchronous setup parameters marked `#[spec_input(ignore)]`
 consume no reference value: replay supplies `Default::default()` in their
 original native positions. Capture still uses the caller's actual context.
+Fields marked `#[spec_event(ignore)]` instead retain producer-supplied values,
+or use whole-struct defaults before field defaults in opted-in property setups.
+See [ignored fields](../reference/value-mapping.md#rust-ignored-record-and-enum-payload-fields).
 Annotated synchronous setups reconstruct receiver and injected environments.
 Private/test-only producers remain in their original Cargo target. Equal
 receiver producer/input identities share state within a scenario; scenario
