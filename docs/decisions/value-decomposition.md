@@ -227,12 +227,19 @@ Use the existing annotations. No new attribute is added.
 - **Ignore:** add `Ignore = true` / `ignore` to `SpecInput`/`spec_input` and to
   SpecEvent fields. It is for context that SpecGate does not create, such as a
   `CancellationToken`, caller-info parameters, or a logger. Ignored inputs are
-  not captured or compared. Replay passes the language default.
+  not captured or compared. Replay passes the language default for ignored
+  parameters. Ignored fields follow the
+  [owner-approved reconstruction precedence](constructor-and-property-setups.md#ignored-field-reconstruction-owner-approved-2026-11-17):
+  an explicit producer owns their values; otherwise use the struct default,
+  with field-type defaults as the last resort within opted-in property setups.
   `ignore` is the author's assertion that the input does not affect the
   captured behavior. Cancellation is not modeled: if a test cancels an ignored
   token, the comparator reports a behavior difference with no further cause.
-  In Rust, `ignore` requires `T: Default`; the macro enforces this at compile
-  time, for inputs and for ignored SpecEvent fields.
+  In Rust, ignored parameters require `T: Default`; the macro enforces this at
+  compile time. For ignored SpecEvent fields, the accepted design requires
+  `T: Default` only when reconstruction uses the field-type default, not when
+  a producer or whole-struct default supplies the value. Rust ignored fields
+  remain unimplemented.
 
 ### Inputs with defaults
 

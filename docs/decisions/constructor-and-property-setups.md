@@ -49,8 +49,9 @@ fields must be accessible to the generated invocation.
 
 The property-setup opt-in is an author promise that omitted fields may safely
 use `Default::default()`. Omission from recording alone is not evidence of
-irrelevance and does not authorize reconstruction. A subset requires the Rust
-type to implement `Default`; failure is a compile-time error. Zero-input
+irrelevance and does not authorize reconstruction. The current implementation
+requires the Rust type to implement `Default` for a subset; failure is a
+compile-time error. Zero-input
 property setups may reconstruct an entirely default value. Types with
 construction invariants must use an explicit producer instead.
 
@@ -85,6 +86,47 @@ the scenario with a warning (see
 [`null-values-are-capture-diagnostics.md`](null-values-are-capture-diagnostics.md)).
 A nullable member (`T?`)
 maps to `optional`, the same as Rust `Option<T>`, and is not decomposed.
+
+### Ignored-field reconstruction (owner-approved 2026-11-17)
+
+For the planned Rust ignored-field support, construction uses this precedence:
+
+1. Use captured semantic values for selected fields or setup-producer inputs.
+   Defaults do not replace recorded values. An explicitly ignored field has no
+   captured value, because it is absent from both the registry and trace.
+2. If an explicit setup producer constructs the struct, use its result. The
+   producer owns initialization of ignored fields; replay does not reset them
+   or add a field-default requirement that the producer does not need.
+3. Otherwise, within an explicitly opted-in property setup, use the whole
+   struct's `Default` for omitted fields when available. Captured selected
+   fields still override that default. If a custom struct default sets an
+   ignored integer field to `42`, replay preserves `42`, not the integer
+   default `0`.
+4. If the struct has no `Default`, an ignored field's own `Default` is the
+   last resort. Require `FieldType: Default` only when this fallback is needed,
+   not when a producer or whole-struct default already supplies its value.
+
+The last step permits field-only defaulting of ignored omissions; it does not
+permit field-only defaulting of other, unannotated omissions. Such omissions
+still need the whole-struct default or an explicit producer. Explicit producers
+remain authoritative for the parameters they fill; the first step does not
+bypass a producer to reconstruct its output from a recorded object.
+
+This revises the earlier unconditional `Default` requirement for ignored fields
+in [value decomposition](value-decomposition.md#annotations), and the
+whole-struct-only restriction for property setups whose only omissions are
+ignored fields. Ignored operation and producer parameters keep their existing
+`Default` requirement.
+
+This is an accepted design, not an implementation claim. Rust ignored fields
+and automatic whole-struct-versus-field default selection remain unimplemented.
+The derive macro cannot inspect resolved trait implementations; the selection
+mechanism still needs a bounded implementation design. No new annotation or
+trait API is selected by this decision.
+
+Property-setup opt-in remains required. This does not enable general record
+reconstruction, default a missing or malformed required reference input, or
+define candidate-only input and inconclusive-replay policy.
 
 ## Boundaries
 
