@@ -817,13 +817,36 @@ fn compare_value(
     match (reference, candidate) {
         (Some(reference), Some(candidate)) => {
             if let (Some(value_type), Some(component), Some(registry)) = (value_type, component, registry) {
-                let reference = canonical_value(reference, value_type, component, registry);
-                let candidate = canonical_value(candidate, value_type, component, registry);
-                if reference != candidate {
+                let reference_canonical = canonical_value(reference, value_type, component, registry);
+                let candidate_canonical = canonical_value(candidate, value_type, component, registry);
+                if reference_canonical != candidate_canonical {
+                    // Readings explain a proven mismatch; they cannot establish equivalence.
+                    if let (Some(expected), Some(actual)) = (
+                        super::reading::optional_readings(reference, value_type, component, registry, path),
+                        super::reading::optional_readings(candidate, value_type, component, registry, path),
+                    ) && expected != actual
+                        && super::reading::display(&expected) != super::reading::display(&actual)
+                    {
+                        if expected.len() == actual.len() && expected.iter().zip(&actual).all(|(left, right)| left.0 == right.0) {
+                            for ((path, expected), (_, actual)) in expected.into_iter().zip(actual) {
+                                if expected != actual {
+                                    mismatch(&path, expected, actual, mismatches);
+                                }
+                            }
+                        } else {
+                            mismatch(
+                                path,
+                                super::reading::display(&expected),
+                                super::reading::display(&actual),
+                                mismatches,
+                            );
+                        }
+                        return;
+                    }
                     mismatch(
                         path,
-                        reference.map_or_else(|| INVALID.to_string(), |value| value.display()),
-                        candidate.map_or_else(|| INVALID.to_string(), |value| value.display()),
+                        reference_canonical.map_or_else(|| INVALID.to_string(), |value| value.display()),
+                        candidate_canonical.map_or_else(|| INVALID.to_string(), |value| value.display()),
                         mismatches,
                     );
                 }

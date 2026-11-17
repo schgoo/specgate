@@ -488,6 +488,16 @@ fn compare_collection_values(
     reference_value: serde_json::Value,
     candidate_value: serde_json::Value,
 ) -> specgate_ctsc::comparison::ComparisonReport {
+    compare_typed_values(value_type, reference_value, candidate_value, |_| {}, &[])
+}
+
+fn compare_typed_values(
+    value_type: serde_json::Value,
+    reference_value: serde_json::Value,
+    candidate_value: serde_json::Value,
+    configure: impl FnOnce(&mut serde_json::Value),
+    imports: &[DocumentBytes<'_>],
+) -> specgate_ctsc::comparison::ComparisonReport {
     let registry_path = corpus().join("registry").join("valid").join("values.registry.json");
     let mut registry = read_json(&registry_path);
     registry["components"][0]["operations"][0]["observations"]
@@ -496,6 +506,7 @@ fn compare_collection_values(
         .iter_mut()
         .find(|observation| observation["name"] == "list_value")
         .unwrap()["type"] = value_type;
+    configure(&mut registry);
     let registry = serde_json::to_vec(&registry).unwrap();
     let mut reference = read_json(&corpus().join("trace").join("valid").join("values.otlp.json"));
     *attribute_mut(&mut reference["resourceSpans"][0]["resource"], "conformance.registry.digest") =
@@ -522,13 +533,224 @@ fn compare_collection_values(
         DocumentBytes::new(Path::new("reference.json"), &reference),
         DocumentBytes::new(Path::new("candidate.json"), &candidate),
         Some(DocumentBytes::new(&registry_path, &registry)),
-        [],
+        imports,
     )
 }
 
 fn integer_collection(values: &[i32]) -> serde_json::Value {
     serde_json::json!({"arrayValue": {"values": values.iter()
         .map(|value| serde_json::json!({"intValue": value.to_string()})).collect::<Vec<_>>()}})
+}
+
+fn optional_type(inner: serde_json::Value) -> serde_json::Value {
+    let mut ty = serde_json::json!({"kind":"optional"});
+    ty["value"] = inner;
+    ty
+}
+
+fn variant_value(name: &str, value: serde_json::Value) -> serde_json::Value {
+    let mut variant = serde_json::json!({"kvlistValue":{"values":[{"key":name}]}});
+    variant["kvlistValue"]["values"][0]["value"] = value;
+    variant
+}
+
+#[test]
+fn optional_readings_distinguish_none_unit_and_nested_presence() {
+    let unit_type = serde_json::json!({"kind":"primitive","name":"unit"});
+    let unit = serde_json::json!({"kvlistValue":{"values":[]}});
+    let none = variant_value("None", unit.clone());
+    let some_unit = variant_value("Some", unit);
+    let report = compare_collection_values(optional_type(unit_type.clone()), none.clone(), some_unit.clone());
+    assert!(report.validation_failures.is_empty(), "{report:#?}");
+    assert!(!report.equivalent);
+    assert_eq!(report.mismatches[0].expected, "none");
+    assert_eq!(report.mismatches[0].actual, "()");
+
+    let states = [none.clone(), variant_value("Some", none), variant_value("Some", some_unit)];
+    for (left, right) in [(0, 1), (0, 2), (1, 2)] {
+        let report = compare_collection_values(
+            optional_type(optional_type(unit_type.clone())),
+            states[left].clone(),
+            states[right].clone(),
+        );
+        assert!(report.validation_failures.is_empty(), "{report:#?}");
+        assert!(!report.equivalent, "{report:#?}");
+        assert_ne!(report.mismatches[0].expected, report.mismatches[0].actual);
+        if left == 1 {
+            assert!(report.mismatches[0].path.ends_with(".some"), "{report:#?}");
+            assert_eq!(report.mismatches[0].expected, "none");
+            assert_eq!(report.mismatches[0].actual, "()");
+        }
+    }
+}
+
+#[test]
+fn optional_readings_elide_only_innermost_some_and_escape_literal_fields() {
+    let int = serde_json::json!({"kind":"primitive","name":"i32"});
+    for (name, suffix) in [
+        ("ordinary", ".ordinary"),
+        ("Some", "[\"Some\"]"),
+        ("some", "[\"some\"]"),
+        ("None", "[\"None\"]"),
+        ("err", "[\"err\"]"),
+        ("result", "[\"result\"]"),
+        ("unit", "[\"unit\"]"),
+        ("a.b", "[\"a.b\"]"),
+        ("0", "[\"0\"]"),
+        ("q\"\\", "[\"q\\\"\\\\\"]"),
+        ("한글", "[\"한글\"]"),
+        ("café", "[\"café\"]"),
+    ] {
+        let record = serde_json::json!({"kind":"record","fields":[{"name":name,"type":optional_type(int.clone())}]});
+        let value = |n: &str| {
+            variant_value(
+                "Some",
+                variant_value(name, variant_value("Some", serde_json::json!({"intValue":n}))),
+            )
+        };
+        let report = compare_collection_values(optional_type(record), value("5"), value("6"));
+        assert!(report.validation_failures.is_empty(), "{report:#?}");
+        assert_eq!(report.mismatches.len(), 1);
+        assert!(report.mismatches[0].path.ends_with(suffix), "{report:#?}");
+        assert_eq!(report.mismatches[0].expected, "5");
+        assert_eq!(report.mismatches[0].actual, "6");
+    }
+    let nested = optional_type(optional_type(int));
+    let value = |n: &str| variant_value("Some", variant_value("Some", serde_json::json!({"intValue":n})));
+    let report = compare_collection_values(nested, value("5"), value("6"));
+    assert!(report.mismatches[0].path.ends_with(".some"), "{report:#?}");
+    assert_eq!(report.mismatches[0].expected, "5");
+}
+
+#[test]
+fn optional_container_readings_never_change_matching_or_multiplicity() {
+    let item = optional_type(serde_json::json!({"kind":"primitive","name":"i32"}));
+    let some = |n: &str| variant_value("Some", serde_json::json!({"intValue":n}));
+    let array = |values: Vec<serde_json::Value>| serde_json::json!({"arrayValue":{"values":values}});
+    for ordered in [false, true] {
+        let ty = serde_json::json!({"kind":"collection","items":item,"ordered":ordered,"unique":false});
+        let left = array(vec![some("1"), some("1"), some("2")]);
+        let reordered = array(vec![some("2"), some("1"), some("1")]);
+        let report = compare_collection_values(ty.clone(), left.clone(), reordered);
+        assert!(report.validation_failures.is_empty(), "{report:#?}");
+        assert_eq!(report.equivalent, !ordered, "{report:#?}");
+        let report = compare_collection_values(ty, left, array(vec![some("1"), some("2"), some("2")]));
+        assert!(report.validation_failures.is_empty(), "{report:#?}");
+        assert!(!report.equivalent);
+        assert!(report.mismatches[0].expected.contains("Some"), "{report:#?}");
+    }
+}
+
+#[test]
+fn optional_readings_do_not_reinterpret_unions_or_invalid_values() {
+    let int = serde_json::json!({"kind":"primitive","name":"i32"});
+    let union = serde_json::json!({"kind":"tagged_union","variants":[{"name":"Some","payload":int}]});
+    let report = compare_collection_values(
+        union,
+        variant_value("Some", serde_json::json!({"intValue":"5"})),
+        variant_value("Some", serde_json::json!({"intValue":"6"})),
+    );
+    assert!(report.validation_failures.is_empty(), "{report:#?}");
+    assert_eq!(report.mismatches[0].expected, "Some(5)");
+    let union = serde_json::json!({"kind":"tagged_union","variants":[{"name":"Some","payload":optional_type(int.clone())}]});
+    let value = |n: &str| variant_value("Some", variant_value("Some", serde_json::json!({"intValue":n})));
+    let report = compare_collection_values(union, value("5"), value("6"));
+    assert!(report.validation_failures.is_empty(), "{report:#?}");
+    assert!(report.mismatches[0].path.ends_with("[\"Some\"]"), "{report:#?}");
+    assert_eq!(report.mismatches[0].expected, "5");
+    for invalid in [
+        serde_json::json!({"intValue":"5"}),
+        variant_value("some", serde_json::json!({"intValue":"5"})),
+    ] {
+        let report = compare_collection_values(optional_type(int.clone()), invalid.clone(), invalid);
+        assert!(!report.validation_failures.is_empty(), "{report:#?}");
+        assert!(report.mismatches.is_empty());
+    }
+    let record = serde_json::json!({"kind":"record","fields":[{"name":"x","type":optional_type(int)}]});
+    let missing = serde_json::json!({"kvlistValue":{"values":[]}});
+    let report = compare_collection_values(record, missing.clone(), missing);
+    assert!(!report.validation_failures.is_empty(), "{report:#?}");
+}
+
+#[test]
+fn optional_readings_keep_record_slot_and_field_paths_distinct() {
+    let unit = serde_json::json!({"kvlistValue":{"values":[]}});
+    let none = variant_value("None", unit);
+    let record = serde_json::json!({"kind":"record","fields":[{
+        "name":"a","type":optional_type(serde_json::json!({"kind":"primitive","name":"i32"}))
+    }]});
+    let report = compare_collection_values(optional_type(record), none.clone(), variant_value("Some", variant_value("a", none)));
+    assert!(report.validation_failures.is_empty(), "{report:#?}");
+    assert!(!report.equivalent);
+    assert!(report.mismatches[0].expected.ends_with(".value: none"), "{report:#?}");
+    assert!(report.mismatches[0].actual.ends_with(".value.a: none"), "{report:#?}");
+}
+
+#[test]
+fn optional_readings_resolve_nested_names_in_imported_owner_scope() {
+    let imported = serde_json::json!({
+        "format":"ctsc.registry","formatVersion":"0.4.0","registryId":"urn:readings:owner","version":"1.0.0",
+        "components":[{"id":"owner","operations":[],"types":[
+            {"kind":"record","name":"Outer","fields":[{"name":"x","type":{"kind":"named","name":"Inner"}}]},
+            {"kind":"record","name":"Inner","fields":[{"name":"value","type":optional_type(
+                serde_json::json!({"kind":"primitive","name":"i32"})
+            )}]}
+        ]}]
+    });
+    let imported = serde_json::to_vec(&imported).unwrap();
+    let ty = serde_json::json!({"kind":"named","name":"Outer","componentId":"owner","registryId":"urn:readings:owner"});
+    let value = |n: &str| {
+        variant_value(
+            "x",
+            variant_value("value", variant_value("Some", serde_json::json!({"intValue":n}))),
+        )
+    };
+    let report = compare_typed_values(
+        ty,
+        value("5"),
+        value("6"),
+        |registry| {
+            registry["imports"] = serde_json::json!([{
+                "registryId":"urn:readings:owner","version":"1.0.0",
+                "digest":format!("sha256:{:x}", Sha256::digest(&imported))
+            }]);
+            registry["components"][0]["dependencies"] = serde_json::json!([{"registryId":"urn:readings:owner","componentId":"owner"}]);
+            // A caller-local homonym must never supply the imported field's type.
+            registry["components"][0]["types"].as_array_mut().unwrap().push(serde_json::json!({
+                "kind":"record","name":"Inner","fields":[{"name":"wrong","type":{"kind":"primitive","name":"bool"}}]
+            }));
+        },
+        &[DocumentBytes::new(Path::new("owner.json"), &imported)],
+    );
+    assert!(report.validation_failures.is_empty(), "{report:#?}");
+    assert_eq!(report.mismatches.len(), 1);
+    assert!(report.mismatches[0].path.ends_with(".x.value"), "{report:#?}");
+    assert_eq!(report.mismatches[0].expected, "5");
+    assert_eq!(report.mismatches[0].actual, "6");
+}
+
+#[test]
+fn trace_core_optional_shaped_values_remain_structurally_exact() {
+    let reference = read_json(&corpus().join("trace/valid/values.otlp.json"));
+    let mut candidate = reference.clone();
+    let event = first_span_mut(&mut candidate, "conformance.operation")["events"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|event| {
+            event["attributes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|a| a["key"] == "conformance.observation.name" && a["value"]["stringValue"] == "optional_absent")
+        })
+        .unwrap();
+    *attribute_mut(event, "conformance.observation.value") = variant_value("Some", serde_json::json!({"kvlistValue":{"values":[]}}));
+    let report = compare_values(&reference, &candidate, None);
+    assert!(report.validation_failures.is_empty(), "{report:#?}");
+    assert!(!report.equivalent);
+    assert!(report.mismatches[0].expected.contains("None"), "{report:#?}");
+    assert!(report.mismatches[0].actual.contains("Some"), "{report:#?}");
 }
 
 #[test]
