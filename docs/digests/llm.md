@@ -204,6 +204,13 @@ architecture and status are in `docs/status.md`. Important current boundaries in
   or getter evaluation, including nested records, union payloads, and property
   setups. Setup annotation presence is detected before ignoring; ignored-only
   annotations yield zero fields. Rust ignored fields remain unsupported.
+- The accepted, unimplemented
+  [Rust ignored-field reconstruction policy](../decisions/constructor-and-property-setups.md#ignored-field-reconstruction-owner-approved-2026-11-17)
+  preserves captured selected values, uses an explicit producer when present,
+  then a whole-struct default, then field defaults for ignored omissions only.
+  A producer's result is not reset; field `Default` bounds apply only when that
+  fallback is needed. Property-setup opt-in and other omitted-field rules
+  remain required. The default-selection mechanism is not yet designed.
 - CTSC `0.4.0` uses `collection` with required `ordered`/`unique` and `map`
   with required `ordered`; old bundles require recapture. Strict `0.2.0`
   preserves bag multiplicity and uses recursive uniqueness. C# generic
