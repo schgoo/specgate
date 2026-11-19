@@ -1,5 +1,6 @@
 # Component-to-implementation binding
 
+> **ADR:** ADR-0009
 > **Status:** accepted
 > **Owner:** user-ratified (schgoo)
 > **Date:** 2026-10-16

@@ -1,5 +1,6 @@
 # Typed generic operations and setup-backed async replay
 
+> **ADR:** ADR-0013
 > **Status:** accepted
 > **Owner:** @schgoo (user-ratified)
 > **Date:** 2026-10-21

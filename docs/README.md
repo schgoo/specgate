@@ -52,7 +52,7 @@ includes a "which guide" table and the agent quick path.
 
 - [`decisions/`](decisions/README.md) — human-ratified architectural decisions.
 - [`decisions/README.md#roadmap-159-architecture-change-records`](decisions/README.md#roadmap-159-architecture-change-records)
-  — proposed ACRs for the spatial capture/replay limitations; owner approval
+  — proposed ADRs for the spatial capture/replay limitations; owner approval
   and implementation remain separate.
 - [`decisions/csharp-golden-replay-parity.md`](decisions/csharp-golden-replay-parity.md)
   — ratified single golden bundle for all languages (including canonical

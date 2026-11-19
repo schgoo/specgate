@@ -1,5 +1,6 @@
 # Compiler-directed custom collection metadata
 
+> **ADR:** ADR-0019
 > **Status:** accepted direction; not implemented
 > **Owner:** @schgoo
 > **Date:** 2026-11-11

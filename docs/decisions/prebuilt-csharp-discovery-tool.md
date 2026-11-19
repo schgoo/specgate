@@ -1,5 +1,6 @@
 # Prebuilt C# discovery tool
 
+> **ADR:** ADR-0020
 > **Status:** accepted
 > **Owner:** SpecGate maintainers (user-ratified)
 > **Date:** 2026-11-17

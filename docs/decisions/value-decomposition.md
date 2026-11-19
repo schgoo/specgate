@@ -1,5 +1,6 @@
 # Language-neutral value decomposition
 
+> **ADR:** ADR-0018
 > **Status:** accepted; implementation pending
 > **Owner:** @schgoo
 > **Date:** 2026-11-04

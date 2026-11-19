@@ -1,5 +1,6 @@
 # Opaque Rust errors
 
+> **ADR:** ADR-0006
 > **Status:** accepted
 > **Owner:** SpecGate maintainers (user-ratified)
 > **Date:** 2026-10-07

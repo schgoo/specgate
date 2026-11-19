@@ -1,5 +1,6 @@
 # Collection storage bindings in registry-driven replay
 
+> **ADR:** ADR-0016
 > **Status:** storage and grouping accepted; input-order proposal not approved
 > **Owner:** @schgoo (user-ratified)
 > **Date:** 2026-11-02

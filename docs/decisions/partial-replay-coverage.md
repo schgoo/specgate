@@ -1,5 +1,6 @@
 # Partial replay with explicit coverage
 
+> **ADR:** ADR-0023
 > **Status:** proposed; not implemented
 > **Owner:** @schgoo (approval requested)
 > **Date:** 2026-11-18

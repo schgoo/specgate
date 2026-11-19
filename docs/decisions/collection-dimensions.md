@@ -1,5 +1,7 @@
 # Collection shape and semantic dimensions
 
+> **ADR:** ADR-0017
+
 ## Decision
 
 CTSC 0.4.0 intentionally breaks the 0.3.0 collection wire format. Homogeneous

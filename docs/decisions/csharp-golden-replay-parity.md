@@ -1,5 +1,6 @@
 # Native C# goldens and implementation-to-implementation replay checks
 
+> **ADR:** ADR-0012
 > **Status:** accepted
 > **Owner:** SpecGate maintainers (human-ratified)
 > **Date:** 2026-10-20

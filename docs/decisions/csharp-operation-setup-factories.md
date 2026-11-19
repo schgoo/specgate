@@ -1,5 +1,6 @@
 # C# factories as operations and setups
 
+> **ADR:** ADR-0022
 > **Status:** proposed; lifecycle approval pending
 > **Owner:** @schgoo (attribution and initial scope approved 2026-11-18)
 > **Date:** 2026-11-18

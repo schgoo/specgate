@@ -1,5 +1,6 @@
 # Required-to-optional output bindings
 
+> **ADR:** ADR-0025
 > **Status:** proposed; not implemented
 > **Owner:** @schgoo (approval requested)
 > **Date:** 2026-11-18

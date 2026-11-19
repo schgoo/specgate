@@ -1,5 +1,6 @@
 # Templated URI dependency for registry imports
 
+> **ADR:** ADR-0004
 > **Status:** accepted
 > **Owner:** SpecGate maintainers (user-ratified)
 > **Date:** 2026-10-01

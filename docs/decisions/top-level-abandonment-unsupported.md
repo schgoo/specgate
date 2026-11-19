@@ -1,5 +1,6 @@
 # Top-level async abandonment is unsupported
 
+> **ADR:** ADR-0007
 > **Status:** accepted
 > **Owner:** SpecGate maintainers (user-ratified)
 > **Date:** 2026-10-09
