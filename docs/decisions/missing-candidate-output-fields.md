@@ -8,9 +8,21 @@
 
 ## Context
 
-The reference record may expose fields absent from the candidate's real API.
-Exact storage binding correctly rejects this today. Filling missing fields
-with empty strings permits execution but hides API absence as value mismatch.
+**A field the candidate does not provide must not look like a field returning
+the wrong value.**
+
+Why it matters: shared fields may be correct even when the replacement exposes
+fewer fields than the reference implementation.
+
+- **Example:** the C# `CoordinateSystem` record has `EpsgId`, `Id`, and `Name`.
+  The Rust candidate may provide only `EpsgId`.
+- **Current limit:** replay checks both output definitions before execution.
+  Different field sets correctly fail that compatibility check.
+- **Misleading workaround:** supplying `""` for `Id` and `Name` lets replay
+  proceed, but comparison reports wrong strings instead of missing fields.
+- **Important distinction:** never declaring `Name` differs from promising
+  `Name` but omitting its recorded value. Neither case means an empty string,
+  a default value, or an explicit no-value result such as `None`.
 
 ## Decision
 

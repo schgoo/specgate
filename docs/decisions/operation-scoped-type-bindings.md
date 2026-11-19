@@ -8,11 +8,24 @@
 
 ## Context
 
-One reference type may correspond to different native candidate types at
-different factory boundaries. Assigning them one semantic name creates
-duplicate owners. Current replay also publishes converted candidate values
-against the reference registry; that cannot faithfully represent missing
-candidate fields or distinct native output declarations.
+**Two factories can return one reference type but two different Rust types.**
+
+Why it matters: SpecGate needs to match each factory's result without pretending
+the two Rust types are one declaration.
+
+- **Example:** C# factories return `CoordinateSystem`; Rust factories return
+  `GeographyCrs` and `GeometryCrs`. The appropriate match depends on which
+  operation returned the value.
+- **Current limit:** annotating both Rust types as `CoordinateSystem` creates
+  duplicate owners: two declarations claiming one semantic type identity.
+  Discovery correctly rejects that ambiguity.
+- **Recording limit:** a registry describes declared types; a trace records
+  calls and values. Replay currently converts candidate values to fit the
+  reference registry. That cannot faithfully retain missing candidate fields
+  or different candidate output declarations.
+- **Later calls:** a reference type name alone cannot tell replay which Rust
+  type to create for a later input or receiver. Output matching must not
+  silently guess that choice.
 
 ## Decision
 

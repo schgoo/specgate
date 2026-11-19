@@ -8,10 +8,22 @@
 
 ## Context
 
-Replay retains setup-backed receivers within a scenario and rejects consuming
-methods. A method taking `self` on a `Copy` type can instead consume a copy
-without moving the retained receiver. `Copy` does not mean pure: effects
-through shared references must still occur.
+**Rust can pass a `Copy` object by value without consuming the object replay
+needs for later calls.**
+
+Why it matters: existing by-value methods could replay without free-function
+wrappers that change the annotated boundary.
+
+- **Receiver:** the object on which a method runs. Replay uses a setup producer
+  to create that object and retains it within one recorded test case.
+- **Current limit:** replay supports borrowed receivers, `&self` and
+  `&mut self`, but rejects methods taking ownership through `self`.
+- **Safe special case:** Rust's compiler permits implicit copying of a `Copy`
+  value. A by-value call can use a copy while retaining the original receiver
+  for later calls.
+- **Not a purity promise:** a copied value can contain shared references.
+  The real method must still run once, including effects through those
+  references; copying does not make the call harmless or independent.
 
 ## Decision
 

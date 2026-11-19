@@ -8,10 +8,23 @@
 
 ## Context
 
-The reported gap is **reference `optional<T>`, candidate required `T`**.
-The candidate can supply every concrete `T` without supplying a native optional.
-Current checked binding rejects the difference; a handwritten `Some(value)`
-projection works but replaces the candidate's declared shape.
+**An optional number and a required number can hold the same value while making
+different promises.**
+
+Why it matters: compare the actual numbers without pretending the candidate
+can also return no number.
+
+- **Example:** reference C# `EpsgId: int?` permits a number or `null`. Candidate
+  Rust `i32` requires a number. The direction is **reference `optional<T>`,
+  candidate required `T`**, not the reverse.
+- **Current limit:** matching field names is not enough. Replay rejects the
+  different declared types before comparing their values.
+- **Workaround:** a handwritten adapter returns `Some(value)`, meaning a
+  present value. That exposes a converted shape instead of the required field
+  the candidate actually declares.
+- **Hard case:** reference `None`, meaning no value, must differ from candidate
+  `5`. Captures containing no nulls do not prove the reference can never
+  return null.
 
 ## Decision
 

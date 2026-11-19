@@ -8,10 +8,22 @@
 
 ## Context
 
-A named enum input can form a valid captured bundle but fail replay decoding
-and Rust storage checks. Bundle validity does not promise that SpecGate can
-construct every declared native input. Output projection alone is generally
-insufficient evidence for reconstructing arbitrary records or unions.
+**SpecGate can record a named enum input but cannot yet rebuild that value
+for replay.**
+
+Why it matters: a valid recording can stop before the candidate operation runs.
+
+- **Example:** `Topology` is an enum, a closed set of choices such as
+  `Geography` and `Geometry`. These choices carry no extra data.
+- **Current limit:** capture records the selected choice and its named type.
+  Replay then rejects it with
+  `input 'topology' uses unsupported structured replay type named`.
+- **Different checks:** bundle validation checks the recording against its
+  declarations. Replay must also know how to create the corresponding Rust
+  value; passing the first check does not supply that construction code.
+- **Scope matters:** recording a value does not generally prove how to rebuild
+  it. Records may hide fields, and enum choices may carry extra data. A fix for
+  complete no-data choices must not silently permit those harder cases.
 
 ## Decision
 

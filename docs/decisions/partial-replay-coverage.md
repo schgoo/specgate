@@ -8,9 +8,20 @@
 
 ## Context
 
-One missing top-level candidate operation currently blocks every scenario.
-Skipping only that call could corrupt later receiver state. Missing nested
-observations already reach comparison; they are not replay stimuli.
+**One missing candidate operation stops replay before any recorded test case
+runs, including cases the candidate could execute.**
+
+Why it matters: one unsupported method prevents useful checks of other methods.
+
+- **Example:** a C# reference, the implementation being copied, records
+  `get_hash_code`, `to_string`, and `to_wkt_id`. A Rust candidate, the replacement
+  being tested, may implement only the last two. Replay stops at the missing
+  hash operation without recording either supported result.
+- **State risk:** a scenario is one recorded test case. Skipping a call inside
+  that case may leave its object in the wrong state for later calls.
+- **Nested calls:** replay invokes top-level calls directly. Calls recorded
+  inside them are observed behavior; missing nested calls already reach
+  comparison rather than blocking planning.
 
 ## Decision
 

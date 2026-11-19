@@ -8,9 +8,22 @@
 
 ## Context
 
-One factory can produce both a result to compare and a receiver for later
-operations. Discovery reads both annotations, but the weaver rejects them.
-A delegating wrapper is a workaround, not support for the original method.
+**One C# factory can have two useful roles, but SpecGate cannot record both
+roles on that method.**
+
+Why it matters: comparing object creation should not prevent testing later
+calls on the created object.
+
+- **Operation:** a call such as `Geography(4326)` creates an object whose
+  returned fields are behavior to compare.
+- **Setup:** the same call supplies the object for later instance operations.
+  SpecGate saves its construction inputs so replay can create a receiver,
+  the object on which those methods run.
+- **Current limit:** discovery accepts both annotations. The weaver, which
+  adds recording code to the compiled method, rejects the combination.
+- **Workaround:** moving setup to a separate method that calls the factory
+  changes the annotation and test layout. That does not make the original
+  factory work in both roles.
 
 ## Decision
 
