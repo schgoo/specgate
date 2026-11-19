@@ -28,6 +28,39 @@ the two Rust types are one declaration.
   type to create for a later input or receiver. Output matching must not
   silently guess that choice.
 
+## Minimal example
+
+Factory excerpts from component `example.crs`; imports, annotated result-type
+declarations, and the enclosing C# class are omitted. C# reference:
+
+```csharp
+[SpecOperation("geography", Spec = "example.crs")]
+public static CoordinateSystem Geography() => new(4326);
+
+[SpecOperation("geometry", Spec = "example.crs")]
+public static CoordinateSystem Geometry() => new(0);
+```
+
+Rust candidate, with the crate-root component declaration omitted:
+
+```rust
+#[spec_operation("geography")]
+pub fn geography() -> GeographyCrs {
+    GeographyCrs { epsg_id: 4326 }
+}
+
+#[spec_operation("geometry")]
+pub fn geometry() -> GeometryCrs {
+    GeometryCrs { epsg_id: 0 }
+}
+```
+
+The proposed plan binds `geography`'s result from `CoordinateSystem` to
+`GeographyCrs`, and `geometry`'s result from `CoordinateSystem` to `GeometryCrs`.
+Each candidate type keeps its own semantic identity; neither is renamed to
+`CoordinateSystem`. This shows binding intent, not configuration syntax or a
+rule for selecting receivers in later calls.
+
 ## Decision
 
 **Requested:** approve one shared architecture for #154, #155, and #156:

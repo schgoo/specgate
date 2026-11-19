@@ -27,6 +27,34 @@ can also return no number.
   `5`. Captures containing no nulls do not prove the reference can never
   return null.
 
+## Minimal example
+
+Output-type excerpts from the same component; imports and operations are omitted.
+C# reference:
+
+```csharp
+[SpecEvent("CoordinateSystem")]
+public sealed record CoordinateSystem(
+    [property: SpecEvent] int? EpsgId);
+```
+
+Rust candidate:
+
+```rust
+#[derive(SpecEvent)]
+pub struct CoordinateSystem {
+    #[spec_event(name = "EpsgId")]
+    pub epsg_id: i32,
+}
+```
+
+With an explicit binding at this result's `EpsgId` field, reference
+`new CoordinateSystem(4326)` could match candidate
+`CoordinateSystem { epsg_id: 4326 }`. Only the comparison view reads the
+candidate field as `Some(4326)`; its native declaration and value stay required.
+Reference `new CoordinateSystem(null)` must still mismatch. The signature
+difference remains, and binding syntax is not defined here.
+
 ## Decision
 
 **Requested:** add one explicit, directional output correspondence:

@@ -26,6 +26,31 @@ calls on the created object.
   changes the annotation and test layout. That does not make the original
   factory work in both roles.
 
+## Minimal example
+
+Proposed C# combination; `using SpecGate.Annotations;` is omitted:
+
+```csharp
+[SpecEvent("Counter")]
+public sealed class Counter
+{
+    [SpecEvent("count")]
+    public int Count { get; init; }
+
+    [SpecOperation("create", Spec = "example.counter")]
+    [SpecSetup("get_count", Spec = "example.counter")]
+    public static Counter Create(int initial) => new() { Count = initial };
+
+    [SpecOperation("get_count", Spec = "example.counter")]
+    public int GetCount() => Count;
+}
+```
+
+Both annotations are on **`Create`**, not on the class. Under the proposal,
+`Counter.Create(3).GetCount()` records the factory's actual result and saves
+`initial = 3` to reconstruct the receiver for `get_count`. The setup annotation
+targets `get_count`, not `create`. Capture currently rejects this combination.
+
 ## Decision
 
 **Requested:** approve one composed rewrite with this order:

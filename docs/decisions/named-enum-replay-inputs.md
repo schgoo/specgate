@@ -26,6 +26,36 @@ Why it matters: a valid recording can stop before the candidate operation runs.
   it. Records may hide fields, and enum choices may carry extra data. A fix for
   complete no-data choices must not silently permit those harder cases.
 
+## Minimal example
+
+Matching type and variant names in one component; imports and the reference
+operation are omitted. C# reference enum:
+
+```csharp
+[SpecEvent("Topology")]
+public enum Topology { Geography = 10, Geometry = 20 }
+```
+
+Rust candidate, with the crate-root component declaration omitted:
+
+```rust
+#[derive(SpecEvent)]
+pub enum Topology {
+    Geography,
+    Geometry,
+}
+
+#[spec_operation("is_geography")]
+pub fn is_geography(topology: Topology) -> bool {
+    matches!(topology, Topology::Geography)
+}
+```
+
+Under the proposal, reference inputs `Geography` and `Geometry` reconstruct the
+matching Rust variants, so `is_geography` returns `true` and `false`. The C#
+integer ordinals do not select Rust variants. A Rust variant such as
+`Geography(i32)` remains outside this proposal, even if its payload is ignored.
+
 ## Decision
 
 **Requested:** support lossless reconstruction of complete payload-free enums,

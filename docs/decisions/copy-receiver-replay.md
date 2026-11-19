@@ -26,6 +26,36 @@ wrappers that change the annotated boundary.
   The real method must still run once, including effects through those
   references; copying does not make the call harmless or independent.
 
+## Minimal example
+
+Rust excerpt; imports and the crate-root component declaration are omitted.
+`replay_receiver` is a **proposed** option, not current annotation syntax:
+
+```rust
+#[derive(Clone, Copy, SpecEvent)]
+pub struct Counter {
+    #[spec_event]
+    pub count: i32,
+}
+
+#[spec_setup("get_count")]
+fn make_counter(initial: i32) -> Counter {
+    Counter { count: initial }
+}
+
+impl Counter {
+    #[spec_operation("get_count", replay_receiver = "copy")]
+    pub fn get_count(self) -> i32 {
+        self.count
+    }
+}
+```
+
+After setup with `initial = 3`, replay could call `get_count` twice and receive
+`3` both times. Each call copies the retained receiver, then runs the actual
+method once. Replay neither calls `Clone` nor reruns `make_counter` between calls.
+The compiler must reject this opt-in if `Counter` does not implement `Copy`.
+
 ## Decision
 
 **Requested:** approve explicit compiler-checked copying, not ownership transfer.

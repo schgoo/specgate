@@ -25,6 +25,34 @@ fewer fields than the reference implementation.
   `Name` but omitting its recorded value. Neither case means an empty string,
   a default value, or an explicit no-value result such as `None`.
 
+## Minimal example
+
+Output-type excerpts from the same component; imports and operations are omitted.
+C# reference:
+
+```csharp
+[SpecEvent("CoordinateSystem")]
+public sealed record CoordinateSystem(
+    [property: SpecEvent] int EpsgId,
+    [property: SpecEvent] string Name);
+```
+
+Rust candidate:
+
+```rust
+#[derive(SpecEvent)]
+pub struct CoordinateSystem {
+    #[spec_event(name = "EpsgId")]
+    pub epsg_id: i32,
+}
+```
+
+For reference `new CoordinateSystem(4326, "WGS 84")` and candidate
+`CoordinateSystem { epsg_id: 4326 }`, an explicit unavailable-field rule for this
+result's `Name` would let `EpsgId` compare equal while reporting missing `Name`.
+Do not add `Name: ""` to the candidate. The rule's configuration syntax is not
+defined here; full API equivalence is not established.
+
 ## Decision
 
 **Requested:** allow explicitly declared unavailable output paths through the

@@ -24,6 +24,33 @@ Why it matters: one unsupported method prevents useful checks of other methods.
   inside them are observed behavior; missing nested calls already reach
   comparison rather than blocking planning.
 
+## Minimal example
+
+Reference test excerpts; both called functions are annotated operations:
+
+```rust
+#[test]
+fn text_only() {
+    assert_eq!(to_string(), "POINT (1 2)");
+}
+
+#[test]
+fn text_and_hash() {
+    assert_eq!(to_string(), "POINT (1 2)");
+    let _ = get_hash_code();
+}
+```
+
+If the candidate implements only `to_string`, this **proposed** command runs
+`text_only` but skips all of `text_and_hash`, before even its first call or setup:
+
+```sh
+specgate replay capture --impl rust --on-unreplayable skip-scenario
+```
+
+Matching text does not hide the skipped test: the result remains inconclusive.
+Without the proposed option, replay keeps its current fail-fast behavior.
+
 ## Decision
 
 **Requested:** approve explicit opt-in, whole-scenario skipping. Proposed CLI:
