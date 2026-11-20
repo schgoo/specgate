@@ -66,30 +66,8 @@ restriction concerns replay inputs, not output comparison.
 
 ### Approved Rust direction (not implemented)
 
-Owner-approved on 2026-11-20: for a constructible recorded input `a: A` and a
-candidate input type `B`, automatically accept and use the conversion when the
-Rust compiler confirms `B: From<A>`. No separate converter registration or
-per-mapping opt-in is required. This refers to the standard `From` trait, not
-an arbitrary inherent method named `from`.
-
-Illustrative generated call; this helper is not a new public API:
-
-```rust
-fn convert_input<A, B: From<A>>(recorded: A) -> B {
-    <B as From<A>>::from(recorded)
-}
-```
-
-For example, Rust provides `From<i32> for i64`, but not
-`From<Option<i32>> for i32` or `From<f64> for i32`. User-defined implementations
-for eligible types also qualify; their authors own the conversion behavior.
-The trait's presence is the acceptance rule, not proof that custom code
-preserves information or meaning.
-
-If the source value cannot be constructed or the required implementation is
-absent, the unsupported mapping remains rejected; users can provide wrappers.
-Do not infer casts, rounding, truncation, or `None` defaults, or automatically
-fall back to `TryFrom`. Conversion failures follow ordinary execution rules,
-not scenario skipping. Conversion permits input construction; it does not
-erase native type or signature differences. This direction is separate from
-output comparison in ADR-0025.
+[ADR-0025: Input and output type compatibility](https://github.com/schgoo/specgate/blob/v0.6.0/docs/decisions/required-to-optional-output-bindings.md#inputs-accepted-2026-11-20)
+records the approved input rule: automatically use compiler-confirmed
+`B: From<A>` for constructible recorded inputs, without converter registration
+or per-mapping opt-in. That support is not implemented; the current limitations
+above still apply. The ADR's separate output-comparison rule remains proposed.

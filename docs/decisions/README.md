@@ -55,7 +55,7 @@ Future records always append, even when documenting an older decision.
 | [ADR-0022](csharp-operation-setup-factories.md) | C# factories as operations and setups |
 | [ADR-0023](partial-replay-coverage.md) | Partial replay with explicit coverage |
 | [ADR-0024](missing-candidate-output-fields.md) | Missing candidate output fields |
-| [ADR-0025](required-to-optional-output-bindings.md) | Required-to-optional output bindings |
+| [ADR-0025](required-to-optional-output-bindings.md) | Input and output type compatibility |
 | [ADR-0026](operation-scoped-type-bindings.md) | Operation-scoped output type bindings |
 | [ADR-0027](copy-receiver-replay.md) | Replay of Copy by-value receivers |
 | [ADR-0028](named-enum-replay-inputs.md) | Named enum replay inputs |
@@ -80,7 +80,7 @@ tradeoffs, and acceptance evidence.
 | ADR-0022 | [#152](https://github.com/schgoo/specgate/issues/152) | [Dual-role C# factories](csharp-operation-setup-factories.md) | Finish the factory operation before publishing setup inputs. Existing attribution/scope approved; lifecycle pending. |
 | ADR-0023 | [#153](https://github.com/schgoo/specgate/issues/153) | [Partial replay](partial-replay-coverage.md) | Explicitly skip whole unsupported scenarios; retain coverage and inconclusive results. |
 | ADR-0024 | [#154](https://github.com/schgoo/specgate/issues/154) | [Missing output fields](missing-candidate-output-fields.md) | Missing fields reach comparison, not replay rejection. Direction approved; binding/policy design pending. |
-| ADR-0025 | [#155](https://github.com/schgoo/specgate/issues/155) | [Required-to-optional outputs](required-to-optional-output-bindings.md) | Permit an explicit lossless output binding; retain signature differences. |
+| ADR-0025 | [#155](https://github.com/schgoo/specgate/issues/155) | [Input and output compatibility](required-to-optional-output-bindings.md) | Automatically use compiler-confirmed Rust `B: From<A>` inputs (approved). Explicit required-to-optional output mapping remains proposed; retain native signature differences. |
 | ADR-0026 | [#156](https://github.com/schgoo/specgate/issues/156) | [Operation-scoped type bindings](operation-scoped-type-bindings.md) | Preserve native registries and unique owners; bind exact output boundaries. |
 | ADR-0027 | [#157](https://github.com/schgoo/specgate/issues/157) | [Copy receivers](copy-receiver-replay.md) | Require explicit intent and compiler-proven copying of the retained receiver. |
 | ADR-0028 | [#158](https://github.com/schgoo/specgate/issues/158) | [Named enum inputs](named-enum-replay-inputs.md) | Any variant form uses typed recorded inputs or explicit setup producers. Principle approved; nested setup design pending. |
