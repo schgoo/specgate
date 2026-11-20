@@ -1,6 +1,6 @@
 # Limitations
 
-This page lists current product limits in one table. "Replay" means candidate
+This page lists current product limits. "Replay" means candidate
 replay (`specgate replay`). For an explanation of how the pieces fit together,
 see [`../status.md`](../status.md).
 
@@ -15,6 +15,7 @@ see [`../status.md`](../status.md).
 | Setup-backed operations | Captured | Captured | Annotated synchronous nongeneric producers reconstruct receivers and injected parameters; private/test-only producers run in one selected Cargo test target | [typed async replay](../decisions/typed-async-client-replay.md) |
 | Generated discovery/replay hooks | Each Cargo target needs a crate-root `spec_component!`; a library declaration does not cover binary or integration-test crates | n/a | The selected Rust test target must declare its own component, even for explicitly component-qualified operations | [Rust instrumentation](../guides/instrument-rust-crate.md) |
 | Structured input and output values | Captured | Captured | Inputs support lossless primitives, tuples of arity 2-4, and recursive collections, supported map keys, and optionals. Property setups fold opted-in records into flat leaves; omitted Rust fields use `Default`. Duplicate names and cyclic expansions reject. General record inputs, including records in containers, remain unsupported (`structured-value`). Results/errors use checked nested storage bindings with named identity retained. Inline reference records can bind to same-component annotated Rust records with exact fields; the reverse direction rejects | [value mapping](value-mapping.md), [constructor and property setups](../decisions/constructor-and-property-setups.md) |
+| Cross-type input conversions | n/a | n/a | Unsupported input mappings are rejected; there is no conversion-binding or converter-registration API. Use a user-authored wrapper with compatible annotated input types. Existing checked storage bindings are unchanged | [input compatibility](#input-type-compatibility) |
 | Nested operations | Captured | Captured | Only top-level reference operations are invoked and require candidate declarations. Missing observed-only calls are comparison differences, not planning errors. Declared nested calls bind in their owning component, including other components. Extra calls use checked storage conversions against the reference registry, including pair-vector maps. Incompatible unused declarations reject only if captured; undeclared or ill-typed calls fail before publication | — |
 | Explicit reference-to-candidate mappings | n/a | n/a | Not implemented | — |
 | Inherited record members | n/a | Supported base-first for ordinary records, property setups, and union payloads. Overrides and `new` replace by source name in the original slot before annotation selection; semantic-name collisions across distinct members reject. Methods remain declared-only | No new C# candidate replay support | #127 delivered; [value mapping](value-mapping.md#c-inherited-record-members) |
@@ -43,3 +44,22 @@ the golden matrix (`expectCategory`).
 Native validation supports JSON and JSONL traces, registry imports, exact
 capture-bundle integrity, and linked type checking. Bundle validation is
 intentionally independent from replay's narrower invocation decoder.
+
+## Input type compatibility
+
+Replay does not convert an optional integer to a required integer or a floating
+point input to an integer. It rejects these incompatible input declarations
+even when the recorded value is `Some(4326)` or `4326.0`. It does not infer a
+conversion from observed values, round or truncate numbers, or replace `None`
+with a default.
+
+If the native candidate takes different input types, write a wrapper that
+accepts compatible recorded input types and implements the intended conversion,
+default, or error policy in ordinary code. Annotate and test that wrapper as the
+candidate boundary. Comparison then assesses the wrapped implementation, not
+equivalence of the unwrapped native APIs. A wrapper failure follows ordinary
+execution rules; it is not a request to skip the scenario.
+
+Existing supported primitive and collection storage bindings, setup producers,
+and explicitly opted-in default rules retain their current behavior. This
+restriction concerns replay inputs, not output comparison.
