@@ -144,6 +144,38 @@ This is diagnostic presentation only, not a new equivalence rule: the nested
 canonical tree remains authoritative. Trace Core comparison without a registry,
 linked validation, wire formats, CTSC `0.4.0`, and Strict `0.2.0` are unchanged.
 
+### SpecGate implementation note: native registry declarations
+
+The Rust library API `comparison::compare_registry_documents` accepts a reference
+root and imports plus a candidate root and imports as `DocumentBytes`. Each set
+is validated and resolved independently, without filesystem or network reads.
+Invalid inputs produce per-side validation failures, not signature differences.
+
+The API compares component IDs and dependencies, operation names, ordered
+inputs, observations, completion declarations, errors, and named types. It
+checks recursive primitive, named, record, tuple, union, optional, collection,
+and map declarations, including collection uniqueness and ordering. Named
+members align by name; input and tuple positions remain significant. Named
+references use their resolved component/name identity, so explicit local
+qualifiers do not create a difference from an implicit local reference.
+
+`RegistryComparisonReport` contains `signatures_match`, `validation_failures`,
+and ordered `differences`. Each difference has an escaped JSON Pointer plus the
+reference and candidate signature-tree values. An absent declaration is
+distinct from a present value. For example, `i32` versus `i64` at the first input
+appears at `/components/<id>/operations/<name>/inputs/0/type/name`.
+These are derived signature trees, not rewritten registry files.
+
+Registry IDs, versions, digests, descriptions, and extensions are provenance
+or other metadata, not signature equality fields. This API covers the currently
+validated CTSC `0.4.0` model; it does not implement future slot metadata such as
+`has_default` or `oblivious` compatibility. It does not compare trace behavior,
+apply input/output mappings, or establish full API equivalence.
+
+This library result is not a versioned CLI report. Dual-registry CLI comparison,
+replay publication/linking, and the complete #137 feature remain pending.
+Existing trace validation, wire formats, and `ctsc.strict/0.2.0` are unchanged.
+
 ## 7. CTSC Strict reference policy
 
 `ctsc.strict/0.2.0` is an optional reference policy. Implementing CTSC does not

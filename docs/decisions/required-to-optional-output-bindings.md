@@ -103,8 +103,20 @@ not scenario skipping.
 Existing checked storage bindings, setup producers, and explicitly opted-in
 default rules remain unchanged. Conversion permits input construction; it does
 not erase native type or signature differences. Source-type construction and
-native-publication integration must be resolved before implementation broadens
-existing contracts.
+native-publication integration still require implementation.
+
+#### Native evidence for input conversions (accepted 2026-11-20)
+
+Replay already runs candidate discovery. Preserve that candidate's native
+registry and actual candidate inputs; validate its trace against its own
+registry. Compare reference and candidate declarations separately from observed
+behavior. Link the native artifacts without rewriting the reference bundle.
+
+This direction does not approve output mapping or a new CTSC Strict equality
+policy. Native publication/linking and CLI reports remain pending. #164
+implements only the registry-comparison library foundation of #137; #161 still
+owns the complete `From` replay feature. Coordinate publication and report
+integration with #135.
 
 ### Outputs (proposed)
 
