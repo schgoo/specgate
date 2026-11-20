@@ -83,7 +83,7 @@ tradeoffs, and acceptance evidence.
 | ADR-0025 | [#155](https://github.com/schgoo/specgate/issues/155) | [Required-to-optional outputs](required-to-optional-output-bindings.md) | Permit an explicit lossless output binding; retain signature differences. |
 | ADR-0026 | [#156](https://github.com/schgoo/specgate/issues/156) | [Operation-scoped type bindings](operation-scoped-type-bindings.md) | Preserve native registries and unique owners; bind exact output boundaries. |
 | ADR-0027 | [#157](https://github.com/schgoo/specgate/issues/157) | [Copy receivers](copy-receiver-replay.md) | Require explicit intent and compiler-proven copying of the retained receiver. |
-| ADR-0028 | [#158](https://github.com/schgoo/specgate/issues/158) | [Named enum inputs](named-enum-replay-inputs.md) | Reconstruct complete unit-variant enums in their native lexical scope. |
+| ADR-0028 | [#158](https://github.com/schgoo/specgate/issues/158) | [Named enum inputs](named-enum-replay-inputs.md) | Any variant form uses typed recorded inputs or explicit setup producers. Principle approved; nested setup design pending. |
 
 ## Template
 
