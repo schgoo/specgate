@@ -380,8 +380,11 @@ not an exit code. CI gates on the report. This changes the CLI:
 The comparator lists each side's violations but does not compare them; a
 mismatch already shows as a behavior difference at the same path.
 
-The comparator compares only traces today. Signature comparison is a new
-subsystem.
+The CLI comparator compares only traces today. #164 adds the native registry
+comparison library foundation for the current CTSC `0.4.0` model; see the
+[implementation note](../ctsc/comparison.md#specgate-implementation-note-native-registry-declarations).
+CLI/report integration and the slot metadata in this ADR remain separate #137
+work, not completed by that library slice.
 
 ## Deferred
 

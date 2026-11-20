@@ -70,6 +70,18 @@ explain a mismatch already established by typed tree comparison; they never
 make required and optional values equivalent. See the
 [implementation note](https://github.com/schgoo/specgate/blob/v0.6.0/docs/ctsc/comparison.md#specgate-implementation-note-optional-diagnostic-readings).
 
+### Library-only native declaration comparison
+
+Rust integrations can use `specgate_ctsc::comparison::compare_registry_documents`
+to compare two native registry document sets with separate imports. It reports
+signature differences separately from registry validation failures. See the
+[library implementation note](https://github.com/schgoo/specgate/blob/v0.6.0/docs/ctsc/comparison.md#specgate-implementation-note-native-registry-declarations).
+
+This does not change the CLI steps above: `compare --registry` still uses one
+registry for both traces. Replay publication/linking and dual-registry CLI
+reports remain pending. A matching declaration report alone does not prove
+that trace behavior matches.
+
 ## Expected output
 
 Lines are not yet a stable contract
