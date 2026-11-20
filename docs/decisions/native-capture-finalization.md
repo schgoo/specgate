@@ -1,5 +1,6 @@
 # Native capture finalization
 
+> **ADR:** ADR-0002
 > **Status:** accepted
 > **Owner:** SpecGate maintainers (user-ratified)
 > **Date:** 2026-10-01

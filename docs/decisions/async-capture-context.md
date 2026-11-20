@@ -1,5 +1,6 @@
 # Async capture context
 
+> **ADR:** ADR-0001
 > **Status:** accepted
 > **Owner:** schgoo
 > **Date:** 2026-09-30

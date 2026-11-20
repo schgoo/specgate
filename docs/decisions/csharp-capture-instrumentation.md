@@ -1,5 +1,6 @@
 # C# capture instruments the built assembly by IL weaving
 
+> **ADR:** ADR-0008
 > **Status:** accepted
 > **Owner:** SpecGate maintainers (user-ratified)
 > **Date:** 2026-10-12

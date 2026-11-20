@@ -1,5 +1,6 @@
 # Rust component-selector spelling
 
+> **ADR:** ADR-0021
 > **Status:** accepted
 > **Owner:** @schgoo (user-ratified)
 > **Date:** 2026-11-17

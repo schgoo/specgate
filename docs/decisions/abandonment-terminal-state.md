@@ -1,5 +1,6 @@
 # Abandonment as a terminal state
 
+> **ADR:** ADR-0005
 > **Status:** accepted
 > **Owner:** schgoo
 > **Date:** 2026-10-02

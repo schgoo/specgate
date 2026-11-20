@@ -1,5 +1,6 @@
 # C# capture runs native tests through the CLI
 
+> **ADR:** ADR-0011
 > **Status:** accepted
 > **Owner:** SpecGate maintainers (plan approved by the user; `net8.0;net10.0` runtime retarget human-ratified)
 > **Date:** 2026-10-17

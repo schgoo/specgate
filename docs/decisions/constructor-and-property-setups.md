@@ -1,5 +1,6 @@
 # Constructor and property setups
 
+> **ADR:** ADR-0014
 > **Status:** accepted
 > **Owner:** @schgoo (user-ratified)
 > **Date:** 2026-10-23

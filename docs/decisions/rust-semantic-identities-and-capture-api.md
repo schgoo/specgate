@@ -1,5 +1,6 @@
 # Rust semantic identities and capture API
 
+> **ADR:** ADR-0003
 > **Status:** accepted
 > **Owner:** SpecGate maintainers (user-ratified)
 > **Date:** 2026-10-01

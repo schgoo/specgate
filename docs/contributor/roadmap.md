@@ -9,6 +9,31 @@
 > current limitations, [`component-identity-and-replay.md`](component-identity-and-replay.md)
 > for the open model questions that gate several items below.
 
+## Delivery tracking
+
+This page explains the product tiers and priorities. For the work below,
+GitHub issues own delivery status, acceptance checks, dependencies, discussion,
+and linked pull requests; do not duplicate their completion checklists here.
+Architectural decision records explain the chosen designs.
+
+[Roadmap #159](https://github.com/schgoo/specgate/issues/159) groups the spatial
+capture and replay investigation follow-ups. Its child issues track the
+individual slices and remaining decision gates:
+
+| Work | Issue |
+|---|---|
+| C# factories as operations and setups | [#152](https://github.com/schgoo/specgate/issues/152) |
+| Supported scenario replay with explicit incomplete coverage | [#153](https://github.com/schgoo/specgate/issues/153) |
+| Missing candidate output fields | [#154](https://github.com/schgoo/specgate/issues/154) |
+| Explicit required-to-optional output comparison | [#155](https://github.com/schgoo/specgate/issues/155) |
+| Per-operation reference-to-candidate type bindings | [#156](https://github.com/schgoo/specgate/issues/156) |
+| Compiler-proven Copy by-value receivers | [#157](https://github.com/schgoo/specgate/issues/157) |
+| Named enum construction from values or setups | [#158](https://github.com/schgoo/specgate/issues/158) |
+| Automatic Rust `From` input conversions | [#161](https://github.com/schgoo/specgate/issues/161) |
+
+These links do not change the owner-defined tiers below. Design approval is
+not an implementation or completion claim; consult the issues for current state.
+
 ## Tiers
 
 | Tier | Capability | One-line test of "done" |

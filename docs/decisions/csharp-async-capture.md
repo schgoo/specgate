@@ -1,5 +1,6 @@
 # C# async capture
 
+> **ADR:** ADR-0010
 > **Status:** accepted
 > **Owner:** SpecGate maintainers (user-ratified)
 > **Date:** 2026-10-16
