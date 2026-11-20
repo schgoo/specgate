@@ -59,6 +59,7 @@ Future records always append, even when documenting an older decision.
 | [ADR-0026](operation-scoped-type-bindings.md) | Operation-scoped output type bindings |
 | [ADR-0027](copy-receiver-replay.md) | Replay of Copy by-value receivers |
 | [ADR-0028](named-enum-replay-inputs.md) | Named enum replay inputs |
+| [ADR-0029](compiler-directed-outcome-metadata.md) | Compiler-directed Rust type and outcome metadata (proposed) |
 
 ## File naming
 
