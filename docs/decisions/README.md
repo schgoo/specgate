@@ -79,7 +79,7 @@ tradeoffs, and acceptance evidence.
 |---|---|---|---|
 | ADR-0022 | [#152](https://github.com/schgoo/specgate/issues/152) | [Dual-role C# factories](csharp-operation-setup-factories.md) | Finish the factory operation before publishing setup inputs. Existing attribution/scope approved; lifecycle pending. |
 | ADR-0023 | [#153](https://github.com/schgoo/specgate/issues/153) | [Partial replay](partial-replay-coverage.md) | Explicitly skip whole unsupported scenarios; retain coverage and inconclusive results. |
-| ADR-0024 | [#154](https://github.com/schgoo/specgate/issues/154) | [Missing output fields](missing-candidate-output-fields.md) | Compare shared fields without inventing absent candidate values. |
+| ADR-0024 | [#154](https://github.com/schgoo/specgate/issues/154) | [Missing output fields](missing-candidate-output-fields.md) | Missing fields reach comparison, not replay rejection. Direction approved; binding/policy design pending. |
 | ADR-0025 | [#155](https://github.com/schgoo/specgate/issues/155) | [Required-to-optional outputs](required-to-optional-output-bindings.md) | Permit an explicit lossless output binding; retain signature differences. |
 | ADR-0026 | [#156](https://github.com/schgoo/specgate/issues/156) | [Operation-scoped type bindings](operation-scoped-type-bindings.md) | Preserve native registries and unique owners; bind exact output boundaries. |
 | ADR-0027 | [#157](https://github.com/schgoo/specgate/issues/157) | [Copy receivers](copy-receiver-replay.md) | Require explicit intent and compiler-proven copying of the retained receiver. |
